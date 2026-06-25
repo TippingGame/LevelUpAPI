@@ -315,6 +315,7 @@ import Icon from '@/components/icons/Icon.vue'
 import PlatformIcon from '@/components/common/PlatformIcon.vue'
 import HelpTooltip from '@/components/common/HelpTooltip.vue'
 import { formatDateTime } from '@/utils/format'
+import { formatGameCoins } from '@/utils/gameCurrency'
 import { platformLabel } from '@/utils/platformColors'
 import {
   accountQuotaGroupHealthRank,
@@ -607,7 +608,7 @@ function groupHealthBadgeClass(status: GroupHealth): string {
 }
 
 function formatCurrency(value: number): string {
-  return `$${(Number.isFinite(value) ? value : 0).toFixed(2)}`
+  return formatGameCoins(Number.isFinite(value) ? value : 0)
 }
 
 function formatPercent(value: number): string {

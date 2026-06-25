@@ -35,7 +35,7 @@
         </template>
 
         <template #cell-balance="{ value }">
-          <span class="font-medium text-gray-900 dark:text-white">${{ Number(value ?? 0).toFixed(2) }}</span>
+          <span class="font-medium text-gray-900 dark:text-white">{{ formatGameCoins(value) }}</span>
         </template>
 
         <template #cell-eligible="{ value }">
@@ -75,6 +75,7 @@ import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { adminAPI } from '@/api/admin'
 import { formatDateTime } from '@/utils/format'
+import { formatGameCoins } from '@/utils/gameCurrency'
 import type { AnnouncementUserReadStatus } from '@/types'
 import type { Column } from '@/components/common/types'
 import { getPersistedPageSize } from '@/composables/usePersistedPageSize'

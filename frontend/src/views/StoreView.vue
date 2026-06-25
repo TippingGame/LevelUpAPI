@@ -191,7 +191,7 @@
                 </div>
                 <div v-if="authStore.isAuthenticated && checkoutProduct.allow_balance_payment !== false" class="mt-2 flex justify-between">
                   <span class="text-gray-500 dark:text-dark-400">{{ t('payment.currentBalance') }}</span>
-                  <span class="font-medium text-gray-900 dark:text-white">${{ currentBalance.toFixed(2) }}</span>
+                  <span class="font-medium text-gray-900 dark:text-white">{{ formatGameCoins(currentBalance) }}</span>
                 </div>
                 <div v-if="authStore.isAuthenticated && checkoutProduct.allow_points_payment" class="mt-2 flex justify-between">
                   <span class="text-gray-500 dark:text-dark-400">{{ t('store.currentPoints') }}</span>
@@ -365,6 +365,7 @@ import { decidePaymentLaunch, getVisibleMethods, normalizeVisibleMethod, type Pa
 import type { CheckoutInfoResponse, CreateOrderResult } from '@/types/payment'
 import type { PaymentMethodOption } from '@/components/payment/PaymentMethodSelector.vue'
 import { formatStoreDrawReward } from '@/utils/storeRewards'
+import { formatGameCoins } from '@/utils/gameCurrency'
 import type { StoreCategory, StoreDrawConfig, StoreOrder, StorePayMethod, StoreProduct } from '@/types/store'
 
 const { t } = useI18n()

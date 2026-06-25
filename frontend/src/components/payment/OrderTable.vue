@@ -19,7 +19,7 @@
           ({{ t('payment.orders.fee') }} {{ row.fee_rate }}%)
         </span>
         <div v-if="row.amount !== row.pay_amount" class="text-xs text-gray-500">
-          {{ t('payment.orders.creditedAmount') }}: {{ row.order_type === 'balance' ? '$' : '¥' }}{{ row.amount.toFixed(2) }}
+          {{ t('payment.orders.creditedAmount') }}: {{ row.order_type === 'balance' ? formatGameCoins(row.amount) : '¥' + row.amount.toFixed(2) }}
         </div>
       </div>
     </template>
@@ -45,6 +45,7 @@ import type { PaymentOrder } from '@/types/payment'
 import type { Column } from '@/components/common/types'
 import DataTable from '@/components/common/DataTable.vue'
 import OrderStatusBadge from '@/components/payment/OrderStatusBadge.vue'
+import { formatGameCoins } from '@/utils/gameCurrency'
 
 const { t } = useI18n()
 

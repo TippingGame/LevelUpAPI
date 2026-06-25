@@ -17,6 +17,7 @@ const messages: Record<string, string> = {
   'admin.dashboard.requests': 'Requests',
   'admin.dashboard.tokens': 'Tokens',
   'admin.dashboard.actual': 'Actual',
+  'admin.dashboard.accountCost': 'Account Cost',
   'admin.dashboard.standard': 'Standard',
   'admin.dashboard.metricTokens': 'By Tokens',
   'admin.dashboard.metricActualCost': 'By Actual Cost',
@@ -123,7 +124,7 @@ describe('ModelDistributionChart', () => {
       raw: 1.4,
       dataset: { data: [1.4, 0.2] },
     })
-    expect(label).toBe('model-b: $1.40 (87.5%)')
+    expect(label).toBe('model-b: 1.4000 coins (87.5%)')
   })
 
   it('renders Others in the spending ranking table and uses a dedicated chart color', async () => {
@@ -166,6 +167,6 @@ describe('ModelDistributionChart', () => {
     expect(rows[2].text()).toContain('Others')
     expect(rows[2].text()).toContain('4')
     expect(rows[2].text()).toContain('400')
-    expect(rows[2].text()).toContain('$10.00')
+    expect(rows[2].text()).toContain('10.0000 coins')
   })
 })

@@ -141,7 +141,7 @@
           </div>
           <div class="mt-2 flex justify-between text-sm">
             <span class="text-gray-500 dark:text-gray-400">{{ t('payment.orders.amount') }}</span>
-            <span class="text-gray-900 dark:text-white">${{ refundTarget.amount.toFixed(2) }}</span>
+            <span class="text-gray-900 dark:text-white">{{ formatRefundAmount(refundTarget) }}</span>
           </div>
         </div>
         <div>
@@ -169,6 +169,7 @@ import { storeAPI } from '@/api/store'
 import { useClipboard } from '@/composables/useClipboard'
 import { extractI18nErrorMessage } from '@/utils/apiError'
 import { formatStoreDrawReward } from '@/utils/storeRewards'
+import { formatGameCoins } from '@/utils/gameCurrency'
 import type { PaymentOrder } from '@/types/payment'
 import type { StoreOrder } from '@/types/store'
 import AppLayout from '@/components/layout/AppLayout.vue'
@@ -275,6 +276,10 @@ async function confirmCancel() {
 }
 
 function openRefundDialog(order: PaymentOrder) { refundTarget.value = order; refundReason.value = '' }
+
+function formatRefundAmount(order: PaymentOrder): string {
+  return order.order_type === 'balance' ? formatGameCoins(order.amount) : `¥${order.amount.toFixed(2)}`
+}
 
 async function confirmRefund() {
   if (!refundTarget.value || !refundReason.value.trim()) return

@@ -32,32 +32,32 @@
         </div>
         <div>
           <p class="text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('dashboard.selfAccountCost') }}</p>
-          <p class="mt-1 text-xl font-bold text-gray-900 dark:text-white">${{ formatCost(summary.self_account_cost) }}</p>
+          <p class="mt-1 text-xl font-bold text-gray-900 dark:text-white">{{ formatCost(summary.self_account_cost) }}</p>
           <p class="text-xs text-gray-500 dark:text-gray-400">
             {{ formatNumber(summary.self_requests) }} {{ t('dashboard.requests') }}
           </p>
         </div>
         <div>
           <p class="text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('dashboard.externalConsumerCharge') }}</p>
-          <p class="mt-1 text-xl font-bold text-blue-600 dark:text-blue-400">${{ formatCost(summary.external_consumer_charge) }}</p>
+          <p class="mt-1 text-xl font-bold text-blue-600 dark:text-blue-400">{{ formatCost(summary.external_consumer_charge) }}</p>
           <p class="text-xs text-gray-500 dark:text-gray-400">
             {{ formatNumber(summary.external_requests) }} {{ t('dashboard.requests') }}
           </p>
         </div>
         <div>
           <p class="text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('dashboard.ownerCredit') }}</p>
-          <p class="mt-1 text-xl font-bold text-emerald-600 dark:text-emerald-400">${{ formatCost(summary.external_owner_credit) }}</p>
+          <p class="mt-1 text-xl font-bold text-emerald-600 dark:text-emerald-400">{{ formatCost(summary.external_owner_credit) }}</p>
           <p class="text-xs text-gray-500 dark:text-gray-400">
-            {{ t('dashboard.platformFee') }} ${{ formatCost(summary.external_platform_fee) }}
+            {{ t('dashboard.platformFee') }} {{ formatCost(summary.external_platform_fee) }}
           </p>
         </div>
         <div>
           <p class="text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('dashboard.balanceNetChange') }}</p>
           <p class="mt-1 text-xl font-bold" :class="summary.balance_net_change >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'">
-            {{ summary.balance_net_change >= 0 ? '+' : '-' }}${{ formatCost(Math.abs(summary.balance_net_change)) }}
+            {{ summary.balance_net_change >= 0 ? '+' : '-' }}{{ formatCost(Math.abs(summary.balance_net_change)) }}
           </p>
           <p class="text-xs text-gray-500 dark:text-gray-400">
-            {{ t('dashboard.selfActualCost') }} ${{ formatCost(summary.self_actual_cost) }}
+            {{ t('dashboard.selfActualCost') }} {{ formatCost(summary.self_actual_cost) }}
           </p>
         </div>
       </div>
@@ -86,7 +86,7 @@
           <h4 class="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
             {{ t('dashboard.ownedAccountBreakdown') }}
           </h4>
-          <span class="text-xs text-gray-400 dark:text-gray-500">{{ t('dashboard.totalAccountCost') }} ${{ formatCost(summary.total_account_cost) }}</span>
+          <span class="text-xs text-gray-400 dark:text-gray-500">{{ t('dashboard.totalAccountCost') }} {{ formatCost(summary.total_account_cost) }}</span>
         </div>
 
         <div v-if="topAccounts.length" class="overflow-x-auto">
@@ -112,15 +112,15 @@
                   </span>
                 </td>
                 <td class="py-2 text-right text-gray-700 dark:text-gray-300">
-                  ${{ formatCost(account.self_account_cost) }}
+                  {{ formatCost(account.self_account_cost) }}
                   <div class="text-gray-400 dark:text-gray-500">{{ formatNumber(account.self_requests) }}</div>
                 </td>
                 <td class="py-2 text-right text-blue-600 dark:text-blue-400">
-                  ${{ formatCost(account.external_consumer_charge) }}
+                  {{ formatCost(account.external_consumer_charge) }}
                   <div class="text-gray-400 dark:text-gray-500">{{ formatNumber(account.external_requests) }}</div>
                 </td>
                 <td class="py-2 text-right font-semibold text-emerald-600 dark:text-emerald-400">
-                  ${{ formatCost(account.external_owner_credit) }}
+                  {{ formatCost(account.external_owner_credit) }}
                 </td>
               </tr>
             </tbody>
@@ -141,7 +141,8 @@ import { useI18n } from 'vue-i18n'
 import Icon from '@/components/icons/Icon.vue'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
 import type { AccountSharingAccountStat, AccountSharingDashboardStats } from '@/api/usage'
-import { formatCostFixed as formatCost, formatNumberLocaleString as formatNumber } from '@/utils/format'
+import { formatNumberLocaleString as formatNumber } from '@/utils/format'
+import { formatGameCoins } from '@/utils/gameCurrency'
 
 const props = defineProps<{
   stats: AccountSharingDashboardStats | null
@@ -153,6 +154,11 @@ const { t } = useI18n()
 
 const summary = computed(() => props.stats?.summary ?? null)
 const topAccounts = computed(() => props.stats?.accounts?.slice(0, 8) ?? [])
+
+const formatCost = (value: number) => formatGameCoins(value, {
+  minimumFractionDigits: 4,
+  maximumFractionDigits: 4,
+})
 
 function statusLabel(account: AccountSharingAccountStat): string {
   if (account.share_mode === 'private') {

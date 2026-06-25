@@ -17,33 +17,14 @@
     <header class="home-shell home-nav">
       <router-link class="brand" to="/home" aria-label="Home">
         <span class="brand-mark" aria-hidden="true">
-          <img v-if="siteLogo" :src="siteLogo" alt="" />
-          <svg v-else viewBox="0 0 100 100" fill="none">
-            <defs>
-              <linearGradient id="homeLogoLight" x1="0%" y1="0%" x2="100%" y2="100%">
-                <stop offset="0%" stop-color="#84aaf7" />
-                <stop offset="100%" stop-color="#5c8cf2" />
-              </linearGradient>
-              <linearGradient id="homeLogoDark" x1="0%" y1="0%" x2="100%" y2="100%">
-                <stop offset="0%" stop-color="#5c8cf2" />
-                <stop offset="100%" stop-color="#172033" />
-              </linearGradient>
-            </defs>
-            <path d="M 33 41 L 59 41 L 52 56 L 33 56 Z" fill="url(#homeLogoLight)" />
-            <path d="M 33 56 L 52 56 L 43 83 L 33 83 Z" fill="url(#homeLogoDark)" />
-            <rect x="16" y="19" width="20" height="64" rx="9" fill="url(#homeLogoLight)" />
-            <path
-              d="M 71 29 L 87 29 Q 91.5 29 89 34 L 61 90 Q 58.5 95 53.5 95 L 38 95 Q 33.5 95 36 90 L 64 34 Q 66.5 29 71 29 Z"
-              fill="url(#homeLogoLight)"
-            />
-          </svg>
+          <img :src="siteLogo || '/logo.svg'" alt="" />
         </span>
         <span>{{ siteName }}</span>
       </router-link>
 
       <nav class="home-nav-links" aria-label="Home navigation">
-        <router-link to="/home">首页</router-link>
-        <router-link to="/key-usage">用量</router-link>
+        <router-link to="/home">{{ t('home.nav.home') }}</router-link>
+        <router-link to="/key-usage">{{ t('home.nav.usage') }}</router-link>
       </nav>
 
       <div class="home-actions">
@@ -97,54 +78,35 @@
               stroke-linecap="round"
             />
           </svg>
-          开放式 AI 账号协作网络
+          {{ t('home.arcade.eyebrow') }}
         </span>
 
         <h1 class="home-title">
-          让账号能力在用户之间<span class="flow-text">自由流动</span>
+          {{ t('home.arcade.titlePrefix') }}<span class="flow-text">{{ t('home.arcade.titleHighlight') }}</span>
         </h1>
 
         <p class="lead">
-          {{ siteName }}不再只是平台向用户提供服务，而是让个人用户提供账号、其他用户消费额度，平台完成调度中转、收益结算、邀请分成。
+          {{ t('home.arcade.lead', { siteName }) }}
         </p>
 
         <div class="hero-actions">
           <router-link :to="isAuthenticated ? dashboardPath : '/login'" class="button primary">
             {{ isAuthenticated ? t('home.goToDashboard') : t('home.getStarted') }}
           </router-link>
-          <router-link class="button secondary" to="/key-usage">查看用量</router-link>
+          <router-link class="button secondary" to="/key-usage">{{ t('home.arcade.viewUsage') }}</router-link>
         </div>
       </section>
 
-      <aside class="visual" aria-label="账号协作网络数据面板示意">
-        <div class="sphere sphere-one"></div>
-        <div class="sphere sphere-two"></div>
-        <div class="sphere sphere-three"></div>
+      <aside class="visual" :aria-label="t('home.arcade.visualLabel')">
+        <div class="pixel-decor pixel-decor-one" aria-hidden="true"></div>
+        <div class="pixel-decor pixel-decor-two" aria-hidden="true"></div>
+        <div class="pixel-decor pixel-decor-three" aria-hidden="true"></div>
 
         <div class="console-card">
           <div class="console-inner">
             <div class="side-rail">
               <div class="rail-logo">
-                <img v-if="siteLogo" :src="siteLogo" alt="" />
-                <svg v-else viewBox="0 0 100 100" fill="none" aria-hidden="true">
-                  <defs>
-                    <linearGradient id="railLogoLight" x1="0%" y1="0%" x2="100%" y2="100%">
-                      <stop offset="0%" stop-color="#84aaf7" />
-                      <stop offset="100%" stop-color="#5c8cf2" />
-                    </linearGradient>
-                    <linearGradient id="railLogoDark" x1="0%" y1="0%" x2="100%" y2="100%">
-                      <stop offset="0%" stop-color="#5c8cf2" />
-                      <stop offset="100%" stop-color="#172033" />
-                    </linearGradient>
-                  </defs>
-                  <path d="M 33 41 L 59 41 L 52 56 L 33 56 Z" fill="url(#railLogoLight)" />
-                  <path d="M 33 56 L 52 56 L 43 83 L 33 83 Z" fill="url(#railLogoDark)" />
-                  <rect x="16" y="19" width="20" height="64" rx="9" fill="url(#railLogoLight)" />
-                  <path
-                    d="M 71 29 L 87 29 Q 91.5 29 89 34 L 61 90 Q 58.5 95 53.5 95 L 38 95 Q 33.5 95 36 90 L 64 34 Q 66.5 29 71 29 Z"
-                    fill="url(#railLogoLight)"
-                  />
-                </svg>
+                <img :src="siteLogo || '/logo.svg'" alt="" />
               </div>
               <i class="active">
                 <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -185,115 +147,88 @@
             </div>
 
             <div class="dashboard-board">
-              <div class="metrics">
-                <article class="metric center-align">
-                  <span class="metric-icon">
-                    <svg fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round">
-                      <path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"></path>
-                    </svg>
-                  </span>
-                  <b>{{ todayRequestsText }}</b>
-                  <span>今日请求</span>
-                </article>
+              <div
+                ref="gameStageRef"
+                class="token-arcade"
+                tabindex="0"
+                role="application"
+                :aria-label="t('home.arcade.stageLabel')"
+                @pointerdown="handleStagePointer"
+                @pointermove="handleStagePointer"
+                @keydown="handleGameKeydown"
+                @keyup="handleGameKeyup"
+              >
+                <div class="arcade-bezel">
+                  <div class="arcade-topline">
+                    <span>{{ t('home.arcade.level') }} {{ gameWaveText }}</span>
+                    <span>{{ t('home.arcade.score') }} {{ gameScoreText }}</span>
+                    <span>{{ t('home.arcade.core') }} {{ gameEnergyText }}</span>
+                  </div>
 
-                <article class="metric">
-                  <span class="metric-icon">
-                    <svg fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round">
-                      <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
-                      <polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline>
-                      <line x1="12" y1="22.08" x2="12" y2="12"></line>
-                    </svg>
-                  </span>
-                  <b>{{ todayTokensText }}</b>
-                  <span>今日 Token</span>
-                </article>
+                  <div class="arcade-screen">
+                    <div class="pixel-stars" aria-hidden="true"></div>
+                    <div class="city-line" aria-hidden="true">
+                      <span v-for="tower in cityTowers" :key="tower.id" :style="{ height: tower.height }"></span>
+                    </div>
 
-                <article class="metric">
-                  <span class="metric-icon">
-                    <svg fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round">
-                      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
-                      <polyline points="9 12 11 14 15 10"></polyline>
-                    </svg>
-                  </span>
-                  <b>98.2%</b>
-                  <span>成功率</span>
-                </article>
+                    <div class="hero-sprite" :style="heroStyle" aria-hidden="true">
+                      <span class="hero-head"></span>
+                      <span class="hero-core"></span>
+                      <span class="hero-body"></span>
+                      <span class="hero-arm hero-arm-left"></span>
+                      <span class="hero-arm hero-arm-right"></span>
+                      <span class="hero-leg hero-leg-left"></span>
+                      <span class="hero-leg hero-leg-right"></span>
+                    </div>
 
-                <article class="metric center-align">
-                  <span class="metric-icon">
-                    <svg fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round">
-                      <circle cx="12" cy="12" r="10"></circle>
-                      <polyline points="12 6 12 12 16 14"></polyline>
-                    </svg>
-                  </span>
-                  <b>124ms</b>
-                  <span>平均响应</span>
-                </article>
-              </div>
+                    <span
+                      v-for="beam in gameBeams"
+                      :key="beam.id"
+                      class="light-beam"
+                      :style="beamStyle(beam)"
+                      aria-hidden="true"
+                    ></span>
 
-              <div class="chart-card">
-                <div class="chart-head">
-                  <div class="chart-title">请求趋势</div>
-                  <div class="chart-legends">
-                    <span class="legend-one">请求数</span>
-                    <span class="legend-two">Token 数</span>
+                    <span
+                      v-for="enemy in gameEnemies"
+                      :key="enemy.id"
+                      class="token-enemy"
+                      :style="enemyStyle(enemy)"
+                      aria-hidden="true"
+                    >
+                      {{ enemy.label }}
+                    </span>
+
+                    <span
+                      v-for="burst in gameBursts"
+                      :key="burst.id"
+                      class="token-burst"
+                      :style="burstStyle(burst)"
+                      aria-hidden="true"
+                    ></span>
+                  </div>
+
+                  <div class="arcade-panel">
+                    <div class="power-meter" aria-hidden="true">
+                      <span :style="{ width: `${gameEnergy}%` }"></span>
+                    </div>
+                    <div class="arcade-controls" aria-hidden="true">
+                      <button type="button" :title="t('home.arcade.controls.up')" @pointerdown.stop.prevent="nudgeHero(0, -8)">▲</button>
+                      <button type="button" :title="t('home.arcade.controls.left')" @pointerdown.stop.prevent="nudgeHero(-8, 0)">◀</button>
+                      <button type="button" :title="t('home.arcade.controls.down')" @pointerdown.stop.prevent="nudgeHero(0, 8)">▼</button>
+                      <button type="button" :title="t('home.arcade.controls.right')" @pointerdown.stop.prevent="nudgeHero(8, 0)">▶</button>
+                    </div>
                   </div>
                 </div>
-
-                <svg viewBox="0 0 520 160" preserveAspectRatio="none">
-                  <defs>
-                    <linearGradient id="homeFadeDark" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stop-color="#172033" stop-opacity="0.2" />
-                      <stop offset="100%" stop-color="#172033" stop-opacity="0" />
-                    </linearGradient>
-                    <linearGradient id="homeFadeBlue" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stop-color="#5c8cf2" stop-opacity="0.2" />
-                      <stop offset="100%" stop-color="#5c8cf2" stop-opacity="0" />
-                    </linearGradient>
-                  </defs>
-
-                  <path d="M0 30H520M0 70H520M0 110H520M0 150H520" stroke="#f1f5f9" stroke-dasharray="4 4" stroke-width="1.5" />
-                  <path d="M 0 145 C 40 145, 80 80, 120 80 C 160 80, 200 140, 240 140 C 290 140, 310 135, 350 135 C 390 135, 400 120, 440 120 C 480 120, 500 135, 520 135 L 520 160 L 0 160 Z" fill="url(#homeFadeBlue)" />
-                  <path d="M 0 130 C 30 130, 50 115, 90 115 C 130 115, 170 140, 210 140 C 240 140, 255 45, 280 45 C 305 45, 320 130, 360 130 C 400 130, 420 110, 460 110 C 490 110, 500 125, 520 125 L 520 160 L 0 160 Z" fill="url(#homeFadeDark)" />
-                  <path d="M 0 145 C 40 145, 80 80, 120 80 C 160 80, 200 140, 240 140 C 290 140, 310 135, 350 135 C 390 135, 400 120, 440 120 C 480 120, 500 135, 520 135" fill="none" stroke="#5c8cf2" stroke-width="3" stroke-linecap="round" />
-                  <path d="M 0 130 C 30 130, 50 115, 90 115 C 130 115, 170 140, 210 140 C 240 140, 255 45, 280 45 C 305 45, 320 130, 360 130 C 400 130, 420 110, 460 110 C 490 110, 500 125, 520 125" fill="none" stroke="#172033" stroke-width="3" stroke-linecap="round" />
-                  <circle cx="120" cy="80" r="4.5" fill="#fff" stroke="#5c8cf2" stroke-width="2.5" />
-                  <circle cx="240" cy="140" r="4.5" fill="#fff" stroke="#5c8cf2" stroke-width="2.5" />
-                  <circle cx="440" cy="120" r="4.5" fill="#fff" stroke="#5c8cf2" stroke-width="2.5" />
-                  <circle cx="90" cy="115" r="4.5" fill="#fff" stroke="#172033" stroke-width="2.5" />
-                  <circle cx="280" cy="45" r="4.5" fill="#fff" stroke="#172033" stroke-width="2.5" />
-                  <circle cx="360" cy="130" r="4.5" fill="#fff" stroke="#172033" stroke-width="2.5" />
-                  <circle cx="460" cy="110" r="4.5" fill="#fff" stroke="#172033" stroke-width="2.5" />
-                </svg>
               </div>
             </div>
           </div>
         </div>
-
-        <div class="stack-3d">
-          <svg viewBox="0 0 120 150" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <path d="M60 140L10 115L60 90L110 115L60 140Z" fill="rgba(92,140,242,0.2)" filter="blur(8px)" />
-            <path d="M60 130L10 105V115L60 140L110 115V105L60 130Z" fill="#e2e8f0" />
-            <path d="M60 130L10 105L60 80L110 105L60 130Z" fill="#f8fafc" />
-            <path d="M10 105L60 130V140L10 115V105Z" fill="#cbd5e1" />
-            <circle cx="85" cy="118" r="2" fill="#5c8cf2" />
-            <circle cx="92" cy="115" r="2" fill="#5c8cf2" />
-            <path d="M60 100L10 75V85L60 110L110 85V75L60 100Z" fill="#e2e8f0" />
-            <path d="M60 100L10 75L60 50L110 75L60 100Z" fill="#ffffff" />
-            <path d="M10 75L60 100V110L10 85V75Z" fill="#cbd5e1" />
-            <circle cx="85" cy="88" r="2" fill="#5c8cf2" />
-            <circle cx="92" cy="85" r="2" fill="#5c8cf2" />
-            <path d="M60 70L10 45V55L60 80L110 55V45L60 70Z" fill="#e2e8f0" />
-            <path d="M60 70L10 45L60 20L110 45L60 70Z" fill="#ffffff" />
-            <path d="M10 45L60 70V80L10 55V45Z" fill="#cbd5e1" />
-            <path d="M60 35L45 42L52 46L60 41L68 46L75 42L60 35Z" fill="#5c8cf2" opacity="0.8" />
-          </svg>
-        </div>
       </aside>
     </main>
 
-    <section class="home-shell step-strip" aria-label="接入步骤">
-      <h2><span class="flow-text">3</span> 步开始，<span class="flow-text">2</span> 分钟完成迁移</h2>
+    <section class="home-shell step-strip" :aria-label="t('home.arcade.stepsLabel')">
+      <h2><span class="flow-text">3</span>{{ t('home.arcade.stepsTitleAfterSteps') }}<span class="flow-text">2</span>{{ t('home.arcade.stepsTitleAfterMinutes') }}</h2>
 
       <div class="steps">
         <article class="step-card">
@@ -306,8 +241,8 @@
             </svg>
           </span>
           <div>
-            <h3>注册账号</h3>
-            <p>免费注册，即刻获得体验额度</p>
+            <h3>{{ t('home.arcade.steps.register.title') }}</h3>
+            <p>{{ t('home.arcade.steps.register.desc') }}</p>
           </div>
         </article>
 
@@ -322,8 +257,8 @@
             </svg>
           </span>
           <div>
-            <h3>获取 API Key</h3>
-            <p>一键生成，支持多 Key 管理与权限控制</p>
+            <h3>{{ t('home.arcade.steps.apiKey.title') }}</h3>
+            <p>{{ t('home.arcade.steps.apiKey.desc') }}</p>
           </div>
         </article>
 
@@ -337,8 +272,8 @@
             </svg>
           </span>
           <div>
-            <h3>替换 Base URL</h3>
-            <p>接入即可使用，快速完成迁移</p>
+            <h3>{{ t('home.arcade.steps.baseUrl.title') }}</h3>
+            <p>{{ t('home.arcade.steps.baseUrl.desc') }}</p>
           </div>
         </article>
       </div>
@@ -351,20 +286,19 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore, useAppStore } from '@/stores'
 import LocaleSwitcher from '@/components/common/LocaleSwitcher.vue'
 import Icon from '@/components/icons/Icon.vue'
-import { getPublicTodayStats } from '@/api/usage'
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
 
 const authStore = useAuthStore()
 const appStore = useAppStore()
 
 // Site settings - directly from appStore (already initialized from injected config)
-const siteName = computed(() => appStore.cachedPublicSettings?.site_name || appStore.siteName || 'Sub2API')
+const siteName = computed(() => appStore.cachedPublicSettings?.site_name || appStore.siteName || 'LevelUpAPI')
 const siteLogo = computed(() => appStore.cachedPublicSettings?.site_logo || appStore.siteLogo || '')
 const docUrl = computed(() => appStore.cachedPublicSettings?.doc_url || appStore.docUrl || '')
 const homeContent = computed(() => appStore.cachedPublicSettings?.home_content || '')
@@ -391,53 +325,235 @@ const userInitial = computed(() => {
 // Current year for footer
 const currentYear = computed(() => new Date().getFullYear())
 
-const publicTodayStats = ref<{
-  today_requests: number
-  today_tokens: number
-} | null>(null)
+interface TokenEnemy {
+  id: number
+  x: number
+  y: number
+  speed: number
+  label: string
+  wobble: number
+}
 
-const todayRequestsText = computed(() => {
-  if (!publicTodayStats.value) return '--'
-  return formatInteger(publicTodayStats.value.today_requests)
-})
+interface LightBeam {
+  id: number
+  x: number
+  y: number
+  speed: number
+}
 
-const todayTokensText = computed(() => {
-  if (!publicTodayStats.value) return '--'
-  return formatCompactNumber(publicTodayStats.value.today_tokens)
-})
+interface TokenBurst {
+  id: number
+  x: number
+  y: number
+  age: number
+}
+
+const gameStageRef = ref<HTMLElement | null>(null)
+const heroPosition = ref({ x: 16, y: 50 })
+const gameEnemies = ref<TokenEnemy[]>([])
+const gameBeams = ref<LightBeam[]>([])
+const gameBursts = ref<TokenBurst[]>([])
+const gameScore = ref(0)
+const gameWave = ref(1)
+const gameEnergy = ref(100)
+const pressedKeys = new Set<string>()
+let gameFrameId = 0
+let lastFrameAt = 0
+let lastShotAt = 0
+let lastEnemyAt = 0
+let gameIdSeed = 1
+
+const cityTowers = [
+  { id: 1, height: '18%' },
+  { id: 2, height: '31%' },
+  { id: 3, height: '24%' },
+  { id: 4, height: '38%' },
+  { id: 5, height: '21%' },
+  { id: 6, height: '34%' },
+  { id: 7, height: '26%' },
+  { id: 8, height: '30%' },
+]
+
+const gameScoreText = computed(() => formatInteger(gameScore.value))
+const gameWaveText = computed(() => String(gameWave.value).padStart(2, '0'))
+const gameEnergyText = computed(() => `${Math.round(gameEnergy.value)}%`)
+const heroStyle = computed(() => ({
+  left: `${heroPosition.value.x}%`,
+  top: `${heroPosition.value.y}%`,
+}))
 
 function formatInteger(value: number): string {
   if (!Number.isFinite(value)) return '--'
-  return new Intl.NumberFormat('zh-CN', {
+  const numberLocale = locale.value === 'zh' ? 'zh-CN' : 'en-US'
+  return new Intl.NumberFormat(numberLocale, {
     maximumFractionDigits: 0
   }).format(value)
 }
 
-function formatCompactNumber(value: number): string {
-  if (!Number.isFinite(value)) return '--'
-
-  const absValue = Math.abs(value)
-  const units = [
-    { value: 1_000_000_000, suffix: 'B' },
-    { value: 1_000_000, suffix: 'M' },
-    { value: 1_000, suffix: 'K' }
-  ]
-  const unit = units.find((item) => absValue >= item.value)
-
-  if (!unit) {
-    return formatInteger(value)
-  }
-
-  return `${(value / unit.value).toFixed(2).replace(/\.?0+$/, '')}${unit.suffix}`
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value))
 }
 
-async function fetchPublicTodayStats() {
-  try {
-    publicTodayStats.value = await getPublicTodayStats()
-  } catch (error) {
-    publicTodayStats.value = null
-    console.error('Failed to fetch public today usage stats:', error)
+function nudgeHero(dx: number, dy: number) {
+  heroPosition.value = {
+    x: clamp(heroPosition.value.x + dx, 8, 38),
+    y: clamp(heroPosition.value.y + dy, 18, 82),
   }
+  gameStageRef.value?.focus()
+}
+
+function handleStagePointer(event: PointerEvent) {
+  const stage = gameStageRef.value
+  if (!stage) return
+  const screen = stage.querySelector('.arcade-screen')
+  if (!(screen instanceof HTMLElement)) return
+
+  const rect = screen.getBoundingClientRect()
+  if (rect.width <= 0 || rect.height <= 0) return
+
+  heroPosition.value = {
+    x: clamp(((event.clientX - rect.left) / rect.width) * 100, 8, 38),
+    y: clamp(((event.clientY - rect.top) / rect.height) * 100, 18, 82),
+  }
+  stage.focus()
+}
+
+function handleGameKeydown(event: KeyboardEvent) {
+  const key = event.key.toLowerCase()
+  if (!['arrowup', 'arrowdown', 'arrowleft', 'arrowright', 'w', 'a', 's', 'd'].includes(key)) return
+  event.preventDefault()
+  pressedKeys.add(key)
+}
+
+function handleGameKeyup(event: KeyboardEvent) {
+  pressedKeys.delete(event.key.toLowerCase())
+}
+
+function beamStyle(beam: LightBeam) {
+  return {
+    left: `${beam.x}%`,
+    top: `${beam.y}%`,
+  }
+}
+
+function enemyStyle(enemy: TokenEnemy) {
+  return {
+    left: `${enemy.x}%`,
+    top: `${enemy.y}%`,
+    '--wobble': `${enemy.wobble}s`,
+  }
+}
+
+function burstStyle(burst: TokenBurst) {
+  return {
+    left: `${burst.x}%`,
+    top: `${burst.y}%`,
+    opacity: String(clamp(1 - burst.age / 520, 0, 1)),
+  }
+}
+
+function spawnEnemy(now: number) {
+  const labels = ['TOK', 'API', '429', 'ERR', 'TTL']
+  const interval = Math.max(620, 1300 - gameWave.value * 72)
+  if (now - lastEnemyAt < interval) return
+
+  lastEnemyAt = now
+  gameEnemies.value.push({
+    id: gameIdSeed++,
+    x: 104,
+    y: 18 + Math.random() * 64,
+    speed: 9 + Math.random() * 6 + gameWave.value * 0.8,
+    label: labels[Math.floor(Math.random() * labels.length)],
+    wobble: 1.4 + Math.random() * 1.2,
+  })
+}
+
+function fireBeam(now: number) {
+  if (now - lastShotAt < 360) return
+  lastShotAt = now
+  gameBeams.value.push({
+    id: gameIdSeed++,
+    x: heroPosition.value.x + 7,
+    y: heroPosition.value.y - 1,
+    speed: 62,
+  })
+}
+
+function updateHeroFromKeys(delta: number) {
+  const step = 46 * delta
+  let dx = 0
+  let dy = 0
+  if (pressedKeys.has('arrowleft') || pressedKeys.has('a')) dx -= step
+  if (pressedKeys.has('arrowright') || pressedKeys.has('d')) dx += step
+  if (pressedKeys.has('arrowup') || pressedKeys.has('w')) dy -= step
+  if (pressedKeys.has('arrowdown') || pressedKeys.has('s')) dy += step
+  if (dx || dy) nudgeHero(dx, dy)
+}
+
+function resolveHits() {
+  const hitEnemyIds = new Set<number>()
+  const hitBeamIds = new Set<number>()
+  const bursts: TokenBurst[] = []
+
+  for (const beam of gameBeams.value) {
+    for (const enemy of gameEnemies.value) {
+      if (hitEnemyIds.has(enemy.id)) continue
+      const closeX = Math.abs(beam.x - enemy.x) < 5.8
+      const closeY = Math.abs(beam.y - enemy.y) < 8.5
+      if (!closeX || !closeY) continue
+      hitEnemyIds.add(enemy.id)
+      hitBeamIds.add(beam.id)
+      bursts.push({ id: gameIdSeed++, x: enemy.x, y: enemy.y, age: 0 })
+      gameScore.value += 100
+      if (gameScore.value > 0 && gameScore.value % 700 === 0) {
+        gameWave.value += 1
+      }
+      break
+    }
+  }
+
+  if (hitEnemyIds.size > 0) {
+    gameEnemies.value = gameEnemies.value.filter((enemy) => !hitEnemyIds.has(enemy.id))
+    gameBeams.value = gameBeams.value.filter((beam) => !hitBeamIds.has(beam.id))
+    gameBursts.value.push(...bursts)
+    gameEnergy.value = clamp(gameEnergy.value + hitEnemyIds.size * 3, 0, 100)
+  }
+}
+
+function updateGame(now: number) {
+  const delta = Math.min((now - lastFrameAt) / 1000 || 0.016, 0.04)
+  lastFrameAt = now
+
+  updateHeroFromKeys(delta)
+  spawnEnemy(now)
+  fireBeam(now)
+
+  gameBeams.value = gameBeams.value
+    .map((beam) => ({ ...beam, x: beam.x + beam.speed * delta }))
+    .filter((beam) => beam.x < 108)
+
+  gameEnemies.value = gameEnemies.value
+    .map((enemy) => ({ ...enemy, x: enemy.x - enemy.speed * delta }))
+    .filter((enemy) => {
+      const escaped = enemy.x < -8
+      if (escaped) gameEnergy.value = clamp(gameEnergy.value - 7, 0, 100)
+      return !escaped
+    })
+
+  gameBursts.value = gameBursts.value
+    .map((burst) => ({ ...burst, age: burst.age + delta * 1000 }))
+    .filter((burst) => burst.age < 520)
+
+  if (gameEnergy.value <= 0) {
+    gameEnergy.value = 100
+    gameWave.value = 1
+    gameScore.value = Math.max(0, gameScore.value - 300)
+    gameEnemies.value = []
+    gameBursts.value = []
+  }
+
+  resolveHits()
+  gameFrameId = window.requestAnimationFrame(updateGame)
 }
 
 // Toggle theme
@@ -470,30 +586,46 @@ onMounted(() => {
     appStore.fetchPublicSettings()
   }
 
-  fetchPublicTodayStats()
+  gameFrameId = window.requestAnimationFrame((now) => {
+    lastFrameAt = now
+    lastEnemyAt = now - 900
+    updateGame(now)
+  })
+})
+
+onBeforeUnmount(() => {
+  if (gameFrameId) {
+    window.cancelAnimationFrame(gameFrameId)
+  }
 })
 </script>
 
 <style scoped>
 .home-page {
-  --bg: #f5f8ff;
-  --surface: rgba(255, 255, 255, 0.82);
+  --bg: #f8fafc;
+  --surface: rgba(255, 255, 255, 0.9);
   --surface-strong: #ffffff;
-  --text: #1a2233;
+  --text: #111827;
   --muted: #64748b;
-  --line: rgba(15, 23, 42, 0.08);
-  --accent: #5c8cf2;
-  --accent-2: #84aaf7;
-  --accent-soft: rgba(92, 140, 242, 0.1);
-  --shadow: 0 24px 70px rgba(15, 23, 42, 0.08);
+  --line: rgba(17, 24, 39, 0.1);
+  --accent: #f43f5e;
+  --accent-2: #fbbf24;
+  --accent-3: #38bdf8;
+  --accent-soft: rgba(251, 191, 36, 0.16);
+  --shadow: 0 3px 0 rgba(17, 24, 39, 0.16), 0 12px 28px rgba(17, 24, 39, 0.06);
 
   position: relative;
   min-height: 100vh;
   overflow: hidden;
   color: var(--text);
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(245, 248, 255, 0.98) 42%, #eff4ff),
-    radial-gradient(circle at 72% 26%, rgba(92, 140, 242, 0.16), transparent 34%);
+    linear-gradient(45deg, rgba(244, 63, 94, 0.05) 25%, transparent 25%),
+    linear-gradient(-45deg, rgba(14, 165, 233, 0.05) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, rgba(16, 185, 129, 0.05) 75%),
+    linear-gradient(-45deg, transparent 75%, rgba(251, 191, 36, 0.08) 75%),
+    #f8fafc;
+  background-position: 0 0, 0 10px, 10px -10px, -10px 0, 0 0;
+  background-size: 20px 20px, 20px 20px, 20px 20px, 20px 20px, auto;
   font-family:
     "Segoe UI",
     "PingFang SC",
@@ -505,11 +637,11 @@ onMounted(() => {
 
 .home-page::before {
   position: absolute;
-  inset: -20%;
+  inset: 0;
   background:
-    radial-gradient(circle at 14% 20%, rgba(92, 140, 242, 0.18), transparent 28%),
-    radial-gradient(circle at 84% 82%, rgba(132, 170, 247, 0.2), transparent 28%);
-  animation: ambient-shift 18s ease-in-out infinite alternate;
+    radial-gradient(circle at 14% 18%, rgba(244, 63, 94, 0.12), transparent 30%),
+    radial-gradient(circle at 78% 20%, rgba(56, 189, 248, 0.12), transparent 28%),
+    radial-gradient(circle at 86% 78%, rgba(251, 191, 36, 0.14), transparent 30%);
   content: "";
   pointer-events: none;
 }
@@ -518,23 +650,29 @@ onMounted(() => {
   --surface: rgba(15, 23, 42, 0.78);
   --surface-strong: #111827;
   --text: #f6f8ff;
-  --muted: #9fb0c8;
+  --muted: #94a3b8;
   --line: rgba(148, 163, 184, 0.16);
-  --accent: #7da2ff;
-  --accent-2: #a9c3ff;
-  --accent-soft: rgba(125, 162, 255, 0.16);
-  --shadow: 0 28px 82px rgba(0, 0, 0, 0.36);
+  --accent: #fb7185;
+  --accent-2: #fbbf24;
+  --accent-3: #38bdf8;
+  --accent-soft: rgba(251, 191, 36, 0.14);
+  --shadow: 0 3px 0 rgba(0, 0, 0, 0.3), 0 18px 36px rgba(0, 0, 0, 0.28);
 
   background:
-    linear-gradient(180deg, #07111f 0%, #0b1424 44%, #101827 100%),
-    radial-gradient(circle at 72% 26%, rgba(92, 140, 242, 0.2), transparent 34%);
+    linear-gradient(45deg, rgba(244, 63, 94, 0.08) 25%, transparent 25%),
+    linear-gradient(-45deg, rgba(56, 189, 248, 0.07) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, rgba(16, 185, 129, 0.06) 75%),
+    linear-gradient(-45deg, transparent 75%, rgba(251, 191, 36, 0.08) 75%),
+    #020617;
+  background-position: 0 0, 0 10px, 10px -10px, -10px 0, 0 0;
+  background-size: 20px 20px, 20px 20px, 20px 20px, 20px 20px, auto;
 }
 
 :global(html.dark .home-page)::before {
   background:
-    radial-gradient(circle at 14% 20%, rgba(92, 140, 242, 0.22), transparent 30%),
-    radial-gradient(circle at 84% 82%, rgba(20, 184, 166, 0.12), transparent 30%),
-    radial-gradient(circle at 42% 88%, rgba(96, 165, 250, 0.12), transparent 28%);
+    radial-gradient(circle at 14% 18%, rgba(244, 63, 94, 0.14), transparent 30%),
+    radial-gradient(circle at 78% 20%, rgba(56, 189, 248, 0.12), transparent 28%),
+    radial-gradient(circle at 86% 78%, rgba(251, 191, 36, 0.12), transparent 30%);
   opacity: 0.88;
 }
 
@@ -546,6 +684,7 @@ onMounted(() => {
 }
 
 .home-nav {
+  z-index: 20;
   display: flex;
   min-height: 82px;
   align-items: center;
@@ -568,17 +707,16 @@ onMounted(() => {
   height: 38px;
   place-items: center;
   overflow: hidden;
-  border: 1px solid rgba(107, 155, 240, 0.14);
-  border-radius: 13px;
-  background: rgba(255, 255, 255, 0.78);
-  box-shadow: 0 14px 34px rgba(107, 155, 240, 0.12);
-  backdrop-filter: blur(16px);
+  border: 1px solid rgba(17, 24, 39, 0.14);
+  border-radius: 10px;
+  background: #ffffff;
+  box-shadow: 0 3px 0 rgba(17, 24, 39, 0.16);
 }
 
 :global(html.dark .home-page .brand-mark) {
   border-color: rgba(148, 163, 184, 0.18);
   background: rgba(15, 23, 42, 0.72);
-  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.26);
+  box-shadow: 0 3px 0 rgba(0, 0, 0, 0.32);
 }
 
 .brand-mark img,
@@ -619,42 +757,11 @@ onMounted(() => {
 }
 
 .home-actions {
+  position: relative;
+  z-index: 21;
   display: flex;
   align-items: center;
   gap: 10px;
-}
-
-.doc-action {
-  display: inline-flex;
-  min-height: 44px;
-  align-items: center;
-  justify-content: center;
-  gap: 7px;
-  border: 1px solid rgba(107, 155, 240, 0.14);
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.56);
-  color: var(--muted);
-  padding: 0 14px;
-  font-size: 0.9rem;
-  font-weight: 700;
-  white-space: nowrap;
-  transition:
-    color 160ms ease,
-    background 160ms ease,
-    transform 160ms ease;
-  backdrop-filter: blur(14px);
-}
-
-:global(html.dark .home-page .doc-action) {
-  border-color: rgba(148, 163, 184, 0.18);
-  background: rgba(15, 23, 42, 0.7);
-  color: #c7d2fe;
-}
-
-.doc-action:hover {
-  transform: translateY(-1px);
-  color: var(--accent);
-  background: rgba(255, 255, 255, 0.78);
 }
 
 .icon-action {
@@ -693,7 +800,7 @@ onMounted(() => {
   justify-content: center;
   gap: 9px;
   border: 1px solid transparent;
-  border-radius: 999px;
+  border-radius: 8px;
   padding: 0 22px;
   cursor: pointer;
   font-size: 0.95rem;
@@ -711,22 +818,24 @@ onMounted(() => {
 }
 
 .button.primary {
-  background: #172033;
+  border-color: rgba(17, 24, 39, 0.14);
+  background: linear-gradient(135deg, #f43f5e, #fbbf24);
   color: #fff;
-  box-shadow: 0 16px 34px rgba(23, 32, 51, 0.24);
+  box-shadow: 0 3px 0 rgba(17, 24, 39, 0.16), 0 14px 30px rgba(244, 63, 94, 0.14);
+  text-shadow: 0 1px 0 rgba(17, 24, 39, 0.22);
 }
 
 .button.secondary {
   border-color: var(--line);
-  background: rgba(255, 255, 255, 0.72);
+  background: rgba(255, 255, 255, 0.9);
   color: var(--text);
-  backdrop-filter: blur(14px);
+  box-shadow: 0 3px 0 rgba(17, 24, 39, 0.12);
 }
 
 :global(html.dark .home-page .button.primary) {
-  background: linear-gradient(135deg, #eef4ff, #9fbaff);
-  color: #0f172a;
-  box-shadow: 0 18px 44px rgba(96, 165, 250, 0.24);
+  background: linear-gradient(135deg, #f43f5e, #fbbf24);
+  color: #ffffff;
+  box-shadow: 0 3px 0 rgba(0, 0, 0, 0.35), 0 16px 34px rgba(244, 63, 94, 0.18);
 }
 
 :global(html.dark .home-page .button.secondary) {
@@ -791,7 +900,7 @@ onMounted(() => {
 }
 
 .flow-text {
-  background: linear-gradient(100deg, #5c8cf2 0%, #84aaf7 28%, #172033 56%, #5c8cf2 100%);
+  background: linear-gradient(100deg, #f43f5e 0%, #fbbf24 32%, #38bdf8 66%, #f43f5e 100%);
   background-size: 260% 100%;
   -webkit-background-clip: text;
   background-clip: text;
@@ -800,7 +909,7 @@ onMounted(() => {
 }
 
 :global(html.dark .home-page .flow-text) {
-  background-image: linear-gradient(100deg, #9db8ff 0%, #dbeafe 28%, #60a5fa 56%, #b7c9ff 100%);
+  background-image: linear-gradient(100deg, #fb7185 0%, #fbbf24 32%, #38bdf8 66%, #fb7185 100%);
 }
 
 .lead {
@@ -832,50 +941,59 @@ onMounted(() => {
   animation: rise 780ms 160ms ease both;
 }
 
-.sphere {
+.pixel-decor {
   position: absolute;
   z-index: -1;
-  border-radius: 50%;
-  background: radial-gradient(circle at 30% 30%, #fff, #cbe0f3 60%, #8ab2e0);
-  box-shadow: 0 10px 20px rgba(92, 140, 242, 0.15), inset 0 -5px 15px rgba(92, 140, 242, 0.1);
+  width: 44px;
+  height: 44px;
+  border: 3px solid #111827;
+  border-radius: 8px;
+  background: #fef3c7;
+  box-shadow:
+    8px 8px 0 #38bdf8,
+    14px 14px 0 rgba(17, 24, 39, 0.12);
+  image-rendering: pixelated;
 }
 
-.sphere-one {
+.pixel-decor-one {
   top: 10%;
   right: 15%;
-  width: 40px;
-  height: 40px;
-  filter: blur(1px);
 }
 
-.sphere-two {
+.pixel-decor-two {
   top: 25%;
   right: 5%;
-  width: 18px;
-  height: 18px;
+  width: 22px;
+  height: 22px;
+  background: #f43f5e;
+  box-shadow:
+    7px 7px 0 #fbbf24,
+    12px 12px 0 rgba(17, 24, 39, 0.12);
 }
 
-.sphere-three {
+.pixel-decor-three {
   right: -2%;
   bottom: 35%;
   width: 28px;
   height: 28px;
-  background: radial-gradient(circle at 30% 30%, #fff, #e2e8f0 60%, #cbd5e1);
+  background: #10b981;
+  box-shadow:
+    7px 7px 0 #f43f5e,
+    12px 12px 0 rgba(17, 24, 39, 0.12);
 }
 
 .console-card {
   width: min(100%, 720px);
-  border: 1px solid rgba(255, 255, 255, 0.9);
-  border-radius: 28px;
-  background: rgba(255, 255, 255, 0.75);
+  border: 1px solid rgba(17, 24, 39, 0.12);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.88);
   box-shadow:
-    -25px 35px 65px rgba(15, 23, 42, 0.08),
-    -10px 15px 25px rgba(92, 140, 242, 0.04),
-    inset 0 0 0 1px rgba(255, 255, 255, 0.6);
+    -18px 24px 40px rgba(17, 24, 39, 0.1),
+    0 4px 0 rgba(17, 24, 39, 0.18);
   transform: rotateX(12deg) rotateY(-16deg) rotateZ(4deg);
   transform-style: preserve-3d;
   transition: transform 500ms cubic-bezier(0.175, 0.885, 0.32, 1.275);
-  backdrop-filter: blur(20px);
+  backdrop-filter: blur(18px);
 }
 
 :global(html.dark .home-page .console-card) {
@@ -903,8 +1021,8 @@ onMounted(() => {
   align-items: center;
   gap: 16px;
   border-right: 1px solid rgba(15, 23, 42, 0.05);
-  border-radius: 28px 0 0 28px;
-  background: rgba(255, 255, 255, 0.4);
+  border-radius: 8px 0 0 8px;
+  background: rgba(255, 255, 255, 0.6);
   padding: 24px 0;
 }
 
@@ -920,9 +1038,10 @@ onMounted(() => {
   place-items: center;
   overflow: hidden;
   margin-bottom: 12px;
+  border: 1px solid rgba(17, 24, 39, 0.12);
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.78);
-  box-shadow: 0 10px 24px rgba(92, 140, 242, 0.12);
+  background: #ffffff;
+  box-shadow: 0 3px 0 rgba(17, 24, 39, 0.14);
 }
 
 .rail-logo img,
@@ -943,14 +1062,14 @@ onMounted(() => {
   height: 40px;
   align-items: center;
   justify-content: center;
-  border-radius: 12px;
+  border-radius: 8px;
   color: var(--muted);
 }
 
 .side-rail i.active {
   background: var(--accent-soft);
   color: var(--accent);
-  box-shadow: 0 4px 12px rgba(92, 140, 242, 0.1);
+  box-shadow: 0 3px 0 rgba(17, 24, 39, 0.12);
 }
 
 .side-rail svg {
@@ -960,212 +1079,374 @@ onMounted(() => {
 }
 
 .dashboard-board {
-  padding: 32px;
+  padding: 24px;
 }
 
-.metrics {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 16px;
-  margin-bottom: 24px;
+.token-arcade {
+  outline: none;
 }
 
-.metric {
-  position: relative;
-  display: flex;
-  min-height: 116px;
-  flex-direction: column;
-  justify-content: center;
+.arcade-bezel {
   overflow: hidden;
-  border: 1px solid rgba(15, 23, 42, 0.04);
-  border-radius: 20px;
-  background: #ffffff;
-  padding: 16px 14px;
-  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.03);
-  transition: transform 300ms ease;
+  border: 4px solid #202436;
+  border-radius: 22px;
+  background:
+    linear-gradient(135deg, #ecf3ff 0%, #ccd8f7 45%, #f7fbff 46%, #b8c3dc 100%);
+  box-shadow:
+    inset 0 0 0 4px rgba(255, 255, 255, 0.68),
+    0 22px 46px rgba(16, 24, 40, 0.18);
 }
 
-:global(html.dark .home-page .metric),
-:global(html.dark .home-page .chart-card),
+:global(html.dark .home-page .arcade-bezel) {
+  border-color: #0f172a;
+  background:
+    linear-gradient(135deg, #27324a 0%, #141b2c 45%, #33415f 46%, #0e1525 100%);
+  box-shadow:
+    inset 0 0 0 4px rgba(148, 163, 184, 0.12),
+    0 24px 50px rgba(0, 0, 0, 0.4);
+}
+
+.arcade-topline {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  border-bottom: 4px solid #202436;
+  background: #f8dc5c;
+  color: #1f2937;
+  padding: 10px 14px;
+  font-family: "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+  font-size: 0.76rem;
+  font-weight: 900;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.arcade-topline span:nth-child(2) {
+  color: #d33232;
+  text-align: center;
+}
+
+.arcade-topline span:nth-child(3) {
+  color: #176c42;
+  text-align: right;
+}
+
+.arcade-screen {
+  position: relative;
+  height: 310px;
+  overflow: hidden;
+  border-bottom: 4px solid #202436;
+  cursor: crosshair;
+  background:
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.06), transparent 50%),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.04) 1px, transparent 1px),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.04) 1px, transparent 1px),
+    linear-gradient(180deg, #081225 0%, #132c56 58%, #1b5f7a 59%, #26364c 100%);
+  background-size: auto, 20px 20px, 20px 20px, auto;
+  image-rendering: pixelated;
+}
+
+.arcade-screen::before {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  background: repeating-linear-gradient(
+    to bottom,
+    rgba(255, 255, 255, 0.08) 0,
+    rgba(255, 255, 255, 0.08) 1px,
+    transparent 1px,
+    transparent 4px
+  );
+  content: "";
+  mix-blend-mode: screen;
+  opacity: 0.36;
+  pointer-events: none;
+}
+
+.arcade-screen::after {
+  position: absolute;
+  inset: 0;
+  z-index: 19;
+  background: radial-gradient(circle at 50% 44%, transparent 0 48%, rgba(0, 0, 0, 0.3) 100%);
+  content: "";
+  pointer-events: none;
+}
+
+.pixel-stars {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(circle at 12% 22%, #fff 0 1px, transparent 1.5px),
+    radial-gradient(circle at 28% 42%, #f8dc5c 0 1px, transparent 1.5px),
+    radial-gradient(circle at 44% 18%, #fff 0 1px, transparent 1.5px),
+    radial-gradient(circle at 69% 30%, #98f3ff 0 1px, transparent 1.5px),
+    radial-gradient(circle at 84% 16%, #fff 0 1px, transparent 1.5px),
+    radial-gradient(circle at 91% 48%, #f8dc5c 0 1px, transparent 1.5px);
+  animation: star-scroll 5.8s linear infinite;
+  opacity: 0.8;
+}
+
+.city-line {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  height: 34%;
+  padding: 0 18px;
+  opacity: 0.9;
+}
+
+.city-line span {
+  width: 9%;
+  background:
+    repeating-linear-gradient(to bottom, rgba(248, 220, 92, 0.85) 0 4px, transparent 4px 12px),
+    linear-gradient(180deg, #253556, #162238);
+  box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.05);
+}
+
+.hero-sprite,
+.token-enemy,
+.light-beam,
+.token-burst {
+  position: absolute;
+  z-index: 4;
+  transform: translate(-50%, -50%);
+}
+
+.hero-sprite {
+  width: 66px;
+  height: 102px;
+  filter:
+    drop-shadow(0 0 12px rgba(129, 222, 255, 0.74))
+    drop-shadow(0 16px 0 rgba(0, 0, 0, 0.16));
+  transition: left 80ms linear, top 80ms linear;
+}
+
+.hero-head {
+  position: absolute;
+  top: 0;
+  left: 18px;
+  width: 30px;
+  height: 26px;
+  border: 3px solid #1e293b;
+  border-radius: 12px 12px 6px 6px;
+  background: linear-gradient(90deg, #d9e3ef 0 35%, #d33232 35% 58%, #eef6ff 58%);
+}
+
+.hero-head::before,
+.hero-head::after {
+  position: absolute;
+  top: 8px;
+  width: 5px;
+  height: 5px;
+  background: #f8dc5c;
+  box-shadow: 0 0 8px #f8dc5c;
+  content: "";
+}
+
+.hero-head::before {
+  left: 5px;
+}
+
+.hero-head::after {
+  right: 5px;
+}
+
+.hero-core {
+  position: absolute;
+  top: 34px;
+  left: 28px;
+  z-index: 4;
+  width: 11px;
+  height: 11px;
+  border: 2px solid #c8f7ff;
+  border-radius: 50%;
+  background: #54e0ff;
+  box-shadow: 0 0 14px #54e0ff;
+  animation: core-pulse 900ms ease-in-out infinite;
+}
+
+.hero-body {
+  position: absolute;
+  top: 24px;
+  left: 17px;
+  width: 32px;
+  height: 50px;
+  border: 3px solid #1e293b;
+  clip-path: polygon(12% 0, 88% 0, 100% 100%, 0 100%);
+  background:
+    linear-gradient(120deg, transparent 0 28%, #d33232 28% 46%, transparent 46%),
+    linear-gradient(240deg, transparent 0 30%, #d33232 30% 47%, transparent 47%),
+    #e8eef7;
+}
+
+.hero-arm {
+  position: absolute;
+  top: 32px;
+  width: 17px;
+  height: 42px;
+  border: 3px solid #1e293b;
+  border-radius: 8px;
+  background: linear-gradient(180deg, #e8eef7 0 45%, #d33232 45%);
+}
+
+.hero-arm-left {
+  left: 6px;
+  transform: rotate(18deg);
+}
+
+.hero-arm-right {
+  right: 0;
+  transform: rotate(-68deg);
+  transform-origin: 50% 20%;
+}
+
+.hero-leg {
+  position: absolute;
+  top: 70px;
+  width: 17px;
+  height: 31px;
+  border: 3px solid #1e293b;
+  border-radius: 7px;
+  background: linear-gradient(180deg, #d33232, #e8eef7 54%);
+}
+
+.hero-leg-left {
+  left: 17px;
+}
+
+.hero-leg-right {
+  right: 13px;
+}
+
+.light-beam {
+  width: 78px;
+  height: 8px;
+  border: 2px solid rgba(255, 255, 255, 0.82);
+  background: linear-gradient(90deg, #fff, #f8dc5c 38%, #54e0ff 78%, transparent);
+  box-shadow:
+    0 0 12px #54e0ff,
+    0 0 26px rgba(248, 220, 92, 0.7);
+}
+
+.token-enemy {
+  display: grid;
+  width: 50px;
+  height: 46px;
+  place-items: center;
+  border: 3px solid #381b2d;
+  border-radius: 6px;
+  background:
+    linear-gradient(135deg, #ff5a5a 0 45%, #f8dc5c 45% 58%, #8b1e3f 58%),
+    #d33232;
+  color: #fff9d9;
+  font-size: 0.72rem;
+  font-weight: 950;
+  text-shadow: 2px 2px 0 #381b2d;
+  box-shadow:
+    inset -5px -5px 0 rgba(0, 0, 0, 0.18),
+    0 0 18px rgba(255, 90, 90, 0.45);
+  animation: token-wobble var(--wobble) steps(2) infinite;
+}
+
+.token-enemy::before,
+.token-enemy::after {
+  position: absolute;
+  top: -8px;
+  width: 11px;
+  height: 11px;
+  border: 3px solid #381b2d;
+  border-radius: 50%;
+  background: #f8dc5c;
+  content: "";
+}
+
+.token-enemy::before {
+  left: 6px;
+}
+
+.token-enemy::after {
+  right: 6px;
+}
+
+.token-burst {
+  width: 54px;
+  height: 54px;
+  background:
+    radial-gradient(circle, #fff 0 12%, #f8dc5c 13% 28%, #ff5a5a 29% 44%, transparent 46%),
+    conic-gradient(from 0deg, transparent 0 10%, #54e0ff 10% 16%, transparent 16% 30%, #f8dc5c 30% 36%, transparent 36% 58%, #fff 58% 64%, transparent 64%);
+  filter: drop-shadow(0 0 16px rgba(248, 220, 92, 0.8));
+  animation: burst-pop 520ms steps(4) forwards;
+}
+
+.arcade-panel {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 16px;
+  align-items: center;
+  background: #e7edf7;
+  padding: 16px;
+}
+
+:global(html.dark .home-page .arcade-panel) {
+  background: #151e31;
+}
+
+.power-meter {
+  height: 18px;
+  overflow: hidden;
+  border: 3px solid #202436;
+  border-radius: 4px;
+  background: #202436;
+}
+
+.power-meter span {
+  display: block;
+  height: 100%;
+  background: repeating-linear-gradient(
+    90deg,
+    #2fd17c 0 14px,
+    #f8dc5c 14px 20px,
+    #2fd17c 20px 34px
+  );
+  transition: width 140ms linear;
+}
+
+.arcade-controls {
+  display: grid;
+  grid-template-columns: repeat(4, 32px);
+  gap: 7px;
+}
+
+.arcade-controls button {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  border: 3px solid #202436;
+  border-radius: 50%;
+  background: #d33232;
+  color: #fff;
+  font-size: 0.7rem;
+  font-weight: 900;
+  line-height: 1;
+  box-shadow: inset -3px -4px 0 rgba(0, 0, 0, 0.22);
+}
+
 :global(html.dark .home-page .step-card) {
   border-color: rgba(148, 163, 184, 0.12);
   background: rgba(15, 23, 42, 0.82);
   box-shadow: 0 16px 38px rgba(0, 0, 0, 0.18);
 }
 
-.metric:hover {
-  transform: translateY(-3px);
-}
-
-.metric.center-align {
-  align-items: center;
-  text-align: center;
-}
-
-.metric-icon {
-  display: grid;
-  width: 32px;
-  height: 32px;
-  place-items: center;
-  margin-bottom: 12px;
-  border-radius: 10px;
-}
-
-.metric:nth-child(1) .metric-icon {
-  background: #eff6ff;
-  color: #3b82f6;
-}
-
-.metric:nth-child(2) .metric-icon {
-  background: #fff7ed;
-  color: #f97316;
-}
-
-.metric:nth-child(3) .metric-icon {
-  background: #f0fdf4;
-  color: #10b981;
-}
-
-.metric:nth-child(4) .metric-icon {
-  background: #f3e8ff;
-  color: #a855f7;
-}
-
-.metric-icon svg {
-  width: 16px;
-  height: 16px;
-}
-
-.metric b {
-  color: var(--text);
-  font-size: 1.25rem;
-  line-height: 1.1;
-}
-
-.metric span:last-child {
-  margin-top: 6px;
-  color: var(--accent);
-  font-size: 0.82rem;
-  font-weight: 650;
-  white-space: nowrap;
-}
-
-:global(html.dark .home-page .metric:nth-child(1) .metric-icon) {
-  background: rgba(59, 130, 246, 0.18);
-  color: #93c5fd;
-}
-
-:global(html.dark .home-page .metric:nth-child(2) .metric-icon) {
-  background: rgba(249, 115, 22, 0.16);
-  color: #fdba74;
-}
-
-:global(html.dark .home-page .metric:nth-child(3) .metric-icon) {
-  background: rgba(16, 185, 129, 0.16);
-  color: #6ee7b7;
-}
-
-:global(html.dark .home-page .metric:nth-child(4) .metric-icon) {
-  background: rgba(168, 85, 247, 0.16);
-  color: #d8b4fe;
-}
-
-.chart-card {
-  border: 1px solid rgba(15, 23, 42, 0.04);
-  border-radius: 20px;
-  background: #ffffff;
-  padding: 24px;
-  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.03);
-}
-
-.chart-head {
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 14px;
-  margin-bottom: 16px;
-}
-
-.chart-title {
-  color: var(--text);
-  font-size: 0.95rem;
-  font-weight: 800;
-}
-
-.chart-legends {
-  display: flex;
-  gap: 16px;
-  color: var(--muted);
-  font-size: 0.75rem;
-  font-weight: 650;
-}
-
-.chart-legends span {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.chart-legends span::before {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  content: "";
-}
-
-.legend-one::before {
-  background: var(--accent);
-}
-
-.legend-two::before {
-  background: #172033;
-}
-
-.chart-card svg {
-  display: block;
-  width: 100%;
-  height: 140px;
-}
-
-:global(html.dark .home-page .chart-card path[stroke="#f1f5f9"]) {
-  stroke: rgba(148, 163, 184, 0.16);
-}
-
-:global(html.dark .home-page .chart-card path[stroke="#172033"]),
-:global(html.dark .home-page .chart-card circle[stroke="#172033"]) {
-  stroke: #c7d2fe;
-}
-
-:global(html.dark .home-page .legend-two)::before {
-  background: #c7d2fe;
-}
-
-.stack-3d {
-  position: absolute;
-  right: -10px;
-  bottom: -30px;
-  z-index: 10;
-  width: 140px;
-  height: 180px;
-  transform: translateZ(80px);
-  transition: transform 400ms ease;
-}
-
-.stack-3d:hover {
-  transform: translateZ(100px) translateY(-5px);
-}
-
-.stack-3d svg {
-  width: 100%;
-  height: 100%;
-  filter: drop-shadow(-10px 20px 20px rgba(92, 140, 242, 0.25));
-}
-
 .step-strip {
   margin: 20px auto 72px;
   border: 1px solid var(--line);
-  border-radius: 34px;
-  background: rgba(255, 255, 255, 0.66);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.88);
   padding: 40px 32px;
   box-shadow: var(--shadow);
   backdrop-filter: blur(18px);
@@ -1198,10 +1479,10 @@ onMounted(() => {
   align-items: center;
   gap: 16px;
   border: 1px solid rgba(15, 23, 42, 0.04);
-  border-radius: 20px;
+  border-radius: 8px;
   background: #ffffff;
   padding: 20px 24px;
-  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.03);
+  box-shadow: 0 3px 0 rgba(17, 24, 39, 0.12), 0 12px 24px rgba(17, 24, 39, 0.04);
   transition: transform 300ms ease;
 }
 
@@ -1236,7 +1517,7 @@ onMounted(() => {
   height: 56px;
   flex-shrink: 0;
   place-items: center;
-  border-radius: 16px;
+  border-radius: 8px;
   background: var(--accent-soft);
   color: var(--accent);
 }
@@ -1324,6 +1605,44 @@ onMounted(() => {
   }
 }
 
+@keyframes star-scroll {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-22px);
+  }
+}
+
+@keyframes core-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.22);
+  }
+}
+
+@keyframes token-wobble {
+  0%,
+  100% {
+    transform: translate(-50%, -50%) rotate(-3deg);
+  }
+  50% {
+    transform: translate(-50%, -50%) rotate(3deg);
+  }
+}
+
+@keyframes burst-pop {
+  from {
+    transform: translate(-50%, -50%) scale(0.55) rotate(0deg);
+  }
+  to {
+    transform: translate(-50%, -50%) scale(1.25) rotate(28deg);
+  }
+}
+
 @media (min-width: 768px) {
   .home-shell {
     width: min(1180px, calc(100% - 48px));
@@ -1354,13 +1673,12 @@ onMounted(() => {
     transform: none !important;
   }
 
-  .stack-3d,
-  .sphere {
+  .pixel-decor {
     display: none;
   }
 
-  .metrics {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+  .arcade-screen {
+    height: 300px;
   }
 
   .steps {
@@ -1411,9 +1729,27 @@ onMounted(() => {
     display: none;
   }
 
-  .dashboard-board,
-  .chart-card {
+  .dashboard-board {
     padding: 20px;
+  }
+
+  .arcade-topline {
+    grid-template-columns: 1fr;
+    gap: 3px;
+  }
+
+  .arcade-topline span,
+  .arcade-topline span:nth-child(2),
+  .arcade-topline span:nth-child(3) {
+    text-align: left;
+  }
+
+  .arcade-screen {
+    height: 280px;
+  }
+
+  .arcade-panel {
+    grid-template-columns: 1fr;
   }
 }
 
@@ -1430,13 +1766,10 @@ onMounted(() => {
     width: 100%;
   }
 
-  .metrics {
-    grid-template-columns: 1fr;
-  }
-
-  .chart-head {
-    align-items: flex-start;
-    flex-direction: column;
+  .hero-sprite {
+    width: 56px;
+    height: 88px;
+    transform: translate(-50%, -50%) scale(0.86);
   }
 
   .step-strip {

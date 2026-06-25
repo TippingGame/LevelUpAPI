@@ -10,6 +10,45 @@ export default {
     login: '登录',
     getStarted: '立即开始',
     goToDashboard: '进入控制台',
+    nav: {
+      home: '首页',
+      usage: '用量'
+    },
+    arcade: {
+      eyebrow: 'LevelUp AI公会',
+      titlePrefix: '集结玩家账号能量，击退',
+      titleHighlight: 'Token 军团',
+      lead: '{siteName} 把每位玩家的闲置账号化作光能补给，其他成员按需调用额度；平台负责战线调度、收益结算与邀请分成，大家一起守住 API 星域。',
+      viewUsage: '查看用量',
+      visualLabel: '光之英雄射线小游戏',
+      stageLabel: '光之英雄防线',
+      level: 'LEVEL',
+      score: 'SCORE',
+      core: 'CORE',
+      controls: {
+        up: '上',
+        left: '左',
+        down: '下',
+        right: '右'
+      },
+      stepsLabel: '接入步骤',
+      stepsTitleAfterSteps: ' 步开始，',
+      stepsTitleAfterMinutes: ' 分钟完成迁移',
+      steps: {
+        register: {
+          title: '注册账号',
+          desc: '免费注册，即刻获得体验额度'
+        },
+        apiKey: {
+          title: '获取 API Key',
+          desc: '一键生成，支持多 Key 管理与权限控制'
+        },
+        baseUrl: {
+          title: '替换 Base URL',
+          desc: '接入即可使用，快速完成迁移'
+        }
+      }
+    },
     // 新增：面向用户的价值主张
     heroSubtitle: '一个密钥，畅用多个 AI 模型',
     heroDescription: '无需管理多个订阅账号，一站式接入 Claude、GPT、Gemini 等主流 AI 服务',
@@ -524,7 +563,7 @@ export default {
     invalidCode: '请输入有效的6位验证码',
     promoCodeLabel: '优惠码',
     promoCodePlaceholder: '输入优惠码（可选）',
-    promoCodeValid: '有效！注册后将获得 ${amount} 赠送余额',
+    promoCodeValid: '有效！注册后将获得 {amount} coins 赠送余额',
     promoCodeInvalid: '无效的优惠码',
     promoCodeNotFound: '优惠码不存在',
     promoCodeExpired: '此优惠码已过期',
@@ -1073,22 +1112,22 @@ export default {
     },
     // 配额和有效期
     quotaLimit: '额度限制',
-    quotaAmount: '额度金额 (USD)',
-    quotaAmountPlaceholder: '输入 USD 额度限制',
+    quotaAmount: '额度金额 (coins)',
+    quotaAmountPlaceholder: '输入 coins 额度限制',
     quotaAmountHint: '设置此密钥可消费的最大金额。0 = 无限制。',
     quotaUsed: '已用额度',
     reset: '重置',
     resetQuotaUsed: '将已用额度重置为 0',
     resetQuotaTitle: '确认重置额度',
-    resetQuotaConfirmMessage: '确定要将密钥 "{name}" 的已用额度（${used}）重置为 0 吗？此操作不可撤销。',
+    resetQuotaConfirmMessage: '确定要将密钥 "{name}" 的已用额度（{used} coins）重置为 0 吗？此操作不可撤销。',
     quotaResetSuccess: '额度重置成功',
     failedToResetQuota: '重置额度失败',
     rateLimitColumn: '速率限制',
     rateLimitSection: '速率限制',
     resetUsage: '重置',
-    rateLimit5h: '5小时限额 (USD)',
-    rateLimit1d: '日限额 (USD)',
-    rateLimit7d: '7天限额 (USD)',
+    rateLimit5h: '5小时限额 (coins)',
+    rateLimit1d: '日限额 (coins)',
+    rateLimit7d: '7天限额 (coins)',
     rateLimitHint: '设置此密钥在指定时间窗口内的最大消费额。0 = 无限制。',
     rateLimitUsage: '速率限制用量',
     resetRateLimitUsage: '重置速率限制用量',
@@ -3005,9 +3044,9 @@ export default {
         typeNotEditable: '分组创建后无法修改计费类型。',
         standard: '标准（余额）',
         subscription: '订阅（配额）',
-        dailyLimit: '每日限额（USD）',
-        weeklyLimit: '每周限额（USD）',
-        monthlyLimit: '每月限额（USD）',
+        dailyLimit: '每日限额（coins）',
+        weeklyLimit: '每周限额（coins）',
+        monthlyLimit: '每月限额（coins）',
         defaultValidityDays: '默认有效期（天）',
         validityHint: '分配给用户时订阅的有效天数',
         noLimit: '无限制'
@@ -5267,7 +5306,7 @@ export default {
       generatedSuccessfully: '生成成功',
       codesCreated: '已创建 {count} 个兑换码',
       codeType: '类型',
-      amount: '金额 ($)',
+      amount: '金额 (coins)',
       pointsValue: '积分数量',
       value: '面值',
       count: '数量',
@@ -5473,7 +5512,7 @@ export default {
       code: '优惠码',
       autoGenerate: '留空自动生成',
       codePlaceholder: '输入优惠码或留空',
-      bonusAmount: '赠送金额 ($)',
+      bonusAmount: '赠送金额 (coins)',
       maxUses: '最大使用次数',
       zeroUnlimited: '0 = 无限制',
       expiresAt: '过期时间',
@@ -6615,9 +6654,9 @@ export default {
         defaultUserRpmLimitHint: '新用户默认每分钟最大请求数，0 = 不限制；仅作用于新用户创建时初始化',
         privateGroupTemplate: '用户私有分组模板',
         privateGroupTemplateHint: '新用户注册时自动创建的私有订阅分组默认配额，0 表示不限制',
-        privateGroupDailyLimit: '日限额 USD',
-        privateGroupWeeklyLimit: '周限额 USD',
-        privateGroupMonthlyLimit: '月限额 USD',
+        privateGroupDailyLimit: '日限额 coins',
+        privateGroupWeeklyLimit: '周限额 coins',
+        privateGroupMonthlyLimit: '月限额 coins',
         privateGroupRateMultiplier: '费率倍数',
         privateGroupRpmLimit: 'RPM 限制',
         defaultSubscriptions: '默认订阅列表',
@@ -6814,8 +6853,8 @@ export default {
         maxAmount: '最高金额',
         dailyLimit: '每日限额',
         balanceRechargeMultiplier: '余额充值倍率',
-        balanceRechargeMultiplierHint: '用户每支付 1 CNY 可获得多少 USD 余额',
-        balanceRechargePreview: '预览：1 CNY = {usd} USD',
+        balanceRechargeMultiplierHint: '用户每支付 1 CNY 可获得多少 coins 余额',
+        balanceRechargePreview: '预览：1 CNY = {usd} coins',
         rechargeFeeRate: '充值手续费率',
         rechargeFeeRateHint: '用户充值时额外收取的手续费百分比，0 表示不收取手续费',
         rechargeFeePreview: '预览：充值 100 元，手续费 {fee} 元',
@@ -7342,7 +7381,7 @@ export default {
       openaiFreeAccountRepair: {
         title: 'OpenAI Free 账号自动修复',
         description: 'Codex 7 天额度耗尽且周限额不高于阈值时，自动降级为 Free 并暂停公共共享。',
-        threshold: 'Free 判定周限额阈值（USD）',
+        threshold: 'Free 判定周限额阈值（coins）',
         thresholdHint: '例如 60 表示周限额小于或等于 60 美元且 7 天额度 100% 时触发修复。'
       },      saveSettings: '保存设置',
       saving: '保存中...',
@@ -7726,7 +7765,7 @@ export default {
       groupMultiplier: {
         title: '💰 3. 费率倍数',
         description:
-          '<div style="line-height: 1.7;"><p style="margin-bottom: 12px;">设置该分组的计费倍率，控制用户的实际扣费。</p><div style="padding: 8px 12px; background: #fef3c7; border-left: 3px solid #f59e0b; border-radius: 4px; font-size: 13px; margin-bottom: 12px;"><b>⚙️ 计费规则：</b><ul style="margin: 8px 0 0 16px;"><li><b>1.0</b> - 原价计费（成本价）</li><li><b>1.5</b> - 用户消耗 $1，扣除 $1.5</li><li><b>2.0</b> - 用户消耗 $1，扣除 $2</li><li><b>0.8</b> - 补贴模式（亏本运营）</li></ul></div><p style="font-size: 13px; color: #6b7280;">建议测试分组设置为 1.0</p></div>',
+          '<div style="line-height: 1.7;"><p style="margin-bottom: 12px;">设置该分组的计费倍率，控制用户的实际扣费。</p><div style="padding: 8px 12px; background: #fef3c7; border-left: 3px solid #f59e0b; border-radius: 4px; font-size: 13px; margin-bottom: 12px;"><b>⚙️ 计费规则：</b><ul style="margin: 8px 0 0 16px;"><li><b>1.0</b> - 原价计费（成本价）</li><li><b>1.5</b> - 用户消耗 1 coins，扣除 1.5 coins</li><li><b>2.0</b> - 用户消耗 1 coins，扣除 2 coins</li><li><b>0.8</b> - 补贴模式（亏本运营）</li></ul></div><p style="font-size: 13px; color: #6b7280;">建议测试分组设置为 1.0</p></div>',
         nextBtn: '下一步'
       },
       groupExclusive: {
@@ -7967,7 +8006,7 @@ export default {
     amountTooLow: '最低金额为 {min}',
     amountTooHigh: '最高金额为 {max}',
     amountNoMethod: '该金额没有可用的支付方式',
-    rechargeRatePreview: '当前倍率：1 CNY = {usd} USD',
+    rechargeRatePreview: '当前倍率：1 CNY = {coins} coins',
     refundReason: '退款原因',
     refundReasonPlaceholder: '请描述您的退款原因',
     stripeLoadFailed: '支付组件加载失败，请刷新页面重试',
@@ -8101,7 +8140,7 @@ export default {
       deductBalanceHint: '从用户余额中扣回充值金额',
       userBalance: '用户余额',
       orderAmount: '订单金额',
-      insufficientBalance: '余额不足，将扣至 $0',
+      insufficientBalance: '余额不足，将扣至 0 coins',
       noDeduction: '将不扣除用户余额',
       forceRefund: '强制退款（忽略余额检查）',
       orderCancelled: '订单已取消',

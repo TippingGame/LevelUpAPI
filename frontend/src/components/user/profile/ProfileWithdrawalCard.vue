@@ -11,7 +11,7 @@
       <div class="grid grid-cols-2 gap-2 sm:min-w-[18rem]">
         <div class="rounded-lg bg-primary-50 px-4 py-3 dark:bg-primary-900/20">
           <p class="text-xs text-primary-600 dark:text-primary-300">当前余额</p>
-          <p class="mt-1 text-xl font-semibold text-gray-900 dark:text-white">${{ balance.toFixed(2) }}</p>
+          <p class="mt-1 text-xl font-semibold text-gray-900 dark:text-white">{{ formatGameCoins(balance) }}</p>
         </div>
         <div class="rounded-lg bg-gray-50 px-4 py-3 dark:bg-dark-800/70">
           <p class="text-xs text-gray-500 dark:text-gray-400">提现状态</p>
@@ -63,15 +63,15 @@
         <div class="mt-4 rounded-lg border border-gray-100 bg-white p-3 text-sm dark:border-dark-700 dark:bg-dark-900/60">
           <div class="flex justify-between gap-3">
             <span class="text-gray-500 dark:text-gray-400">提现金额</span>
-            <span class="font-medium text-gray-900 dark:text-white">${{ normalizedAmount.toFixed(2) }}</span>
+            <span class="font-medium text-gray-900 dark:text-white">{{ formatGameCoins(normalizedAmount) }}</span>
           </div>
           <div class="mt-2 flex justify-between gap-3">
             <span class="text-gray-500 dark:text-gray-400">首次手续费</span>
-            <span class="font-medium text-gray-900 dark:text-white">${{ feeAmount.toFixed(2) }}</span>
+            <span class="font-medium text-gray-900 dark:text-white">{{ formatGameCoins(feeAmount) }}</span>
           </div>
           <div class="mt-2 flex justify-between gap-3 border-t border-gray-100 pt-2 dark:border-dark-700">
             <span class="text-gray-500 dark:text-gray-400">本次扣除</span>
-            <span class="font-semibold text-gray-900 dark:text-white">${{ totalDeducted.toFixed(2) }}</span>
+            <span class="font-semibold text-gray-900 dark:text-white">{{ formatGameCoins(totalDeducted) }}</span>
           </div>
         </div>
 
@@ -184,11 +184,11 @@
             <div class="mt-3 grid grid-cols-2 gap-3 text-sm">
               <div>
                 <p class="text-xs text-gray-500 dark:text-gray-400">提现金额</p>
-                <p class="font-medium text-gray-900 dark:text-white">${{ item.amount.toFixed(2) }}</p>
+                <p class="font-medium text-gray-900 dark:text-white">{{ formatGameCoins(item.amount) }}</p>
               </div>
               <div>
                 <p class="text-xs text-gray-500 dark:text-gray-400">扣除</p>
-                <p class="font-medium text-gray-900 dark:text-white">${{ item.total_deducted.toFixed(2) }}</p>
+                <p class="font-medium text-gray-900 dark:text-white">{{ formatGameCoins(item.total_deducted) }}</p>
               </div>
             </div>
             <div class="mt-3 flex flex-wrap items-center justify-between gap-2">
@@ -222,6 +222,7 @@ import { useAppStore } from '@/stores/app'
 import { useAuthStore } from '@/stores/auth'
 import type { ReceiptCode, ReceiptCodePaymentMethod, WithdrawalRequest, WithdrawalStatus } from '@/types'
 import { extractApiErrorMessage } from '@/utils/apiError'
+import { formatGameCoins } from '@/utils/gameCurrency'
 
 const { t } = useI18n()
 const appStore = useAppStore()

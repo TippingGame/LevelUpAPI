@@ -1,0 +1,10 @@
+# Compose override for local Windows development/deployment.
+# Use together with docker-compose.local.yml to build the app image from this
+# workspace instead of pulling the published weishaw/sub2api image.
+
+services:
+  sub2api:
+    image: levelupapi-local:latest
+    build:
+      context: ..
+      dockerfile: Dockerfile

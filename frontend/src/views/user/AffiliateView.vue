@@ -210,8 +210,9 @@ import userAPI from '@/api/user'
 import type { AffiliateInvitee, UserAffiliateDetail } from '@/types'
 import { useAppStore } from '@/stores/app'
 import { useClipboard } from '@/composables/useClipboard'
-import { formatCurrency, formatDateTime } from '@/utils/format'
+import { formatDateTime } from '@/utils/format'
 import { extractApiErrorMessage } from '@/utils/apiError'
+import { formatGameCoins } from '@/utils/gameCurrency'
 
 const { t } = useI18n()
 const appStore = useAppStore()
@@ -249,6 +250,8 @@ const periodIncomeTitle = computed(() => {
   if (periodPreset.value === 'last7') return t('affiliate.stats.last7Quota')
   return t('affiliate.stats.periodQuota')
 })
+
+const formatCurrency = (value: number) => formatGameCoins(value)
 
 const weeklyQuotaText = computed(() => {
   const used = detail.value?.aff_weekly_used ?? 0

@@ -194,9 +194,9 @@ describe('user UsageView tooltip', () => {
     expect(text).toContain('Rate')
     expect(text).toContain('1.00x')
     expect(text).toContain('Billed')
-    expect(text).toContain('$0.092883')
-    expect(text).toContain('$5.0000 / 1M tokens')
-    expect(text).toContain('$30.0000 / 1M tokens')
+    expect(text).toContain('0.092883 coins')
+    expect(text).toContain('5.0000 coins / 1M tokens')
+    expect(text).toContain('30.0000 coins / 1M tokens')
   })
 
   it('exports csv with input and output unit price columns', async () => {
@@ -352,8 +352,8 @@ describe('user UsageView tooltip', () => {
     expect(setupState.getLedgerReasonLabel('account_share_income')).toBe('Shared account income')
     expect(setupState.getLedgerReasonLabel('invite_share_income')).toBe('Invite share income')
     expect(setupState.getLedgerReasonLabel('redeem_code')).toBe('Recharge')
-    expect(setupState.formatLedgerAmount(row)).toBe('+$0.1234567891')
-    expect(setupState.formatLedgerCurrency(row.balance_after)).toBe('$10.0000000001')
+    expect(setupState.formatLedgerAmount(row)).toBe('+0.1234567891 coins')
+    expect(setupState.formatLedgerCurrency(row.balance_after)).toBe('10.0000000001 coins')
     expect(setupState.getLedgerRemark(row)).toBe('Consumer: 9 · API Key: 8 · Account: 7 · Request: req-income')
 
     const adminRow = {

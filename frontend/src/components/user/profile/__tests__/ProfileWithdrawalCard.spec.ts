@@ -78,7 +78,7 @@ describe('ProfileWithdrawalCard', () => {
     await amountInput.setValue('1.23')
 
     expect(wrapper.text()).toContain('余额提现与收款码')
-    expect(wrapper.text()).toContain('$1.23')
+    expect(wrapper.text()).toContain('1.23 coins')
     expect(showErrorMock).not.toHaveBeenCalled()
   })
 })

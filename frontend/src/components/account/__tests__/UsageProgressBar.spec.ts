@@ -85,7 +85,7 @@ describe('UsageProgressBar', () => {
     })
 
     expect(wrapper.text()).toContain('0 req')
-    expect(wrapper.text()).toContain('A $0.00')
-    expect(wrapper.text()).toContain('U $0.00')
+    expect(wrapper.text()).toContain('A 0.00 coins')
+    expect(wrapper.text()).toContain('U 0.00 coins')
   })
 })

@@ -9,7 +9,7 @@
         <!-- Custom Logo or Default Logo -->
         <template v-if="settingsLoaded">
           <div class="auth-logo">
-            <img :src="siteLogo || '/logo.png'" alt="Logo" class="h-full w-full object-contain" />
+            <img :src="siteLogo || '/logo.svg'" alt="Logo" class="h-full w-full object-contain" />
           </div>
           <h1 class="auth-title">
             {{ siteName }}
@@ -45,9 +45,9 @@ import { sanitizeUrl } from '@/utils/url'
 
 const appStore = useAppStore()
 
-const siteName = computed(() => appStore.siteName || 'Sub2API')
+const siteName = computed(() => appStore.siteName || 'LevelUpAPI')
 const siteLogo = computed(() => sanitizeUrl(appStore.siteLogo || '', { allowRelative: true, allowDataUrl: true }))
-const siteSubtitle = computed(() => appStore.cachedPublicSettings?.site_subtitle || 'Subscription to API Conversion Platform')
+const siteSubtitle = computed(() => appStore.cachedPublicSettings?.site_subtitle || 'Game-ready AI API Gateway')
 const settingsLoaded = computed(() => appStore.publicSettingsLoaded)
 
 const currentYear = computed(() => new Date().getFullYear())
@@ -67,7 +67,7 @@ onMounted(() => {
   overflow: hidden;
   padding: 1rem;
   color: #10223a;
-  background: #f8fcff;
+  background: #fff7ed;
   font-family:
     "Segoe UI",
     "PingFang SC",
@@ -81,11 +81,13 @@ onMounted(() => {
   inset: -22%;
   z-index: 0;
   background:
-    radial-gradient(circle at 18% 24%, rgba(91, 168, 255, 0.34), transparent 26%),
-    radial-gradient(circle at 82% 18%, rgba(34, 198, 243, 0.22), transparent 24%),
-    radial-gradient(circle at 50% 86%, rgba(167, 208, 255, 0.3), transparent 30%),
-    linear-gradient(125deg, #ffffff 0%, #eaf6ff 36%, #ffffff 58%, #dceeff 100%);
-  background-size: 130% 130%;
+    linear-gradient(45deg, rgba(244, 63, 94, 0.08) 25%, transparent 25%),
+    linear-gradient(-45deg, rgba(14, 165, 233, 0.08) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, rgba(16, 185, 129, 0.08) 75%),
+    linear-gradient(-45deg, transparent 75%, rgba(251, 191, 36, 0.16) 75%),
+    linear-gradient(125deg, #fff7ed 0%, #f0f9ff 42%, #ecfdf5 100%);
+  background-position: 0 0, 0 12px, 12px -12px, -12px 0, 0 0;
+  background-size: 24px 24px, 24px 24px, 24px 24px, 24px 24px, 130% 130%;
   animation: auth-ambient-shift 18s ease-in-out infinite alternate;
   content: "";
   pointer-events: none;
@@ -96,8 +98,7 @@ onMounted(() => {
   inset: 0;
   z-index: 0;
   background:
-    radial-gradient(circle at 50% 0%, rgba(255, 255, 255, 0.92), transparent 34%),
-    linear-gradient(to bottom, rgba(255, 255, 255, 0.24), rgba(255, 255, 255, 0.78));
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.2), rgba(255, 255, 255, 0.72));
   content: "";
   pointer-events: none;
 }
@@ -106,9 +107,7 @@ onMounted(() => {
   position: absolute;
   inset: 0;
   z-index: 0;
-  background:
-    radial-gradient(circle at 30% 36%, rgba(107, 155, 240, 0.08), transparent 18%),
-    radial-gradient(circle at 70% 68%, rgba(99, 180, 225, 0.1), transparent 22%);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(251, 191, 36, 0.12));
   pointer-events: none;
 }
 
@@ -131,16 +130,16 @@ onMounted(() => {
   align-items: center;
   justify-content: center;
   overflow: hidden;
-  border: 1px solid rgba(107, 155, 240, 0.14);
-  border-radius: 1.125rem;
-  background: rgba(255, 255, 255, 0.68);
-  box-shadow: 0 18px 42px rgba(107, 155, 240, 0.14);
+  border: 2px solid rgba(17, 24, 39, 0.16);
+  border-radius: 0.875rem;
+  background: rgba(255, 255, 255, 0.84);
+  box-shadow: 0 4px 0 rgba(17, 24, 39, 0.16), 0 18px 42px rgba(244, 63, 94, 0.12);
   backdrop-filter: blur(16px);
 }
 
 .auth-title {
   margin: 0.875rem 0 0;
-  background: linear-gradient(92deg, #537fd9 0%, #63b4e1 46%, #10223a 100%);
+  background: linear-gradient(92deg, #e11d48 0%, #f59e0b 46%, #0f766e 100%);
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
@@ -157,11 +156,11 @@ onMounted(() => {
 }
 
 .auth-card {
-  border: 1px solid rgba(107, 155, 240, 0.08);
-  border-radius: 1.375rem;
-  background: rgba(255, 255, 255, 0.64);
+  border: 1px solid rgba(17, 24, 39, 0.12);
+  border-radius: 0.75rem;
+  background: rgba(255, 255, 255, 0.82);
   padding: 2rem;
-  box-shadow: 0 28px 78px rgba(38, 86, 143, 0.12);
+  box-shadow: 0 4px 0 rgba(17, 24, 39, 0.14), 0 28px 78px rgba(38, 86, 143, 0.1);
   backdrop-filter: blur(22px);
 }
 
@@ -195,7 +194,7 @@ onMounted(() => {
 
 .auth-card :deep(.input) {
   min-height: 2.875rem;
-  border-color: rgba(107, 155, 240, 0.14);
+  border-color: rgba(17, 24, 39, 0.14);
   background: rgba(255, 255, 255, 0.72);
   color: #10223a;
   box-shadow: 0 10px 28px rgba(38, 86, 143, 0.04);
@@ -206,10 +205,10 @@ onMounted(() => {
 }
 
 .auth-card :deep(.input:focus) {
-  border-color: #8fb6f4;
+  border-color: #f43f5e;
   box-shadow:
-    0 0 0 3px rgba(107, 155, 240, 0.14),
-    0 12px 32px rgba(107, 155, 240, 0.08);
+    0 0 0 3px rgba(251, 191, 36, 0.22),
+    0 12px 32px rgba(244, 63, 94, 0.08);
 }
 
 .auth-card :deep(.text-gray-400),
@@ -219,68 +218,66 @@ onMounted(() => {
 
 .auth-card :deep(.btn-primary) {
   min-height: 2.875rem;
-  border-radius: 0.875rem;
-  background: linear-gradient(92deg, #8fb6f4 0%, #6b9bf0 54%, #63b4e1 100%);
-  box-shadow: 0 14px 34px rgba(107, 155, 240, 0.2);
+  border-radius: 0.625rem;
+  background: linear-gradient(92deg, #f43f5e 0%, #f59e0b 100%);
+  box-shadow: 0 4px 0 rgba(17, 24, 39, 0.18), 0 14px 34px rgba(244, 63, 94, 0.2);
 }
 
 .auth-card :deep(.btn-primary:hover) {
-  background: linear-gradient(92deg, #7fa8ee 0%, #5f8fe3 54%, #57a9d8 100%);
-  box-shadow: 0 16px 38px rgba(107, 155, 240, 0.24);
+  background: linear-gradient(92deg, #e11d48 0%, #d97706 100%);
+  box-shadow: 0 4px 0 rgba(17, 24, 39, 0.2), 0 16px 38px rgba(244, 63, 94, 0.24);
 }
 
 .auth-card :deep(.text-primary-600),
 .auth-footer :deep(.text-primary-600),
 .auth-card :deep(.dark\:text-primary-400),
 .auth-footer :deep(.dark\:text-primary-400) {
-  color: #537fd9;
+  color: #e11d48;
 }
 
 .auth-card :deep(.hover\:text-primary-500:hover),
 .auth-footer :deep(.hover\:text-primary-500:hover),
 .auth-card :deep(.dark\:hover\:text-primary-300:hover),
 .auth-footer :deep(.dark\:hover\:text-primary-300:hover) {
-  color: #4167b8;
+  color: #be123c;
 }
 
 .auth-card :deep(.bg-gray-200),
 .auth-card :deep(.dark\:bg-dark-700) {
-  background-color: rgba(107, 155, 240, 0.12);
+  background-color: rgba(251, 191, 36, 0.16);
 }
 
 :global(html.dark .auth-shell) {
   color: #f6f8ff;
-  background: #07111f;
+  background: #020617;
 }
 
 :global(html.dark .auth-shell::before) {
   background:
-    radial-gradient(circle at 18% 24%, rgba(92, 140, 242, 0.22), transparent 28%),
-    radial-gradient(circle at 82% 18%, rgba(20, 184, 166, 0.12), transparent 24%),
-    radial-gradient(circle at 50% 86%, rgba(96, 165, 250, 0.12), transparent 30%),
-    linear-gradient(125deg, #07111f 0%, #0b1424 44%, #101827 100%);
+    linear-gradient(45deg, rgba(244, 63, 94, 0.1) 25%, transparent 25%),
+    linear-gradient(-45deg, rgba(56, 189, 248, 0.08) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, rgba(16, 185, 129, 0.08) 75%),
+    linear-gradient(-45deg, transparent 75%, rgba(251, 191, 36, 0.08) 75%),
+    linear-gradient(125deg, #020617 0%, #0f172a 48%, #111827 100%);
 }
 
 :global(html.dark .auth-shell::after) {
   background:
-    radial-gradient(circle at 50% 0%, rgba(148, 163, 184, 0.1), transparent 34%),
     linear-gradient(to bottom, rgba(2, 6, 23, 0.12), rgba(2, 6, 23, 0.62));
 }
 
 :global(html.dark .auth-backdrop) {
-  background:
-    radial-gradient(circle at 30% 36%, rgba(125, 162, 255, 0.12), transparent 18%),
-    radial-gradient(circle at 70% 68%, rgba(20, 184, 166, 0.1), transparent 22%);
+  background: linear-gradient(180deg, rgba(15, 23, 42, 0.08), rgba(251, 191, 36, 0.08));
 }
 
 :global(html.dark .auth-logo) {
   border-color: rgba(148, 163, 184, 0.18);
   background: rgba(15, 23, 42, 0.72);
-  box-shadow: 0 18px 42px rgba(0, 0, 0, 0.28);
+  box-shadow: 0 4px 0 rgba(0, 0, 0, 0.34), 0 18px 42px rgba(0, 0, 0, 0.28);
 }
 
 :global(html.dark .auth-title) {
-  background-image: linear-gradient(92deg, #9db8ff 0%, #dbeafe 42%, #60a5fa 100%);
+  background-image: linear-gradient(92deg, #fb7185 0%, #fbbf24 42%, #38bdf8 100%);
 }
 
 :global(html.dark .auth-subtitle),

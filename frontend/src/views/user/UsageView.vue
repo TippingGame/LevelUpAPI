@@ -52,18 +52,18 @@
         <div class="card p-4">
           <div class="flex items-center gap-3">
             <div class="rounded-lg bg-green-100 p-2 dark:bg-green-900/30">
-              <Icon name="dollar" size="md" class="text-green-600 dark:text-green-400" />
+              <Icon name="coin" size="md" class="text-green-600 dark:text-green-400" />
             </div>
             <div class="min-w-0 flex-1">
               <p class="text-xs font-medium text-gray-500 dark:text-gray-400">
                 {{ t('usage.totalCost') }}
               </p>
               <p class="text-xl font-bold text-green-600 dark:text-green-400">
-                ${{ (usageStats?.total_actual_cost || 0).toFixed(4) }}
+                {{ formatUsageCoins(usageStats?.total_actual_cost || 0, 4) }}
               </p>
               <p class="text-xs text-gray-500 dark:text-gray-400">
                 {{ t('usage.actualCost') }} /
-                <span class="line-through">${{ (usageStats?.total_cost || 0).toFixed(4) }}</span>
+                <span class="line-through">{{ formatUsageCoins(usageStats?.total_cost || 0, 4) }}</span>
                 {{ t('usage.standardCost') }}
               </p>
             </div>
@@ -351,7 +351,7 @@
             <div class="flex items-start gap-1.5 text-sm">
               <div class="flex flex-col">
                 <span class="font-medium text-green-600 dark:text-green-400">
-                  ${{ row.actual_cost.toFixed(6) }}
+                  {{ formatUsageCoins(row.actual_cost, 6) }}
                 </span>
                 <span v-if="walletDeductionText(row)" class="text-xs text-gray-500 dark:text-gray-400">{{ walletDeductionText(row) }}</span>
               </div>
@@ -572,35 +572,35 @@
             <div class="text-xs font-semibold text-gray-300 mb-1">{{ t('usage.costDetails') }}</div>
             <div v-if="tooltipData && tooltipData.input_cost > 0" class="flex items-center justify-between gap-4">
               <span class="text-gray-400">{{ t('admin.usage.inputCost') }}</span>
-              <span class="font-medium text-white">${{ tooltipData.input_cost.toFixed(6) }}</span>
+              <span class="font-medium text-white">{{ formatUsageCoins(tooltipData.input_cost, 6) }}</span>
             </div>
             <div v-if="tooltipData && tooltipData.output_cost > 0" class="flex items-center justify-between gap-4">
               <span class="text-gray-400">{{ t('admin.usage.outputCost') }}</span>
-              <span class="font-medium text-white">${{ tooltipData.output_cost.toFixed(6) }}</span>
+              <span class="font-medium text-white">{{ formatUsageCoins(tooltipData.output_cost, 6) }}</span>
             </div>
             <!-- Token billing: show unit prices per 1M tokens -->
             <template v-if="!tooltipData?.billing_mode || tooltipData.billing_mode === 'token'">
               <div v-if="tooltipData && tooltipData.input_tokens > 0" class="flex items-center justify-between gap-4">
                 <span class="text-gray-400">{{ t('usage.inputTokenPrice') }}</span>
-                <span class="font-medium text-sky-300">{{ formatTokenPricePerMillion(tooltipData.input_cost, tooltipData.input_tokens) }} {{ t('usage.perMillionTokens') }}</span>
+                <span class="font-medium text-sky-300">{{ formatTokenPricePerMillionCoins(tooltipData.input_cost, tooltipData.input_tokens) }} {{ t('usage.perMillionTokens') }}</span>
               </div>
               <div v-if="tooltipData && tooltipData.output_tokens > 0" class="flex items-center justify-between gap-4">
                 <span class="text-gray-400">{{ t('usage.outputTokenPrice') }}</span>
-                <span class="font-medium text-violet-300">{{ formatTokenPricePerMillion(tooltipData.output_cost, tooltipData.output_tokens) }} {{ t('usage.perMillionTokens') }}</span>
+                <span class="font-medium text-violet-300">{{ formatTokenPricePerMillionCoins(tooltipData.output_cost, tooltipData.output_tokens) }} {{ t('usage.perMillionTokens') }}</span>
               </div>
             </template>
             <!-- Per-request / image billing: show unit price -->
             <div v-else class="flex items-center justify-between gap-4">
               <span class="text-gray-400">{{ tooltipData.billing_mode === 'image' ? t('usage.imageUnitPrice') : t('usage.unitPrice') }}</span>
-              <span class="font-medium text-sky-300">${{ tooltipData.total_cost?.toFixed(6) || '0.000000' }}</span>
+              <span class="font-medium text-sky-300">{{ formatUsageCoins(tooltipData.total_cost, 6) }}</span>
             </div>
             <div v-if="tooltipData && tooltipData.cache_creation_cost > 0" class="flex items-center justify-between gap-4">
               <span class="text-gray-400">{{ t('admin.usage.cacheCreationCost') }}</span>
-              <span class="font-medium text-white">${{ tooltipData.cache_creation_cost.toFixed(6) }}</span>
+              <span class="font-medium text-white">{{ formatUsageCoins(tooltipData.cache_creation_cost, 6) }}</span>
             </div>
             <div v-if="tooltipData && tooltipData.cache_read_cost > 0" class="flex items-center justify-between gap-4">
               <span class="text-gray-400">{{ t('admin.usage.cacheReadCost') }}</span>
-              <span class="font-medium text-white">${{ tooltipData.cache_read_cost.toFixed(6) }}</span>
+              <span class="font-medium text-white">{{ formatUsageCoins(tooltipData.cache_read_cost, 6) }}</span>
             </div>
           </div>
           <!-- Rate and Summary -->
@@ -616,12 +616,12 @@
           </div>
           <div class="flex items-center justify-between gap-6">
             <span class="text-gray-400">{{ t('usage.original') }}</span>
-            <span class="font-medium text-white">${{ tooltipData?.total_cost.toFixed(6) }}</span>
+            <span class="font-medium text-white">{{ formatUsageCoins(tooltipData?.total_cost, 6) }}</span>
           </div>
           <div class="flex items-center justify-between gap-6 border-t border-gray-700 pt-1.5">
             <span class="text-gray-400">{{ t('usage.billed') }}</span>
             <span class="font-semibold text-green-400"
-              >${{ tooltipData?.actual_cost.toFixed(6) }}</span
+              >{{ formatUsageCoins(tooltipData?.actual_cost, 6) }}</span
             >
           </div>
         </div>
@@ -660,10 +660,11 @@ import type { Column } from '@/components/common/types'
 import { formatDateTime, formatReasoningEffort } from '@/utils/format'
 import { getPersistedPageSize } from '@/composables/usePersistedPageSize'
 import { formatCacheHitRate, formatCacheTokens, formatMultiplier } from '@/utils/formatters'
-import { formatTokenPricePerMillion } from '@/utils/usagePricing'
+import { calculateTokenPricePerMillion } from '@/utils/usagePricing'
 import { getUsageServiceTierLabel } from '@/utils/usageServiceTier'
 import { resolveUsageRequestType } from '@/utils/usageRequestType'
 import { getBillingModeLabel, getBillingModeBadgeClass } from '@/utils/billingMode'
+import { formatGameCoins } from '@/utils/gameCurrency'
 
 const { t } = useI18n()
 const appStore = useAppStore()
@@ -778,6 +779,21 @@ function formatPointsAmount(value?: number | null) {
   return amount.toFixed(10).replace(/\.?0+$/, '') || '0'
 }
 
+function formatUsageCoins(value?: number | string | null, digits = 4): string {
+  return formatGameCoins(value, {
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  })
+}
+
+function formatTokenPricePerMillionCoins(
+  cost: number | null | undefined,
+  tokens: number | null | undefined
+): string {
+  const price = calculateTokenPricePerMillion(cost, tokens)
+  return price == null ? '-' : formatUsageCoins(price, 4)
+}
+
 function billingWalletType(row: UsageLog) {
   if (row.billing_wallet_type) return row.billing_wallet_type
   if (row.billing_type === 1) return 'subscription'
@@ -824,7 +840,7 @@ function walletDeductionText(row: UsageLog) {
   const balance = Number(row.balance_deducted || 0)
   const parts: string[] = []
   if (points > epsilon) parts.push(`${formatPointsAmount(points)} ${t('common.points')}`)
-  if (balance > epsilon) parts.push(`$${balance.toFixed(6)}`)
+  if (balance > epsilon) parts.push(formatUsageCoins(balance, 6))
   return parts.join(' + ')
 }
 
@@ -1206,8 +1222,8 @@ const absoluteLedgerDecimal = (value?: string | number | null): string => {
 const formatLedgerCurrency = (value?: string | number | null, digits = 10): string => {
   const normalized = normalizeLedgerDecimal(value, digits)
   return normalized.startsWith('-')
-    ? `-$${normalized.slice(1)}`
-    : `$${normalized}`
+    ? `-${formatGameCoins(normalized.slice(1), { minimumFractionDigits: 0, maximumFractionDigits: digits })}`
+    : formatGameCoins(normalized, { minimumFractionDigits: 0, maximumFractionDigits: digits })
 }
 
 const formatOptionalLedgerCurrency = (value?: number | null, digits = 10): string => {
