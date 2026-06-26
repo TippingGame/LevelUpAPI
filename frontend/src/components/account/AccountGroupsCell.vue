@@ -1,7 +1,7 @@
 <template>
-  <div v-if="groups && groups.length > 0" class="relative w-full max-w-80 md:min-w-72 md:max-w-96">
-    <!-- 分组容器：固定最大宽度，最多显示2行 -->
-    <div class="flex flex-wrap gap-1 max-h-14 overflow-hidden">
+  <div v-if="groups && groups.length > 0" class="relative w-full max-w-48">
+    <!-- 分组容器：竖向排列，避免横向撑宽表格 -->
+    <div class="flex max-h-24 flex-col items-start gap-1 overflow-hidden">
       <GroupBadge
         v-for="group in displayGroups"
         :key="group.id"
@@ -10,7 +10,7 @@
         :subscription-type="group.subscription_type"
         :rate-multiplier="group.rate_multiplier"
         :show-rate="false"
-        class="max-w-36 md:max-w-44"
+        class="max-w-full"
       />
       <!-- 更多数量徽章 -->
       <button

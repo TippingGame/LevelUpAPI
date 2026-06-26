@@ -209,19 +209,6 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
-    path: '/account-share',
-    name: 'AccountShare',
-    component: () => import('@/views/user/AccountShareView.vue'),
-    meta: {
-      requiresAuth: true,
-      requiresAdmin: false,
-      requiresSharedAccountOwner: true,
-      title: 'Account Plaza',
-      titleKey: 'accountShare.title',
-      descriptionKey: 'accountShare.description'
-    }
-  },
-  {
     path: '/usage',
     name: 'Usage',
     component: () => import('@/views/user/UsageView.vue'),

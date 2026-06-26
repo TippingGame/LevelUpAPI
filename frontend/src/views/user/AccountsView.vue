@@ -644,7 +644,7 @@ const columns = computed<Column[]>(() => [
   { key: 'status', label: t('admin.accounts.columns.status'), sortable: true },
   { key: 'schedulable', label: t('admin.accounts.columns.schedulable'), sortable: true },
   { key: 'today_stats', label: t('admin.accounts.columns.todayStats'), sortable: false },
-  { key: 'groups', label: t('admin.accounts.columns.groups'), sortable: false, class: 'min-w-[320px]' },
+  { key: 'groups', label: t('admin.accounts.columns.groups'), sortable: false, class: 'min-w-[180px] max-w-[220px]' },
   { key: 'usage', label: t('admin.accounts.columns.usageWindows'), sortable: false, class: 'min-w-[180px]' },
   { key: 'priority', label: t('admin.accounts.columns.priority'), sortable: true },
   { key: 'last_used_at', label: t('admin.accounts.columns.lastUsed'), sortable: true },

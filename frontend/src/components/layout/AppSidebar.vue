@@ -691,7 +691,6 @@ function buildSelfNavItems(withDashboard: boolean): NavItem[] {
   }
   if (canManageUserAccounts.value) {
     items.push({ path: '/accounts', label: t('nav.myAccounts'), icon: GlobeIcon, hideInSimpleMode: true })
-    items.push({ path: '/account-share', label: t('nav.accountShare'), icon: UsersIcon, hideInSimpleMode: true })
   }
   items.push(
     { path: '/keys', label: t('nav.apiKeys'), icon: KeyIcon },

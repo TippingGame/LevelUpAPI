@@ -1176,7 +1176,7 @@ const allColumns = computed<Column[]>(() => {
     { key: 'today_stats', label: t('admin.accounts.columns.todayStats'), sortable: false }
   ]
   if (!authStore.isSimpleMode) {
-    c.push({ key: 'groups', label: t('admin.accounts.columns.groups'), sortable: false, class: 'min-w-[320px]' })
+    c.push({ key: 'groups', label: t('admin.accounts.columns.groups'), sortable: false, class: 'min-w-[180px] max-w-[220px]' })
   }
   c.push(
     { key: 'usage', label: t('admin.accounts.columns.usageWindows'), sortable: false },
