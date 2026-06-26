@@ -15,10 +15,10 @@ export default {
       usage: 'Usage'
     },
     arcade: {
-      eyebrow: 'LevelUp AI Guild',
-      titlePrefix: 'Rally account power and defeat the ',
-      titleHighlight: 'Token Legion',
-      lead: '{siteName} turns every player\'s idle accounts into shared power-ups. Members consume quota when needed while the platform handles routing, settlement, and referral rewards across the API realm.',
+      eyebrow: 'LevelUp AI Progression',
+      titlePrefix: 'Grow your account and evolve ',
+      titleHighlight: 'with AI',
+      lead: '{siteName} starts every user with core API access, then lets them build level and trust over time. Once qualified, they can apply to become shared account owners, connect idle accounts to the pool, and turn personal resources and AI capacity into stronger shared power.',
       viewUsage: 'View Usage',
       visualLabel: 'Light hero beam mini-game',
       stageLabel: 'Light hero defense line',

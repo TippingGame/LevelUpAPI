@@ -15,10 +15,10 @@ export default {
       usage: '用量'
     },
     arcade: {
-      eyebrow: 'LevelUp AI公会',
-      titlePrefix: '集结玩家账号能量，击退',
-      titleHighlight: 'Token 军团',
-      lead: '{siteName} 把每位玩家的闲置账号化作光能补给，其他成员按需调用额度；平台负责战线调度、收益结算与邀请分成，大家一起守住 API 星域。',
+      eyebrow: 'LevelUp AI成长计划',
+      titlePrefix: '从账号成长，到与 AI ',
+      titleHighlight: '并肩进化',
+      lead: '{siteName} 让每位用户从基础调用开始积累等级与信誉，达到要求后申请成为共享号主，将闲置账号接入号池参与调度与收益结算，一步步把个人能力和 AI 资源融合成更强战力。',
       viewUsage: '查看用量',
       visualLabel: '光之英雄射线小游戏',
       stageLabel: '光之英雄防线',
