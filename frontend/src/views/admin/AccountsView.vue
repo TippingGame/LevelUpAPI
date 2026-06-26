@@ -391,6 +391,7 @@ import TablePageLayout from '@/components/layout/TablePageLayout.vue'
 import DataTable from '@/components/common/DataTable.vue'
 import Pagination from '@/components/common/Pagination.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
+import type { Column } from '@/components/common/types'
 import { CreateAccountModal, EditAccountModal, BulkEditAccountModal, SyncFromCrsModal, TempUnschedStatusModal } from '@/components/account'
 import AccountTableActions from '@/components/admin/account/AccountTableActions.vue'
 import AccountTableFilters from '@/components/admin/account/AccountTableFilters.vue'
@@ -1162,8 +1163,8 @@ function shareStatusBadgeClass(status?: string): string {
 }
 
 // All available columns
-const allColumns = computed(() => {
-  const c = [
+const allColumns = computed<Column[]>(() => {
+  const c: Column[] = [
     { key: 'select', label: '', sortable: false },
     { key: 'name', label: t('admin.accounts.columns.name'), sortable: true },
     { key: 'id', label: t('admin.accounts.columns.id'), sortable: true },
@@ -1175,7 +1176,7 @@ const allColumns = computed(() => {
     { key: 'today_stats', label: t('admin.accounts.columns.todayStats'), sortable: false }
   ]
   if (!authStore.isSimpleMode) {
-    c.push({ key: 'groups', label: t('admin.accounts.columns.groups'), sortable: false })
+    c.push({ key: 'groups', label: t('admin.accounts.columns.groups'), sortable: false, class: 'min-w-[320px]' })
   }
   c.push(
     { key: 'usage', label: t('admin.accounts.columns.usageWindows'), sortable: false },

@@ -143,7 +143,7 @@ func RegisterUserRoutes(
 		}
 
 		accountShare := authenticated.Group("/account-share")
-		accountShare.Use(middleware.AdminOnly())
+		accountShare.Use(h.UserAccount.RequireSharedAccountOwner())
 		{
 			accountShare.POST("/openai/auth-url", h.AccountShareMode.GenerateOpenAIAuthURL)
 			accountShare.POST("/openai/exchange-code", h.AccountShareMode.ExchangeOpenAICode)

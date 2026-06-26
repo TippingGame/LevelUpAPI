@@ -23,9 +23,9 @@ var (
 
 const (
 	affiliateInviteesLimit          = 100
-	AffiliateCodeWeeklyLimitDefault = 2
+	AffiliateCodeWeeklyLimitDefault = 0
 	AffiliateCodeWeeklyLimitMax     = 100000
-	AffiliateCodeAutoRotateDefault  = true
+	AffiliateCodeAutoRotateDefault  = false
 	// AffiliateCodeMinLength / AffiliateCodeMaxLength bound both system-generated
 	// 12-char codes and admin-customized codes (e.g. "VIP2026").
 	AffiliateCodeMinLength = 4

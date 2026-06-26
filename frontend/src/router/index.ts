@@ -215,7 +215,7 @@ const routes: RouteRecordRaw[] = [
     meta: {
       requiresAuth: true,
       requiresAdmin: false,
-      blockForRegularUsers: true,
+      requiresSharedAccountOwner: true,
       title: 'Account Plaza',
       titleKey: 'accountShare.title',
       descriptionKey: 'accountShare.description'

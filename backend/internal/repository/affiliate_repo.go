@@ -790,9 +790,28 @@ func ensureUserAffiliateWithClient(ctx context.Context, client affiliateQueryExe
 			return nil, codeErr
 		}
 		_, insertErr := client.ExecContext(ctx, `
-INSERT INTO user_affiliates (user_id, aff_code, created_at, updated_at)
-VALUES ($1, $2, NOW(), NOW())
-ON CONFLICT (user_id) DO NOTHING`, userID, code)
+INSERT INTO user_affiliates (
+    user_id,
+    aff_code,
+    aff_weekly_limit,
+    aff_code_auto_rotate,
+    aff_code_expires_at,
+    created_at,
+    updated_at
+)
+VALUES (
+    $1,
+    $2,
+    $3,
+    $4,
+    CASE
+        WHEN $4::boolean THEN (date_trunc('week', NOW() AT TIME ZONE 'Asia/Shanghai') + INTERVAL '7 days') AT TIME ZONE 'Asia/Shanghai'
+        ELSE NULL
+    END,
+    NOW(),
+    NOW()
+)
+ON CONFLICT (user_id) DO NOTHING`, userID, code, service.AffiliateCodeWeeklyLimitDefault, service.AffiliateCodeAutoRotateDefault)
 		if insertErr == nil {
 			break
 		}
@@ -1159,7 +1178,7 @@ func validateAffiliateCodeCycle(summary *service.AffiliateSummary, cycle service
 	if isAffiliateCodeCycleStale(summary, cycle) {
 		used = 0
 	}
-	if summary.AffWeeklyLimit <= 0 || used >= summary.AffWeeklyLimit {
+	if summary.AffWeeklyLimit > 0 && used >= summary.AffWeeklyLimit {
 		return service.ErrAffiliateCodeQuotaEmpty
 	}
 	return nil
@@ -1470,9 +1489,9 @@ WHERE (
     ua.aff_code_custom = true
     OR ua.aff_rebate_rate_percent IS NOT NULL
     OR ua.aff_weekly_limit <> %d
-    OR ua.aff_code_auto_rotate <> TRUE
+    OR ua.aff_code_auto_rotate <> %t
 )
-  AND (u.email ILIKE $1 OR u.username ILIKE $1)`, service.AffiliateCodeWeeklyLimitDefault)
+  AND (u.email ILIKE $1 OR u.username ILIKE $1)`, service.AffiliateCodeWeeklyLimitDefault, service.AffiliateCodeAutoRotateDefault)
 
 	client := clientFromContext(ctx, r.client)
 

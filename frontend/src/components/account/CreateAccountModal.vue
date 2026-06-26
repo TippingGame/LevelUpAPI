@@ -3471,6 +3471,13 @@ const antigravityModelMappings = ref<ModelMapping[]>([])
 const antigravityPresetMappings = computed(() => getPresetMappingsByPlatform('antigravity'))
 const bedrockPresets = computed(() => getPresetMappingsByPlatform('bedrock'))
 
+const loadAntigravityDefaultMappings = async (): Promise<ModelMapping[]> => {
+  if (isUserScope.value) {
+    return getPresetMappingsByPlatform('antigravity').map(({ from, to }) => ({ from, to }))
+  }
+  return fetchAntigravityDefaultMappings()
+}
+
 // Bedrock credentials
 const bedrockAuthMode = ref<'sigv4' | 'apikey'>('sigv4')
 const bedrockAccessKeyId = ref('')
@@ -3839,7 +3846,7 @@ watch(
       // Antigravity: 默认使用映射模式并填充默认映射
       if (form.platform === 'antigravity') {
         antigravityModelRestrictionMode.value = 'mapping'
-        fetchAntigravityDefaultMappings().then(mappings => {
+        loadAntigravityDefaultMappings().then(mappings => {
           antigravityModelMappings.value = [...mappings]
         })
         antigravityWhitelistModels.value = []
@@ -3921,7 +3928,7 @@ watch(
     // Antigravity: 默认使用映射模式并填充默认映射
     if (newPlatform === 'antigravity') {
       antigravityModelRestrictionMode.value = 'mapping'
-      fetchAntigravityDefaultMappings().then(mappings => {
+      loadAntigravityDefaultMappings().then(mappings => {
         antigravityModelMappings.value = [...mappings]
       })
       antigravityWhitelistModels.value = []
@@ -4397,7 +4404,7 @@ const resetForm = () => {
 
   antigravityModelRestrictionMode.value = 'mapping'
   antigravityWhitelistModels.value = []
-  fetchAntigravityDefaultMappings().then(mappings => {
+  loadAntigravityDefaultMappings().then(mappings => {
     antigravityModelMappings.value = [...mappings]
   })
   poolModeEnabled.value = false

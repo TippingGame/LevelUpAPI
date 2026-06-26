@@ -256,6 +256,9 @@ const formatCurrency = (value: number) => formatGameCoins(value)
 const weeklyQuotaText = computed(() => {
   const used = detail.value?.aff_weekly_used ?? 0
   const limit = detail.value?.aff_weekly_limit ?? 0
+  if (limit <= 0) {
+    return t('affiliate.weeklyQuotaUnlimited', { used })
+  }
   const remaining = detail.value?.aff_weekly_remaining ?? Math.max(0, limit - used)
   return t('affiliate.weeklyQuotaText', { used, limit, remaining })
 })

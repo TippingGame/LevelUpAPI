@@ -131,8 +131,8 @@
           </div>
 
           <div class="grid gap-3 rounded-md bg-gray-50 px-3 py-2 text-xs text-gray-500 dark:bg-dark-800 dark:text-dark-400 sm:grid-cols-2">
-            <span>{{ t('admin.users.invitePolicy.weeklyUsage', { used: affiliatePolicy.used, limit: affiliatePolicy.weeklyLimit }) }}</span>
-            <span>{{ t('admin.users.invitePolicy.remaining', { remaining: affiliatePolicyRemaining }) }}</span>
+            <span>{{ affiliatePolicyUsageText }}</span>
+            <span>{{ affiliatePolicyRemainingText }}</span>
           </div>
         </div>
       </div>
@@ -166,6 +166,9 @@ const props = defineProps<{ show: boolean, user: AdminUser | null }>()
 const emit = defineEmits(['close', 'success'])
 const { t } = useI18n(); const appStore = useAppStore(); const { copyToClipboard } = useClipboard()
 
+const AFFILIATE_WEEKLY_LIMIT_DEFAULT = 0
+const AFFILIATE_AUTO_ROTATE_DEFAULT = false
+
 const submitting = ref(false); const passwordCopied = ref(false)
 const form = reactive({ email: '', password: '', username: '', notes: '', concurrency: 1, rpm_limit: 0, customAttributes: {} as UserAttributeValuesMap })
 const affiliatePolicy = reactive({
@@ -175,10 +178,10 @@ const affiliatePolicy = reactive({
   code: '',
   initialCode: '',
   used: 0,
-  weeklyLimit: 2,
-  initialWeeklyLimit: 2,
-  autoRotate: true,
-  initialAutoRotate: true,
+  weeklyLimit: AFFILIATE_WEEKLY_LIMIT_DEFAULT,
+  initialWeeklyLimit: AFFILIATE_WEEKLY_LIMIT_DEFAULT,
+  autoRotate: AFFILIATE_AUTO_ROTATE_DEFAULT,
+  initialAutoRotate: AFFILIATE_AUTO_ROTATE_DEFAULT,
   expiresAt: null as string | null,
 })
 let affiliatePolicyRequestSeq = 0
@@ -209,10 +212,10 @@ const resetAffiliatePolicy = () => {
     code: '',
     initialCode: '',
     used: 0,
-    weeklyLimit: 2,
-    initialWeeklyLimit: 2,
-    autoRotate: true,
-    initialAutoRotate: true,
+    weeklyLimit: AFFILIATE_WEEKLY_LIMIT_DEFAULT,
+    initialWeeklyLimit: AFFILIATE_WEEKLY_LIMIT_DEFAULT,
+    autoRotate: AFFILIATE_AUTO_ROTATE_DEFAULT,
+    initialAutoRotate: AFFILIATE_AUTO_ROTATE_DEFAULT,
     expiresAt: null,
   })
 }
@@ -226,10 +229,10 @@ const loadAffiliatePolicy = async (userId: number) => {
     code: '',
     initialCode: '',
     used: 0,
-    weeklyLimit: 2,
-    initialWeeklyLimit: 2,
-    autoRotate: true,
-    initialAutoRotate: true,
+    weeklyLimit: AFFILIATE_WEEKLY_LIMIT_DEFAULT,
+    initialWeeklyLimit: AFFILIATE_WEEKLY_LIMIT_DEFAULT,
+    autoRotate: AFFILIATE_AUTO_ROTATE_DEFAULT,
+    initialAutoRotate: AFFILIATE_AUTO_ROTATE_DEFAULT,
     expiresAt: null,
   })
   try {
@@ -245,8 +248,8 @@ const loadAffiliatePolicy = async (userId: number) => {
       used: entry.aff_weekly_used ?? 0,
       weeklyLimit,
       initialWeeklyLimit: weeklyLimit,
-      autoRotate: entry.aff_code_auto_rotate ?? true,
-      initialAutoRotate: entry.aff_code_auto_rotate ?? true,
+      autoRotate: entry.aff_code_auto_rotate ?? AFFILIATE_AUTO_ROTATE_DEFAULT,
+      initialAutoRotate: entry.aff_code_auto_rotate ?? AFFILIATE_AUTO_ROTATE_DEFAULT,
       expiresAt: entry.aff_code_expires_at ?? null,
     })
   } catch (e: any) {
@@ -257,7 +260,14 @@ const loadAffiliatePolicy = async (userId: number) => {
   }
 }
 
+const affiliatePolicyUnlimited = computed(() => affiliatePolicy.weeklyLimit <= 0)
 const affiliatePolicyRemaining = computed(() => Math.max(0, affiliatePolicy.weeklyLimit - affiliatePolicy.used))
+const affiliatePolicyUsageText = computed(() => affiliatePolicyUnlimited.value
+  ? t('admin.users.invitePolicy.weeklyUsageUnlimited', { used: affiliatePolicy.used })
+  : t('admin.users.invitePolicy.weeklyUsage', { used: affiliatePolicy.used, limit: affiliatePolicy.weeklyLimit }))
+const affiliatePolicyRemainingText = computed(() => affiliatePolicyUnlimited.value
+  ? t('admin.users.invitePolicy.remainingUnlimited')
+  : t('admin.users.invitePolicy.remaining', { remaining: affiliatePolicyRemaining.value }))
 
 const affiliatePolicyDirty = computed(() => {
   if (!affiliatePolicy.loaded) return false

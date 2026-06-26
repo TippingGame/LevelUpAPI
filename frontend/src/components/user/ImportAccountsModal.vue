@@ -28,6 +28,11 @@
       >
         {{ selectedPlatformHint }}
       </div>
+      <ShareModeSelector
+        v-if="selectedPlatform"
+        :selected-mode="selectedShareMode"
+        @select="selectShareMode"
+      />
     </template>
   </CredentialImportModal>
 
@@ -48,6 +53,11 @@
         v-if="selectedPlatform === 'openai'"
         :selected-level="selectedAccountLevel"
         @select="selectAccountLevel"
+      />
+      <ShareModeSelector
+        v-if="selectedPlatform"
+        :selected-mode="selectedShareMode"
+        @select="selectShareMode"
       />
 
       <div class="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-300">
@@ -174,7 +184,7 @@ import { useAppStore } from '@/stores/app'
 import { useOpenAIOAuth } from '@/composables/useOpenAIOAuth'
 import { extractApiErrorMessage } from '@/utils/apiError'
 import type { ImportCredentialContentsRequest, ImportCredentialContentsResponse } from '@/api/accounts'
-import type { AccountLevel, AccountPlatform, Proxy } from '@/types'
+import type { AccountLevel, AccountPlatform, AccountShareMode, Proxy } from '@/types'
 
 type SelectableOpenAILevel = Exclude<AccountLevel, 'unknown'>
 type ImportPlatform = AccountPlatform
@@ -199,6 +209,7 @@ const PROXY_PURCHASE_URL = 'https://www.seekproxy.com/user/reg?invite_id=105978'
 
 const selectedPlatform = ref<ImportPlatform | ''>('')
 const selectedAccountLevel = ref<SelectableOpenAILevel | ''>('')
+const selectedShareMode = ref<AccountShareMode>('private')
 const selectedProxyId = ref<number | null>(null)
 const proxies = ref<Proxy[]>([])
 const proxyLoading = ref(false)
@@ -384,6 +395,46 @@ const AccountLevelSelector = defineComponent({
   }
 })
 
+const ShareModeSelector = defineComponent({
+  name: 'UserImportShareModeSelector',
+  props: {
+    selectedMode: {
+      type: String,
+      default: 'private'
+    }
+  },
+  emits: ['select'],
+  setup(props, { emit }) {
+    const options: Array<{ value: AccountShareMode; label: string; icon: 'lock' | 'globe' }> = [
+      { value: 'private', label: t('userAccounts.privateMode'), icon: 'lock' },
+      { value: 'public', label: t('userAccounts.publicMode'), icon: 'globe' }
+    ]
+    return () => h('div', { class: 'space-y-2' }, [
+      h('label', { class: 'input-label' }, t('userAccounts.shareMode')),
+      h('div', { class: 'grid grid-cols-2 gap-2' }, options.map(option =>
+        h(
+          'button',
+          {
+            type: 'button',
+            class: [
+              'inline-flex min-h-[44px] items-center justify-center rounded-lg border px-3 py-2 text-sm font-medium transition-colors',
+              props.selectedMode === option.value
+                ? 'border-primary-400 bg-primary-50 text-primary-700 dark:border-primary-500 dark:bg-primary-900/30 dark:text-primary-300'
+                : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50 dark:border-dark-700 dark:bg-dark-800 dark:text-dark-200 dark:hover:bg-dark-700'
+            ],
+            onClick: () => emit('select', option.value)
+          },
+          [
+            h(Icon, { name: option.icon, size: 'sm', class: 'mr-2' }),
+            option.label
+          ]
+        )
+      )),
+      h('p', { class: 'input-hint' }, t('userAccounts.importShareModeHint'))
+    ])
+  }
+})
+
 watch(
   () => selectedPlatform.value,
   (platform) => {
@@ -450,9 +501,14 @@ function selectAccountLevel(level: SelectableOpenAILevel | ''): void {
   selectedAccountLevel.value = level
 }
 
+function selectShareMode(mode: AccountShareMode): void {
+  selectedShareMode.value = mode
+}
+
 function resetOAuthImportState(): void {
   selectedPlatform.value = ''
   selectedAccountLevel.value = ''
+  selectedShareMode.value = 'private'
   selectedProxyId.value = null
   oauthAccountName.value = ''
   proxyLoadMessage.value = ''
@@ -478,7 +534,7 @@ function importPersonalCredentials(contents: string[]): Promise<ImportCredential
   const request: ImportCredentialContentsRequest = {
     contents,
     platform: selectedPlatform.value,
-    share_mode: 'private',
+    share_mode: selectedShareMode.value,
     concurrency: PERSONAL_ACCOUNT_DEFAULT_CONCURRENCY,
     priority: PERSONAL_ACCOUNT_DEFAULT_PRIORITY,
     group_ids: [],
@@ -602,7 +658,7 @@ async function submitOAuthImport(): Promise<void> {
       credentials: templated.credentials,
       extra: templated.extra,
       proxy_id: selectedProxyId.value,
-      share_mode: 'private',
+      share_mode: selectedShareMode.value,
       concurrency: PERSONAL_ACCOUNT_DEFAULT_CONCURRENCY,
       priority: PERSONAL_ACCOUNT_DEFAULT_PRIORITY,
       group_ids: [],

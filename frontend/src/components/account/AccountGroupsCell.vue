@@ -1,5 +1,5 @@
 <template>
-  <div v-if="groups && groups.length > 0" class="relative max-w-56">
+  <div v-if="groups && groups.length > 0" class="relative w-full max-w-80 md:min-w-72 md:max-w-96">
     <!-- 分组容器：固定最大宽度，最多显示2行 -->
     <div class="flex flex-wrap gap-1 max-h-14 overflow-hidden">
       <GroupBadge
@@ -10,7 +10,7 @@
         :subscription-type="group.subscription_type"
         :rate-multiplier="group.rate_multiplier"
         :show-rate="false"
-        class="max-w-24"
+        class="max-w-36 md:max-w-44"
       />
       <!-- 更多数量徽章 -->
       <button
