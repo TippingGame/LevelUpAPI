@@ -50,6 +50,18 @@ declare module 'vue-router' {
     requiresPayment?: boolean
 
     /**
+     * Whether this route requires the shared account owner title.
+     * @default false
+     */
+    requiresSharedAccountOwner?: boolean
+
+    /**
+     * Whether authenticated regular users should be redirected away.
+     * @default false
+     */
+    blockForRegularUsers?: boolean
+
+    /**
      * i18n key for the page title
      */
     titleKey?: string

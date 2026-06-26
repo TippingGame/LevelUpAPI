@@ -158,7 +158,9 @@ const routes: RouteRecordRaw[] = [
     name: 'Store',
     component: () => import('@/views/StoreView.vue'),
     meta: {
-      requiresAuth: false,
+      requiresAuth: true,
+      requiresAdmin: true,
+      blockForRegularUsers: true,
       title: 'Store',
       titleKey: 'store.title'
     }
@@ -200,6 +202,7 @@ const routes: RouteRecordRaw[] = [
     meta: {
       requiresAuth: true,
       requiresAdmin: false,
+      requiresSharedAccountOwner: true,
       title: 'My Accounts',
       titleKey: 'userAccounts.title',
       descriptionKey: 'userAccounts.description'
@@ -212,6 +215,7 @@ const routes: RouteRecordRaw[] = [
     meta: {
       requiresAuth: true,
       requiresAdmin: false,
+      blockForRegularUsers: true,
       title: 'Account Plaza',
       titleKey: 'accountShare.title',
       descriptionKey: 'accountShare.description'
@@ -485,7 +489,7 @@ const routes: RouteRecordRaw[] = [
     meta: {
       requiresAuth: true,
       requiresAdmin: false,
-      title: 'Channel Status',
+      title: 'Pool Status',
       titleKey: 'nav.channelStatus'
     }
   },
@@ -762,7 +766,7 @@ let authInitialized = false
 const navigationLoading = useNavigationLoadingState()
 // 延迟初始化预加载，传入 router 实例
 let routePrefetch: ReturnType<typeof useRoutePrefetch> | null = null
-const BACKEND_MODE_ALLOWED_PATHS = ['/login', '/key-usage', '/setup', '/payment/result', '/payment/airwallex', '/legal', '/store']
+const BACKEND_MODE_ALLOWED_PATHS = ['/login', '/key-usage', '/setup', '/payment/result', '/payment/airwallex', '/legal']
 const BACKEND_MODE_CALLBACK_PATHS = [
   '/auth/callback',
   '/auth/linuxdo/callback',
@@ -786,6 +790,10 @@ function isBackendModePublicRouteAllowed(path: string, hasPendingAuthSession: bo
   }
 
   return false
+}
+
+function userCanManageAccounts(authStore: ReturnType<typeof useAuthStore>): boolean {
+  return authStore.isAdmin || authStore.user?.can_manage_user_accounts === true
 }
 
 router.beforeEach((to, _from, next) => {
@@ -837,6 +845,10 @@ router.beforeEach((to, _from, next) => {
       next(authStore.isAdmin ? '/admin/dashboard' : '/dashboard')
       return
     }
+    if (to.meta.blockForRegularUsers && authStore.isAuthenticated && !authStore.isAdmin) {
+      next('/dashboard')
+      return
+    }
     // Backend mode: block public pages for unauthenticated users (except login, key-usage, setup)
     if (appStore.backendModeEnabled && !authStore.isAuthenticated) {
       const isAllowed = isBackendModePublicRouteAllowed(to.path, authStore.hasPendingAuthSession)
@@ -866,6 +878,15 @@ router.beforeEach((to, _from, next) => {
     return
   }
 
+  if (to.meta.blockForRegularUsers && !authStore.isAdmin) {
+    next('/dashboard')
+    return
+  }
+
+  if (to.meta.requiresSharedAccountOwner && !userCanManageAccounts(authStore)) {
+    next(authStore.isAdmin ? '/admin/dashboard' : '/dashboard')
+    return
+  }
 
   // Check payment requirement (internal payment system only)
   if (to.meta.requiresPayment) {

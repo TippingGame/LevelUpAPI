@@ -11,6 +11,7 @@ type User struct {
 	Email                      string     `json:"email"`
 	Username                   string     `json:"username"`
 	Role                       string     `json:"role"`
+	CanManageUserAccounts      bool       `json:"can_manage_user_accounts"`
 	Balance                    float64    `json:"balance"`
 	PointsBalance              float64    `json:"points_balance"`
 	LoadFactorCreditsBalance   int        `json:"load_factor_credits_balance"`

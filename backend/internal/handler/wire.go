@@ -106,6 +106,7 @@ func ProvideUserAccountHandler(
 	openaiOAuthService *service.OpenAIOAuthService,
 	geminiOAuthService *service.GeminiOAuthService,
 	antigravityOAuthService *service.AntigravityOAuthService,
+	userAttributeService *service.UserAttributeService,
 	concurrencyService *service.ConcurrencyService,
 	sessionLimitCache service.SessionLimitCache,
 	rpmCache service.RPMCache,
@@ -123,6 +124,7 @@ func ProvideUserAccountHandler(
 		antigravityOAuthService,
 		accountBatchTaskService,
 	)
+	h.SetUserAttributeService(userAttributeService)
 	h.SetRuntimeCapacityProviders(concurrencyService, sessionLimitCache, rpmCache)
 	return h
 }

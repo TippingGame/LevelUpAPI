@@ -23,18 +23,24 @@ type AuthHandler struct {
 	authService   *service.AuthService
 	userService   *service.UserService
 	settingSvc    *service.SettingService
+	attrService   *service.UserAttributeService
 	promoService  *service.PromoService
 	redeemService *service.RedeemService
 	totpService   *service.TotpService
 }
 
 // NewAuthHandler creates a new AuthHandler
-func NewAuthHandler(cfg *config.Config, authService *service.AuthService, userService *service.UserService, settingService *service.SettingService, promoService *service.PromoService, redeemService *service.RedeemService, totpService *service.TotpService) *AuthHandler {
+func NewAuthHandler(cfg *config.Config, authService *service.AuthService, userService *service.UserService, settingService *service.SettingService, promoService *service.PromoService, redeemService *service.RedeemService, totpService *service.TotpService, attrServices ...*service.UserAttributeService) *AuthHandler {
+	var attrService *service.UserAttributeService
+	if len(attrServices) > 0 {
+		attrService = attrServices[0]
+	}
 	return &AuthHandler{
 		cfg:           cfg,
 		authService:   authService,
 		userService:   userService,
 		settingSvc:    settingService,
+		attrService:   attrService,
 		promoService:  promoService,
 		redeemService: redeemService,
 		totpService:   totpService,
@@ -92,6 +98,32 @@ func ensureLoginUserActive(user *service.User) error {
 	return nil
 }
 
+func (h *AuthHandler) canManageUserAccounts(ctx context.Context, user *service.User) bool {
+	if user == nil {
+		return false
+	}
+	if user.IsAdmin() {
+		return true
+	}
+	if h == nil || h.attrService == nil {
+		return false
+	}
+	allowed, err := h.attrService.UserHasSharedAccountOwnerTitle(ctx, user.ID)
+	if err != nil {
+		slog.Warn("failed to resolve shared account owner title", "error", err, "user_id", user.ID)
+		return false
+	}
+	return allowed
+}
+
+func (h *AuthHandler) userDTOFromService(ctx context.Context, user *service.User) *dto.User {
+	out := dto.UserFromService(user)
+	if out != nil {
+		out.CanManageUserAccounts = h.canManageUserAccounts(ctx, user)
+	}
+	return out
+}
+
 // respondWithTokenPair 生成 Token 对并返回认证响应
 // 如果 Token 对生成失败，回退到只返回 Access Token（向后兼容）
 func (h *AuthHandler) respondWithTokenPair(c *gin.Context, user *service.User) {
@@ -112,7 +144,7 @@ func (h *AuthHandler) respondWithTokenPair(c *gin.Context, user *service.User) {
 		response.Success(c, AuthResponse{
 			AccessToken: token,
 			TokenType:   "Bearer",
-			User:        dto.UserFromService(user),
+			User:        h.userDTOFromService(c.Request.Context(), user),
 		})
 		return
 	}
@@ -121,7 +153,7 @@ func (h *AuthHandler) respondWithTokenPair(c *gin.Context, user *service.User) {
 		RefreshToken: tokenPair.RefreshToken,
 		ExpiresIn:    tokenPair.ExpiresIn,
 		TokenType:    "Bearer",
-		User:         dto.UserFromService(user),
+		User:         h.userDTOFromService(c.Request.Context(), user),
 	})
 }
 
@@ -480,9 +512,11 @@ func (h *AuthHandler) GetCurrentUser(c *gin.Context) {
 	if h.cfg != nil {
 		runMode = h.cfg.RunMode
 	}
+	profile := userProfileResponseFromService(user, identities)
+	profile.CanManageUserAccounts = h.canManageUserAccounts(c.Request.Context(), user)
 
 	response.Success(c, UserResponse{
-		userProfileResponse: userProfileResponseFromService(user, identities),
+		userProfileResponse: profile,
 		RunMode:             runMode,
 	})
 }

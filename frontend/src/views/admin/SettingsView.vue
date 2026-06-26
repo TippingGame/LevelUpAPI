@@ -5340,7 +5340,7 @@
                       v-model="form.payment_product_name_prefix"
                       type="text"
                       class="input"
-                      placeholder="Sub2API"
+                      placeholder="LevelUpAPI"
                     />
                   </div>
                   <div>
@@ -5362,7 +5362,7 @@
                       class="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-600 dark:border-dark-600 dark:bg-dark-800 dark:text-gray-300"
                     >
                       {{
-                        (form.payment_product_name_prefix || "Sub2API") +
+                        (form.payment_product_name_prefix || "LevelUpAPI") +
                         " 100 " +
                         (form.payment_product_name_suffix || "CNY")
                       }}
@@ -6781,9 +6781,9 @@ const form = reactive<SettingsForm>({
   user_private_group_rate_multiplier: 1,
   user_private_group_commission_rate: 0,
   user_private_group_rpm_limit: 0,
-  site_name: "Sub2API",
+  site_name: "LevelUpAPI",
   site_logo: "",
-  site_subtitle: "Subscription to API Conversion Platform",
+  site_subtitle: "Game-ready AI API Gateway",
   api_base_url: "",
   contact_info: "",
   doc_url: "",
@@ -6960,10 +6960,10 @@ const form = reactive<SettingsForm>({
   channel_monitor_enabled: true,
   channel_monitor_default_interval_seconds: 60,
   // Available Channels feature switch
-  available_channels_enabled: false,
+  available_channels_enabled: true,
   user_account_import_limit: USER_ACCOUNT_IMPORT_LIMIT_DEFAULT,
   // Affiliate (邀请返利) feature switch
-  affiliate_enabled: false,
+  affiliate_enabled: true,
   // Risk control feature switch
   risk_control_enabled: false,
   cyber_session_block_enabled: false,

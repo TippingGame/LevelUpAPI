@@ -319,7 +319,7 @@ export const useAppStore = defineStore('app', () => {
         return { ...cachedPublicSettings.value }
       }
       return {
-        registration_enabled: false,
+        registration_enabled: true,
         email_verify_enabled: false,
         force_email_on_third_party_signup: false,
         registration_email_suffix_whitelist: [],
@@ -355,9 +355,9 @@ export const useAppStore = defineStore('app', () => {
         balance_low_notify_threshold: 0,
         channel_monitor_enabled: true,
         channel_monitor_default_interval_seconds: 60,
-        available_channels_enabled: false,
+        available_channels_enabled: true,
         user_account_import_limit: 100,
-        affiliate_enabled: false,
+        affiliate_enabled: true,
       }
     }
 

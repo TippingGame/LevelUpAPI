@@ -94,8 +94,9 @@ func RegisterUserRoutes(
 
 		accounts := authenticated.Group("/accounts")
 		{
-			accounts.GET("", h.UserAccount.List)
 			accounts.GET("/quota-dashboard", h.UserAccount.GetQuotaPoolDashboard)
+			accounts.Use(h.UserAccount.RequireSharedAccountOwner())
+			accounts.GET("", h.UserAccount.List)
 			accounts.GET("/data", h.UserAccount.ExportData)
 			accounts.POST("/today-stats/batch", h.UserAccount.GetBatchTodayStats)
 			accounts.GET("/:id/usage", h.UserAccount.GetUsage)
@@ -122,6 +123,7 @@ func RegisterUserRoutes(
 
 		// User-scoped OAuth endpoints for creating personal accounts.
 		accountOAuth := authenticated.Group("/account-oauth")
+		accountOAuth.Use(h.UserAccount.RequireSharedAccountOwner())
 		{
 			accountOAuth.POST("/anthropic/auth-url", h.UserAccount.GenerateAnthropicOAuthURL)
 			accountOAuth.POST("/anthropic/exchange-code", h.UserAccount.ExchangeAnthropicOAuthCode)
@@ -141,6 +143,7 @@ func RegisterUserRoutes(
 		}
 
 		accountShare := authenticated.Group("/account-share")
+		accountShare.Use(middleware.AdminOnly())
 		{
 			accountShare.POST("/openai/auth-url", h.AccountShareMode.GenerateOpenAIAuthURL)
 			accountShare.POST("/openai/exchange-code", h.AccountShareMode.ExchangeOpenAICode)

@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -21,6 +22,7 @@ type UserHandler struct {
 	emailService     *service.EmailService
 	emailCache       service.EmailCache
 	affiliateService *service.AffiliateService
+	attrService      *service.UserAttributeService
 }
 
 // NewUserHandler creates a new UserHandler
@@ -30,13 +32,19 @@ func NewUserHandler(
 	emailService *service.EmailService,
 	emailCache service.EmailCache,
 	affiliateService *service.AffiliateService,
+	attrServices ...*service.UserAttributeService,
 ) *UserHandler {
+	var attrService *service.UserAttributeService
+	if len(attrServices) > 0 {
+		attrService = attrServices[0]
+	}
 	return &UserHandler{
 		userService:      userService,
 		authService:      authService,
 		emailService:     emailService,
 		emailCache:       emailCache,
 		affiliateService: affiliateService,
+		attrService:      attrService,
 	}
 }
 
@@ -538,7 +546,27 @@ func (h *UserHandler) buildUserProfileResponse(ctx context.Context, userID int64
 	if err != nil {
 		return userProfileResponse{}, err
 	}
-	return userProfileResponseFromService(user, identities), nil
+	profile := userProfileResponseFromService(user, identities)
+	profile.CanManageUserAccounts = h.canManageUserAccounts(ctx, user)
+	return profile, nil
+}
+
+func (h *UserHandler) canManageUserAccounts(ctx context.Context, user *service.User) bool {
+	if user == nil {
+		return false
+	}
+	if user.IsAdmin() {
+		return true
+	}
+	if h == nil || h.attrService == nil {
+		return false
+	}
+	allowed, err := h.attrService.UserHasSharedAccountOwnerTitle(ctx, user.ID)
+	if err != nil {
+		slog.Warn("failed to resolve shared account owner title", "error", err, "user_id", user.ID)
+		return false
+	}
+	return allowed
 }
 
 func userProfileResponseFromService(user *service.User, identities service.UserIdentitySummarySet) userProfileResponse {

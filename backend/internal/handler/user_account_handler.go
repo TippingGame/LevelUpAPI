@@ -30,6 +30,7 @@ type UserAccountHandler struct {
 	accountTestService      *service.AccountTestService
 	rateLimitService        *service.RateLimitService
 	settingService          *service.SettingService
+	attrService             *service.UserAttributeService
 	concurrencyService      *service.ConcurrencyService
 	oauthService            *service.OAuthService
 	openaiOAuthService      *service.OpenAIOAuthService
@@ -64,6 +65,7 @@ func NewUserAccountHandler(
 		accountTestService:      accountTestService,
 		rateLimitService:        rateLimitService,
 		settingService:          settingService,
+		attrService:             nil,
 		oauthService:            oauthService,
 		openaiOAuthService:      openaiOAuthService,
 		geminiOAuthService:      geminiOAuthService,
@@ -73,6 +75,13 @@ func NewUserAccountHandler(
 	}
 	h.registerAccountBatchExecutors()
 	return h
+}
+
+func (h *UserAccountHandler) SetUserAttributeService(attrService *service.UserAttributeService) {
+	if h == nil {
+		return
+	}
+	h.attrService = attrService
 }
 
 func (h *UserAccountHandler) SetRuntimeCapacityProviders(
@@ -86,6 +95,38 @@ func (h *UserAccountHandler) SetRuntimeCapacityProviders(
 	h.concurrencyService = concurrencyService
 	h.sessionLimitCache = sessionLimitCache
 	h.rpmCache = rpmCache
+}
+
+func (h *UserAccountHandler) RequireSharedAccountOwner() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		subject, ok := middleware2.GetAuthSubjectFromContext(c)
+		if !ok {
+			response.Unauthorized(c, "User not authenticated")
+			c.Abort()
+			return
+		}
+		if role, ok := middleware2.GetUserRoleFromContext(c); ok && role == service.RoleAdmin {
+			c.Next()
+			return
+		}
+		if h == nil || h.attrService == nil {
+			response.ErrorFrom(c, infraerrors.Forbidden("SHARED_ACCOUNT_OWNER_REQUIRED", "shared account owner title required"))
+			c.Abort()
+			return
+		}
+		allowed, err := h.attrService.UserHasSharedAccountOwnerTitle(c.Request.Context(), subject.UserID)
+		if err != nil {
+			response.ErrorFrom(c, err)
+			c.Abort()
+			return
+		}
+		if !allowed {
+			response.ErrorFrom(c, infraerrors.Forbidden("SHARED_ACCOUNT_OWNER_REQUIRED", "shared account owner title required"))
+			c.Abort()
+			return
+		}
+		c.Next()
+	}
 }
 
 type createUserAccountRequest struct {

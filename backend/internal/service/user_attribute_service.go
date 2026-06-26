@@ -173,6 +173,42 @@ func (s *UserAttributeService) GetBatchUserAttributes(ctx context.Context, userI
 	return result, nil
 }
 
+// UserHasSharedAccountOwnerTitle reports whether the user has been granted the
+// shared account owner title via the existing custom user attributes system.
+func (s *UserAttributeService) UserHasSharedAccountOwnerTitle(ctx context.Context, userID int64) (bool, error) {
+	if s == nil || s.defRepo == nil || s.valueRepo == nil || userID <= 0 {
+		return false, nil
+	}
+
+	defs, err := s.defRepo.List(ctx, true)
+	if err != nil {
+		return false, err
+	}
+	if len(defs) == 0 {
+		return false, nil
+	}
+
+	values, err := s.valueRepo.GetByUserID(ctx, userID)
+	if err != nil {
+		return false, err
+	}
+	valueByAttributeID := make(map[int64]string, len(values))
+	for _, value := range values {
+		valueByAttributeID[value.AttributeID] = value.Value
+	}
+
+	for _, def := range defs {
+		rawValue, ok := valueByAttributeID[def.ID]
+		if !ok || strings.TrimSpace(rawValue) == "" {
+			continue
+		}
+		if isSharedAccountOwnerAttributeValue(def, rawValue) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 // UpdateUserAttributes batch updates attribute values for a user
 func (s *UserAttributeService) UpdateUserAttributes(ctx context.Context, userID int64, inputs []UpdateUserAttributeInput) error {
 	// Validate all values before updating
@@ -288,6 +324,53 @@ func (s *UserAttributeService) validateValue(def *UserAttributeDefinition, value
 	}
 
 	return nil
+}
+
+func isSharedAccountOwnerAttributeValue(def UserAttributeDefinition, rawValue string) bool {
+	key := normalizeAttributeMatchText(def.Key)
+	name := normalizeAttributeMatchText(def.Name)
+	description := normalizeAttributeMatchText(def.Description)
+	value := normalizeAttributeMatchText(rawValue)
+
+	keyMatches := key == "sharedaccountowner" ||
+		key == "accountshareowner" ||
+		key == "accountowner" ||
+		key == "accountownertitle" ||
+		key == "sharedowner" ||
+		strings.Contains(key, "sharedaccountowner") ||
+		strings.Contains(key, "共享号主")
+	valueMatches := value == "sharedaccountowner" ||
+		value == "shareowner" ||
+		value == "accountshareowner" ||
+		value == "accountowner" ||
+		strings.Contains(value, "共享号主")
+	titleFieldMatches := strings.Contains(name, "共享号主") ||
+		strings.Contains(description, "共享号主") ||
+		strings.Contains(key, "共享号主") ||
+		strings.Contains(key, "title") ||
+		strings.Contains(key, "role") ||
+		strings.Contains(name, "头衔") ||
+		strings.Contains(name, "身份")
+
+	if keyMatches && isTruthyAttributeValue(value) {
+		return true
+	}
+	return titleFieldMatches && valueMatches
+}
+
+func isTruthyAttributeValue(value string) bool {
+	switch value {
+	case "true", "1", "yes", "y", "on", "enabled", "enable", "开启", "启用", "是", "共享号主":
+		return true
+	default:
+		return false
+	}
+}
+
+func normalizeAttributeMatchText(value string) string {
+	value = strings.TrimSpace(strings.ToLower(value))
+	replacer := strings.NewReplacer("_", "", "-", "", " ", "", "\t", "", "\n", "", "\r", "")
+	return replacer.Replace(value)
 }
 
 // validationError creates a validation error with a custom message
