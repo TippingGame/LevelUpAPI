@@ -767,6 +767,7 @@ const adminNavItems = computed((): NavItem[] => {
     { path: '/admin/announcements', label: t('nav.announcements'), icon: BellIcon },
     { path: '/admin/conversations', label: t('nav.conversations'), icon: ChatIcon },
     { path: '/admin/proxies', label: t('nav.proxies'), icon: ServerIcon },
+    { path: '/admin/withdrawals', label: t('nav.withdrawalManagement'), icon: CreditCardIcon },
     { path: '/admin/risk-control', label: t('nav.riskControl'), icon: ShieldIcon, hideInSimpleMode: true, featureFlag: flagRiskControl },
     { path: '/admin/redeem', label: t('nav.redeemCodes'), icon: TicketIcon, hideInSimpleMode: true },
     { path: '/admin/promo-codes', label: t('nav.promoCodes'), icon: GiftIcon, hideInSimpleMode: true },
@@ -793,7 +794,6 @@ const adminNavItems = computed((): NavItem[] => {
       children: [
         { path: '/admin/orders/dashboard', label: t('nav.paymentDashboard'), icon: ChartIcon },
         { path: '/admin/orders', label: t('nav.orderManagement'), icon: OrderIcon },
-        { path: '/admin/withdrawals', label: t('nav.withdrawalManagement'), icon: CreditCardIcon },
         { path: '/admin/orders/plans', label: t('nav.paymentPlans'), icon: CreditCardIcon },
         { path: '/admin/revenue', label: t('nav.revenue'), icon: ChartIcon },
       ],

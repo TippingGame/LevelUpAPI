@@ -712,8 +712,7 @@ const routes: RouteRecordRaw[] = [
       requiresAuth: true,
       requiresAdmin: true,
       title: 'Withdrawal Management',
-      titleKey: 'nav.withdrawalManagement',
-      requiresPayment: true
+      titleKey: 'nav.withdrawalManagement'
     }
   },
 

@@ -6552,7 +6552,7 @@ export default {
         claudeOAuthSystemPrompt: 'Expansion prompt',
         claudeOAuthSystemPromptPlaceholder: 'Leave empty to use the built-in Claude Code expansion prompt.',
         claudeOAuthSystemPromptBlocks: 'Blocks JSON',
-        claudeOAuthSystemPromptBlocksPlaceholder: 'Leave empty for default blocks, or provide {"blocks":[{"type":"text","text":"{billing_header}"}]}',
+        claudeOAuthSystemPromptBlocksPlaceholder: 'Leave empty for default blocks, or provide {\'{\'}"blocks":[{\'{\'}"type":"text","text":"{\'{\'}billing_header{\'}\'}"{\'}\'}]{\'}\'}',
         anthropicCacheTTL1hInjection: 'Anthropic Cache TTL Injection',
         anthropicCacheTTL1hInjectionHint: 'When enabled, existing ephemeral cache_control blocks in Anthropic OAuth/Setup Token request bodies are forced to 1h; response usage is billed back as 5m by default, with account-level TTL billing override taking priority.',
       },

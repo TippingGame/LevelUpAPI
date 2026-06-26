@@ -6703,7 +6703,7 @@ export default {
         claudeOAuthSystemPrompt: '扩展 Prompt',
         claudeOAuthSystemPromptPlaceholder: '留空使用内置 Claude Code 扩展 prompt。',
         claudeOAuthSystemPromptBlocks: 'Blocks JSON',
-        claudeOAuthSystemPromptBlocksPlaceholder: '留空使用默认 blocks，或填写 {"blocks":[{"type":"text","text":"{billing_header}"}]}',
+        claudeOAuthSystemPromptBlocksPlaceholder: '留空使用默认 blocks，或填写 {\'{\'}"blocks":[{\'{\'}"type":"text","text":"{\'{\'}billing_header{\'}\'}"{\'}\'}]{\'}\'}',
         anthropicCacheTTL1hInjection: 'Anthropic 缓存 TTL 注入',
         anthropicCacheTTL1hInjectionHint: '开启后，对 Anthropic OAuth/Setup Token 请求体中已有的 ephemeral 缓存块强制写入 1h；响应 usage 默认按 5m 回写计费，账号级 TTL 计费设置优先。',
       },
