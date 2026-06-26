@@ -129,6 +129,21 @@ services:
       - ANTIGRAVITY_OAUTH_CLIENT_SECRET=${ANTIGRAVITY_OAUTH_CLIENT_SECRET:-}
 
       # =======================================================================
+      # Receipt Code OSS/S3 Storage
+      # =======================================================================
+      - RECEIPT_CODE_STORAGE_ENABLED=${RECEIPT_CODE_STORAGE_ENABLED:-false}
+      - RECEIPT_CODE_STORAGE_ENDPOINT=${RECEIPT_CODE_STORAGE_ENDPOINT:-}
+      - RECEIPT_CODE_STORAGE_REGION=${RECEIPT_CODE_STORAGE_REGION:-oss-cn-hangzhou}
+      - RECEIPT_CODE_STORAGE_BUCKET=${RECEIPT_CODE_STORAGE_BUCKET:-}
+      - RECEIPT_CODE_STORAGE_ACCESS_KEY_ID=${RECEIPT_CODE_STORAGE_ACCESS_KEY_ID:-}
+      - RECEIPT_CODE_STORAGE_SECRET_ACCESS_KEY=${RECEIPT_CODE_STORAGE_SECRET_ACCESS_KEY:-}
+      - RECEIPT_CODE_STORAGE_PREFIX=${RECEIPT_CODE_STORAGE_PREFIX:-receipt-codes/}
+      - RECEIPT_CODE_STORAGE_PUBLIC_BASE_URL=${RECEIPT_CODE_STORAGE_PUBLIC_BASE_URL:-}
+      - RECEIPT_CODE_STORAGE_FORCE_PATH_STYLE=${RECEIPT_CODE_STORAGE_FORCE_PATH_STYLE:-false}
+      - RECEIPT_CODE_STORAGE_MAX_SIZE_BYTES=${RECEIPT_CODE_STORAGE_MAX_SIZE_BYTES:-1048576}
+      - RECEIPT_CODE_STORAGE_PRESIGN_EXPIRE_SECONDS=${RECEIPT_CODE_STORAGE_PRESIGN_EXPIRE_SECONDS:-300}
+
+      # =======================================================================
       # Security Configuration (URL Allowlist)
       # =======================================================================
       # Enable URL allowlist validation (false to skip allowlist checks)
