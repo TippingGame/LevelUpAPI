@@ -81,4 +81,22 @@ describe('ProfileWithdrawalCard', () => {
     expect(wrapper.text()).toContain('1.23 coins')
     expect(showErrorMock).not.toHaveBeenCalled()
   })
+
+  it('shows a locked overlay without loading withdrawal data', async () => {
+    const wrapper = mount(ProfileWithdrawalCard, {
+      props: {
+        locked: true
+      },
+      global: {
+        stubs: {
+          Icon: true
+        }
+      }
+    })
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('共享号主专属')
+    expect(getReceiptCodeMock).not.toHaveBeenCalled()
+    expect(listWithdrawalsMock).not.toHaveBeenCalled()
+  })
 })

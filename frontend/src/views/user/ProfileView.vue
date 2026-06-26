@@ -22,6 +22,9 @@
             :system-default-threshold="systemDefaultThreshold"
             :user-email="user.email"
           />
+          <ProfileWithdrawalCard
+            :locked="!canUseWithdrawal"
+          />
         </template>
 
         <template #side-after>
@@ -60,6 +63,7 @@ import ProfileBalanceNotifyCard from '@/components/user/profile/ProfileBalanceNo
 import ProfileInfoCard from '@/components/user/profile/ProfileInfoCard.vue'
 import ProfilePasswordForm from '@/components/user/profile/ProfilePasswordForm.vue'
 import ProfileTotpCard from '@/components/user/profile/ProfileTotpCard.vue'
+import ProfileWithdrawalCard from '@/components/user/profile/ProfileWithdrawalCard.vue'
 import { isWeChatWebOAuthEnabled } from '@/api/auth'
 import { useAppStore } from '@/stores/app'
 import { useAuthStore } from '@/stores/auth'
@@ -68,6 +72,7 @@ const { t } = useI18n()
 const appStore = useAppStore()
 const authStore = useAuthStore()
 const user = computed(() => authStore.user)
+const canUseWithdrawal = computed(() => authStore.isAdmin || user.value?.can_manage_user_accounts === true)
 
 const contactInfo = ref('')
 const balanceLowNotifyEnabled = ref(false)

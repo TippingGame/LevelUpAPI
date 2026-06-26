@@ -1,5 +1,5 @@
 <template>
-  <section class="card border border-gray-100 bg-white/90 p-5 dark:border-dark-700 dark:bg-dark-900/50 md:p-6">
+  <section class="card relative overflow-hidden border border-gray-100 bg-white/90 p-5 dark:border-dark-700 dark:bg-dark-900/50 md:p-6">
     <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
       <div class="min-w-0">
         <h3 class="text-lg font-semibold text-gray-900 dark:text-white">余额提现与收款码</h3>
@@ -210,11 +210,24 @@
         </p>
       </div>
     </div>
+
+    <div
+      v-if="locked"
+      class="absolute inset-0 z-20 flex items-center justify-center bg-white/80 px-6 text-center backdrop-blur-[2px] dark:bg-dark-950/80"
+    >
+      <div class="max-w-md rounded-xl border border-gray-200 bg-white px-5 py-4 shadow-lg dark:border-dark-700 dark:bg-dark-900">
+        <div class="mx-auto flex h-11 w-11 items-center justify-center rounded-full bg-primary-50 text-primary-600 dark:bg-primary-900/30 dark:text-primary-300">
+          <Icon name="lock" size="lg" />
+        </div>
+        <p class="mt-3 text-sm font-semibold text-gray-900 dark:text-white">{{ lockedTitle }}</p>
+        <p class="mt-1 text-xs leading-5 text-gray-500 dark:text-gray-400">{{ lockedMessage }}</p>
+      </div>
+    </div>
   </section>
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { userAPI } from '@/api'
 import Icon from '@/components/icons/Icon.vue'
@@ -227,6 +240,16 @@ import { formatGameCoins } from '@/utils/gameCurrency'
 const { t } = useI18n()
 const appStore = useAppStore()
 const authStore = useAuthStore()
+
+const props = withDefaults(defineProps<{
+  locked?: boolean
+  lockedTitle?: string
+  lockedMessage?: string
+}>(), {
+  locked: false,
+  lockedTitle: '共享号主专属',
+  lockedMessage: '提现功能仅对管理员授权的共享号主开放。'
+})
 
 const paymentMethods: ReceiptCodePaymentMethod[] = ['alipay', 'wechat']
 const selectedMethod = ref<ReceiptCodePaymentMethod>('alipay')
@@ -254,7 +277,8 @@ const normalizedAmount = computed(() => {
 const amountIsValid = computed(() => /^\d+(\.\d{1,2})?$/.test(amountRawText.value) && normalizedAmount.value >= 1)
 const totalDeducted = computed(() => normalizedAmount.value + feeAmount.value)
 const canSubmit = computed(() => {
-  return amountIsValid.value
+  return !props.locked
+    && amountIsValid.value
     && !!currentReceiptCode.value
     && !draftFile.value
     && !hasPendingWithdrawal.value
@@ -270,14 +294,28 @@ const submitHint = computed(() => {
 })
 
 onMounted(() => {
-  void load()
+  if (!props.locked) {
+    void load()
+  }
 })
+
+watch(
+  () => props.locked,
+  (locked) => {
+    if (!locked) {
+      void load()
+    }
+  }
+)
 
 onBeforeUnmount(() => {
   revokeDraftPreview()
 })
 
 async function load() {
+  if (props.locked) {
+    return
+  }
   loading.value = true
   try {
     const [alipay, wechat, list] = await Promise.all([
@@ -296,6 +334,9 @@ async function load() {
 }
 
 function selectMethod(method: ReceiptCodePaymentMethod) {
+  if (props.locked) {
+    return
+  }
   if (selectedMethod.value === method) {
     return
   }
@@ -309,6 +350,12 @@ function methodLabel(method: ReceiptCodePaymentMethod): string {
 
 function handleFileChange(event: Event) {
   const input = event.target as HTMLInputElement | null
+  if (props.locked) {
+    if (input) {
+      input.value = ''
+    }
+    return
+  }
   const file = input?.files?.[0]
   if (input) {
     input.value = ''
@@ -330,6 +377,9 @@ function handleFileChange(event: Event) {
 }
 
 async function handleSave() {
+  if (props.locked) {
+    return
+  }
   if (!draftFile.value) {
     appStore.showError('请先选择收款码图片')
     return
@@ -349,6 +399,9 @@ async function handleSave() {
 }
 
 async function handleDelete() {
+  if (props.locked) {
+    return
+  }
   if (draftFile.value) {
     clearDraft()
     return
@@ -371,6 +424,9 @@ async function handleDelete() {
 }
 
 async function submit() {
+  if (props.locked) {
+    return
+  }
   if (!canSubmit.value) {
     appStore.showError(submitHint.value || '请确认金额、余额和收款码后再提交')
     return
@@ -392,6 +448,9 @@ async function submit() {
 }
 
 async function cancel(id: number) {
+  if (props.locked) {
+    return
+  }
   actionLoading.value = true
   try {
     await userAPI.cancelWithdrawal(id)
