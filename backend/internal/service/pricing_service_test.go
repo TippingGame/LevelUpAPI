@@ -195,6 +195,26 @@ func TestGetModelPricing_ImageModelDoesNotFallbackToTextModel(t *testing.T) {
 	require.NotSame(t, textPricing, got)
 }
 
+func TestGetModelPricing_NewClaudeFamiliesUseDedicatedPricing(t *testing.T) {
+	opus47Pricing := &LiteLLMModelPricing{InputCostPerToken: 4.7e-6}
+	opus48Pricing := &LiteLLMModelPricing{InputCostPerToken: 4.8e-6}
+	fablePricing := &LiteLLMModelPricing{InputCostPerToken: 5e-6}
+	opus46Pricing := &LiteLLMModelPricing{InputCostPerToken: 4.6e-6}
+
+	svc := &PricingService{
+		pricingData: map[string]*LiteLLMModelPricing{
+			"claude-opus-4-7": opus47Pricing,
+			"claude-opus-4-8": opus48Pricing,
+			"claude-fable-5":  fablePricing,
+			"claude-opus-4-6": opus46Pricing,
+		},
+	}
+
+	require.Same(t, opus47Pricing, svc.GetModelPricing("claude-opus-4.7-20260417"))
+	require.Same(t, opus48Pricing, svc.GetModelPricing("models/claude-opus-4.8-latest"))
+	require.Same(t, fablePricing, svc.GetModelPricing("claude-fable-latest"))
+}
+
 func TestParsePricingData_PreservesPriorityAndServiceTierFields(t *testing.T) {
 	raw := map[string]any{
 		"gpt-5.4": map[string]any{
