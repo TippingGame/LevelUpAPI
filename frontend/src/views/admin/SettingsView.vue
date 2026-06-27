@@ -9582,19 +9582,14 @@ async function submitAffiliateBindInviter() {
   @apply inline-flex min-w-full gap-0.5 rounded-2xl
          border border-gray-100 bg-white/80 p-1 backdrop-blur-sm
          dark:border-dark-700/50 dark:bg-dark-800/80;
+  width: max-content;
   box-shadow:
     0 1px 3px rgb(0 0 0 / 0.04),
     0 1px 2px rgb(0 0 0 / 0.02);
 }
 
-@media (min-width: 640px) {
-  .settings-tabs {
-    @apply flex;
-  }
-}
-
 .settings-tab {
-  @apply relative flex flex-1 items-center justify-center gap-1.5
+  @apply relative flex flex-none items-center justify-center gap-1.5
          whitespace-nowrap rounded-xl px-2.5 py-2
          text-sm font-medium
          text-gray-500 dark:text-dark-400
