@@ -2642,11 +2642,12 @@ func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccou
 		}
 	}
 	accountLevel := NormalizeOpenAIAccountLevel(input.Platform, input.AccountLevel, input.Credentials, input.Extra)
-	if err := s.validateAccountLevelGroupBinding(ctx, input.Platform, accountLevel, groupIDs); err != nil {
+	if err := s.validateAccountLevelGroupBinding(ctx, input.Platform, input.Type, accountLevel, groupIDs); err != nil {
 		return nil, err
 	}
 	if err := s.validateAccountShareGroupBinding(ctx, &Account{
 		Platform:    input.Platform,
+		Type:        input.Type,
 		OwnerUserID: input.OwnerUserID,
 		ShareMode:   NormalizeAccountShareMode(input.ShareMode),
 		ShareStatus: NormalizeAccountShareStatus(input.ShareStatus),
@@ -2901,14 +2902,14 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 				return nil, err
 			}
 		}
-		if err := s.validateAccountLevelGroupBinding(ctx, account.Platform, account.AccountLevel, *input.GroupIDs); err != nil {
+		if err := s.validateAccountLevelGroupBinding(ctx, account.Platform, account.Type, account.AccountLevel, *input.GroupIDs); err != nil {
 			return nil, err
 		}
 		if err := s.validateAccountShareGroupBinding(ctx, account, *input.GroupIDs); err != nil {
 			return nil, err
 		}
 	} else if input.AccountLevel != nil {
-		if err := s.validateAccountLevelGroupBinding(ctx, account.Platform, account.AccountLevel, account.GroupIDs); err != nil {
+		if err := s.validateAccountLevelGroupBinding(ctx, account.Platform, account.Type, account.AccountLevel, account.GroupIDs); err != nil {
 			return nil, err
 		}
 	}
@@ -3000,7 +3001,7 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 			if input.GroupIDs != nil {
 				groupIDs = *input.GroupIDs
 			}
-			if err := s.validateAccountLevelGroupBinding(ctx, account.Platform, level, groupIDs); err != nil {
+			if err := s.validateAccountLevelGroupBinding(ctx, account.Platform, account.Type, level, groupIDs); err != nil {
 				return nil, err
 			}
 			if input.GroupIDs != nil {
@@ -4234,8 +4235,11 @@ func (s *adminServiceImpl) validateGroupIDsExist(ctx context.Context, groupIDs [
 	return nil
 }
 
-func (s *adminServiceImpl) validateAccountLevelGroupBinding(ctx context.Context, accountPlatform, accountLevel string, groupIDs []int64) error {
+func (s *adminServiceImpl) validateAccountLevelGroupBinding(ctx context.Context, accountPlatform, accountType, accountLevel string, groupIDs []int64) error {
 	if len(groupIDs) == 0 || accountPlatform != PlatformOpenAI {
+		return nil
+	}
+	if strings.EqualFold(strings.TrimSpace(accountType), AccountTypeAPIKey) {
 		return nil
 	}
 	level := NormalizeAccountLevel(accountLevel)
@@ -4272,6 +4276,12 @@ func (s *adminServiceImpl) validateAccountShareGroupBinding(ctx context.Context,
 		}
 		if group == nil || group.ID <= 0 {
 			return ErrGroupNotFound
+		}
+		if isOAuthOnlyGroup(group) && requiresOAuthOnlyGroupCheck(account.Type) {
+			return infraerrors.BadRequest(
+				"ACCOUNT_GROUP_BINDING_INVALID",
+				fmt.Sprintf("group %s only allows OAuth accounts", group.Name),
+			)
 		}
 
 		scope := NormalizeGroupScope(group.Scope)
@@ -4453,7 +4463,7 @@ func (s *adminServiceImpl) normalizeAccountIDsForGroupBinding(ctx context.Contex
 			continue
 		}
 		accountLevel := NormalizeAccountLevel(account.AccountLevel)
-		if requiresLevelCheck && account.Platform == PlatformOpenAI && !CanOpenAIAccountJoinSharedPool(accountLevel, requiredLevel) {
+		if requiresLevelCheck && account.Platform == PlatformOpenAI && !strings.EqualFold(strings.TrimSpace(account.Type), AccountTypeAPIKey) && !CanOpenAIAccountJoinSharedPool(accountLevel, requiredLevel) {
 			return nil, fmt.Errorf("account_level mismatch: OpenAI account %s level %s cannot bind to group %s requiring %s", account.Name, NormalizeOpenAISharedPoolAccountLevel(accountLevel), group.Name, requiredLevel)
 		}
 		filtered = append(filtered, accountID)

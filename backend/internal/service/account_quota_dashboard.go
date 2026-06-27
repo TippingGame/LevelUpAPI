@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
@@ -632,7 +633,7 @@ func accountSchedulableInQuotaGroup(account Account, now time.Time, groupStatus,
 	}
 	if groupPlatform == PlatformOpenAI {
 		required := NormalizeOpenAISharedPoolRequiredLevel(requiredAccountLevel)
-		if required != "" && !CanOpenAIAccountJoinSharedPool(account.AccountLevel, required) {
+		if required != "" && !strings.EqualFold(strings.TrimSpace(account.Type), AccountTypeAPIKey) && !CanOpenAIAccountJoinSharedPool(account.AccountLevel, required) {
 			return false
 		}
 	}

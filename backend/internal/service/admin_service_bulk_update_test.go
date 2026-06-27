@@ -306,6 +306,82 @@ func TestAdminService_UpdateAccount_KeepsExplicitOpenAILevelForGroupBinding(t *t
 	require.Equal(t, []int64{20}, repo.boundGroupIDs[1])
 }
 
+func TestAdminService_UpdateAccount_OpenAIAPIKeyIgnoresRequiredLevelForGroupBinding(t *testing.T) {
+	repo := &accountRepoStubForBulkUpdate{
+		getByIDAccounts: map[int64]*Account{
+			1: {
+				ID:           1,
+				Name:         "openai-api-key",
+				Platform:     PlatformOpenAI,
+				Type:         AccountTypeAPIKey,
+				AccountLevel: AccountLevelUnknown,
+				Concurrency:  1,
+			},
+		},
+	}
+	svc := &adminServiceImpl{
+		accountRepo: repo,
+		groupRepo: &groupRepoStubForAdmin{
+			getByID: &Group{
+				ID:                   20,
+				Name:                 "Plus Pool",
+				Platform:             PlatformOpenAI,
+				RequiredAccountLevel: AccountLevelPlus,
+			},
+		},
+	}
+
+	groupIDs := []int64{20}
+	result, err := svc.UpdateAccount(context.Background(), 1, &UpdateAccountInput{
+		GroupIDs:              &groupIDs,
+		SkipMixedChannelCheck: true,
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.NotNil(t, repo.updatedAccount)
+	require.Equal(t, []int64{20}, repo.boundGroupIDs[1])
+}
+
+func TestAdminService_UpdateAccount_OpenAIAPIKeyStillRejectedByOAuthOnlyGroup(t *testing.T) {
+	repo := &accountRepoStubForBulkUpdate{
+		getByIDAccounts: map[int64]*Account{
+			1: {
+				ID:           1,
+				Name:         "openai-api-key",
+				Platform:     PlatformOpenAI,
+				Type:         AccountTypeAPIKey,
+				AccountLevel: AccountLevelUnknown,
+				Concurrency:  1,
+			},
+		},
+	}
+	svc := &adminServiceImpl{
+		accountRepo: repo,
+		groupRepo: &groupRepoStubForAdmin{
+			getByID: &Group{
+				ID:               20,
+				Name:             "OAuth Only Pool",
+				Platform:         PlatformOpenAI,
+				RequireOAuthOnly: true,
+			},
+		},
+	}
+
+	groupIDs := []int64{20}
+	result, err := svc.UpdateAccount(context.Background(), 1, &UpdateAccountInput{
+		GroupIDs:              &groupIDs,
+		SkipMixedChannelCheck: true,
+	})
+
+	require.Nil(t, result)
+	require.Error(t, err)
+	require.Equal(t, 400, infraerrors.Code(err))
+	require.Contains(t, err.Error(), "only allows OAuth accounts")
+	require.Nil(t, repo.updatedAccount)
+	require.Empty(t, repo.boundGroupIDs)
+}
+
 func TestAdminService_UpdateOwnedPrivateAccountRejectsPublicGroupBinding(t *testing.T) {
 	ownerID := int64(101)
 	repo := &accountRepoStubForBulkUpdate{

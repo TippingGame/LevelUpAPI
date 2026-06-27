@@ -290,6 +290,40 @@ func TestAdminService_CreateGroupCopyAccounts_RejectsHigherOpenAILevelIntoLowerP
 	require.Empty(t, repo.bindAccountsAccountIDs)
 }
 
+func TestAdminService_CreateGroupCopyAccounts_AllowsOpenAIAPIKeyInRequiredLevelPool(t *testing.T) {
+	repo := &groupRepoStubForAdmin{
+		getByIDByID: map[int64]*Group{
+			1: {ID: 1, Name: "API Key Source", Platform: PlatformOpenAI},
+		},
+		accountIDsByGroupIDs: []int64{101},
+	}
+	accountRepo := &accountRepoStubForBulkUpdate{
+		getByIDsAccounts: []*Account{
+			{
+				ID:           101,
+				Name:         "api-key-account",
+				Platform:     PlatformOpenAI,
+				AccountLevel: AccountLevelUnknown,
+				Type:         AccountTypeAPIKey,
+			},
+		},
+	}
+	svc := &adminServiceImpl{groupRepo: repo, accountRepo: accountRepo}
+
+	group, err := svc.CreateGroup(context.Background(), &CreateGroupInput{
+		Name:                     "Plus Pool",
+		Platform:                 PlatformOpenAI,
+		RateMultiplier:           1,
+		RequiredAccountLevel:     AccountLevelPlus,
+		CopyAccountsFromGroupIDs: []int64{1},
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, group)
+	require.NotNil(t, repo.created)
+	require.Equal(t, []int64{101}, repo.bindAccountsAccountIDs)
+}
+
 func TestAdminService_UpdateGroupCopyAccounts_RejectsMismatchedOpenAILevelBeforeClearingBindings(t *testing.T) {
 	existing := &Group{
 		ID:                   2,

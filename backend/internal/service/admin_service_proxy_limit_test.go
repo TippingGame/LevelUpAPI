@@ -45,6 +45,28 @@ type accountRepoStubForProxyLimit struct {
 	bulkUpdateCalled bool
 	getByIDAccount   *Account
 	getByIDsAccounts []*Account
+	boundGroupIDs    map[int64][]int64
+}
+
+type groupRepoStubForAccountCreate struct {
+	groupRepoStubForAdmin
+	groups           map[int64]*Group
+	activeByPlatform map[string][]Group
+}
+
+func (s *groupRepoStubForAccountCreate) GetByID(_ context.Context, id int64) (*Group, error) {
+	if group, ok := s.groups[id]; ok {
+		return group, nil
+	}
+	return nil, ErrGroupNotFound
+}
+
+func (s *groupRepoStubForAccountCreate) GetByIDLite(ctx context.Context, id int64) (*Group, error) {
+	return s.GetByID(ctx, id)
+}
+
+func (s *groupRepoStubForAccountCreate) ListActiveByPlatform(_ context.Context, platform string) ([]Group, error) {
+	return append([]Group(nil), s.activeByPlatform[platform]...), nil
 }
 
 func (s *accountRepoStubForProxyLimit) Create(_ context.Context, account *Account) error {
@@ -67,6 +89,14 @@ func (s *accountRepoStubForProxyLimit) GetByID(_ context.Context, _ int64) (*Acc
 
 func (s *accountRepoStubForProxyLimit) GetByIDs(_ context.Context, _ []int64) ([]*Account, error) {
 	return s.getByIDsAccounts, nil
+}
+
+func (s *accountRepoStubForProxyLimit) BindGroups(_ context.Context, accountID int64, groupIDs []int64) error {
+	if s.boundGroupIDs == nil {
+		s.boundGroupIDs = map[int64][]int64{}
+	}
+	s.boundGroupIDs[accountID] = append([]int64(nil), groupIDs...)
+	return nil
 }
 
 func (s *accountRepoStubForProxyLimit) BulkUpdate(_ context.Context, _ []int64, _ AccountBulkUpdate) (int64, error) {
@@ -99,6 +129,47 @@ func TestAdminService_CreateAccount_ProxyLimitExceeded(t *testing.T) {
 	require.Nil(t, created)
 	require.ErrorIs(t, err, ErrProxyAccountLimitExceeded)
 	require.Nil(t, accountRepo.created)
+}
+
+func TestAdminService_CreateAccount_OpenAIAPIKeyIgnoresDefaultGroupRequiredLevel(t *testing.T) {
+	groupID := int64(11)
+	accountRepo := &accountRepoStubForProxyLimit{}
+	groupRepo := &groupRepoStubForAccountCreate{
+		groups: map[int64]*Group{
+			groupID: {
+				ID:                   groupID,
+				Name:                 PlatformOpenAI + "-default",
+				Platform:             PlatformOpenAI,
+				RequiredAccountLevel: AccountLevelPlus,
+			},
+		},
+		activeByPlatform: map[string][]Group{
+			PlatformOpenAI: {
+				{
+					ID:                   groupID,
+					Name:                 PlatformOpenAI + "-default",
+					Platform:             PlatformOpenAI,
+					RequiredAccountLevel: AccountLevelPlus,
+				},
+			},
+		},
+	}
+	svc := &adminServiceImpl{accountRepo: accountRepo, groupRepo: groupRepo}
+
+	created, err := svc.CreateAccount(context.Background(), &CreateAccountInput{
+		Name:        "openai-proxy-key",
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Credentials: map[string]any{"api_key": "sk-test", "base_url": "https://sub.kedaya.xyz/v1"},
+		Concurrency: 1,
+		Priority:    50,
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, created)
+	require.NotNil(t, accountRepo.created)
+	require.Equal(t, AccountLevelUnknown, accountRepo.created.AccountLevel)
+	require.Equal(t, []int64{groupID}, accountRepo.boundGroupIDs[created.ID])
 }
 
 func TestAdminService_UpdateProxy_MaxAccountsBelowCurrentRejected(t *testing.T) {

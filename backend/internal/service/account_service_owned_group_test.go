@@ -1826,3 +1826,58 @@ func TestAccountQuotaGroupDashboardUsesGeneratedAtForSchedulability(t *testing.T
 	require.Equal(t, 0, summaries[0].SchedulableAccountCount)
 	require.Equal(t, 1, summaries[0].RateLimitedAccountCount)
 }
+
+func TestAccountQuotaGroupDashboardRequiredLevelAllowsOpenAIAPIKey(t *testing.T) {
+	now := time.Date(2026, 5, 13, 10, 0, 0, 0, time.UTC)
+	group := &Group{
+		ID:                   102,
+		Name:                 "OpenAI plus pool",
+		Platform:             PlatformOpenAI,
+		Status:               StatusActive,
+		Scope:                GroupScopePublic,
+		RequiredAccountLevel: AccountLevelPlus,
+	}
+
+	builder := newAccountQuotaGroupDashboardBuilder(now)
+	builder.addAccount(Account{
+		ID:           1,
+		Platform:     PlatformOpenAI,
+		Type:         AccountTypeAPIKey,
+		AccountLevel: AccountLevelUnknown,
+		Status:       StatusActive,
+		Schedulable:  true,
+		Groups:       []*Group{group},
+	})
+
+	summaries := builder.finalize()
+	require.Len(t, summaries, 1)
+	require.Equal(t, 1, summaries[0].AccountCount)
+	require.Equal(t, 1, summaries[0].SchedulableAccountCount)
+}
+
+func TestAccountQuotaGroupDashboardRequireOAuthOnlyExcludesAPIKey(t *testing.T) {
+	now := time.Date(2026, 5, 13, 10, 0, 0, 0, time.UTC)
+	group := &Group{
+		ID:               103,
+		Name:             "OpenAI oauth only pool",
+		Platform:         PlatformOpenAI,
+		Status:           StatusActive,
+		Scope:            GroupScopePublic,
+		RequireOAuthOnly: true,
+	}
+
+	builder := newAccountQuotaGroupDashboardBuilder(now)
+	builder.addAccount(Account{
+		ID:          1,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Status:      StatusActive,
+		Schedulable: true,
+		Groups:      []*Group{group},
+	})
+
+	summaries := builder.finalize()
+	require.Len(t, summaries, 1)
+	require.Equal(t, 1, summaries[0].AccountCount)
+	require.Equal(t, 0, summaries[0].SchedulableAccountCount)
+}

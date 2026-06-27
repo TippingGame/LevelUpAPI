@@ -729,14 +729,50 @@ func (s *AccountRepoSuite) TestListSchedulableByGroupIDAndPlatform_OpenAIRequire
 		AccountLevel: service.AccountLevelPro,
 		Schedulable:  true,
 	})
+	apiKeyAcc := mustCreateAccount(s.T(), s.client, &service.Account{
+		Name:         "api-key",
+		Platform:     service.PlatformOpenAI,
+		Type:         service.AccountTypeAPIKey,
+		AccountLevel: service.AccountLevelUnknown,
+		Schedulable:  true,
+	})
 	mustBindAccountToGroup(s.T(), s.client, freeAcc.ID, group.ID, 1)
 	mustBindAccountToGroup(s.T(), s.client, plusAcc.ID, group.ID, 2)
 	mustBindAccountToGroup(s.T(), s.client, proAcc.ID, group.ID, 3)
+	mustBindAccountToGroup(s.T(), s.client, apiKeyAcc.ID, group.ID, 4)
+
+	accounts, err := s.repo.ListSchedulableByGroupIDAndPlatform(s.ctx, group.ID, service.PlatformOpenAI)
+	s.Require().NoError(err)
+	s.Require().Len(accounts, 2)
+	s.Require().Equal(plusAcc.ID, accounts[0].ID)
+	s.Require().Equal(apiKeyAcc.ID, accounts[1].ID)
+}
+
+func (s *AccountRepoSuite) TestListSchedulableByGroupIDAndPlatform_RequireOAuthOnlyExcludesAPIKey() {
+	group := mustCreateGroup(s.T(), s.client, &service.Group{
+		Name:             "g-openai-oauth-only",
+		Platform:         service.PlatformOpenAI,
+		RequireOAuthOnly: true,
+	})
+	oauthAcc := mustCreateAccount(s.T(), s.client, &service.Account{
+		Name:        "oauth",
+		Platform:    service.PlatformOpenAI,
+		Type:        service.AccountTypeOAuth,
+		Schedulable: true,
+	})
+	apiKeyAcc := mustCreateAccount(s.T(), s.client, &service.Account{
+		Name:        "api-key",
+		Platform:    service.PlatformOpenAI,
+		Type:        service.AccountTypeAPIKey,
+		Schedulable: true,
+	})
+	mustBindAccountToGroup(s.T(), s.client, oauthAcc.ID, group.ID, 1)
+	mustBindAccountToGroup(s.T(), s.client, apiKeyAcc.ID, group.ID, 2)
 
 	accounts, err := s.repo.ListSchedulableByGroupIDAndPlatform(s.ctx, group.ID, service.PlatformOpenAI)
 	s.Require().NoError(err)
 	s.Require().Len(accounts, 1)
-	s.Require().Equal(plusAcc.ID, accounts[0].ID)
+	s.Require().Equal(oauthAcc.ID, accounts[0].ID)
 }
 
 func (s *AccountRepoSuite) TestListSchedulableByGroupIDAndPlatform_RequiredAccountLevelIgnoredForNonOpenAI() {

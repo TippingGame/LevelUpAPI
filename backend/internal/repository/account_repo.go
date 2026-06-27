@@ -2446,7 +2446,16 @@ func (r *accountRepository) queryAccountsByGroup(ctx context.Context, groupID in
 			if len(allowedLevels) == 0 {
 				return []service.Account{}, nil
 			}
-			preds = append(preds, dbaccount.PlatformEQ(service.PlatformOpenAI), dbaccount.AccountLevelIn(allowedLevels...))
+			preds = append(preds,
+				dbaccount.PlatformEQ(service.PlatformOpenAI),
+				dbaccount.Or(
+					dbaccount.TypeEQ(service.AccountTypeAPIKey),
+					dbaccount.AccountLevelIn(allowedLevels...),
+				),
+			)
+		}
+		if group.RequireOauthOnly {
+			preds = append(preds, dbaccount.TypeIn(service.AccountTypeOAuth, service.AccountTypeSetupToken))
 		}
 	}
 	if opts.status != "" {

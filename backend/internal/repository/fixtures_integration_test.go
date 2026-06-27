@@ -90,7 +90,9 @@ func mustCreateGroup(t *testing.T, client *dbent.Client, g *service.Group) *serv
 		SetScope(service.NormalizeGroupScope(g.Scope)).
 		SetSubscriptionType(g.SubscriptionType).
 		SetRateMultiplier(g.RateMultiplier).
-		SetIsExclusive(g.IsExclusive)
+		SetIsExclusive(g.IsExclusive).
+		SetRequireOauthOnly(g.RequireOAuthOnly).
+		SetRequirePrivacySet(g.RequirePrivacySet)
 	if g.OwnerUserID != nil {
 		create.SetOwnerUserID(*g.OwnerUserID)
 	}
