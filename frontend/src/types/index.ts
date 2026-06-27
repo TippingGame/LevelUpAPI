@@ -86,6 +86,7 @@ export interface User {
   wechat_bound?: boolean
   role: 'admin' | 'user' // User role for authorization
   can_manage_user_accounts?: boolean // Whether the user can access Shared Owner accounts
+  shared_account_owner_status?: SharedAccountOwnerStatus | null
   balance: number // User balance for API usage
   points_balance?: number // User points balance for API usage and store purchases
   load_factor_credits_balance?: number // Remaining non-refundable load-factor credits
@@ -98,10 +99,25 @@ export interface User {
   balance_notify_enabled: boolean
   balance_notify_threshold: number | null
   balance_notify_extra_emails: NotifyEmailEntry[]
+  total_recharged?: number
   subscriptions?: UserSubscription[] // User's active subscriptions
   last_active_at?: string | null
   created_at: string
   updated_at: string
+}
+
+export type SharedAccountOwnerMode = 'none' | 'auto' | 'manual_on' | 'manual_off'
+
+export interface SharedAccountOwnerStatus {
+  enabled: boolean
+  mode: SharedAccountOwnerMode | string
+  threshold: number
+  total_recharged: number
+  progress: number
+  remaining: number
+  manual_override?: boolean | null
+  attribute_id?: number | null
+  reasons?: string[]
 }
 
 export type ReceiptCodePaymentMethod = 'alipay' | 'wechat'

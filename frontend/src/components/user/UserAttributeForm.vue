@@ -112,11 +112,37 @@ const emit = defineEmits<Emits>()
 const loading = ref(false)
 const attributes = ref<UserAttributeDefinition[]>([])
 const localValues = ref<UserAttributeValuesMap>({})
+const hiddenAttributeIds = ref<Set<number>>(new Set())
+
+const isSharedAccountOwnerAttribute = (attr: UserAttributeDefinition): boolean => {
+  const key = String(attr.key || '').toLowerCase().replace(/[_\-\s]/g, '')
+  return key === 'sharedaccountowner' || key.includes('sharedaccountowner') || attr.name.includes('共享号主')
+}
+
+const pruneHiddenAttributeValues = () => {
+  if (hiddenAttributeIds.value.size === 0) return
+  let changed = false
+  const next: UserAttributeValuesMap = {}
+  for (const [id, value] of Object.entries(localValues.value)) {
+    if (hiddenAttributeIds.value.has(Number(id))) {
+      changed = true
+      continue
+    }
+    next[Number(id)] = value
+  }
+  if (changed) {
+    localValues.value = next
+    emit('update:modelValue', { ...localValues.value })
+  }
+}
 
 const loadAttributes = async () => {
   loading.value = true
   try {
-    attributes.value = await adminAPI.userAttributes.listEnabledDefinitions()
+    const defs = await adminAPI.userAttributes.listEnabledDefinitions()
+    hiddenAttributeIds.value = new Set(defs.filter(isSharedAccountOwnerAttribute).map(attr => attr.id))
+    attributes.value = defs.filter(attr => !isSharedAccountOwnerAttribute(attr))
+    pruneHiddenAttributeValues()
   } catch (error) {
     console.error('Failed to load attributes:', error)
   } finally {
@@ -131,6 +157,7 @@ const loadUserValues = async () => {
     const values = await adminAPI.userAttributes.getUserAttributeValues(props.userId)
     const valuesMap: UserAttributeValuesMap = {}
     values.forEach(v => {
+      if (hiddenAttributeIds.value.has(v.attribute_id)) return
       valuesMap[v.attribute_id] = v.value
     })
     localValues.value = { ...valuesMap }

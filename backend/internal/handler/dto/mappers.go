@@ -71,6 +71,20 @@ func UserFromService(u *service.User) *User {
 	return out
 }
 
+func SharedAccountOwnerStatusFromService(status service.SharedAccountOwnerStatus) *SharedAccountOwnerStatus {
+	return &SharedAccountOwnerStatus{
+		Enabled:        status.Enabled,
+		Mode:           status.Mode,
+		Threshold:      status.Threshold,
+		TotalRecharged: status.TotalRecharged,
+		Progress:       status.Progress,
+		Remaining:      status.Remaining,
+		ManualOverride: status.ManualOverride,
+		AttributeID:    status.AttributeID,
+		Reasons:        status.Reasons,
+	}
+}
+
 // UserFromServiceAdmin converts a service User to DTO for admin users.
 // It includes notes - user-facing endpoints must not use this.
 func UserFromServiceAdmin(u *service.User) *AdminUser {

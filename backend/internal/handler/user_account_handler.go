@@ -30,6 +30,7 @@ type UserAccountHandler struct {
 	accountTestService      *service.AccountTestService
 	rateLimitService        *service.RateLimitService
 	settingService          *service.SettingService
+	userService             *service.UserService
 	attrService             *service.UserAttributeService
 	concurrencyService      *service.ConcurrencyService
 	oauthService            *service.OAuthService
@@ -84,6 +85,13 @@ func (h *UserAccountHandler) SetUserAttributeService(attrService *service.UserAt
 	h.attrService = attrService
 }
 
+func (h *UserAccountHandler) SetUserService(userService *service.UserService) {
+	if h == nil {
+		return
+	}
+	h.userService = userService
+}
+
 func (h *UserAccountHandler) SetRuntimeCapacityProviders(
 	concurrencyService *service.ConcurrencyService,
 	sessionLimitCache service.SessionLimitCache,
@@ -99,8 +107,29 @@ func (h *UserAccountHandler) SetRuntimeCapacityProviders(
 
 func (h *UserAccountHandler) RequireSharedAccountOwner() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		if _, ok := middleware2.GetAuthSubjectFromContext(c); !ok {
+		subject, ok := middleware2.GetAuthSubjectFromContext(c)
+		if !ok {
 			response.Unauthorized(c, "User not authenticated")
+			c.Abort()
+			return
+		}
+		if h == nil || h.userService == nil {
+			response.ErrorFrom(c, infraerrors.Forbidden("SHARED_ACCOUNT_OWNER_REQUIRED", "shared account owner access is required"))
+			c.Abort()
+			return
+		}
+		user, err := h.userService.GetByID(c.Request.Context(), subject.UserID)
+		if err != nil {
+			response.ErrorFrom(c, err)
+			c.Abort()
+			return
+		}
+		status := sharedAccountOwnerStatusForUser(c.Request.Context(), h.attrService, user)
+		if !status.Enabled {
+			response.ErrorFrom(c, infraerrors.Forbidden("SHARED_ACCOUNT_OWNER_REQUIRED", "shared account owner access is required").WithMetadata(map[string]string{
+				"threshold": strconv.FormatFloat(status.Threshold, 'f', 2, 64),
+				"remaining": strconv.FormatFloat(status.Remaining, 'f', 2, 64),
+			}))
 			c.Abort()
 			return
 		}

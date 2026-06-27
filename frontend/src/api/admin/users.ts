@@ -6,6 +6,8 @@
 import { apiClient } from '../client'
 import type { AdminUser, UpdateUserRequest, PaginatedResponse, ApiKey } from '@/types'
 
+export type SharedAccountOwnerOverrideMode = 'auto' | 'enabled' | 'disabled'
+
 export interface AdminBindAuthIdentityChannelRequest {
   channel: string
   channel_app_id: string
@@ -131,6 +133,14 @@ export async function create(userData: {
  */
 export async function update(id: number, updates: UpdateUserRequest): Promise<AdminUser> {
   const { data } = await apiClient.put<AdminUser>(`/admin/users/${id}`, updates)
+  return data
+}
+
+export async function updateSharedAccountOwner(
+  id: number,
+  mode: SharedAccountOwnerOverrideMode
+): Promise<AdminUser> {
+  const { data } = await apiClient.put<AdminUser>(`/admin/users/${id}/shared-account-owner`, { mode })
   return data
 }
 
@@ -346,6 +356,7 @@ export const usersAPI = {
   getById,
   create,
   update,
+  updateSharedAccountOwner,
   delete: deleteUser,
   updateBalance,
   updatePoints,

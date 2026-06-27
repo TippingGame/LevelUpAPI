@@ -1,6 +1,69 @@
 <template>
   <AppLayout>
-    <TablePageLayout>
+    <div v-if="!canManageSharedAccounts" class="space-y-5">
+      <section class="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm dark:border-dark-700 dark:bg-dark-900">
+        <div class="grid gap-0 lg:grid-cols-[minmax(0,1.2fr)_minmax(18rem,0.8fr)]">
+          <div class="p-5 sm:p-6">
+            <div class="flex flex-wrap items-start justify-between gap-4">
+              <div>
+                <p class="text-sm font-semibold text-primary-600 dark:text-primary-300">共享号主进度</p>
+                <h2 class="mt-2 text-2xl font-semibold text-gray-900 dark:text-white">历史兑换满 {{ formatGameCoins(sharedOwnerThreshold, { minimumFractionDigits: 0, maximumFractionDigits: 0 }) }} 自动开启</h2>
+                <p class="mt-2 max-w-2xl text-sm leading-6 text-gray-500 dark:text-gray-400">
+                  开启后可接入共享号池、管理自有共享账号，并使用余额提现与收款码功能。
+                </p>
+              </div>
+              <span
+                class="rounded-full px-3 py-1 text-sm font-medium"
+                :class="sharedOwnerStatus?.mode === 'manual_off'
+                  ? 'bg-red-50 text-red-700 dark:bg-red-900/25 dark:text-red-300'
+                  : 'bg-amber-50 text-amber-700 dark:bg-amber-900/25 dark:text-amber-300'"
+              >
+                {{ sharedOwnerStatusText }}
+              </span>
+            </div>
+
+            <div class="mt-6">
+              <div class="flex items-center justify-between gap-3 text-sm">
+                <span class="font-medium text-gray-700 dark:text-gray-300">累计历史兑换</span>
+                <span class="font-semibold text-gray-900 dark:text-white">
+                  {{ formatGameCoins(sharedOwnerTotal) }} / {{ formatGameCoins(sharedOwnerThreshold, { minimumFractionDigits: 0, maximumFractionDigits: 0 }) }}
+                </span>
+              </div>
+              <div class="mt-3 h-3 overflow-hidden rounded-full bg-gray-100 dark:bg-dark-800">
+                <div
+                  class="h-full rounded-full bg-gradient-to-r from-emerald-500 via-sky-500 to-primary-500 transition-all duration-500"
+                  :style="{ width: `${sharedOwnerProgressPercent}%` }"
+                ></div>
+              </div>
+              <div class="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-gray-500 dark:text-gray-400">
+                <span>当前进度 {{ sharedOwnerProgressPercent }}%</span>
+                <span v-if="sharedOwnerStatus?.mode === 'manual_off'">管理员已手动关闭，自动达标暂不生效。</span>
+                <span v-else>还差 {{ formatGameCoins(sharedOwnerRemaining) }} 即可自动开启。</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="border-t border-gray-200 bg-gray-50 p-5 dark:border-dark-700 dark:bg-dark-950/40 sm:p-6 lg:border-l lg:border-t-0">
+            <div class="grid gap-3">
+              <div class="rounded-lg bg-white p-4 ring-1 ring-gray-100 dark:bg-dark-900 dark:ring-dark-700">
+                <p class="text-xs text-gray-500 dark:text-gray-400">已累计</p>
+                <p class="mt-1 text-xl font-semibold text-gray-900 dark:text-white">{{ formatGameCoins(sharedOwnerTotal) }}</p>
+              </div>
+              <div class="rounded-lg bg-white p-4 ring-1 ring-gray-100 dark:bg-dark-900 dark:ring-dark-700">
+                <p class="text-xs text-gray-500 dark:text-gray-400">解锁差额</p>
+                <p class="mt-1 text-xl font-semibold text-gray-900 dark:text-white">{{ formatGameCoins(sharedOwnerRemaining) }}</p>
+              </div>
+              <div class="rounded-lg bg-white p-4 ring-1 ring-gray-100 dark:bg-dark-900 dark:ring-dark-700">
+                <p class="text-xs text-gray-500 dark:text-gray-400">可用功能</p>
+                <p class="mt-1 text-sm font-medium text-gray-900 dark:text-white">共享号池、账号导入、收益提现</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <TablePageLayout v-else>
       <template #actions>
         <div class="flex flex-wrap items-center justify-end gap-3">
           <button
@@ -390,6 +453,7 @@
     </TablePageLayout>
 
     <CreateAccountModal
+      v-if="canManageSharedAccounts"
       :show="showCreateModal"
       :proxies="userProxies"
       :groups="modalGroups"
@@ -401,6 +465,7 @@
     />
 
     <EditAccountModal
+      v-if="canManageSharedAccounts"
       :show="showEditModal"
       :account="editingAccount"
       :proxies="[]"
@@ -413,6 +478,7 @@
     />
 
     <BulkEditAccountModal
+      v-if="canManageSharedAccounts"
       :show="showBulkEditModal"
       :account-ids="selectedIds"
       :selected-platforms="selectedPlatforms"
@@ -429,6 +495,7 @@
     />
 
     <ConfirmDialog
+      v-if="canManageSharedAccounts"
       :show="showDeleteDialog"
       :title="t('userAccounts.deleteAccount')"
       :message="deleteConfirmMessage"
@@ -440,6 +507,7 @@
     />
 
     <ConfirmDialog
+      v-if="canManageSharedAccounts"
       :show="showBulkDeleteDialog"
       :title="t('admin.accounts.bulkDeleteTitle')"
       :message="bulkDeleteConfirmMessage"
@@ -451,6 +519,7 @@
     />
 
     <ConfirmDialog
+      v-if="canManageSharedAccounts"
       :show="showExportDataDialog"
       :title="t('userAccounts.exportAccounts')"
       :message="t('userAccounts.exportConfirmMessage')"
@@ -461,12 +530,14 @@
     />
 
     <ImportAccountsModal
+      v-if="canManageSharedAccounts"
       :show="showImportModal"
       @close="showImportModal = false"
       @imported="handleAccountsImported"
     />
 
     <AccountTestModal
+      v-if="canManageSharedAccounts"
       :show="showTestModal"
       :account="testingAccount"
       account-scope="user"
@@ -475,6 +546,7 @@
     />
 
     <AccountStatsModal
+      v-if="canManageSharedAccounts"
       :show="showStatsModal"
       :account="statsAccount"
       :stats-loader="accountsAPI.getStats"
@@ -482,6 +554,7 @@
     />
 
     <ReAuthAccountModal
+      v-if="canManageSharedAccounts"
       :show="showReAuthModal"
       :account="reAuthAccount"
       account-scope="user"
@@ -490,6 +563,7 @@
     />
 
     <UserAccountActionMenu
+      v-if="canManageSharedAccounts"
       :show="actionMenu.show"
       :account="actionMenu.account"
       :position="actionMenu.position"
@@ -541,6 +615,7 @@ import type { Account, AccountPlatform, AccountType, AdminGroup, Group, Proxy, W
 import type { Column } from '@/components/common/types'
 import { formatDateTime, formatRelativeTime } from '@/utils/format'
 import { extractApiErrorMessage } from '@/utils/apiError'
+import { formatGameCoins } from '@/utils/gameCurrency'
 
 type UserAccountStatus = 'active' | 'disabled'
 
@@ -609,6 +684,28 @@ const filterGroupId = ref<string | number>('')
 const activeBatchTaskPolls = new Set<number>()
 let isUnmounted = false
 const ACCOUNT_BATCH_TASK_POLL_TIMEOUT_MS = 30 * 60 * 1000
+
+const sharedOwnerStatus = computed(() => authStore.user?.shared_account_owner_status ?? null)
+const canManageSharedAccounts = computed(() => authStore.canManageUserAccounts)
+const sharedOwnerThreshold = computed(() => Number(sharedOwnerStatus.value?.threshold ?? 100))
+const sharedOwnerTotal = computed(() => Number(sharedOwnerStatus.value?.total_recharged ?? authStore.user?.total_recharged ?? 0))
+const sharedOwnerRemaining = computed(() => Math.max(0, Number(sharedOwnerStatus.value?.remaining ?? sharedOwnerThreshold.value - sharedOwnerTotal.value)))
+const sharedOwnerProgressPercent = computed(() => {
+  const progress = sharedOwnerStatus.value?.progress ?? (sharedOwnerThreshold.value > 0 ? sharedOwnerTotal.value / sharedOwnerThreshold.value : 0)
+  return Math.max(0, Math.min(100, Math.round(progress * 100)))
+})
+const sharedOwnerStatusText = computed(() => {
+  switch (sharedOwnerStatus.value?.mode) {
+    case 'manual_off':
+      return '管理员已关闭'
+    case 'manual_on':
+      return '管理员已开启'
+    case 'auto':
+      return '已自动开启'
+    default:
+      return '未开启'
+  }
+})
 
 const modalGroups = computed(() => groups.value as unknown as AdminGroup[])
 
@@ -983,6 +1080,14 @@ function isAbortError(error: unknown): boolean {
 }
 
 async function loadAccounts(): Promise<void> {
+  if (!canManageSharedAccounts.value) {
+    abortController?.abort()
+    accounts.value = []
+    pagination.value.total = 0
+    pagination.value.pages = 0
+    loading.value = false
+    return
+  }
   abortController?.abort()
   const controller = new AbortController()
   abortController = controller
@@ -1024,11 +1129,17 @@ async function refreshCurrentUserBalance(): Promise<void> {
 
 async function refreshAccountsPage(): Promise<void> {
   const balanceRefresh = refreshCurrentUserBalance()
-  await loadAccounts()
+  if (canManageSharedAccounts.value) {
+    await loadAccounts()
+  }
   await balanceRefresh
 }
 
 async function loadGroups(): Promise<void> {
+  if (!canManageSharedAccounts.value) {
+    groups.value = []
+    return
+  }
   try {
     groups.value = await userGroupsAPI.getAvailable()
   } catch (error) {
@@ -1037,6 +1148,7 @@ async function loadGroups(): Promise<void> {
 }
 
 async function loadUserProxies(force = false): Promise<void> {
+  if (!canManageSharedAccounts.value) return
   if (userProxiesLoading.value || (!force && userProxies.value.length > 0)) return
   userProxiesLoading.value = true
   try {
@@ -1552,6 +1664,12 @@ function handleShowTempUnsched(_account: Account): void {
 }
 
 onMounted(async () => {
+  await authStore.refreshUser().catch((error) => {
+    console.error('Failed to refresh shared owner status:', error)
+  })
+  if (!canManageSharedAccounts.value) {
+    return
+  }
   await Promise.all([loadGroups(), loadAccounts()])
 })
 

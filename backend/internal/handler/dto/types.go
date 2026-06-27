@@ -7,22 +7,23 @@ import (
 )
 
 type User struct {
-	ID                         int64      `json:"id"`
-	Email                      string     `json:"email"`
-	Username                   string     `json:"username"`
-	Role                       string     `json:"role"`
-	CanManageUserAccounts      bool       `json:"can_manage_user_accounts"`
-	Balance                    float64    `json:"balance"`
-	PointsBalance              float64    `json:"points_balance"`
-	LoadFactorCreditsBalance   int        `json:"load_factor_credits_balance"`
-	LoadFactorCreditsUsedTotal int        `json:"load_factor_credits_used_total"`
-	PreferPointsBilling        bool       `json:"prefer_points_billing"`
-	Concurrency                int        `json:"concurrency"`
-	Status                     string     `json:"status"`
-	AllowedGroups              []int64    `json:"allowed_groups"`
-	LastActiveAt               *time.Time `json:"last_active_at,omitempty"`
-	CreatedAt                  time.Time  `json:"created_at"`
-	UpdatedAt                  time.Time  `json:"updated_at"`
+	ID                         int64                     `json:"id"`
+	Email                      string                    `json:"email"`
+	Username                   string                    `json:"username"`
+	Role                       string                    `json:"role"`
+	CanManageUserAccounts      bool                      `json:"can_manage_user_accounts"`
+	SharedAccountOwnerStatus   *SharedAccountOwnerStatus `json:"shared_account_owner_status,omitempty"`
+	Balance                    float64                   `json:"balance"`
+	PointsBalance              float64                   `json:"points_balance"`
+	LoadFactorCreditsBalance   int                       `json:"load_factor_credits_balance"`
+	LoadFactorCreditsUsedTotal int                       `json:"load_factor_credits_used_total"`
+	PreferPointsBilling        bool                      `json:"prefer_points_billing"`
+	Concurrency                int                       `json:"concurrency"`
+	Status                     string                    `json:"status"`
+	AllowedGroups              []int64                   `json:"allowed_groups"`
+	LastActiveAt               *time.Time                `json:"last_active_at,omitempty"`
+	CreatedAt                  time.Time                 `json:"created_at"`
+	UpdatedAt                  time.Time                 `json:"updated_at"`
 
 	// 余额不足通知
 	BalanceNotifyEnabled       bool               `json:"balance_notify_enabled"`
@@ -36,6 +37,18 @@ type User struct {
 
 	APIKeys       []APIKey           `json:"api_keys,omitempty"`
 	Subscriptions []UserSubscription `json:"subscriptions,omitempty"`
+}
+
+type SharedAccountOwnerStatus struct {
+	Enabled        bool     `json:"enabled"`
+	Mode           string   `json:"mode"`
+	Threshold      float64  `json:"threshold"`
+	TotalRecharged float64  `json:"total_recharged"`
+	Progress       float64  `json:"progress"`
+	Remaining      float64  `json:"remaining"`
+	ManualOverride *bool    `json:"manual_override,omitempty"`
+	AttributeID    *int64   `json:"attribute_id,omitempty"`
+	Reasons        []string `json:"reasons,omitempty"`
 }
 
 type UserSummary struct {

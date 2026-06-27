@@ -65,6 +65,16 @@ func TestAPIContracts(t *testing.T) {
 					"balance_notify_threshold": null,
 					"balance_notify_extra_emails": null,
 					"total_recharged": 0,
+					"can_manage_user_accounts": false,
+					"shared_account_owner_status": {
+						"enabled": false,
+						"mode": "none",
+						"threshold": 100,
+						"total_recharged": 0,
+						"progress": 0,
+						"remaining": 100,
+						"reasons": ["recharge_threshold_pending"]
+					},
 					"linuxdo_bound": false,
 					"load_factor_credits_balance": 0,
 					"load_factor_credits_used_total": 0,

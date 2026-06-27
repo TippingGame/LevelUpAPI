@@ -35,6 +35,29 @@ type UserAttributeOption struct {
 	Label string `json:"label"`
 }
 
+const (
+	SharedAccountOwnerRechargeThreshold = 100.0
+
+	SharedAccountOwnerModeNone      = "none"
+	SharedAccountOwnerModeAuto      = "auto"
+	SharedAccountOwnerModeManualOn  = "manual_on"
+	SharedAccountOwnerModeManualOff = "manual_off"
+)
+
+// SharedAccountOwnerStatus describes whether a user can use shared-owner-only
+// features and how that decision was reached.
+type SharedAccountOwnerStatus struct {
+	Enabled        bool     `json:"enabled"`
+	Mode           string   `json:"mode"`
+	Threshold      float64  `json:"threshold"`
+	TotalRecharged float64  `json:"total_recharged"`
+	Progress       float64  `json:"progress"`
+	Remaining      float64  `json:"remaining"`
+	ManualOverride *bool    `json:"manual_override,omitempty"`
+	AttributeID    *int64   `json:"attribute_id,omitempty"`
+	Reasons        []string `json:"reasons,omitempty"`
+}
+
 // UserAttributeValidation represents validation rules for an attribute
 type UserAttributeValidation struct {
 	MinLength *int    `json:"min_length,omitempty"`

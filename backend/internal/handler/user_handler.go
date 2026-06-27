@@ -546,15 +546,8 @@ func (h *UserHandler) buildUserProfileResponse(ctx context.Context, userID int64
 		return userProfileResponse{}, err
 	}
 	profile := userProfileResponseFromService(user, identities)
-	profile.CanManageUserAccounts = h.canManageUserAccounts(ctx, user)
+	applySharedAccountOwnerStatus(&profile.User, sharedAccountOwnerStatusForUser(ctx, h.attrService, user))
 	return profile, nil
-}
-
-func (h *UserHandler) canManageUserAccounts(ctx context.Context, user *service.User) bool {
-	if user == nil {
-		return false
-	}
-	return true
 }
 
 func userProfileResponseFromService(user *service.User, identities service.UserIdentitySummarySet) userProfileResponse {

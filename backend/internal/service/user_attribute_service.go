@@ -3,7 +3,9 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"math"
 	"regexp"
 	"strconv"
 	"strings"
@@ -173,6 +175,43 @@ func (s *UserAttributeService) GetBatchUserAttributes(ctx context.Context, userI
 	return result, nil
 }
 
+// ResolveSharedAccountOwnerStatus resolves the shared account owner feature gate.
+// Manual off overrides the automatic threshold; manual on grants access directly.
+func (s *UserAttributeService) ResolveSharedAccountOwnerStatus(ctx context.Context, user *User) (SharedAccountOwnerStatus, error) {
+	status := SharedAccountOwnerStatusFromUser(user)
+	if user == nil || user.ID <= 0 || s == nil || s.defRepo == nil || s.valueRepo == nil {
+		return status, nil
+	}
+
+	override, attributeID, err := s.sharedAccountOwnerOverride(ctx, user.ID)
+	if err != nil {
+		return status, err
+	}
+	if attributeID != nil {
+		status.AttributeID = attributeID
+	}
+	if override != nil {
+		status.ManualOverride = override
+		if *override {
+			status.Enabled = true
+			status.Mode = SharedAccountOwnerModeManualOn
+			status.Reasons = []string{"manual_on"}
+			return status, nil
+		}
+		status.Enabled = false
+		status.Mode = SharedAccountOwnerModeManualOff
+		status.Reasons = []string{"manual_off"}
+		return status, nil
+	}
+
+	if status.TotalRecharged+1e-9 >= status.Threshold {
+		status.Enabled = true
+		status.Mode = SharedAccountOwnerModeAuto
+		status.Reasons = []string{"recharge_threshold_met"}
+	}
+	return status, nil
+}
+
 // UserHasSharedAccountOwnerTitle reports whether the user has been granted the
 // shared account owner title via the existing custom user attributes system.
 func (s *UserAttributeService) UserHasSharedAccountOwnerTitle(ctx context.Context, userID int64) (bool, error) {
@@ -202,11 +241,55 @@ func (s *UserAttributeService) UserHasSharedAccountOwnerTitle(ctx context.Contex
 		if !ok || strings.TrimSpace(rawValue) == "" {
 			continue
 		}
-		if isSharedAccountOwnerAttributeValue(def, rawValue) {
+		override, matched := sharedAccountOwnerOverrideFromValue(def, rawValue)
+		if matched && override != nil && *override {
 			return true, nil
 		}
 	}
 	return false, nil
+}
+
+func (s *UserAttributeService) SetSharedAccountOwnerOverride(ctx context.Context, userID int64, override *bool) (SharedAccountOwnerStatus, error) {
+	status := SharedAccountOwnerStatusFromUser(&User{ID: userID})
+	if userID <= 0 {
+		return status, nil
+	}
+	if s == nil || s.defRepo == nil || s.valueRepo == nil {
+		return status, fmt.Errorf("user attribute service is unavailable")
+	}
+
+	def, err := s.ensureSharedAccountOwnerDefinition(ctx)
+	if err != nil {
+		return status, err
+	}
+
+	value := ""
+	if override != nil {
+		if *override {
+			value = "true"
+		} else {
+			value = "false"
+		}
+	}
+	if err := s.valueRepo.UpsertBatch(ctx, userID, []UpdateUserAttributeInput{{
+		AttributeID: def.ID,
+		Value:       value,
+	}}); err != nil {
+		return status, err
+	}
+
+	status.AttributeID = &def.ID
+	status.ManualOverride = override
+	if override != nil {
+		if *override {
+			status.Enabled = true
+			status.Mode = SharedAccountOwnerModeManualOn
+		} else {
+			status.Enabled = false
+			status.Mode = SharedAccountOwnerModeManualOff
+		}
+	}
+	return status, nil
 }
 
 // UpdateUserAttributes batch updates attribute values for a user
@@ -326,7 +409,128 @@ func (s *UserAttributeService) validateValue(def *UserAttributeDefinition, value
 	return nil
 }
 
-func isSharedAccountOwnerAttributeValue(def UserAttributeDefinition, rawValue string) bool {
+func SharedAccountOwnerStatusFromUser(user *User) SharedAccountOwnerStatus {
+	total := 0.0
+	if user != nil {
+		total = math.Max(0, user.TotalRecharged)
+	}
+	threshold := SharedAccountOwnerRechargeThreshold
+	progress := 0.0
+	if threshold > 0 {
+		progress = math.Min(1, total/threshold)
+	}
+	status := SharedAccountOwnerStatus{
+		Enabled:        false,
+		Mode:           SharedAccountOwnerModeNone,
+		Threshold:      threshold,
+		TotalRecharged: total,
+		Progress:       progress,
+		Remaining:      math.Max(0, threshold-total),
+		Reasons:        []string{"recharge_threshold_pending"},
+	}
+	if total+1e-9 >= threshold {
+		status.Enabled = true
+		status.Mode = SharedAccountOwnerModeAuto
+		status.Reasons = []string{"recharge_threshold_met"}
+	}
+	return status
+}
+
+func (s *UserAttributeService) sharedAccountOwnerOverride(ctx context.Context, userID int64) (*bool, *int64, error) {
+	defs, err := s.defRepo.List(ctx, true)
+	if err != nil {
+		return nil, nil, err
+	}
+	if len(defs) == 0 {
+		return nil, nil, nil
+	}
+
+	values, err := s.valueRepo.GetByUserID(ctx, userID)
+	if err != nil {
+		return nil, nil, err
+	}
+	valueByAttributeID := make(map[int64]string, len(values))
+	for _, value := range values {
+		valueByAttributeID[value.AttributeID] = value.Value
+	}
+
+	var matchedAttributeID *int64
+	for _, def := range defs {
+		rawValue, ok := valueByAttributeID[def.ID]
+		if !ok {
+			continue
+		}
+		override, matched := sharedAccountOwnerOverrideFromValue(def, rawValue)
+		if !matched {
+			continue
+		}
+		id := def.ID
+		matchedAttributeID = &id
+		if override != nil {
+			return override, matchedAttributeID, nil
+		}
+	}
+	return nil, matchedAttributeID, nil
+}
+
+func (s *UserAttributeService) ensureSharedAccountOwnerDefinition(ctx context.Context) (*UserAttributeDefinition, error) {
+	def, err := s.defRepo.GetByKey(ctx, "shared_account_owner")
+	if err == nil {
+		changed := false
+		if !def.Enabled {
+			def.Enabled = true
+			changed = true
+		}
+		if def.Type != AttributeTypeSelect {
+			def.Type = AttributeTypeSelect
+			changed = true
+		}
+		if !hasAttributeOption(def.Options, "true") || !hasAttributeOption(def.Options, "false") {
+			def.Options = []UserAttributeOption{
+				{Value: "true", Label: "手动开启"},
+				{Value: "false", Label: "手动关闭"},
+			}
+			changed = true
+		}
+		if changed {
+			if err := s.defRepo.Update(ctx, def); err != nil {
+				return nil, err
+			}
+		}
+		return def, nil
+	}
+	if !errors.Is(err, ErrAttributeDefinitionNotFound) {
+		return nil, err
+	}
+
+	def = &UserAttributeDefinition{
+		Key:         "shared_account_owner",
+		Name:        "共享号主",
+		Description: "留空时按历史兑换满 100 自动开启；手动关闭会覆盖自动开启。",
+		Type:        AttributeTypeSelect,
+		Options: []UserAttributeOption{
+			{Value: "true", Label: "手动开启"},
+			{Value: "false", Label: "手动关闭"},
+		},
+		Required: false,
+		Enabled:  true,
+	}
+	if err := s.defRepo.Create(ctx, def); err != nil {
+		return nil, err
+	}
+	return def, nil
+}
+
+func hasAttributeOption(options []UserAttributeOption, value string) bool {
+	for _, option := range options {
+		if option.Value == value {
+			return true
+		}
+	}
+	return false
+}
+
+func sharedAccountOwnerOverrideFromValue(def UserAttributeDefinition, rawValue string) (*bool, bool) {
 	key := normalizeAttributeMatchText(def.Key)
 	name := normalizeAttributeMatchText(def.Name)
 	description := normalizeAttributeMatchText(def.Description)
@@ -351,16 +555,40 @@ func isSharedAccountOwnerAttributeValue(def UserAttributeDefinition, rawValue st
 		strings.Contains(key, "role") ||
 		strings.Contains(name, "头衔") ||
 		strings.Contains(name, "身份")
+	strictOwnerFieldMatches := keyMatches ||
+		strings.Contains(name, "共享号主") ||
+		strings.Contains(description, "共享号主") ||
+		strings.Contains(key, "共享号主")
 
-	if keyMatches && isTruthyAttributeValue(value) {
-		return true
+	if !keyMatches && !titleFieldMatches {
+		return nil, false
 	}
-	return titleFieldMatches && valueMatches
+	if strictOwnerFieldMatches && (strings.TrimSpace(rawValue) == "" || value == "auto" || value == "自动" || value == "跟随自动") {
+		return nil, true
+	}
+	if (strictOwnerFieldMatches && isTruthyAttributeValue(value)) || (titleFieldMatches && valueMatches) {
+		out := true
+		return &out, true
+	}
+	if strictOwnerFieldMatches && isFalseyAttributeValue(value) {
+		out := false
+		return &out, true
+	}
+	return nil, strictOwnerFieldMatches
 }
 
 func isTruthyAttributeValue(value string) bool {
 	switch value {
 	case "true", "1", "yes", "y", "on", "enabled", "enable", "开启", "启用", "是", "共享号主":
+		return true
+	default:
+		return false
+	}
+}
+
+func isFalseyAttributeValue(value string) bool {
+	switch value {
+	case "false", "0", "no", "n", "off", "disabled", "disable", "关闭", "禁用", "否", "普通用户":
 		return true
 	default:
 		return false

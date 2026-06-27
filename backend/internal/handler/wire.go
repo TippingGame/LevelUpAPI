@@ -96,6 +96,10 @@ func ProvideSettingHandler(settingService *service.SettingService, buildInfo Bui
 	return NewSettingHandler(settingService, buildInfo.Version)
 }
 
+func ProvideAdminUserHandler(adminService service.AdminService, concurrencyService *service.ConcurrencyService, userAttributeService *service.UserAttributeService) *admin.UserHandler {
+	return admin.NewUserHandler(adminService, concurrencyService, userAttributeService)
+}
+
 func ProvideUserAccountHandler(
 	accountService *service.AccountService,
 	accountUsageService *service.AccountUsageService,
@@ -107,6 +111,7 @@ func ProvideUserAccountHandler(
 	geminiOAuthService *service.GeminiOAuthService,
 	antigravityOAuthService *service.AntigravityOAuthService,
 	userAttributeService *service.UserAttributeService,
+	userService *service.UserService,
 	concurrencyService *service.ConcurrencyService,
 	sessionLimitCache service.SessionLimitCache,
 	rpmCache service.RPMCache,
@@ -125,6 +130,7 @@ func ProvideUserAccountHandler(
 		accountBatchTaskService,
 	)
 	h.SetUserAttributeService(userAttributeService)
+	h.SetUserService(userService)
 	h.SetRuntimeCapacityProviders(concurrencyService, sessionLimitCache, rpmCache)
 	return h
 }
@@ -209,7 +215,7 @@ var ProviderSet = wire.NewSet(
 
 	// Admin handlers
 	admin.NewDashboardHandler,
-	admin.NewUserHandler,
+	ProvideAdminUserHandler,
 	admin.NewGroupHandler,
 	admin.NewAccountHandler,
 	admin.NewAccountSharePolicyHandler,

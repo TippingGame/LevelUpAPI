@@ -91,7 +91,7 @@ export const useAuthStore = defineStore('auth', () => {
   })
 
   const canManageUserAccounts = computed(() => {
-    return isAuthenticated.value
+    return user.value?.can_manage_user_accounts === true
   })
 
   const isSimpleMode = computed(() => runMode.value === 'simple')

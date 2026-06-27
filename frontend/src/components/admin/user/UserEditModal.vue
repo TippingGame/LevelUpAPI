@@ -57,6 +57,59 @@
         <p class="input-hint">{{ t('admin.users.form.rpmLimitHint') }}</p>
       </div>
       <div class="rounded-lg border border-gray-200 p-4 dark:border-dark-700">
+        <div class="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <h3 class="text-sm font-semibold text-gray-900 dark:text-white">共享号主</h3>
+            <p class="mt-1 text-xs text-gray-500 dark:text-dark-400">
+              历史兑换满 {{ formatGameCoins(sharedOwnerThreshold, { minimumFractionDigits: 0, maximumFractionDigits: 0 }) }} 自动开启，也可以手动覆盖。
+            </p>
+          </div>
+          <span
+            class="rounded-full px-2.5 py-1 text-xs font-medium"
+            :class="sharedOwnerBadgeClass"
+          >
+            {{ sharedOwnerBadgeText }}
+          </span>
+        </div>
+
+        <div class="mt-4 grid gap-3 sm:grid-cols-3">
+          <div class="rounded-md bg-gray-50 px-3 py-2 dark:bg-dark-800">
+            <p class="text-xs text-gray-500 dark:text-dark-400">历史兑换</p>
+            <p class="mt-1 text-sm font-semibold text-gray-900 dark:text-white">{{ formatGameCoins(sharedOwnerTotal) }}</p>
+          </div>
+          <div class="rounded-md bg-gray-50 px-3 py-2 dark:bg-dark-800">
+            <p class="text-xs text-gray-500 dark:text-dark-400">解锁差额</p>
+            <p class="mt-1 text-sm font-semibold text-gray-900 dark:text-white">{{ formatGameCoins(sharedOwnerRemaining) }}</p>
+          </div>
+          <div class="rounded-md bg-gray-50 px-3 py-2 dark:bg-dark-800">
+            <p class="text-xs text-gray-500 dark:text-dark-400">进度</p>
+            <p class="mt-1 text-sm font-semibold text-gray-900 dark:text-white">{{ sharedOwnerProgressPercent }}%</p>
+          </div>
+        </div>
+
+        <div class="mt-4 h-2 overflow-hidden rounded-full bg-gray-100 dark:bg-dark-800">
+          <div
+            class="h-full rounded-full bg-gradient-to-r from-emerald-500 via-sky-500 to-primary-500"
+            :style="{ width: `${sharedOwnerProgressPercent}%` }"
+          ></div>
+        </div>
+
+        <div class="mt-4 grid grid-cols-3 gap-2">
+          <button
+            v-for="option in sharedOwnerModeOptions"
+            :key="option.value"
+            type="button"
+            class="min-h-10 rounded-lg border px-3 py-2 text-sm font-medium transition"
+            :class="sharedOwnerMode === option.value
+              ? 'border-primary-300 bg-primary-50 text-primary-700 dark:border-primary-700 dark:bg-primary-900/30 dark:text-primary-200'
+              : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300 dark:border-dark-700 dark:bg-dark-900/60 dark:text-dark-300 dark:hover:border-dark-600'"
+            @click="sharedOwnerMode = option.value"
+          >
+            {{ option.label }}
+          </button>
+        </div>
+      </div>
+      <div class="rounded-lg border border-gray-200 p-4 dark:border-dark-700">
         <div class="mb-4 flex items-start justify-between gap-4">
           <div>
             <h3 class="text-sm font-semibold text-gray-900 dark:text-white">
@@ -161,6 +214,8 @@ import UserAttributeForm from '@/components/user/UserAttributeForm.vue'
 import Icon from '@/components/icons/Icon.vue'
 import Toggle from '@/components/common/Toggle.vue'
 import { formatDateTime } from '@/utils/format'
+import { formatGameCoins } from '@/utils/gameCurrency'
+import type { SharedAccountOwnerOverrideMode } from '@/api/admin/users'
 
 const props = defineProps<{ show: boolean, user: AdminUser | null }>()
 const emit = defineEmits(['close', 'success'])
@@ -171,6 +226,8 @@ const AFFILIATE_AUTO_ROTATE_DEFAULT = false
 
 const submitting = ref(false); const passwordCopied = ref(false)
 const form = reactive({ email: '', password: '', username: '', notes: '', concurrency: 1, rpm_limit: 0, customAttributes: {} as UserAttributeValuesMap })
+const sharedOwnerMode = ref<SharedAccountOwnerOverrideMode>('auto')
+const initialSharedOwnerMode = ref<SharedAccountOwnerOverrideMode>('auto')
 const affiliatePolicy = reactive({
   loading: false,
   loaded: false,
@@ -185,6 +242,42 @@ const affiliatePolicy = reactive({
   expiresAt: null as string | null,
 })
 let affiliatePolicyRequestSeq = 0
+
+const sharedOwnerModeOptions: Array<{ value: SharedAccountOwnerOverrideMode; label: string }> = [
+  { value: 'auto', label: '自动' },
+  { value: 'enabled', label: '开启' },
+  { value: 'disabled', label: '关闭' },
+]
+
+const userSharedOwnerStatus = computed(() => props.user?.shared_account_owner_status ?? null)
+const sharedOwnerThreshold = computed(() => Number(userSharedOwnerStatus.value?.threshold ?? 100))
+const sharedOwnerTotal = computed(() => Number(userSharedOwnerStatus.value?.total_recharged ?? props.user?.total_recharged ?? 0))
+const sharedOwnerRemaining = computed(() => Math.max(0, Number(userSharedOwnerStatus.value?.remaining ?? sharedOwnerThreshold.value - sharedOwnerTotal.value)))
+const sharedOwnerProgressPercent = computed(() => {
+  const progress = userSharedOwnerStatus.value?.progress ?? (sharedOwnerThreshold.value > 0 ? sharedOwnerTotal.value / sharedOwnerThreshold.value : 0)
+  return Math.max(0, Math.min(100, Math.round(progress * 100)))
+})
+const sharedOwnerBadgeText = computed(() => {
+  if (sharedOwnerMode.value === 'enabled') return '手动开启'
+  if (sharedOwnerMode.value === 'disabled') return '手动关闭'
+  return userSharedOwnerStatus.value?.enabled ? '自动开启' : '自动未开启'
+})
+const sharedOwnerBadgeClass = computed(() => {
+  if (sharedOwnerMode.value === 'disabled') return 'bg-red-50 text-red-700 dark:bg-red-900/25 dark:text-red-300'
+  if (sharedOwnerMode.value === 'enabled' || userSharedOwnerStatus.value?.enabled) return 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/25 dark:text-emerald-300'
+  return 'bg-amber-50 text-amber-700 dark:bg-amber-900/25 dark:text-amber-300'
+})
+
+const sharedOwnerModeFromUser = (u: AdminUser): SharedAccountOwnerOverrideMode => {
+  switch (u.shared_account_owner_status?.mode) {
+    case 'manual_on':
+      return 'enabled'
+    case 'manual_off':
+      return 'disabled'
+    default:
+      return 'auto'
+  }
+}
 
 const normalizeConcurrencyInput = () => {
   form.concurrency = Math.max(1, form.concurrency || 1)
@@ -288,9 +381,14 @@ const affiliatePolicyExpiryText = computed(() => {
 watch(() => props.user, (u) => {
   if (u) {
     Object.assign(form, { email: u.email, password: '', username: u.username || '', notes: u.notes || '', concurrency: u.concurrency, rpm_limit: u.rpm_limit ?? 0, customAttributes: {} })
+    const mode = sharedOwnerModeFromUser(u)
+    sharedOwnerMode.value = mode
+    initialSharedOwnerMode.value = mode
     passwordCopied.value = false
     void loadAffiliatePolicy(u.id)
   } else {
+    sharedOwnerMode.value = 'auto'
+    initialSharedOwnerMode.value = 'auto'
     resetAffiliatePolicy()
   }
 }, { immediate: true })
@@ -333,6 +431,9 @@ const handleUpdateUser = async () => {
       if (affiliatePolicy.weeklyLimit !== affiliatePolicy.initialWeeklyLimit) payload.aff_weekly_limit = affiliatePolicy.weeklyLimit
       if (affiliatePolicy.autoRotate !== affiliatePolicy.initialAutoRotate) payload.aff_code_auto_rotate = affiliatePolicy.autoRotate
       await adminAPI.affiliates.updateUserSettings(props.user.id, payload)
+    }
+    if (sharedOwnerMode.value !== initialSharedOwnerMode.value) {
+      await adminAPI.users.updateSharedAccountOwner(props.user.id, sharedOwnerMode.value)
     }
     if (Object.keys(form.customAttributes).length > 0) await adminAPI.userAttributes.updateUserAttributeValues(props.user.id, form.customAttributes)
     appStore.showSuccess(t('admin.users.userUpdated'))

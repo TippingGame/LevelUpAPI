@@ -202,7 +202,6 @@ const routes: RouteRecordRaw[] = [
     meta: {
       requiresAuth: true,
       requiresAdmin: false,
-      requiresSharedAccountOwner: true,
       title: 'Shared Account Owner',
       titleKey: 'userAccounts.title',
       descriptionKey: 'userAccounts.description'
@@ -778,10 +777,6 @@ function isBackendModePublicRouteAllowed(path: string, hasPendingAuthSession: bo
   return false
 }
 
-function userCanManageAccounts(authStore: ReturnType<typeof useAuthStore>): boolean {
-  return authStore.canManageUserAccounts
-}
-
 router.beforeEach((to, _from, next) => {
   // 开始导航加载状态
   navigationLoading.startNavigation()
@@ -866,11 +861,6 @@ router.beforeEach((to, _from, next) => {
 
   if (to.meta.blockForRegularUsers && !authStore.isAdmin) {
     next('/dashboard')
-    return
-  }
-
-  if (to.meta.requiresSharedAccountOwner && !userCanManageAccounts(authStore)) {
-    next(authStore.isAdmin ? '/admin/dashboard' : '/dashboard')
     return
   }
 

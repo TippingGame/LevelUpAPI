@@ -98,17 +98,10 @@ func ensureLoginUserActive(user *service.User) error {
 	return nil
 }
 
-func (h *AuthHandler) canManageUserAccounts(ctx context.Context, user *service.User) bool {
-	if user == nil {
-		return false
-	}
-	return true
-}
-
 func (h *AuthHandler) userDTOFromService(ctx context.Context, user *service.User) *dto.User {
 	out := dto.UserFromService(user)
 	if out != nil {
-		out.CanManageUserAccounts = h.canManageUserAccounts(ctx, user)
+		applySharedAccountOwnerStatus(out, sharedAccountOwnerStatusForUser(ctx, h.attrService, user))
 	}
 	return out
 }
@@ -502,7 +495,7 @@ func (h *AuthHandler) GetCurrentUser(c *gin.Context) {
 		runMode = h.cfg.RunMode
 	}
 	profile := userProfileResponseFromService(user, identities)
-	profile.CanManageUserAccounts = h.canManageUserAccounts(c.Request.Context(), user)
+	applySharedAccountOwnerStatus(&profile.User, sharedAccountOwnerStatusForUser(c.Request.Context(), h.attrService, user))
 
 	response.Success(c, UserResponse{
 		userProfileResponse: profile,

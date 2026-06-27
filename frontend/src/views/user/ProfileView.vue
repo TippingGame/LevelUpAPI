@@ -24,6 +24,7 @@
           />
           <ProfileWithdrawalCard
             :locked="!canUseWithdrawal"
+            :locked-message="withdrawalLockedMessage"
           />
         </template>
 
@@ -67,12 +68,23 @@ import ProfileWithdrawalCard from '@/components/user/profile/ProfileWithdrawalCa
 import { isWeChatWebOAuthEnabled } from '@/api/auth'
 import { useAppStore } from '@/stores/app'
 import { useAuthStore } from '@/stores/auth'
+import { formatGameCoins } from '@/utils/gameCurrency'
 
 const { t } = useI18n()
 const appStore = useAppStore()
 const authStore = useAuthStore()
 const user = computed(() => authStore.user)
 const canUseWithdrawal = computed(() => authStore.canManageUserAccounts)
+const withdrawalLockedMessage = computed(() => {
+  const status = authStore.user?.shared_account_owner_status
+  if (status?.mode === 'manual_off') {
+    return '管理员已关闭共享号主功能，暂时不能使用提现。'
+  }
+  const remaining = Number(status?.remaining ?? 0)
+  return remaining > 0
+    ? `历史兑换累计还差 ${formatGameCoins(remaining)} 自动开启共享号主，开启后可使用提现。`
+    : '共享号主可使用提现功能。'
+})
 
 const contactInfo = ref('')
 const balanceLowNotifyEnabled = ref(false)

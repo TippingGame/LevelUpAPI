@@ -22,13 +22,19 @@ type UserWithConcurrency struct {
 type UserHandler struct {
 	adminService       service.AdminService
 	concurrencyService *service.ConcurrencyService
+	attrService        *service.UserAttributeService
 }
 
 // NewUserHandler creates a new admin user handler
-func NewUserHandler(adminService service.AdminService, concurrencyService *service.ConcurrencyService) *UserHandler {
+func NewUserHandler(adminService service.AdminService, concurrencyService *service.ConcurrencyService, attrServices ...*service.UserAttributeService) *UserHandler {
+	var attrService *service.UserAttributeService
+	if len(attrServices) > 0 {
+		attrService = attrServices[0]
+	}
 	return &UserHandler{
 		adminService:       adminService,
 		concurrencyService: concurrencyService,
+		attrService:        attrService,
 	}
 }
 
@@ -79,6 +85,27 @@ type UpdateLoadFactorCreditsRequest struct {
 	Amount    int    `json:"amount" binding:"required,gt=0"`
 	Operation string `json:"operation" binding:"required,oneof=set add subtract"`
 	Notes     string `json:"notes"`
+}
+
+type UpdateSharedAccountOwnerRequest struct {
+	Mode string `json:"mode" binding:"required,oneof=auto enabled disabled"`
+}
+
+func (h *UserHandler) userDTO(ctx context.Context, user *service.User) *dto.AdminUser {
+	out := dto.UserFromServiceAdmin(user)
+	if out == nil {
+		return nil
+	}
+	status := service.SharedAccountOwnerStatusFromUser(user)
+	if h != nil && h.attrService != nil && user != nil && user.ID > 0 {
+		resolved, err := h.attrService.ResolveSharedAccountOwnerStatus(ctx, user)
+		if err == nil {
+			status = resolved
+		}
+	}
+	out.CanManageUserAccounts = status.Enabled
+	out.SharedAccountOwnerStatus = dto.SharedAccountOwnerStatusFromService(status)
+	return out
 }
 
 type BindUserAuthIdentityRequest struct {
@@ -152,7 +179,7 @@ func (h *UserHandler) List(c *gin.Context) {
 	out := make([]UserWithConcurrency, len(users))
 	for i := range users {
 		out[i] = UserWithConcurrency{
-			AdminUser: *dto.UserFromServiceAdmin(&users[i]),
+			AdminUser: *h.userDTO(c.Request.Context(), &users[i]),
 		}
 		if info := loadInfo[users[i].ID]; info != nil {
 			out[i].CurrentConcurrency = info.CurrentConcurrency
@@ -200,7 +227,7 @@ func (h *UserHandler) GetByID(c *gin.Context) {
 		return
 	}
 
-	response.Success(c, dto.UserFromServiceAdmin(user))
+	response.Success(c, h.userDTO(c.Request.Context(), user))
 }
 
 // BindAuthIdentity manually binds a canonical auth identity to a user.
@@ -266,7 +293,7 @@ func (h *UserHandler) Create(c *gin.Context) {
 		return
 	}
 
-	response.Success(c, dto.UserFromServiceAdmin(user))
+	response.Success(c, h.userDTO(c.Request.Context(), user))
 }
 
 // Update handles updating a user
@@ -302,7 +329,50 @@ func (h *UserHandler) Update(c *gin.Context) {
 		return
 	}
 
-	response.Success(c, dto.UserFromServiceAdmin(user))
+	response.Success(c, h.userDTO(c.Request.Context(), user))
+}
+
+// UpdateSharedAccountOwner handles manual shared account owner override.
+// PUT /api/v1/admin/users/:id/shared-account-owner
+func (h *UserHandler) UpdateSharedAccountOwner(c *gin.Context) {
+	userID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "Invalid user ID")
+		return
+	}
+	if h.attrService == nil {
+		response.InternalError(c, "User attribute service is unavailable")
+		return
+	}
+
+	var req UpdateSharedAccountOwnerRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+
+	var override *bool
+	switch req.Mode {
+	case "enabled":
+		value := true
+		override = &value
+	case "disabled":
+		value := false
+		override = &value
+	case "auto":
+		override = nil
+	}
+	if _, err := h.attrService.SetSharedAccountOwnerOverride(c.Request.Context(), userID, override); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+
+	user, err := h.adminService.GetUser(c.Request.Context(), userID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, h.userDTO(c.Request.Context(), user))
 }
 
 // Delete handles deleting a user
@@ -350,7 +420,7 @@ func (h *UserHandler) UpdateBalance(c *gin.Context) {
 		if execErr != nil {
 			return nil, execErr
 		}
-		return dto.UserFromServiceAdmin(user), nil
+		return h.userDTO(ctx, user), nil
 	})
 }
 
@@ -384,7 +454,7 @@ func (h *UserHandler) UpdatePoints(c *gin.Context) {
 		if execErr != nil {
 			return nil, execErr
 		}
-		return dto.UserFromServiceAdmin(user), nil
+		return h.userDTO(ctx, user), nil
 	})
 }
 
@@ -418,7 +488,7 @@ func (h *UserHandler) UpdateLoadFactorCredits(c *gin.Context) {
 		if execErr != nil {
 			return nil, execErr
 		}
-		return dto.UserFromServiceAdmin(user), nil
+		return h.userDTO(ctx, user), nil
 	})
 }
 
