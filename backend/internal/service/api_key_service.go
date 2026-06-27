@@ -414,6 +414,8 @@ func primaryGroupIDFromRoutes(routes []APIKeyGroupRoute) *int64 {
 }
 
 func (s *APIKeyService) validateAPIKeyGroupRoutes(ctx context.Context, user *User, routes []APIKeyGroupRoute) error {
+	platform := ""
+	platformSet := false
 	for i := range routes {
 		group, err := s.groupRepo.GetByID(ctx, routes[i].GroupID)
 		if err != nil {
@@ -422,9 +424,23 @@ func (s *APIKeyService) validateAPIKeyGroupRoutes(ctx context.Context, user *Use
 		if !s.canUserBindGroup(ctx, user, group) {
 			return ErrGroupNotAllowed
 		}
+		groupPlatform := strings.TrimSpace(group.Platform)
+		if !platformSet {
+			platform = groupPlatform
+			platformSet = true
+		} else if !strings.EqualFold(platform, groupPlatform) {
+			return ErrAPIKeyGroupRouteInvalid
+		}
 		routes[i].Group = group
 	}
 	return nil
+}
+
+func normalizeAPIKeyGroupRoutePriority(routes []APIKeyGroupRoute) {
+	for i := range routes {
+		routes[i].Priority = (i + 1) * 100
+		routes[i].Weight = 1
+	}
 }
 
 // Create 鍒涘缓API Key
@@ -475,6 +491,7 @@ func (s *APIKeyService) Create(ctx context.Context, userID int64, req CreateAPIK
 		if err := s.validateAPIKeyGroupRoutes(ctx, user, groupRoutes); err != nil {
 			return nil, err
 		}
+		normalizeAPIKeyGroupRoutePriority(groupRoutes)
 		primaryGroupID := primaryGroupIDFromRoutes(groupRoutes)
 		if primaryGroupID == nil {
 			return nil, ErrAPIKeyGroupRouteInvalid
@@ -702,6 +719,7 @@ func (s *APIKeyService) Update(ctx context.Context, id int64, userID int64, req 
 			if err := s.validateAPIKeyGroupRoutes(ctx, user, groupRoutes); err != nil {
 				return nil, err
 			}
+			normalizeAPIKeyGroupRoutePriority(groupRoutes)
 			primaryGroupID := primaryGroupIDFromRoutes(groupRoutes)
 			if primaryGroupID == nil {
 				return nil, ErrAPIKeyGroupRouteInvalid

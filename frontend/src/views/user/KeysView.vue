@@ -101,23 +101,43 @@
               <button
                 :ref="(el) => setGroupButtonRef(row.id, el)"
                 @click="openGroupSelector(row)"
-                class="-mx-2 -my-1 flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1 transition-all duration-200 hover:bg-gray-100 dark:hover:bg-dark-700"
+                class="-mx-2 -my-1 flex min-w-44 cursor-pointer items-start justify-between gap-2 rounded-lg px-2 py-1 transition-all duration-200 hover:bg-gray-100 dark:hover:bg-dark-700"
                 :title="t('keys.clickToChangeGroup')"
               >
-                <GroupBadge
-                  v-if="row.group"
-                  :name="row.group.name"
-                  :platform="row.group.platform"
-                  :subscription-type="row.group.subscription_type"
-                  :rate-multiplier="row.group.rate_multiplier"
-                  :user-rate-multiplier="userGroupRates[row.group.id]"
-                />
-                <span v-else class="text-sm text-gray-400 dark:text-dark-500">{{
-                  t('keys.noGroup')
-                }}</span>
-                <span class="text-xs text-gray-500 dark:text-gray-400">{{ t('keys.selectGroup') }}</span>
+                <div class="min-w-0">
+                  <div v-if="keyRouteGroups(row).length > 0" class="flex max-h-24 flex-col items-start gap-1 overflow-hidden">
+                    <div
+                      v-for="(group, index) in keyRouteGroups(row).slice(0, 3)"
+                      :key="group.id"
+                      class="flex max-w-full items-center gap-1"
+                    >
+                      <span class="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary-50 text-xs font-medium text-primary-700 dark:bg-primary-900/30 dark:text-primary-300">
+                        {{ index + 1 }}
+                      </span>
+                      <GroupBadge
+                        :name="group.name"
+                        :platform="group.platform"
+                        :scope="group.scope"
+                        :subscription-type="group.subscription_type"
+                        :rate-multiplier="group.rate_multiplier"
+                        :user-rate-multiplier="userGroupRates[group.id]"
+                        :always-show-rate="true"
+                        class="min-w-0 max-w-full"
+                      />
+                    </div>
+                    <span
+                      v-if="keyRouteGroups(row).length > 3"
+                      class="inline-flex items-center rounded-md bg-gray-100 px-1.5 py-0.5 text-xs font-medium text-gray-600 dark:bg-dark-600 dark:text-gray-300"
+                    >
+                      +{{ keyRouteGroups(row).length - 3 }}
+                    </span>
+                  </div>
+                  <span v-else class="text-sm text-gray-400 dark:text-dark-500">{{
+                    t('keys.noGroup')
+                  }}</span>
+                </div>
                 <svg
-                  class="h-3.5 w-3.5 text-gray-400 opacity-60 transition-opacity group-hover/dropdown:opacity-100"
+                  class="mt-1 h-3.5 w-3.5 shrink-0 text-gray-400 opacity-60 transition-opacity group-hover/dropdown:opacity-100"
                   fill="none"
                   stroke="currentColor"
                   viewBox="0 0 24 24"
@@ -411,172 +431,95 @@
           />
         </div>
 
-        <div>
-          <label class="input-label">{{ t('keys.groupLabel') }}</label>
-          <Select
-            v-model="formData.group_id"
-            :options="groupOptions"
-            :placeholder="t('keys.selectGroup')"
-            :searchable="true"
-            :search-placeholder="t('keys.searchGroup')"
-            data-tour="key-form-group"
-          >
-            <template #selected="{ option }">
-              <GroupBadge
-                v-if="option"
-                :name="(option as unknown as GroupOption).label"
-                :platform="(option as unknown as GroupOption).platform"
-                :scope="(option as unknown as GroupOption).scope"
-                :subscription-type="(option as unknown as GroupOption).subscriptionType"
-                :rate-multiplier="(option as unknown as GroupOption).rate"
-                :user-rate-multiplier="(option as unknown as GroupOption).userRate"
-              />
-              <span v-else class="text-gray-400">{{ t('keys.selectGroup') }}</span>
-            </template>
-            <template #option="{ option, selected }">
-              <GroupOptionItem
-                :name="(option as unknown as GroupOption).label"
-                :platform="(option as unknown as GroupOption).platform"
-                :scope="(option as unknown as GroupOption).scope"
-                :subscription-type="(option as unknown as GroupOption).subscriptionType"
-                :rate-multiplier="(option as unknown as GroupOption).rate"
-                :user-rate-multiplier="(option as unknown as GroupOption).userRate"
-                :description="(option as unknown as GroupOption).description"
-                :selected="selected"
-              />
-            </template>
-          </Select>
-        </div>
-
-        <div class="space-y-4 rounded-xl border border-gray-200 bg-gray-50/60 p-4 dark:border-dark-700 dark:bg-dark-900/20 sm:p-5">
-          <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div class="min-w-0">
-              <label class="text-sm font-medium text-gray-700 dark:text-dark-200">多分组路由</label>
-              <p class="mt-1 max-w-2xl text-xs leading-5 text-gray-500 dark:text-dark-400">
-                开启后可按优先级和权重为同一个 Key 配置多个分组
-              </p>
+        <div class="space-y-3" data-tour="key-form-group">
+          <div class="flex items-center justify-between gap-3">
+            <label class="input-label mb-0">{{ t('keys.groupLabel') }}</label>
+            <div class="flex items-center gap-2">
+              <span class="text-xs text-gray-500 dark:text-dark-400">已选 {{ selectedRouteGroupIds.length }}</span>
+              <button
+                v-if="selectedRouteGroupIds.length > 0"
+                type="button"
+                class="rounded-md px-2 py-1 text-xs text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-700 dark:text-dark-400 dark:hover:bg-dark-700 dark:hover:text-dark-200"
+                @click="setFormGroupIds([])"
+              >
+                清空
+              </button>
             </div>
-            <button
-              type="button"
-              @click="toggleGroupRoutes"
-              :class="[
-                'relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors',
-                formData.enable_group_routes ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600'
-              ]"
-            >
-              <span
-                :class="[
-                  'inline-block h-4 w-4 transform rounded-full bg-white transition-transform',
-                  formData.enable_group_routes ? 'translate-x-6' : 'translate-x-1'
-                ]"
-              />
-            </button>
           </div>
 
-          <div v-if="formData.enable_group_routes" class="space-y-3">
+          <div
+            v-if="selectedRouteGroups.length > 0"
+            class="flex max-h-32 flex-col items-start gap-1 overflow-y-auto rounded-lg border border-gray-200 bg-gray-50 p-2 dark:border-dark-600 dark:bg-dark-800/70"
+          >
             <div
-              v-for="(route, index) in formData.group_routes"
-              :key="index"
-              class="space-y-3 rounded-xl border border-gray-200 bg-white p-3 shadow-sm dark:border-dark-700 dark:bg-dark-800/70 sm:p-4"
+              v-for="(group, index) in selectedRouteGroups"
+              :key="group.id"
+              class="flex max-w-full items-center gap-1"
             >
-              <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <div class="flex min-w-0 items-center gap-2">
-                  <span class="inline-flex h-6 min-w-6 items-center justify-center rounded-full bg-primary-50 px-2 text-xs font-medium text-primary-700 dark:bg-primary-900/30 dark:text-primary-300">
-                    {{ index + 1 }}
-                  </span>
-                  <span class="text-sm font-medium text-gray-700 dark:text-dark-200">路由配置</span>
-                </div>
-                <div class="flex items-center gap-2">
-                  <label class="inline-flex h-10 items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 text-sm text-gray-600 dark:border-dark-600 dark:bg-dark-700/60 dark:text-dark-300">
-                    <input
-                      v-model="route.enabled"
-                      type="checkbox"
-                      class="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
-                    />
-                    启用
-                  </label>
-                  <button
-                    type="button"
-                    class="btn btn-secondary h-10 px-3"
-                    :disabled="formData.group_routes.length <= 1"
-                    @click="removeGroupRoute(index)"
-                  >
-                    <Icon name="trash" size="sm" />
-                  </button>
-                </div>
-              </div>
+              <span class="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary-50 text-xs font-medium text-primary-700 dark:bg-primary-900/30 dark:text-primary-300">
+                {{ index + 1 }}
+              </span>
+              <GroupBadge
+                :name="group.name"
+                :platform="group.platform"
+                :scope="group.scope"
+                :subscription-type="group.subscription_type"
+                :rate-multiplier="group.rate_multiplier"
+                :user-rate-multiplier="userGroupRates[group.id]"
+                :always-show-rate="true"
+                class="min-w-0 max-w-full"
+              />
+            </div>
+          </div>
 
-              <div class="grid gap-3 md:grid-cols-2 lg:grid-cols-[minmax(16rem,1fr)_8rem_8rem_9rem]">
-                <div class="md:col-span-2 lg:col-span-1">
-                  <label class="mb-1 block text-xs text-gray-500 dark:text-dark-400">分组</label>
-                  <Select
-                    v-model="route.group_id"
-                    :options="groupOptions"
-                    :searchable="true"
-                    :search-placeholder="t('keys.searchGroup')"
-                  >
-                    <template #selected="{ option }">
-                      <GroupBadge
-                        v-if="option"
-                        :name="(option as unknown as GroupOption).label"
-                        :platform="(option as unknown as GroupOption).platform"
-                        :scope="(option as unknown as GroupOption).scope"
-                        :subscription-type="(option as unknown as GroupOption).subscriptionType"
-                        :rate-multiplier="(option as unknown as GroupOption).rate"
-                        :user-rate-multiplier="(option as unknown as GroupOption).userRate"
-                      />
-                      <span v-else class="text-gray-400">{{ t('keys.selectGroup') }}</span>
-                    </template>
-                    <template #option="{ option, selected }">
-                      <GroupOptionItem
-                        :name="(option as unknown as GroupOption).label"
-                        :platform="(option as unknown as GroupOption).platform"
-                        :scope="(option as unknown as GroupOption).scope"
-                        :subscription-type="(option as unknown as GroupOption).subscriptionType"
-                        :rate-multiplier="(option as unknown as GroupOption).rate"
-                        :user-rate-multiplier="(option as unknown as GroupOption).userRate"
-                        :description="(option as unknown as GroupOption).description"
-                        :selected="selected"
-                      />
-                    </template>
-                  </Select>
-                </div>
-                <div>
-                  <label class="mb-1 block text-xs text-gray-500 dark:text-dark-400">优先级</label>
-                  <input
-                    v-model.number="route.priority"
-                    type="number"
-                    min="0"
-                    step="1"
-                    class="input"
-                  />
-                </div>
-                <div>
-                  <label class="mb-1 block text-xs text-gray-500 dark:text-dark-400">权重</label>
-                  <input
-                    v-model.number="route.weight"
-                    type="number"
-                    min="1"
-                    step="1"
-                    class="input"
-                  />
-                </div>
-                <div>
-                  <label class="mb-1 block text-xs text-gray-500 dark:text-dark-400">冷却秒数</label>
-                  <input
-                    v-model.number="route.cooldown_seconds"
-                    type="number"
-                    min="0"
-                    step="1"
-                    class="input"
-                  />
-                </div>
+          <div class="rounded-lg border border-gray-200 bg-white dark:border-dark-700 dark:bg-dark-800">
+            <div class="border-b border-gray-100 p-2 dark:border-dark-700">
+              <div class="relative">
+                <svg class="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                </svg>
+                <input
+                  v-model="formGroupSearchQuery"
+                  type="text"
+                  class="w-full rounded-lg border border-gray-200 bg-gray-50 py-1.5 pl-8 pr-3 text-sm text-gray-900 placeholder-gray-400 outline-none focus:border-primary-300 focus:ring-1 focus:ring-primary-300 dark:border-dark-600 dark:bg-dark-700 dark:text-white dark:placeholder-gray-500 dark:focus:border-primary-600 dark:focus:ring-primary-600"
+                  :placeholder="t('keys.searchGroup')"
+                />
               </div>
             </div>
-            <button type="button" class="btn btn-secondary w-full sm:w-auto" @click="addGroupRoute">
-              <Icon name="plus" size="sm" class="mr-2" />
-              添加路由
-            </button>
+            <div class="grid max-h-64 grid-cols-1 gap-1 overflow-y-auto p-2 sm:grid-cols-2">
+              <label
+                v-for="option in formGroupOptions"
+                :key="option.value"
+                class="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-2 transition-colors hover:bg-gray-50 dark:hover:bg-dark-700"
+                :title="option.description || undefined"
+              >
+                <input
+                  type="checkbox"
+                  class="h-4 w-4 shrink-0 rounded border-gray-300 text-primary-600 focus:ring-primary-500 dark:border-dark-500"
+                  :checked="selectedRouteGroupIds.includes(option.value)"
+                  @change="handleFormGroupToggle(option.value, ($event.target as HTMLInputElement).checked)"
+                />
+                <span
+                  v-if="selectedRouteGroupIds.includes(option.value)"
+                  class="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary-50 text-xs font-medium text-primary-700 dark:bg-primary-900/30 dark:text-primary-300"
+                >
+                  {{ selectedRouteGroupIds.indexOf(option.value) + 1 }}
+                </span>
+                <GroupOptionItem
+                  :name="option.label"
+                  :platform="option.platform"
+                  :scope="option.scope"
+                  :subscription-type="option.subscriptionType"
+                  :rate-multiplier="option.rate"
+                  :user-rate-multiplier="option.userRate"
+                  :description="option.description"
+                  :selected="selectedRouteGroupIds.includes(option.value)"
+                />
+              </label>
+              <div v-if="formGroupOptions.length === 0" class="py-4 text-center text-sm text-gray-400 dark:text-gray-500 sm:col-span-2">
+                {{ t('keys.noGroupFound') }}
+              </div>
+            </div>
           </div>
         </div>
 
@@ -1148,20 +1091,31 @@
         </div>
         <!-- Group list -->
         <div class="max-h-80 overflow-y-auto p-1.5">
-          <button
+          <label
             v-for="option in filteredGroupOptions"
             :key="option.value ?? 'null'"
-            @click="changeGroup(selectedKeyForGroup!, option.value)"
             :class="[
-              'flex w-full items-center justify-between rounded-lg px-3 py-2.5 text-sm transition-colors',
+              'flex w-full cursor-pointer items-center gap-2 rounded-lg px-3 py-2.5 text-sm transition-colors',
               'border-b border-gray-100 last:border-0 dark:border-dark-700',
-              selectedKeyForGroup?.group_id === option.value ||
-              (!selectedKeyForGroup?.group_id && option.value === null)
+              selectedDropdownGroupIds.includes(option.value)
                 ? 'bg-primary-50 dark:bg-primary-900/20'
                 : 'hover:bg-gray-100 dark:hover:bg-dark-700'
             ]"
             :title="option.description || undefined"
           >
+            <input
+              type="checkbox"
+              class="h-4 w-4 shrink-0 rounded border-gray-300 text-primary-600 focus:ring-primary-500 dark:border-dark-500"
+              :checked="selectedDropdownGroupIds.includes(option.value)"
+              @change="handleDropdownGroupToggle(option.value, ($event.target as HTMLInputElement).checked)"
+              @click.stop
+            />
+            <span
+              v-if="selectedDropdownGroupIds.includes(option.value)"
+              class="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary-50 text-xs font-medium text-primary-700 dark:bg-primary-900/30 dark:text-primary-300"
+            >
+              {{ selectedDropdownGroupIds.indexOf(option.value) + 1 }}
+            </span>
             <GroupOptionItem
               :name="option.label"
               :platform="option.platform"
@@ -1170,16 +1124,26 @@
               :rate-multiplier="option.rate"
               :user-rate-multiplier="option.userRate"
               :description="option.description"
-              :selected="
-                selectedKeyForGroup?.group_id === option.value ||
-                (!selectedKeyForGroup?.group_id && option.value === null)
-              "
+              :selected="selectedDropdownGroupIds.includes(option.value)"
             />
-          </button>
+          </label>
           <!-- Empty state when search has no results -->
           <div v-if="filteredGroupOptions.length === 0" class="py-4 text-center text-sm text-gray-400 dark:text-gray-500">
             {{ t('keys.noGroupFound') }}
           </div>
+        </div>
+        <div class="flex items-center justify-between gap-2 border-t border-gray-100 p-2 dark:border-dark-700">
+          <button type="button" class="btn btn-secondary text-sm" @click="clearDropdownGroups">
+            清空
+          </button>
+          <button
+            type="button"
+            class="btn btn-primary text-sm"
+            :disabled="!selectedKeyForGroup || selectedDropdownGroupIds.length === 0"
+            @click="applyDropdownGroups"
+          >
+            保存
+          </button>
         </div>
       </div>
     </Teleport>
@@ -1210,7 +1174,7 @@ import TablePageLayout from '@/components/layout/TablePageLayout.vue'
 	import EndpointPopover from '@/components/keys/EndpointPopover.vue'
 	import GroupBadge from '@/components/common/GroupBadge.vue'
 	import GroupOptionItem from '@/components/common/GroupOptionItem.vue'
-	import type { ApiKey, ApiKeyGroupRoute, Group, PublicSettings, SubscriptionType, GroupPlatform, GroupScope } from '@/types'
+	import type { ApiKey, ApiKeyGroupRoute, Group, PublicSettings, GroupPlatform } from '@/types'
 import type { Column } from '@/components/common/types'
 import type { BatchApiKeyUsageStats } from '@/api/usage'
 import { formatDateTime } from '@/utils/format'
@@ -1225,33 +1189,6 @@ const formatDateTimeLocal = (isoDate: string): string => {
   const pad = (n: number) => n.toString().padStart(2, '0')
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`
 }
-
-interface GroupOption {
-  value: number
-  label: string
-  description: string | null
-  rate: number
-  userRate: number | null
-  subscriptionType: SubscriptionType
-  platform: GroupPlatform
-  scope?: GroupScope
-}
-
-interface ApiKeyGroupRouteForm {
-  group_id: number | null
-  priority: number
-  weight: number
-  enabled: boolean
-  cooldown_seconds: number
-}
-
-const defaultGroupRoute = (groupId: number | null = null): ApiKeyGroupRouteForm => ({
-  group_id: groupId,
-  priority: 100,
-  weight: 1,
-  enabled: true,
-  cooldown_seconds: 30
-})
 
 const appStore = useAppStore()
 const onboardingStore = useOnboardingStore()
@@ -1310,6 +1247,7 @@ const publicSettings = ref<PublicSettings | null>(null)
 const apiEndpointBaseUrl = computed(() => publicSettings.value?.api_base_url || window.location.origin)
 const dropdownRef = ref<HTMLElement | null>(null)
 const dropdownPosition = ref<{ top?: number; bottom?: number; left: number } | null>(null)
+const dropdownGroupIds = ref<number[]>([])
 const groupButtonRefs = ref<Map<number, HTMLElement>>(new Map())
 let abortController: AbortController | null = null
 
@@ -1344,8 +1282,7 @@ const formData = ref({
   rate_limit_5h: null as number | null,
   rate_limit_1d: null as number | null,
   rate_limit_7d: null as number | null,
-  enable_group_routes: false,
-  group_routes: [defaultGroupRoute()] as ApiKeyGroupRouteForm[],
+  group_ids: [] as number[],
   enable_expiration: false,
   expiration_preset: '30' as '7' | '30' | '90' | 'custom',
   expiration_date: ''
@@ -1423,101 +1360,128 @@ const groupOptions = computed(() =>
   }))
 )
 
-const createRoutesFromKey = (key: ApiKey): ApiKeyGroupRouteForm[] => {
-  if (key.group_routes && key.group_routes.length > 0) {
-    return key.group_routes.map((route) => ({
-      group_id: route.group_id,
-      priority: route.priority,
-      weight: route.weight,
-      enabled: route.enabled === false ? false : true,
-      cooldown_seconds: route.cooldown_seconds
-    }))
+const groupById = computed(() => {
+  const map = new Map<number, Group>()
+  for (const group of groups.value) {
+    map.set(group.id, group)
   }
-  return [defaultGroupRoute(key.group_id)]
-}
+  return map
+})
 
-const toggleGroupRoutes = () => {
-  formData.value.enable_group_routes = !formData.value.enable_group_routes
-  if (
-    formData.value.enable_group_routes &&
-    (formData.value.group_routes.length === 0 || formData.value.group_routes.every((route) => route.group_id === null))
-  ) {
-    formData.value.group_routes = [defaultGroupRoute(formData.value.group_id)]
+const uniqueGroupIds = (ids: number[]): number[] => {
+  const seen = new Set<number>()
+  const orderedIds: number[] = []
+  for (const id of ids) {
+    if (seen.has(id)) continue
+    seen.add(id)
+    orderedIds.push(id)
   }
+  return orderedIds
 }
 
-const addGroupRoute = () => {
-  formData.value.group_routes.push(defaultGroupRoute())
-}
-
-const removeGroupRoute = (index: number) => {
-  if (formData.value.group_routes.length <= 1) return
-  formData.value.group_routes.splice(index, 1)
-}
-
-const normalizeGroupRoutes = (): ApiKeyGroupRoute[] | null => {
-  if (!formData.value.enable_group_routes) {
-    if (formData.value.group_id === null) return []
-    return [{
-      group_id: formData.value.group_id,
-      priority: 100,
-      weight: 1,
-      enabled: true,
-      cooldown_seconds: 30
-    }]
-  }
-
-  const routes: ApiKeyGroupRoute[] = []
-  const seenGroupIds = new Set<number>()
-  for (const route of formData.value.group_routes) {
-    if (route.group_id === null) {
-      appStore.showError('多分组路由中存在未选择的分组')
-      return null
-    }
-    if (seenGroupIds.has(route.group_id)) {
-      appStore.showError('多分组路由不能包含重复分组')
-      return null
-    }
-    if (!Number.isInteger(route.priority) || route.priority < 0) {
-      appStore.showError('多分组路由优先级必须是不小于 0 的整数')
-      return null
-    }
-    if (!Number.isInteger(route.weight) || route.weight < 1) {
-      appStore.showError('多分组路由权重必须是不小于 1 的整数')
-      return null
-    }
-    if (!Number.isInteger(route.cooldown_seconds) || route.cooldown_seconds < 0) {
-      appStore.showError('多分组路由冷却秒数必须是不小于 0 的整数')
-      return null
-    }
-    seenGroupIds.add(route.group_id)
-    routes.push({
-      group_id: route.group_id,
-      priority: route.priority,
-      weight: route.weight,
-      enabled: route.enabled === true,
-      cooldown_seconds: route.cooldown_seconds
+const routeGroupIdsFromKey = (key: ApiKey): number[] => {
+  const routeIds = (key.group_routes || [])
+    .filter((route) => route.enabled !== false)
+    .slice()
+    .sort((a, b) => {
+      if (a.priority !== b.priority) return a.priority - b.priority
+      if (a.weight !== b.weight) return b.weight - a.weight
+      return a.group_id - b.group_id
     })
-  }
+    .map((route) => route.group_id)
+  if (routeIds.length > 0) return uniqueGroupIds(routeIds)
+  return key.group_id ? [key.group_id] : []
+}
 
-  return routes
+const setFormGroupIds = (ids: number[]) => {
+  const orderedIds = uniqueGroupIds(ids)
+  formData.value.group_ids = orderedIds
+  formData.value.group_id = orderedIds[0] ?? null
+}
+
+const selectedRouteGroupIds = computed(() => formData.value.group_ids)
+
+const selectedRouteGroups = computed(() =>
+  selectedRouteGroupIds.value
+    .map((id) => groupById.value.get(id))
+    .filter((group): group is Group => !!group)
+)
+
+const selectedRoutePlatform = computed<GroupPlatform | null>(() => selectedRouteGroups.value[0]?.platform ?? null)
+
+const keyRouteGroups = (key: ApiKey): Group[] => {
+  const groupsForKey = routeGroupIdsFromKey(key)
+    .map((id) => groupById.value.get(id) || (key.group?.id === id ? key.group : null) || (key.group_routes || []).find((route) => route.group?.id === id)?.group || null)
+    .filter((group): group is Group => !!group)
+  if (groupsForKey.length > 0) return groupsForKey
+  return key.group ? [key.group] : []
+}
+
+const normalizeGroupRoutes = (groupIds: number[]): ApiKeyGroupRoute[] | null => {
+  const orderedGroupIds = uniqueGroupIds(groupIds)
+  const selectedGroups = orderedGroupIds
+    .map((id) => groupById.value.get(id))
+    .filter((group): group is Group => !!group)
+  if (selectedGroups.length !== orderedGroupIds.length) {
+    appStore.showError(t('keys.groupRequired'))
+    return null
+  }
+  const platform = selectedGroups[0]?.platform
+  if (platform && selectedGroups.some((group) => group.platform !== platform)) {
+    appStore.showError('只能选择同一开发商的分组')
+    return null
+  }
+  return orderedGroupIds.map((groupId, index) => ({
+    group_id: groupId,
+    priority: (index + 1) * 100,
+    weight: 1,
+    enabled: true,
+    cooldown_seconds: 30
+  }))
 }
 
 const resolvePrimaryGroupId = (routes: ApiKeyGroupRoute[] | null): number | null => {
-  if (!routes || routes.length === 0) return formData.value.group_id
-  const enabledRoutes = routes.filter((route) => route.enabled)
-  if (enabledRoutes.length === 0) return formData.value.group_id
-  return enabledRoutes.reduce((best, route) => (
-    route.priority < best.priority ? route : best
-  )).group_id
+  return routes?.[0]?.group_id ?? null
 }
 
-// Group dropdown search
+const formGroupSearchQuery = ref('')
 const groupSearchQuery = ref('')
+
+const formGroupOptions = computed(() => {
+  const query = formGroupSearchQuery.value.trim().toLowerCase()
+  return groupOptions.value.filter((opt) => {
+    if (selectedRoutePlatform.value && opt.platform !== selectedRoutePlatform.value) return false
+    if (!query) return true
+    return opt.label.toLowerCase().includes(query) ||
+      (opt.description && opt.description.toLowerCase().includes(query))
+  })
+})
+
+const handleFormGroupToggle = (groupId: number, checked: boolean) => {
+  const group = groupById.value.get(groupId)
+  if (checked && selectedRoutePlatform.value && group && group.platform !== selectedRoutePlatform.value) {
+    appStore.showError('只能选择同一开发商的分组')
+    return
+  }
+  const nextIds = checked
+    ? [...selectedRouteGroupIds.value, groupId]
+    : selectedRouteGroupIds.value.filter((id) => id !== groupId)
+  setFormGroupIds(nextIds)
+}
+
+const selectedDropdownGroupIds = computed(() => dropdownGroupIds.value)
+const selectedDropdownPlatform = computed<GroupPlatform | null>(() => {
+  const firstGroup = selectedDropdownGroupIds.value
+    .map((id) => groupById.value.get(id))
+    .find((group): group is Group => !!group)
+  return firstGroup?.platform ?? null
+})
+
 const filteredGroupOptions = computed(() => {
   const query = groupSearchQuery.value.trim().toLowerCase()
-  if (!query) return groupOptions.value
   return groupOptions.value.filter((opt) => {
+    if (selectedDropdownPlatform.value && opt.platform !== selectedDropdownPlatform.value) return false
+    if (!query) return true
     return opt.label.toLowerCase().includes(query) ||
       (opt.description && opt.description.toLowerCase().includes(query))
   })
@@ -1653,10 +1617,10 @@ const editKey = (key: ApiKey) => {
   selectedKey.value = key
   const hasIPRestriction = (key.ip_whitelist?.length > 0) || (key.ip_blacklist?.length > 0)
   const hasExpiration = !!key.expires_at
-  const groupRoutes = createRoutesFromKey(key)
+  const groupIds = routeGroupIdsFromKey(key)
   formData.value = {
     name: key.name,
-    group_id: key.group_id,
+    group_id: groupIds[0] ?? key.group_id,
     status: key.status === 'quota_exhausted' || key.status === 'expired' ? 'inactive' : key.status,
     use_custom_key: false,
     custom_key: '',
@@ -1669,8 +1633,7 @@ const editKey = (key: ApiKey) => {
     rate_limit_5h: key.rate_limit_5h || null,
     rate_limit_1d: key.rate_limit_1d || null,
     rate_limit_7d: key.rate_limit_7d || null,
-    enable_group_routes: (key.group_routes?.length ?? 0) > 1,
-    group_routes: groupRoutes,
+    group_ids: groupIds,
     enable_expiration: hasExpiration,
     expiration_preset: 'custom',
     expiration_date: key.expires_at ? formatDateTimeLocal(key.expires_at) : ''
@@ -1718,26 +1681,40 @@ const openGroupSelector = (key: ApiKey) => {
       }
     }
     groupSelectorKeyId.value = key.id
+    dropdownGroupIds.value = routeGroupIdsFromKey(key)
     groupSearchQuery.value = ''
   }
 }
 
-const changeGroup = async (key: ApiKey, newGroupId: number | null) => {
-  groupSelectorKeyId.value = null
-  dropdownPosition.value = null
-  if (key.group_id === newGroupId) return
+const handleDropdownGroupToggle = (groupId: number, checked: boolean) => {
+  const group = groupById.value.get(groupId)
+  if (checked && selectedDropdownPlatform.value && group && group.platform !== selectedDropdownPlatform.value) {
+    appStore.showError('只能选择同一开发商的分组')
+    return
+  }
+  dropdownGroupIds.value = checked
+    ? uniqueGroupIds([...dropdownGroupIds.value, groupId])
+    : dropdownGroupIds.value.filter((id) => id !== groupId)
+}
+
+const clearDropdownGroups = () => {
+  dropdownGroupIds.value = []
+}
+
+const applyDropdownGroups = async () => {
+  const key = selectedKeyForGroup.value
+  if (!key || dropdownGroupIds.value.length === 0) return
+  const routes = normalizeGroupRoutes(dropdownGroupIds.value)
+  if (routes === null) return
+  const primaryGroupId = resolvePrimaryGroupId(routes)
 
   try {
     await keysAPI.update(key.id, {
-      group_id: newGroupId,
-      group_routes: newGroupId === null ? [] : [{
-        group_id: newGroupId,
-        priority: 100,
-        weight: 1,
-        enabled: true,
-        cooldown_seconds: 30
-      }]
+      group_id: primaryGroupId,
+      group_routes: routes
     })
+    groupSelectorKeyId.value = null
+    dropdownPosition.value = null
     appStore.showSuccess(t('keys.groupChangedSuccess'))
     loadApiKeys()
   } catch (error) {
@@ -1751,6 +1728,7 @@ const closeGroupSelector = (event: MouseEvent) => {
   if (!target.closest('.group\\/dropdown') && !dropdownRef.value?.contains(target)) {
     groupSelectorKeyId.value = null
     dropdownPosition.value = null
+    dropdownGroupIds.value = []
   }
 }
 
@@ -1760,7 +1738,7 @@ const confirmDelete = (key: ApiKey) => {
 }
 
 const handleSubmit = async () => {
-  const groupRoutes = normalizeGroupRoutes()
+  const groupRoutes = normalizeGroupRoutes(formData.value.group_ids)
   if (groupRoutes === null) {
     return
   }
@@ -1905,8 +1883,7 @@ const closeModals = () => {
     rate_limit_5h: null,
     rate_limit_1d: null,
     rate_limit_7d: null,
-    enable_group_routes: false,
-    group_routes: [defaultGroupRoute()],
+    group_ids: [],
     enable_expiration: false,
     expiration_preset: '30',
     expiration_date: ''
