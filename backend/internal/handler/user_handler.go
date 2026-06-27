@@ -3,7 +3,6 @@ package handler
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"strings"
 	"time"
 
@@ -555,18 +554,7 @@ func (h *UserHandler) canManageUserAccounts(ctx context.Context, user *service.U
 	if user == nil {
 		return false
 	}
-	if user.IsAdmin() {
-		return true
-	}
-	if h == nil || h.attrService == nil {
-		return false
-	}
-	allowed, err := h.attrService.UserHasSharedAccountOwnerTitle(ctx, user.ID)
-	if err != nil {
-		slog.Warn("failed to resolve shared account owner title", "error", err, "user_id", user.ID)
-		return false
-	}
-	return allowed
+	return true
 }
 
 func userProfileResponseFromService(user *service.User, identities service.UserIdentitySummarySet) userProfileResponse {

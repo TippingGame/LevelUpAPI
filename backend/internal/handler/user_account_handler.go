@@ -99,29 +99,8 @@ func (h *UserAccountHandler) SetRuntimeCapacityProviders(
 
 func (h *UserAccountHandler) RequireSharedAccountOwner() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		subject, ok := middleware2.GetAuthSubjectFromContext(c)
-		if !ok {
+		if _, ok := middleware2.GetAuthSubjectFromContext(c); !ok {
 			response.Unauthorized(c, "User not authenticated")
-			c.Abort()
-			return
-		}
-		if role, ok := middleware2.GetUserRoleFromContext(c); ok && role == service.RoleAdmin {
-			c.Next()
-			return
-		}
-		if h == nil || h.attrService == nil {
-			response.ErrorFrom(c, infraerrors.Forbidden("SHARED_ACCOUNT_OWNER_REQUIRED", "shared account owner title required"))
-			c.Abort()
-			return
-		}
-		allowed, err := h.attrService.UserHasSharedAccountOwnerTitle(c.Request.Context(), subject.UserID)
-		if err != nil {
-			response.ErrorFrom(c, err)
-			c.Abort()
-			return
-		}
-		if !allowed {
-			response.ErrorFrom(c, infraerrors.Forbidden("SHARED_ACCOUNT_OWNER_REQUIRED", "shared account owner title required"))
 			c.Abort()
 			return
 		}

@@ -72,7 +72,7 @@ const { t } = useI18n()
 const appStore = useAppStore()
 const authStore = useAuthStore()
 const user = computed(() => authStore.user)
-const canUseWithdrawal = computed(() => authStore.isAdmin || user.value?.can_manage_user_accounts === true)
+const canUseWithdrawal = computed(() => authStore.canManageUserAccounts)
 
 const contactInfo = ref('')
 const balanceLowNotifyEnabled = ref(false)

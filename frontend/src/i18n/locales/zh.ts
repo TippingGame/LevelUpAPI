@@ -403,7 +403,7 @@ export default {
     availableChannels: '可用渠道',
     subscriptions: '订阅管理',
     accounts: '账号管理',
-    myAccounts: '我的账号',
+    myAccounts: '共享号主',
     accountShare: '账号广场',
     proxies: 'IP管理',
     redeemCodes: '兑换码',
@@ -736,7 +736,7 @@ export default {
     addBalanceWithCode: '使用兑换码充值',
     accountSharingTitle: '个人账号用量',
     accountSharingSettlement: '结算流水',
-    ownedAccounts: '我的账号',
+    ownedAccounts: '共享号主',
     publicApproved: '公共已通过',
     publicPending: '公共待校验',
     publicSuspended: '公共已暂停',
@@ -769,8 +769,8 @@ export default {
 
   // User-owned Accounts
   userAccounts: {
-    title: '我的账号',
-    description: '管理自己添加的上游账号',
+    title: '共享号主',
+    description: '管理共享号主账号与上游资源',
     searchPlaceholder: '搜索账号名称...',
     createAccount: '新增账号',
     importAccounts: '导入',
@@ -1351,7 +1351,7 @@ export default {
     detailTitle: '渠道详情',
     closeDetail: '关闭',
     quotaPool: {
-      mineTitle: '我的账号容量池',
+      mineTitle: '共享号主容量池',
       mineSubtitle: '按分组汇总你自己拥有的账号额度和 OpenAI OAuth 窗口快照。',
       platformTitle: '平台共享容量池',
       platformSubtitle: '只展示公开余额分组中的平台公共账号与已批准公开共享账号。',
@@ -6458,10 +6458,10 @@ export default {
           enabledHint: '关闭后用户端侧边栏入口隐藏，接口返回空数组。',
         },
         userAccountImport: {
-          title: '我的账号导入',
-          description: '控制用户端“我的账号”单次导入账号的数量上限。',
+          title: '共享号主导入',
+          description: '控制用户端“共享号主”单次导入账号的数量上限。',
           limit: '单次导入上限',
-          limitHint: '用户端我的账号导入每次最多允许的账号数量。范围 1 - 1000，默认 100。',
+          limitHint: '用户端共享号主导入每次最多允许的账号数量。范围 1 - 1000，默认 100。',
         },
         riskControl: {
           title: '内容风控',

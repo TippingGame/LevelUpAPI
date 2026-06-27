@@ -203,7 +203,7 @@ const routes: RouteRecordRaw[] = [
       requiresAuth: true,
       requiresAdmin: false,
       requiresSharedAccountOwner: true,
-      title: 'My Accounts',
+      title: 'Shared Account Owner',
       titleKey: 'userAccounts.title',
       descriptionKey: 'userAccounts.description'
     }
@@ -779,7 +779,7 @@ function isBackendModePublicRouteAllowed(path: string, hasPendingAuthSession: bo
 }
 
 function userCanManageAccounts(authStore: ReturnType<typeof useAuthStore>): boolean {
-  return authStore.isAdmin || authStore.user?.can_manage_user_accounts === true
+  return authStore.canManageUserAccounts
 }
 
 router.beforeEach((to, _from, next) => {

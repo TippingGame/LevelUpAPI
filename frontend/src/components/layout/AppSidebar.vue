@@ -677,7 +677,7 @@ const flagRiskControl = makeSidebarFlag(FeatureFlags.riskControl)
 const flagOpsMonitoring = () => adminSettingsStore.opsMonitoringEnabled
 const flagAdminPayment = () => adminSettingsStore.paymentEnabled
 const externalPurchaseUrl = 'https://catfk.com/shop/M7KWPS96'
-const canManageUserAccounts = computed(() => authStore.isAdmin || authStore.user?.can_manage_user_accounts === true)
+const canManageUserAccounts = computed(() => authStore.canManageUserAccounts)
 
 // buildSelfNavItems 构造用户自己的导航项（用户端主菜单和管理员的"我的账户"子菜单共享这组声明）。
 // withDashboard=true 时包含仪表盘（用户端），false 时不含（管理员的个人区已经有独立仪表盘入口）。

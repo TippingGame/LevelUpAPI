@@ -85,7 +85,7 @@ export interface User {
   oidc_bound?: boolean
   wechat_bound?: boolean
   role: 'admin' | 'user' // User role for authorization
-  can_manage_user_accounts?: boolean // Whether the user can access My Accounts
+  can_manage_user_accounts?: boolean // Whether the user can access Shared Owner accounts
   balance: number // User balance for API usage
   points_balance?: number // User points balance for API usage and store purchases
   load_factor_credits_balance?: number // Remaining non-refundable load-factor credits

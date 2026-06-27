@@ -248,7 +248,7 @@ const props = withDefaults(defineProps<{
 }>(), {
   locked: false,
   lockedTitle: '共享号主专属',
-  lockedMessage: '提现功能仅对管理员授权的共享号主开放。'
+  lockedMessage: '共享号主可使用提现功能。'
 })
 
 const paymentMethods: ReceiptCodePaymentMethod[] = ['alipay', 'wechat']

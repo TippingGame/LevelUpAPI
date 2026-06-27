@@ -196,7 +196,7 @@
                   <div class="model-selector-shell">
                     <ModelWhitelistSelector v-model="allowedModels" platform="openai" />
                   </div>
-                  <small>复用“我的账号”新增账号的模型选择器，可搜索、多选并添加自定义模型。</small>
+                  <small>复用“共享号主”新增账号的模型选择器，可搜索、多选并添加自定义模型。</small>
                 </div>
 
                 <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-1">
@@ -417,7 +417,7 @@
                 @click="setFilter(ownerFilter)"
               >
                 <Icon name="userCircle" size="sm" />
-                <span>我的账号</span>
+                <span>共享号主</span>
                 <small>{{ authStore.isAdmin ? '全部号主' : '号主管理' }}</small>
               </button>
               <span class="filter-divider" aria-hidden="true"></span>
@@ -1494,7 +1494,7 @@ const filters: FilterOption[] = [
   { key: 'all', label: '全部', tab: 'all' },
   ...seatOptions.map((seat): FilterOption => ({ key: `seat-${seat}`, label: `${seat}人`, tab: 'all', seatLimit: seat }))
 ]
-const ownerFilter: FilterOption = { key: 'mine', label: '我的账号', tab: 'mine' }
+const ownerFilter: FilterOption = { key: 'mine', label: '共享号主', tab: 'mine' }
 const listingStatusFilterOptions: Array<{ value: ListingStatusFilterValue; label: string }> = [
   { value: '', label: '默认状态' },
   { value: 'available', label: '可用账号' },

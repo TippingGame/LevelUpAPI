@@ -403,7 +403,7 @@ export default {
     availableChannels: 'Available Channels',
     subscriptions: 'Subscriptions',
     accounts: 'Accounts',
-    myAccounts: 'My Accounts',
+    myAccounts: 'Shared Owner',
     accountShare: 'Account Plaza',
     proxies: 'Proxies',
     redeemCodes: 'Redeem Codes',
@@ -770,8 +770,8 @@ export default {
 
   // User-owned Accounts
   userAccounts: {
-    title: 'My Accounts',
-    description: 'Manage upstream accounts added by you',
+    title: 'Shared Owner',
+    description: 'Manage shared-owner accounts and upstream resources',
     searchPlaceholder: 'Search account name...',
     createAccount: 'New Account',
     importAccounts: 'Import',
@@ -6304,9 +6304,9 @@ export default {
         },
         userAccountImport: {
           title: 'My Account Import',
-          description: 'Control how many accounts a user can import into My Accounts in one request.',
+          description: 'Control how many accounts a user can import into Shared Owner in one request.',
           limit: 'Single import limit',
-          limitHint: 'Maximum account count for each My Accounts import. Range 1 - 1000, default 100.',
+          limitHint: 'Maximum account count for each Shared Owner import. Range 1 - 1000, default 100.',
         },
         riskControl: {
           title: 'Content Risk Control',
