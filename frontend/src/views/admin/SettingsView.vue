@@ -5689,139 +5689,6 @@
                     </a>
                   </p>
                 </div>
-                <div
-                  class="rounded-lg border border-gray-200 bg-gray-50 p-4 dark:border-dark-600 dark:bg-dark-800/60"
-                >
-                  <div class="flex items-center justify-between gap-4">
-                    <div>
-                      <label class="font-medium text-gray-900 dark:text-white">
-                        {{ t("admin.settings.payment.receiptCodeOssTitle") }}
-                      </label>
-                      <p class="text-sm text-gray-500 dark:text-gray-400">
-                        {{ t("admin.settings.payment.receiptCodeOssHint") }}
-                      </p>
-                    </div>
-                    <Toggle v-model="form.payment_receipt_code_oss_enabled" />
-                  </div>
-                  <div class="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-3">
-                    <div>
-                      <label class="input-label">
-                        {{ t("admin.settings.payment.receiptCodeOssEndpoint") }}
-                      </label>
-                      <input
-                        v-model="form.payment_receipt_code_oss_endpoint"
-                        type="url"
-                        class="input"
-                        placeholder="https://oss-cn-hangzhou.aliyuncs.com"
-                      />
-                    </div>
-                    <div>
-                      <label class="input-label">
-                        {{ t("admin.settings.payment.receiptCodeOssRegion") }}
-                      </label>
-                      <input
-                        v-model="form.payment_receipt_code_oss_region"
-                        type="text"
-                        class="input"
-                        placeholder="oss-cn-hangzhou"
-                      />
-                    </div>
-                    <div>
-                      <label class="input-label">
-                        {{ t("admin.settings.payment.receiptCodeOssBucket") }}
-                      </label>
-                      <input
-                        v-model="form.payment_receipt_code_oss_bucket"
-                        type="text"
-                        class="input"
-                        placeholder="sub2api"
-                      />
-                    </div>
-                    <div>
-                      <label class="input-label">
-                        {{ t("admin.settings.payment.receiptCodeOssAccessKey") }}
-                      </label>
-                      <input
-                        v-model="form.payment_receipt_code_oss_access_key_id"
-                        type="text"
-                        class="input"
-                        placeholder="LTAI..."
-                      />
-                    </div>
-                    <div>
-                      <label class="input-label">
-                        {{ t("admin.settings.payment.receiptCodeOssSecret") }}
-                      </label>
-                      <input
-                        v-model="form.payment_receipt_code_oss_secret_access_key"
-                        type="password"
-                        class="input"
-                        :placeholder="
-                          form.payment_receipt_code_oss_secret_access_key_configured
-                            ? t('admin.settings.payment.secretConfiguredPlaceholder')
-                            : 'AccessKey Secret'
-                        "
-                        autocomplete="new-password"
-                      />
-                    </div>
-                    <div>
-                      <label class="input-label">
-                        {{ t("admin.settings.payment.receiptCodeOssPrefix") }}
-                      </label>
-                      <input
-                        v-model="form.payment_receipt_code_oss_prefix"
-                        type="text"
-                        class="input"
-                        placeholder="receipt-codes/"
-                      />
-                    </div>
-                    <div>
-                      <label class="input-label">
-                        {{ t("admin.settings.payment.receiptCodeOssPublicBaseUrl") }}
-                      </label>
-                      <input
-                        v-model="form.payment_receipt_code_oss_public_base_url"
-                        type="url"
-                        class="input"
-                        placeholder="https://cdn.example.com/receipt-codes"
-                      />
-                    </div>
-                    <div>
-                      <label class="input-label">
-                        {{ t("admin.settings.payment.receiptCodeOssMaxSize") }}
-                      </label>
-                      <input
-                        v-model.number="form.payment_receipt_code_oss_max_size_bytes"
-                        type="number"
-                        min="1"
-                        max="5242880"
-                        class="input"
-                      />
-                    </div>
-                    <div>
-                      <label class="input-label">
-                        {{ t("admin.settings.payment.receiptCodeOssPresignExpire") }}
-                      </label>
-                      <input
-                        v-model.number="
-                          form.payment_receipt_code_oss_presign_expire_seconds
-                        "
-                        type="number"
-                        min="1"
-                        max="3600"
-                        class="input"
-                      />
-                    </div>
-                  </div>
-                  <label class="mt-3 flex items-center gap-2 text-sm text-gray-600 dark:text-gray-300">
-                    <input
-                      v-model="form.payment_receipt_code_oss_force_path_style"
-                      type="checkbox"
-                      class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
-                    />
-                    {{ t("admin.settings.payment.receiptCodeOssForcePathStyle") }}
-                  </label>
-                </div>
                 <!-- Row 5: Announcement + help image/text -->
                 <div>
                   <label class="input-label">{{
@@ -6361,6 +6228,164 @@
         </div>
         <!-- /Tab: Email -->
 
+        <!-- Tab: Receipt Code -->
+        <div v-show="activeTab === 'receiptCode'" class="space-y-6">
+          <div class="card">
+            <div
+              class="border-b border-gray-100 px-6 py-4 dark:border-dark-700"
+            >
+              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
+                {{ t("admin.settings.receiptCode.title") }}
+              </h2>
+              <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                {{ t("admin.settings.receiptCode.description") }}
+              </p>
+            </div>
+            <div class="space-y-6 p-6">
+              <div class="flex items-center justify-between gap-4">
+                <div>
+                  <label class="font-medium text-gray-900 dark:text-white">
+                    {{ t("admin.settings.receiptCode.storageEnabled") }}
+                  </label>
+                  <p class="text-sm text-gray-500 dark:text-gray-400">
+                    {{ t("admin.settings.receiptCode.storageEnabledHint") }}
+                  </p>
+                </div>
+                <Toggle v-model="form.payment_receipt_code_oss_enabled" />
+              </div>
+
+              <div class="grid grid-cols-1 gap-4 lg:grid-cols-3">
+                <div>
+                  <label class="input-label">
+                    {{ t("admin.settings.receiptCode.endpoint") }}
+                  </label>
+                  <input
+                    v-model="form.payment_receipt_code_oss_endpoint"
+                    type="url"
+                    class="input"
+                    placeholder="https://cos.ap-guangzhou.myqcloud.com"
+                  />
+                </div>
+                <div>
+                  <label class="input-label">
+                    {{ t("admin.settings.receiptCode.region") }}
+                  </label>
+                  <input
+                    v-model="form.payment_receipt_code_oss_region"
+                    type="text"
+                    class="input"
+                    placeholder="ap-guangzhou"
+                  />
+                </div>
+                <div>
+                  <label class="input-label">
+                    {{ t("admin.settings.receiptCode.bucket") }}
+                  </label>
+                  <input
+                    v-model="form.payment_receipt_code_oss_bucket"
+                    type="text"
+                    class="input"
+                    placeholder="example-1250000000"
+                  />
+                </div>
+                <div>
+                  <label class="input-label">
+                    {{ t("admin.settings.receiptCode.accessKey") }}
+                  </label>
+                  <input
+                    v-model="form.payment_receipt_code_oss_access_key_id"
+                    type="text"
+                    class="input"
+                    placeholder="SecretId / AccessKey ID"
+                  />
+                </div>
+                <div>
+                  <label class="input-label">
+                    {{ t("admin.settings.receiptCode.secretKey") }}
+                  </label>
+                  <input
+                    v-model="form.payment_receipt_code_oss_secret_access_key"
+                    type="password"
+                    class="input"
+                    :placeholder="
+                      form.payment_receipt_code_oss_secret_access_key_configured
+                        ? t('admin.settings.receiptCode.secretConfiguredPlaceholder')
+                        : 'SecretKey / AccessKey Secret'
+                    "
+                    autocomplete="new-password"
+                  />
+                </div>
+                <div>
+                  <label class="input-label">
+                    {{ t("admin.settings.receiptCode.prefix") }}
+                  </label>
+                  <input
+                    v-model="form.payment_receipt_code_oss_prefix"
+                    type="text"
+                    class="input"
+                    placeholder="levelup/receipts/"
+                  />
+                </div>
+                <div>
+                  <label class="input-label">
+                    {{ t("admin.settings.receiptCode.publicBaseUrl") }}
+                  </label>
+                  <input
+                    v-model="form.payment_receipt_code_oss_public_base_url"
+                    type="url"
+                    class="input"
+                    placeholder="https://cdn.example.com/receipts"
+                  />
+                  <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
+                    {{ t("admin.settings.receiptCode.publicBaseUrlHint") }}
+                  </p>
+                </div>
+                <div>
+                  <label class="input-label">
+                    {{ t("admin.settings.receiptCode.maxSize") }}
+                  </label>
+                  <input
+                    v-model.number="form.payment_receipt_code_oss_max_size_bytes"
+                    type="number"
+                    min="1"
+                    max="5242880"
+                    class="input"
+                  />
+                </div>
+                <div>
+                  <label class="input-label">
+                    {{ t("admin.settings.receiptCode.presignExpire") }}
+                  </label>
+                  <input
+                    v-model.number="
+                      form.payment_receipt_code_oss_presign_expire_seconds
+                    "
+                    type="number"
+                    min="1"
+                    max="3600"
+                    class="input"
+                  />
+                </div>
+              </div>
+
+              <label class="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-300">
+                <input
+                  v-model="form.payment_receipt_code_oss_force_path_style"
+                  type="checkbox"
+                  class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                />
+                {{ t("admin.settings.receiptCode.forcePathStyle") }}
+              </label>
+
+              <div
+                class="rounded-lg border border-sky-100 bg-sky-50 px-4 py-3 text-sm text-sky-800 dark:border-sky-900/50 dark:bg-sky-900/20 dark:text-sky-200"
+              >
+                {{ t("admin.settings.receiptCode.storageNote") }}
+              </div>
+            </div>
+          </div>
+        </div>
+
         <!-- Tab: Backup -->
         <div v-show="activeTab === 'backup'">
           <BackupSettings />
@@ -6523,6 +6548,7 @@ type SettingsTab =
   | "users"
   | "gateway"
   | "payment"
+  | "receiptCode"
   | "email"
   | "backup";
 const activeTab = ref<SettingsTab>("general");
@@ -6534,6 +6560,7 @@ const settingsTabs = [
   { key: "users" as SettingsTab, icon: "user" as const },
   { key: "gateway" as SettingsTab, icon: "server" as const },
   { key: "payment" as SettingsTab, icon: "creditCard" as const },
+  { key: "receiptCode" as SettingsTab, icon: "upload" as const },
   { key: "email" as SettingsTab, icon: "mail" as const },
   { key: "backup" as SettingsTab, icon: "database" as const },
 ];
@@ -6811,13 +6838,13 @@ const form = reactive<SettingsForm>({
   payment_product_name_suffix: "",
   payment_load_balance_strategy: "round-robin",
   payment_receipt_code_oss_enabled: false,
-  payment_receipt_code_oss_endpoint: "https://oss-cn-hangzhou.aliyuncs.com",
-  payment_receipt_code_oss_region: "oss-cn-hangzhou",
+  payment_receipt_code_oss_endpoint: "",
+  payment_receipt_code_oss_region: "",
   payment_receipt_code_oss_bucket: "",
   payment_receipt_code_oss_access_key_id: "",
   payment_receipt_code_oss_secret_access_key: "",
   payment_receipt_code_oss_secret_access_key_configured: false,
-  payment_receipt_code_oss_prefix: "receipt-codes/",
+  payment_receipt_code_oss_prefix: "levelup/receipts/",
   payment_receipt_code_oss_public_base_url: "",
   payment_receipt_code_oss_force_path_style: false,
   payment_receipt_code_oss_max_size_bytes: 1048576,

@@ -1,7 +1,7 @@
 <template>
-    <div class="space-y-6">
+    <div class="card overflow-hidden">
       <!-- S3 Storage Config -->
-      <div class="card p-6">
+      <section class="backup-section">
         <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
           <div>
             <h3 class="text-base font-semibold text-gray-900 dark:text-white">
@@ -52,10 +52,10 @@
             {{ savingS3 ? t('common.loading') : t('common.save') }}
           </button>
         </div>
-      </div>
+      </section>
 
       <!-- Schedule Config -->
-      <div class="card p-6">
+      <section class="backup-section">
         <div class="mb-4">
           <h3 class="text-base font-semibold text-gray-900 dark:text-white">
             {{ t('admin.backup.schedule.title') }}
@@ -90,10 +90,10 @@
             {{ savingSchedule ? t('common.loading') : t('common.save') }}
           </button>
         </div>
-      </div>
+      </section>
 
       <!-- Usage Retention Config -->
-      <div class="card p-6">
+      <section class="backup-section">
         <div class="mb-4">
           <h3 class="text-base font-semibold text-gray-900 dark:text-white">
             {{ t('admin.backup.usageRetention.title') }}
@@ -133,10 +133,10 @@
             {{ savingUsageRetention ? t('common.loading') : t('common.save') }}
           </button>
         </div>
-      </div>
+      </section>
 
       <!-- Backup Operations -->
-      <div class="card p-6">
+      <section class="backup-section border-b-0">
         <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
           <div>
             <h3 class="text-base font-semibold text-gray-900 dark:text-white">
@@ -233,7 +233,7 @@
             </tbody>
           </table>
         </div>
-      </div>
+      </section>
     </div>
 
     <!-- Cloudflare R2 Setup Guide Modal -->
@@ -708,6 +708,10 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
+.backup-section {
+  @apply border-b border-gray-100 p-6 dark:border-dark-700;
+}
+
 .modal-enter-active,
 .modal-leave-active {
   transition: opacity 0.2s ease;
