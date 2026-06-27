@@ -136,17 +136,12 @@
 
               <!-- Contact Support -->
               <div
+                v-if="contactInfo"
                 class="border-t border-gray-100 px-4 py-2.5 dark:border-dark-700"
               >
                 <div class="space-y-1.5 text-xs text-gray-500 dark:text-gray-400">
                   <div class="flex items-center gap-2">
-                    <Icon name="chat" size="xs" />
-                    <span>QQ群:</span>
-                    <span class="font-medium text-gray-700 dark:text-gray-300">{{ supportQqGroup }}</span>
-                  </div>
-                  <div v-if="contactInfo" class="flex items-center gap-2">
                     <Icon name="chatBubble" size="xs" />
-                    <span>{{ t('common.contactSupport') }}:</span>
                     <span class="font-medium text-gray-700 dark:text-gray-300">{{
                       contactInfo
                     }}</span>
@@ -217,7 +212,6 @@ const onboardingStore = useOnboardingStore()
 const user = computed(() => authStore.user)
 const dropdownOpen = ref(false)
 const dropdownRef = ref<HTMLElement | null>(null)
-const supportQqGroup = '722647431'
 const contactInfo = computed(() => appStore.contactInfo)
 const docUrl = computed(() => appStore.docUrl)
 const avatarUrl = computed(() => user.value?.avatar_url?.trim() || '')
