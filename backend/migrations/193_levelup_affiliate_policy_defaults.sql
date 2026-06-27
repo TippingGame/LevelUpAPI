@@ -1,4 +1,5 @@
--- LevelUpAPI affiliate policy defaults: 5% invite share, unlimited invitees,
+-- LevelUpAPI affiliate policy defaults: 85% owner share, 5% invite share,
+-- 10% platform retention, unlimited invitees,
 -- and stable invite codes by default.
 
 INSERT INTO settings (key, value, updated_at)
@@ -22,7 +23,7 @@ BEGIN
         )
         SELECT
             'global',
-            0.950000,
+            0.850000,
             0.050000,
             TRUE,
             NOW(),
@@ -39,7 +40,7 @@ BEGIN
         );
 
         UPDATE account_share_policies
-        SET owner_share_ratio = LEAST(owner_share_ratio, 0.950000),
+        SET owner_share_ratio = LEAST(owner_share_ratio, 0.850000),
             invite_share_ratio = 0.050000,
             updated_at = NOW()
         WHERE deleted_at IS NULL

@@ -426,8 +426,8 @@ const savingModePolicy = ref(false)
 const policies = ref<AccountSharePolicy[]>([])
 const modePolicy = ref<AccountShareModePolicy | null>(null)
 const form = reactive({
-  ownerSharePercent: 70 as number | string,
-  inviteSharePercent: 0 as number | string,
+  ownerSharePercent: 85 as number | string,
+  inviteSharePercent: 5 as number | string,
   enabled: true
 })
 const commissionForm = reactive({
@@ -572,8 +572,8 @@ async function saveModePolicy() {
 function syncFormFromPolicy() {
   const target = editablePolicy.value
   if (!target) {
-    form.ownerSharePercent = 70
-    form.inviteSharePercent = 0
+    form.ownerSharePercent = 85
+    form.inviteSharePercent = 5
     form.enabled = true
     return
   }
