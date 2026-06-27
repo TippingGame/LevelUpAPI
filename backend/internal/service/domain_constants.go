@@ -28,12 +28,12 @@ const (
 	AffiliateRebateRateDefault          = 5.0
 	AffiliateRebateRateMin              = 0.0
 	AffiliateRebateRateMax              = 100.0
-	AffiliateEnabledDefault             = true  // 邀请返利总开关默认开启
-	AffiliateRebateFreezeHoursDefault   = 0     // 0 = 不冻结（向后兼容）
-	AffiliateRebateFreezeHoursMax       = 720   // 最大 30 天
-	AffiliateRebateDurationDaysDefault  = 0     // 0 = 永久有效
-	AffiliateRebateDurationDaysMax      = 3650  // ~10 年
-	AffiliateRebatePerInviteeCapDefault = 0.0   // 0 = 无上限
+	AffiliateEnabledDefault             = true // 邀请返利总开关默认开启
+	AffiliateRebateFreezeHoursDefault   = 0    // 0 = 不冻结（向后兼容）
+	AffiliateRebateFreezeHoursMax       = 720  // 最大 30 天
+	AffiliateRebateDurationDaysDefault  = 0    // 0 = 永久有效
+	AffiliateRebateDurationDaysMax      = 3650 // ~10 年
+	AffiliateRebatePerInviteeCapDefault = 0.0  // 0 = 无上限
 )
 
 // Platform constants
@@ -201,6 +201,8 @@ const (
 	SettingKeyCustomMenuItems                = "custom_menu_items"               // 自定义菜单项（JSON 数组）
 	SettingKeyCustomEndpoints                = "custom_endpoints"                // 自定义端点列表（JSON 数组）
 	SettingKeyRiskControlEnabled             = "risk_control_enabled"            // 是否启用风控中心
+	SettingKeyInvoiceManagementEnabled       = "invoice_management_enabled"      // 是否启用发票管理
+	SettingKeyWithdrawalManagementEnabled    = "withdrawal_management_enabled"   // 是否启用提现管理
 	SettingKeyContentModerationConfig        = "content_moderation_config"       // 内容审计配置（JSON）
 	SettingKeyCyberSessionBlockEnabled       = "cyber_session_block_enabled"     // cyber 命中后会话级自动屏蔽总开关（默认关）
 	SettingKeyCyberSessionBlockTTLSeconds    = "cyber_session_block_ttl_seconds" // 会话屏蔽 TTL 秒数（默认 3600）

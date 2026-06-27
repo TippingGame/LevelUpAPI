@@ -132,6 +132,8 @@ type SystemSettings struct {
 	DefaultConcurrency              int                          `json:"default_concurrency"`
 	DefaultBalance                  float64                      `json:"default_balance"`
 	RiskControlEnabled              bool                         `json:"risk_control_enabled"`
+	InvoiceManagementEnabled        bool                         `json:"invoice_management_enabled"`
+	WithdrawalManagementEnabled     bool                         `json:"withdrawal_management_enabled"`
 	CyberSessionBlockEnabled        bool                         `json:"cyber_session_block_enabled"`
 	CyberSessionBlockTTLSeconds     int                          `json:"cyber_session_block_ttl_seconds"`
 	AffiliateRebateRate             float64                      `json:"affiliate_rebate_rate"`
@@ -322,8 +324,10 @@ type PublicSettings struct {
 
 	UserAccountImportLimit int `json:"user_account_import_limit"`
 
-	AffiliateEnabled   bool `json:"affiliate_enabled"`
-	RiskControlEnabled bool `json:"risk_control_enabled"`
+	AffiliateEnabled            bool `json:"affiliate_enabled"`
+	InvoiceManagementEnabled    bool `json:"invoice_management_enabled"`
+	WithdrawalManagementEnabled bool `json:"withdrawal_management_enabled"`
+	RiskControlEnabled          bool `json:"risk_control_enabled"`
 }
 
 type LoginAgreementDocument struct {

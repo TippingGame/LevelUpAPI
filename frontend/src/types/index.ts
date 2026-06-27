@@ -161,6 +161,111 @@ export interface WithdrawalRequest {
   updated_at: string
 }
 
+export type InvoiceType = 'personal_normal' | 'enterprise_normal' | 'enterprise_special'
+export type InvoiceBuyerType = 'personal' | 'enterprise'
+export type InvoiceSourceType = 'payment_order' | 'redeem_code'
+export type InvoiceStatus = 'pending' | 'issued' | 'rejected' | 'cancelled'
+
+export interface InvoiceProfile {
+  id: number
+  user_id: number
+  invoice_type: InvoiceType
+  buyer_type: InvoiceBuyerType
+  title_name: string
+  tax_id: string
+  registered_address: string
+  registered_phone: string
+  bank_name: string
+  bank_account: string
+  recipient_email: string
+  recipient_phone: string
+  is_default: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface InvoiceProfileInput {
+  invoice_type: InvoiceType
+  title_name: string
+  tax_id?: string
+  registered_address?: string
+  registered_phone?: string
+  bank_name?: string
+  bank_account?: string
+  recipient_email: string
+  recipient_phone?: string
+  is_default?: boolean
+}
+
+export interface InvoiceSourceRef {
+  source_type: InvoiceSourceType
+  source_id: number
+}
+
+export interface InvoiceEligibleSource {
+  source_type: InvoiceSourceType
+  source_id: number
+  source_no: string
+  source_label: string
+  item_type: string
+  entitlement_amount: number
+  invoice_amount: number
+  occurred_at: string
+  status: string
+}
+
+export interface InvoiceRequestItem {
+  id: number
+  invoice_request_id: number
+  source_type: InvoiceSourceType
+  source_id: number
+  source_no: string
+  source_label: string
+  item_type: string
+  entitlement_amount: number
+  invoice_amount: number
+  occurred_at: string
+  active: boolean
+  created_at: string
+}
+
+export interface InvoiceRequest {
+  id: number
+  request_no: string
+  user_id: number
+  user_email: string
+  invoice_type: InvoiceType
+  buyer_type: InvoiceBuyerType
+  title_name: string
+  tax_id: string
+  registered_address: string
+  registered_phone: string
+  bank_name: string
+  bank_account: string
+  recipient_email: string
+  recipient_phone: string
+  amount: number
+  currency: string
+  status: InvoiceStatus
+  invoice_number: string
+  invoice_code: string
+  invoice_file_url: string
+  invoice_file_name: string
+  issued_at?: string | null
+  rejected_reason?: string | null
+  admin_note?: string | null
+  processed_by_user_id?: number | null
+  submitted_at: string
+  processed_at?: string | null
+  created_at: string
+  updated_at: string
+  items?: InvoiceRequestItem[]
+}
+
+export interface InvoiceRequestInput extends Omit<InvoiceProfileInput, 'is_default'> {
+  source_refs: InvoiceSourceRef[]
+}
+
 export interface AdminUser extends User {
   // 管理员备注（普通用户接口不返回）
   notes: string
@@ -290,6 +395,8 @@ export interface PublicSettings {
   hide_ccs_import_button: boolean
   payment_enabled: boolean
   risk_control_enabled?: boolean
+  invoice_management_enabled?: boolean
+  withdrawal_management_enabled?: boolean
   table_default_page_size: number
   table_page_size_options: number[]
   custom_menu_items: CustomMenuItem[]

@@ -77,6 +77,7 @@ func RegisterAdminRoutes(
 		registerUsageRoutes(admin, h)
 		registerRevenueRoutes(admin, h)
 		registerWithdrawalRoutes(admin, h)
+		registerInvoiceRoutes(admin, h)
 		registerShopRoutes(admin, h)
 
 		// 用户属性管理
@@ -130,6 +131,16 @@ func registerWithdrawalRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		withdrawals.GET("/:id", h.Admin.Withdrawal.Get)
 		withdrawals.POST("/:id/settle", h.Admin.Withdrawal.Settle)
 		withdrawals.POST("/:id/reject", h.Admin.Withdrawal.Reject)
+	}
+}
+
+func registerInvoiceRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
+	invoices := admin.Group("/invoices")
+	{
+		invoices.GET("", h.Admin.Invoice.List)
+		invoices.GET("/:id", h.Admin.Invoice.Get)
+		invoices.POST("/:id/issue", h.Admin.Invoice.Issue)
+		invoices.POST("/:id/reject", h.Admin.Invoice.Reject)
 	}
 }
 

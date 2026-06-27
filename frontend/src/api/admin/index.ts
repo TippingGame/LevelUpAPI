@@ -35,6 +35,7 @@ import affiliatesAPI from './affiliates'
 import accountSharePoliciesAPI from './accountSharePolicies'
 import accountShareModePolicyAPI from './accountShareModePolicy'
 import riskControlAPI from './riskControl'
+import adminInvoicesAPI from './invoices'
 
 /**
  * Unified admin API object for convenient access
@@ -71,7 +72,8 @@ export const adminAPI = {
   affiliates: affiliatesAPI,
   accountSharePolicies: accountSharePoliciesAPI,
   accountShareModePolicy: accountShareModePolicyAPI,
-  riskControl: riskControlAPI
+  riskControl: riskControlAPI,
+  invoices: adminInvoicesAPI
 }
 
 export {
@@ -106,7 +108,8 @@ export {
   affiliatesAPI,
   accountSharePoliciesAPI,
   accountShareModePolicyAPI,
-  riskControlAPI
+  riskControlAPI,
+  adminInvoicesAPI
 }
 
 export default adminAPI

@@ -114,6 +114,16 @@ export const FeatureFlags = {
     mode: 'opt-in',
     label: 'Risk Control',
   }),
+  invoiceManagement: defineFlag({
+    key: 'invoice_management_enabled',
+    mode: 'opt-in',
+    label: 'Invoice Management',
+  }),
+  withdrawalManagement: defineFlag({
+    key: 'withdrawal_management_enabled',
+    mode: 'opt-out',
+    label: 'Withdrawal Management',
+  }),
   affiliate: defineFlag({
     key: 'affiliate_enabled',
     mode: 'opt-out',

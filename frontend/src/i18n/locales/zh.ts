@@ -433,6 +433,7 @@ export default {
     revenue: '收益管理',
     paymentConfig: '支付配置',
     withdrawalManagement: '提现管理',
+    invoiceManagement: '发票管理',
     paymentPlans: '订阅套餐',
     channelManagement: '渠道管理',
     channelPricing: '渠道定价',
@@ -6463,6 +6464,14 @@ export default {
           description: '控制用户端“共享号主”单次导入账号的数量上限。',
           limit: '单次导入上限',
           limitHint: '用户端共享号主导入每次最多允许的账号数量。范围 1 - 1000，默认 100。',
+        },
+        businessModules: {
+          title: '业务功能',
+          description: '控制发票、提现等财务相关业务模块的用户端和管理端入口。',
+          invoiceManagement: '启用发票管理',
+          invoiceManagementHint: '开启后用户可提交发票申请，管理员可在财务管理中处理发票。',
+          withdrawalManagement: '启用提现管理',
+          withdrawalManagementHint: '关闭后隐藏提现管理入口，已保存的提现数据不会删除。',
         },
         riskControl: {
           title: '内容风控',

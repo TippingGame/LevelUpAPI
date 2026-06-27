@@ -317,6 +317,18 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/invoices',
+    name: 'Invoices',
+    component: () => import('@/views/user/InvoicesView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: false,
+      title: 'Invoice Management',
+      titleKey: 'nav.invoiceManagement',
+      requiresInvoiceManagement: true
+    }
+  },
+  {
     path: '/payment/qrcode',
     name: 'PaymentQRCode',
     component: () => import('@/views/user/PaymentQRCodeView.vue'),
@@ -711,7 +723,20 @@ const routes: RouteRecordRaw[] = [
       requiresAuth: true,
       requiresAdmin: true,
       title: 'Withdrawal Management',
-      titleKey: 'nav.withdrawalManagement'
+      titleKey: 'nav.withdrawalManagement',
+      requiresWithdrawalManagement: true
+    }
+  },
+  {
+    path: '/admin/invoices',
+    name: 'AdminInvoices',
+    component: () => import('@/views/admin/invoices/AdminInvoicesView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      title: 'Invoice Management',
+      titleKey: 'nav.invoiceManagement',
+      requiresInvoiceManagement: true
     }
   },
 
@@ -873,7 +898,22 @@ router.beforeEach((to, _from, next) => {
     }
   }
 
-  // 简易模式下限制访问某些页面
+  if (to.meta.requiresInvoiceManagement) {
+    const invoiceEnabled = appStore.cachedPublicSettings?.invoice_management_enabled === true
+    if (!invoiceEnabled) {
+      next(authStore.isAdmin ? '/admin/settings' : '/dashboard')
+      return
+    }
+  }
+
+  if (to.meta.requiresWithdrawalManagement) {
+    const withdrawalEnabled = appStore.cachedPublicSettings?.withdrawal_management_enabled !== false
+    if (!withdrawalEnabled) {
+      next(authStore.isAdmin ? '/admin/settings' : '/dashboard')
+      return
+    }
+  }
+
   if (to.meta.requiresRiskControl) {
     const riskControlEnabled = appStore.cachedPublicSettings?.risk_control_enabled === true
     if (!riskControlEnabled) {

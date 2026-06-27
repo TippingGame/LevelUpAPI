@@ -40,6 +40,7 @@ type AdminHandlers struct {
 	Payment                *admin.PaymentHandler
 	Revenue                *admin.RevenueHandler
 	Withdrawal             *admin.WithdrawalHandler
+	Invoice                *admin.InvoiceHandler
 	Shop                   *admin.ShopHandler
 	Affiliate              *admin.AffiliateHandler
 }
@@ -67,6 +68,7 @@ type Handlers struct {
 	AvailableChannel *AvailableChannelHandler
 	ReceiptCode      *ReceiptCodeHandler
 	Withdrawal       *WithdrawalHandler
+	Invoice          *InvoiceHandler
 	Shop             *ShopHandler
 }
 

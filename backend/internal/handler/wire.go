@@ -43,6 +43,7 @@ func ProvideAdminHandlers(
 	paymentHandler *admin.PaymentHandler,
 	revenueHandler *admin.RevenueHandler,
 	withdrawalHandler *admin.WithdrawalHandler,
+	invoiceHandler *admin.InvoiceHandler,
 	shopHandler *admin.ShopHandler,
 	affiliateHandler *admin.AffiliateHandler,
 ) *AdminHandlers {
@@ -81,6 +82,7 @@ func ProvideAdminHandlers(
 		Payment:                paymentHandler,
 		Revenue:                revenueHandler,
 		Withdrawal:             withdrawalHandler,
+		Invoice:                invoiceHandler,
 		Shop:                   shopHandler,
 		Affiliate:              affiliateHandler,
 	}
@@ -158,6 +160,7 @@ func ProvideHandlers(
 	availableChannelHandler *AvailableChannelHandler,
 	receiptCodeHandler *ReceiptCodeHandler,
 	withdrawalHandler *WithdrawalHandler,
+	invoiceHandler *InvoiceHandler,
 	shopHandler *ShopHandler,
 	_ *service.IdempotencyCoordinator,
 	_ *service.IdempotencyCleanupService,
@@ -184,6 +187,7 @@ func ProvideHandlers(
 		AvailableChannel: availableChannelHandler,
 		ReceiptCode:      receiptCodeHandler,
 		Withdrawal:       withdrawalHandler,
+		Invoice:          invoiceHandler,
 		Shop:             shopHandler,
 	}
 }
@@ -211,6 +215,7 @@ var ProviderSet = wire.NewSet(
 	NewAvailableChannelHandler,
 	NewReceiptCodeHandler,
 	NewWithdrawalHandler,
+	NewInvoiceHandler,
 	NewShopHandler,
 
 	// Admin handlers
@@ -248,6 +253,7 @@ var ProviderSet = wire.NewSet(
 	admin.NewPaymentHandler,
 	admin.NewRevenueHandler,
 	admin.NewWithdrawalHandler,
+	admin.NewInvoiceHandler,
 	admin.NewShopHandler,
 	admin.NewAffiliateHandler,
 

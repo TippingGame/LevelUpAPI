@@ -556,6 +556,8 @@ export interface SystemSettings {
   // Available Channels feature switch
   available_channels_enabled: boolean;
   user_account_import_limit: number;
+  invoice_management_enabled: boolean;
+  withdrawal_management_enabled: boolean;
 
   // Affiliate (邀请返利) feature switch
   affiliate_enabled: boolean;
@@ -783,6 +785,8 @@ export interface UpdateSettingsRequest {
   // Available Channels feature switch
   available_channels_enabled?: boolean;
   user_account_import_limit?: number;
+  invoice_management_enabled?: boolean;
+  withdrawal_management_enabled?: boolean;
 
   // Affiliate (邀请返利) feature switch
   affiliate_enabled?: boolean;

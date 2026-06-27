@@ -674,8 +674,12 @@ const flagPayment = makeSidebarFlag(FeatureFlags.payment)
 const flagAvailableChannels = makeSidebarFlag(FeatureFlags.availableChannels)
 const flagAffiliate = makeSidebarFlag(FeatureFlags.affiliate)
 const flagRiskControl = makeSidebarFlag(FeatureFlags.riskControl)
+const flagInvoiceManagement = makeSidebarFlag(FeatureFlags.invoiceManagement)
+const flagWithdrawalManagement = makeSidebarFlag(FeatureFlags.withdrawalManagement)
 const flagOpsMonitoring = () => adminSettingsStore.opsMonitoringEnabled
 const flagAdminPayment = () => adminSettingsStore.paymentEnabled
+const flagAdminFinance = () =>
+  flagAdminPayment() || flagInvoiceManagement() || flagWithdrawalManagement()
 const externalPurchaseUrl = 'https://catfk.com/shop/M7KWPS96'
 // buildSelfNavItems 构造用户自己的导航项（用户端主菜单和管理员的"我的账户"子菜单共享这组声明）。
 // withDashboard=true 时包含仪表盘（用户端），false 时不含（管理员的个人区已经有独立仪表盘入口）。
@@ -696,6 +700,7 @@ function buildSelfNavItems(withDashboard: boolean): NavItem[] {
     { path: '/subscriptions', label: t('nav.mySubscriptions'), icon: CreditCardIcon, hideInSimpleMode: true },
     { path: '/purchase-external', label: t('nav.buySubscription'), icon: RechargeSubscriptionIcon, url: externalPurchaseUrl, openInNewWindow: true, hideInSimpleMode: true },
     { path: '/orders', label: t('nav.myOrders'), icon: OrderListIcon, hideInSimpleMode: true, featureFlag: flagPayment },
+    { path: '/invoices', label: t('nav.invoiceManagement'), icon: OrderListIcon, hideInSimpleMode: true, featureFlag: flagInvoiceManagement },
     { path: '/redeem', label: t('nav.redeem'), icon: GiftIcon, hideInSimpleMode: true },
     { path: '/affiliate', label: t('nav.affiliate'), icon: UsersIcon, hideInSimpleMode: true, featureFlag: flagAffiliate },
     { path: '/conversations', label: t('nav.conversations'), icon: ChatIcon, hideInSimpleMode: true },
@@ -763,7 +768,6 @@ const adminNavItems = computed((): NavItem[] => {
     { path: '/admin/announcements', label: t('nav.announcements'), icon: BellIcon },
     { path: '/admin/conversations', label: t('nav.conversations'), icon: ChatIcon },
     { path: '/admin/proxies', label: t('nav.proxies'), icon: ServerIcon },
-    { path: '/admin/withdrawals', label: t('nav.withdrawalManagement'), icon: CreditCardIcon },
     { path: '/admin/risk-control', label: t('nav.riskControl'), icon: ShieldIcon, hideInSimpleMode: true, featureFlag: flagRiskControl },
     { path: '/admin/redeem', label: t('nav.redeemCodes'), icon: TicketIcon, hideInSimpleMode: true },
     { path: '/admin/promo-codes', label: t('nav.promoCodes'), icon: GiftIcon, hideInSimpleMode: true },
@@ -786,12 +790,14 @@ const adminNavItems = computed((): NavItem[] => {
       icon: OrderIcon,
       hideInSimpleMode: true,
       expandOnly: true,
-      featureFlag: flagAdminPayment,
+      featureFlag: flagAdminFinance,
       children: [
-        { path: '/admin/orders/dashboard', label: t('nav.paymentDashboard'), icon: ChartIcon },
-        { path: '/admin/orders', label: t('nav.orderManagement'), icon: OrderIcon },
-        { path: '/admin/orders/plans', label: t('nav.paymentPlans'), icon: CreditCardIcon },
-        { path: '/admin/revenue', label: t('nav.revenue'), icon: ChartIcon },
+        { path: '/admin/orders/dashboard', label: t('nav.paymentDashboard'), icon: ChartIcon, featureFlag: flagAdminPayment },
+        { path: '/admin/orders', label: t('nav.orderManagement'), icon: OrderIcon, featureFlag: flagAdminPayment },
+        { path: '/admin/withdrawals', label: t('nav.withdrawalManagement'), icon: CreditCardIcon, featureFlag: flagWithdrawalManagement },
+        { path: '/admin/invoices', label: t('nav.invoiceManagement'), icon: OrderListIcon, featureFlag: flagInvoiceManagement },
+        { path: '/admin/orders/plans', label: t('nav.paymentPlans'), icon: CreditCardIcon, featureFlag: flagAdminPayment },
+        { path: '/admin/revenue', label: t('nav.revenue'), icon: ChartIcon, featureFlag: flagAdminPayment },
       ],
     },
     { path: '/admin/usage', label: t('nav.usage'), icon: ChartIcon }

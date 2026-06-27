@@ -83,8 +83,10 @@ func (h *SettingHandler) GetPublicSettings(c *gin.Context) {
 
 		UserAccountImportLimit: settings.UserAccountImportLimit,
 
-		AffiliateEnabled:   settings.AffiliateEnabled,
-		RiskControlEnabled: settings.RiskControlEnabled,
+		AffiliateEnabled:            settings.AffiliateEnabled,
+		InvoiceManagementEnabled:    settings.InvoiceManagementEnabled,
+		WithdrawalManagementEnabled: settings.WithdrawalManagementEnabled,
+		RiskControlEnabled:          settings.RiskControlEnabled,
 	})
 }
 

@@ -433,6 +433,7 @@ export default {
     revenue: 'Revenue',
     paymentConfig: 'Payment Config',
     withdrawalManagement: 'Withdrawals',
+    invoiceManagement: 'Invoices',
     paymentPlans: 'Plans',
     channelManagement: 'Channels',
     channelPricing: 'Channel Pricing',
@@ -6308,6 +6309,14 @@ export default {
           description: 'Control how many accounts a user can import into Shared Owner in one request.',
           limit: 'Single import limit',
           limitHint: 'Maximum account count for each Shared Owner import. Range 1 - 1000, default 100.',
+        },
+        businessModules: {
+          title: 'Business Modules',
+          description: 'Control user and admin entry points for invoice, withdrawal, and finance-related modules.',
+          invoiceManagement: 'Enable Invoice Management',
+          invoiceManagementHint: 'When enabled, users can submit invoice requests and admins can process them from Finance.',
+          withdrawalManagement: 'Enable Withdrawal Management',
+          withdrawalManagementHint: 'When disabled, withdrawal management is hidden. Existing withdrawal data is preserved.',
         },
         riskControl: {
           title: 'Content Risk Control',

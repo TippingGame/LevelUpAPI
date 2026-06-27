@@ -703,6 +703,8 @@ func (s *SettingService) GetPublicSettings(ctx context.Context) (*PublicSettings
 		SettingKeyUserAccountImportLimit,
 		SettingKeyAffiliateEnabled,
 		SettingKeyRiskControlEnabled,
+		SettingKeyInvoiceManagementEnabled,
+		SettingKeyWithdrawalManagementEnabled,
 	}
 
 	settings, err := s.settingRepo.GetMultiple(ctx, keys)
@@ -809,7 +811,9 @@ func (s *SettingService) GetPublicSettings(ctx context.Context) (*PublicSettings
 
 		AffiliateEnabled: settings[SettingKeyAffiliateEnabled] == "true",
 
-		RiskControlEnabled: settings[SettingKeyRiskControlEnabled] == "true",
+		RiskControlEnabled:          settings[SettingKeyRiskControlEnabled] == "true",
+		InvoiceManagementEnabled:    settings[SettingKeyInvoiceManagementEnabled] == "true",
+		WithdrawalManagementEnabled: !isFalseSettingValue(settings[SettingKeyWithdrawalManagementEnabled]),
 	}, nil
 }
 
@@ -985,6 +989,8 @@ type PublicSettingsInjectionPayload struct {
 	UserAccountImportLimit               int  `json:"user_account_import_limit"`
 	AffiliateEnabled                     bool `json:"affiliate_enabled"`
 	RiskControlEnabled                   bool `json:"risk_control_enabled"`
+	InvoiceManagementEnabled             bool `json:"invoice_management_enabled"`
+	WithdrawalManagementEnabled          bool `json:"withdrawal_management_enabled"`
 }
 
 // GetPublicSettingsForInjection returns public settings in a format suitable for HTML injection.
@@ -1047,6 +1053,8 @@ func (s *SettingService) GetPublicSettingsForInjection(ctx context.Context) (any
 		UserAccountImportLimit:               settings.UserAccountImportLimit,
 		AffiliateEnabled:                     settings.AffiliateEnabled,
 		RiskControlEnabled:                   settings.RiskControlEnabled,
+		InvoiceManagementEnabled:             settings.InvoiceManagementEnabled,
+		WithdrawalManagementEnabled:          settings.WithdrawalManagementEnabled,
 	}, nil
 }
 
@@ -1797,6 +1805,10 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 	// Affiliate (邀请返利) feature switch
 	updates[SettingKeyAffiliateEnabled] = strconv.FormatBool(settings.AffiliateEnabled)
 
+	// Functional module switches
+	updates[SettingKeyInvoiceManagementEnabled] = strconv.FormatBool(settings.InvoiceManagementEnabled)
+	updates[SettingKeyWithdrawalManagementEnabled] = strconv.FormatBool(settings.WithdrawalManagementEnabled)
+
 	// Claude Code version check
 	updates[SettingKeyMinClaudeCodeVersion] = settings.MinClaudeCodeVersion
 	updates[SettingKeyMaxClaudeCodeVersion] = settings.MaxClaudeCodeVersion
@@ -2186,6 +2198,24 @@ func (s *SettingService) IsAffiliateEnabled(ctx context.Context) bool {
 		return false // 默认关闭
 	}
 	return value == "true"
+}
+
+// IsInvoiceManagementEnabled checks whether invoice management is enabled.
+func (s *SettingService) IsInvoiceManagementEnabled(ctx context.Context) bool {
+	value, err := s.settingRepo.GetValue(ctx, SettingKeyInvoiceManagementEnabled)
+	if err != nil {
+		return false
+	}
+	return value == "true"
+}
+
+// IsWithdrawalManagementEnabled checks whether withdrawal management is enabled.
+func (s *SettingService) IsWithdrawalManagementEnabled(ctx context.Context) bool {
+	value, err := s.settingRepo.GetValue(ctx, SettingKeyWithdrawalManagementEnabled)
+	if err != nil {
+		return true
+	}
+	return !isFalseSettingValue(value)
 }
 
 // GetAffiliateRebateRatePercent 读取并 clamp 全局返利比例。
@@ -2633,6 +2663,10 @@ func (s *SettingService) InitializeDefaultSettings(ctx context.Context) error {
 		// Affiliate (邀请返利) feature (default enabled)
 		SettingKeyAffiliateEnabled: "true",
 
+		// Functional modules
+		SettingKeyInvoiceManagementEnabled:    "false",
+		SettingKeyWithdrawalManagementEnabled: "true",
+
 		// Claude Code version check (default: empty = disabled)
 		SettingKeyMinClaudeCodeVersion: "",
 		SettingKeyMaxClaudeCodeVersion: "",
@@ -3034,6 +3068,8 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 
 	// Affiliate (邀请返利) feature (default: enabled; strict true when persisted)
 	result.AffiliateEnabled = settings[SettingKeyAffiliateEnabled] == "true"
+	result.InvoiceManagementEnabled = settings[SettingKeyInvoiceManagementEnabled] == "true"
+	result.WithdrawalManagementEnabled = !isFalseSettingValue(settings[SettingKeyWithdrawalManagementEnabled])
 	result.RiskControlEnabled = settings[SettingKeyRiskControlEnabled] == "true"
 	result.CyberSessionBlockEnabled = settings[SettingKeyCyberSessionBlockEnabled] == "true"
 	if v, err := strconv.Atoi(strings.TrimSpace(settings[SettingKeyCyberSessionBlockTTLSeconds])); err == nil && v > 0 {

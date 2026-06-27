@@ -229,6 +229,8 @@ func (h *SettingHandler) GetSettings(c *gin.Context) {
 		DefaultConcurrency:                        settings.DefaultConcurrency,
 		DefaultBalance:                            settings.DefaultBalance,
 		RiskControlEnabled:                        settings.RiskControlEnabled,
+		InvoiceManagementEnabled:                  settings.InvoiceManagementEnabled,
+		WithdrawalManagementEnabled:               settings.WithdrawalManagementEnabled,
 		CyberSessionBlockEnabled:                  settings.CyberSessionBlockEnabled,
 		CyberSessionBlockTTLSeconds:               settings.CyberSessionBlockTTLSeconds,
 		AffiliateRebateRate:                       settings.AffiliateRebateRate,
@@ -505,6 +507,8 @@ type UpdateSettingsRequest struct {
 	DefaultConcurrency                       int                               `json:"default_concurrency"`
 	DefaultBalance                           float64                           `json:"default_balance"`
 	RiskControlEnabled                       *bool                             `json:"risk_control_enabled"`
+	InvoiceManagementEnabled                 *bool                             `json:"invoice_management_enabled"`
+	WithdrawalManagementEnabled              *bool                             `json:"withdrawal_management_enabled"`
 	CyberSessionBlockEnabled                 *bool                             `json:"cyber_session_block_enabled"`
 	CyberSessionBlockTTLSeconds              *int                              `json:"cyber_session_block_ttl_seconds"`
 	AffiliateRebateRate                      *float64                          `json:"affiliate_rebate_rate"`
@@ -1497,6 +1501,18 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 			}
 			return previousSettings.RiskControlEnabled
 		}(),
+		InvoiceManagementEnabled: func() bool {
+			if req.InvoiceManagementEnabled != nil {
+				return *req.InvoiceManagementEnabled
+			}
+			return previousSettings.InvoiceManagementEnabled
+		}(),
+		WithdrawalManagementEnabled: func() bool {
+			if req.WithdrawalManagementEnabled != nil {
+				return *req.WithdrawalManagementEnabled
+			}
+			return previousSettings.WithdrawalManagementEnabled
+		}(),
 		CyberSessionBlockEnabled: func() bool {
 			if req.CyberSessionBlockEnabled != nil {
 				return *req.CyberSessionBlockEnabled
@@ -1941,6 +1957,8 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		DefaultConcurrency:                        updatedSettings.DefaultConcurrency,
 		DefaultBalance:                            updatedSettings.DefaultBalance,
 		RiskControlEnabled:                        updatedSettings.RiskControlEnabled,
+		InvoiceManagementEnabled:                  updatedSettings.InvoiceManagementEnabled,
+		WithdrawalManagementEnabled:               updatedSettings.WithdrawalManagementEnabled,
 		CyberSessionBlockEnabled:                  updatedSettings.CyberSessionBlockEnabled,
 		CyberSessionBlockTTLSeconds:               updatedSettings.CyberSessionBlockTTLSeconds,
 		AffiliateRebateRate:                       updatedSettings.AffiliateRebateRate,
@@ -2339,6 +2357,12 @@ func preserveOmittedUpdateSettingsFields(req *UpdateSettingsRequest, previous *s
 	if !fieldProvided(fields, "risk_control_enabled") {
 		req.RiskControlEnabled = &previous.RiskControlEnabled
 	}
+	if !fieldProvided(fields, "invoice_management_enabled") {
+		req.InvoiceManagementEnabled = &previous.InvoiceManagementEnabled
+	}
+	if !fieldProvided(fields, "withdrawal_management_enabled") {
+		req.WithdrawalManagementEnabled = &previous.WithdrawalManagementEnabled
+	}
 	if !fieldProvided(fields, "cyber_session_block_enabled") {
 		req.CyberSessionBlockEnabled = &previous.CyberSessionBlockEnabled
 	}
@@ -2644,6 +2668,12 @@ func diffSettings(before *service.SystemSettings, after *service.SystemSettings,
 	}
 	if before.RiskControlEnabled != after.RiskControlEnabled {
 		changed = append(changed, "risk_control_enabled")
+	}
+	if before.InvoiceManagementEnabled != after.InvoiceManagementEnabled {
+		changed = append(changed, "invoice_management_enabled")
+	}
+	if before.WithdrawalManagementEnabled != after.WithdrawalManagementEnabled {
+		changed = append(changed, "withdrawal_management_enabled")
 	}
 	if before.CyberSessionBlockEnabled != after.CyberSessionBlockEnabled {
 		changed = append(changed, "cyber_session_block_enabled")

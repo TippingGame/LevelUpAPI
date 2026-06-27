@@ -135,6 +135,8 @@ type SystemSettings struct {
 	DefaultConcurrency              int
 	DefaultBalance                  float64
 	RiskControlEnabled              bool
+	InvoiceManagementEnabled        bool
+	WithdrawalManagementEnabled     bool
 	CyberSessionBlockEnabled        bool
 	CyberSessionBlockTTLSeconds     int
 	AffiliateEnabled                bool
@@ -291,6 +293,10 @@ type PublicSettings struct {
 
 	// Affiliate (邀请返利) feature toggle
 	AffiliateEnabled bool `json:"affiliate_enabled"`
+
+	// Functional module switches
+	InvoiceManagementEnabled    bool `json:"invoice_management_enabled"`
+	WithdrawalManagementEnabled bool `json:"withdrawal_management_enabled"`
 
 	// 风控中心功能开关
 	RiskControlEnabled bool `json:"risk_control_enabled"`

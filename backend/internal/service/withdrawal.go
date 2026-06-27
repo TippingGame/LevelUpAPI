@@ -28,6 +28,7 @@ var (
 	ErrWithdrawalCannotCancel        = infraerrors.Conflict("WITHDRAWAL_CANNOT_CANCEL", "only pending withdrawals can be cancelled")
 	ErrWithdrawalCannotSettle        = infraerrors.Conflict("WITHDRAWAL_CANNOT_SETTLE", "only pending withdrawals can be settled")
 	ErrWithdrawalCannotReject        = infraerrors.Conflict("WITHDRAWAL_CANNOT_REJECT", "only pending withdrawals can be rejected")
+	ErrWithdrawalManagementDisabled  = infraerrors.Forbidden("WITHDRAWAL_MANAGEMENT_DISABLED", "withdrawal management is disabled")
 )
 
 type WithdrawalRequest struct {
@@ -87,6 +88,7 @@ type WithdrawalService struct {
 	authCacheInvalidator APIKeyAuthCacheInvalidator
 	billingCacheService  *BillingCacheService
 	receiptCodeService   *ReceiptCodeService
+	settingService       *SettingService
 }
 
 func NewWithdrawalService(
@@ -94,16 +96,21 @@ func NewWithdrawalService(
 	authCacheInvalidator APIKeyAuthCacheInvalidator,
 	billingCacheService *BillingCacheService,
 	receiptCodeService *ReceiptCodeService,
+	settingService *SettingService,
 ) *WithdrawalService {
 	return &WithdrawalService{
 		repo:                 repo,
 		authCacheInvalidator: authCacheInvalidator,
 		billingCacheService:  billingCacheService,
 		receiptCodeService:   receiptCodeService,
+		settingService:       settingService,
 	}
 }
 
 func (s *WithdrawalService) Submit(ctx context.Context, input WithdrawalSubmitInput) (*WithdrawalRequest, error) {
+	if err := s.ensureEnabled(ctx); err != nil {
+		return nil, err
+	}
 	input.PaymentMethod = normalizeReceiptCodePaymentMethod(input.PaymentMethod)
 	if input.PaymentMethod == "" {
 		return nil, ErrReceiptCodePaymentMethodInvalid
@@ -123,6 +130,9 @@ func (s *WithdrawalService) Submit(ctx context.Context, input WithdrawalSubmitIn
 }
 
 func (s *WithdrawalService) Cancel(ctx context.Context, userID, id int64, reason string) (*WithdrawalRequest, error) {
+	if err := s.ensureEnabled(ctx); err != nil {
+		return nil, err
+	}
 	req, err := s.repo.Cancel(ctx, userID, id, strings.TrimSpace(reason))
 	if err != nil {
 		return nil, err
@@ -132,6 +142,9 @@ func (s *WithdrawalService) Cancel(ctx context.Context, userID, id int64, reason
 }
 
 func (s *WithdrawalService) ListMine(ctx context.Context, userID int64, page, pageSize int) ([]WithdrawalRequest, int64, error) {
+	if err := s.ensureEnabled(ctx); err != nil {
+		return nil, 0, err
+	}
 	items, total, err := s.repo.ListByUser(ctx, userID, page, pageSize)
 	if err != nil {
 		return nil, 0, err
@@ -143,6 +156,9 @@ func (s *WithdrawalService) ListMine(ctx context.Context, userID int64, page, pa
 }
 
 func (s *WithdrawalService) AdminList(ctx context.Context, params WithdrawalListParams) ([]WithdrawalRequest, int64, error) {
+	if err := s.ensureEnabled(ctx); err != nil {
+		return nil, 0, err
+	}
 	items, total, err := s.repo.ListAdmin(ctx, params)
 	if err != nil {
 		return nil, 0, err
@@ -154,6 +170,9 @@ func (s *WithdrawalService) AdminList(ctx context.Context, params WithdrawalList
 }
 
 func (s *WithdrawalService) AdminGet(ctx context.Context, id int64) (*WithdrawalRequest, error) {
+	if err := s.ensureEnabled(ctx); err != nil {
+		return nil, err
+	}
 	req, err := s.repo.GetByID(ctx, id)
 	if err != nil {
 		return nil, err
@@ -162,6 +181,9 @@ func (s *WithdrawalService) AdminGet(ctx context.Context, id int64) (*Withdrawal
 }
 
 func (s *WithdrawalService) AdminSettle(ctx context.Context, id, adminUserID int64, note string) (*WithdrawalRequest, error) {
+	if err := s.ensureEnabled(ctx); err != nil {
+		return nil, err
+	}
 	req, err := s.repo.Settle(ctx, id, adminUserID, strings.TrimSpace(note))
 	if err != nil {
 		return nil, err
@@ -170,6 +192,9 @@ func (s *WithdrawalService) AdminSettle(ctx context.Context, id, adminUserID int
 }
 
 func (s *WithdrawalService) AdminReject(ctx context.Context, id, adminUserID int64, note string) (*WithdrawalRequest, error) {
+	if err := s.ensureEnabled(ctx); err != nil {
+		return nil, err
+	}
 	req, err := s.repo.Reject(ctx, id, adminUserID, strings.TrimSpace(note))
 	if err != nil {
 		return nil, err
@@ -183,6 +208,16 @@ func (s *WithdrawalService) ReceiptCodeInUse(ctx context.Context, storageKey str
 		return false, nil
 	}
 	return s.repo.ReceiptCodeInUse(ctx, storageKey)
+}
+
+func (s *WithdrawalService) ensureEnabled(ctx context.Context) error {
+	if s == nil || s.settingService == nil {
+		return nil
+	}
+	if !s.settingService.IsWithdrawalManagementEnabled(ctx) {
+		return ErrWithdrawalManagementDisabled
+	}
+	return nil
 }
 
 func (s *WithdrawalService) invalidateBalance(ctx context.Context, userID int64) {

@@ -4860,6 +4860,41 @@
           </div>
         </div>
 
+        <div class="card">
+          <div class="border-b border-gray-100 px-6 py-4 dark:border-dark-700">
+            <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
+              {{ t('admin.settings.features.businessModules.title') }}
+            </h2>
+            <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
+              {{ t('admin.settings.features.businessModules.description') }}
+            </p>
+          </div>
+          <div class="divide-y divide-gray-100 dark:divide-dark-700">
+            <div class="flex items-center justify-between gap-4 px-6 py-5">
+              <div>
+                <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
+                  {{ t('admin.settings.features.businessModules.invoiceManagement') }}
+                </label>
+                <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+                  {{ t('admin.settings.features.businessModules.invoiceManagementHint') }}
+                </p>
+              </div>
+              <Toggle v-model="form.invoice_management_enabled" />
+            </div>
+            <div class="flex items-center justify-between gap-4 px-6 py-5">
+              <div>
+                <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
+                  {{ t('admin.settings.features.businessModules.withdrawalManagement') }}
+                </label>
+                <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+                  {{ t('admin.settings.features.businessModules.withdrawalManagementHint') }}
+                </p>
+              </div>
+              <Toggle v-model="form.withdrawal_management_enabled" />
+            </div>
+          </div>
+        </div>
+
         <!-- Risk control feature card -->
         <div class="card">
           <div class="border-b border-gray-100 px-6 py-4 dark:border-dark-700">
@@ -6989,6 +7024,8 @@ const form = reactive<SettingsForm>({
   // Available Channels feature switch
   available_channels_enabled: true,
   user_account_import_limit: USER_ACCOUNT_IMPORT_LIMIT_DEFAULT,
+  invoice_management_enabled: false,
+  withdrawal_management_enabled: true,
   // Affiliate (邀请返利) feature switch
   affiliate_enabled: true,
   // Risk control feature switch
@@ -8280,6 +8317,8 @@ async function saveSettings() {
       user_account_import_limit: normalizeUserAccountImportLimit(
         form.user_account_import_limit,
       ),
+      invoice_management_enabled: form.invoice_management_enabled,
+      withdrawal_management_enabled: form.withdrawal_management_enabled,
       // Affiliate (邀请返利) feature switch
       affiliate_enabled: form.affiliate_enabled,
     };

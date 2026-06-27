@@ -102,6 +102,7 @@ var ProviderSet = wire.NewSet(
 	NewAffiliateRepository,
 	NewReceiptCodeRepository,
 	NewWithdrawalRepository,
+	NewInvoiceRepository,
 
 	// Cache implementations
 	NewGatewayCache,
