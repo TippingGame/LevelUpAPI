@@ -195,7 +195,9 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 	}
 
 	// 6. Build upstream request
-	upstreamReq, err := s.buildUpstreamRequest(ctx, c, account, responsesBody, token, true, promptCacheKey, false)
+	upstreamCtx, releaseUpstreamCtx := detachStreamUpstreamContext(ctx, true)
+	upstreamReq, err := s.buildUpstreamRequest(upstreamCtx, c, account, responsesBody, token, true, promptCacheKey, false)
+	releaseUpstreamCtx()
 	if err != nil {
 		return nil, fmt.Errorf("build upstream request: %w", err)
 	}
@@ -487,6 +489,7 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 	var responseServiceTier string
 	firstChunk := true
 	var terminalErr error
+	clientDisconnected := false
 
 	scanner := bufio.NewScanner(resp.Body)
 	maxLineSize := defaultMaxLineSize
@@ -525,19 +528,12 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 			return false
 		}
 
-		// Extract usage from completion events
-		if (event.Type == "response.completed" || event.Type == "response.incomplete" || event.Type == "response.failed") &&
-			event.Response != nil && event.Response.Usage != nil {
+		isTerminalEvent := isOpenAICompatResponsesTerminalEvent(event.Type)
+		if isTerminalEvent && event.Response != nil && event.Response.Usage != nil {
 			if event.Response.ServiceTier != "" {
 				responseServiceTier = event.Response.ServiceTier
 			}
-			usage = OpenAIUsage{
-				InputTokens:  event.Response.Usage.InputTokens,
-				OutputTokens: event.Response.Usage.OutputTokens,
-			}
-			if event.Response.Usage.InputTokensDetails != nil {
-				usage.CacheReadInputTokens = event.Response.Usage.InputTokensDetails.CachedTokens
-			}
+			usage = copyOpenAIUsageFromResponsesUsage(event.Response.Usage)
 		}
 		if event.Type == "response.failed" {
 			if hit, _, msg := detectOpenAICyberPolicy([]byte(payload)); hit {
@@ -558,41 +554,59 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 		}
 
 		chunks := apicompat.ResponsesEventToChatChunks(&event, state)
-		for _, chunk := range chunks {
-			sse, err := apicompat.ChatChunkToSSE(chunk)
-			if err != nil {
-				logger.L().Warn("openai chat_completions stream: failed to marshal chunk",
-					zap.Error(err),
-					zap.String("request_id", requestID),
-				)
-				continue
-			}
-			if _, err := fmt.Fprint(c.Writer, sse); err != nil {
-				logger.L().Info("openai chat_completions stream: client disconnected",
-					zap.String("request_id", requestID),
-				)
-				return true
+		if !clientDisconnected {
+			for _, chunk := range chunks {
+				sse, err := apicompat.ChatChunkToSSE(chunk)
+				if err != nil {
+					logger.L().Warn("openai chat_completions stream: failed to marshal chunk",
+						zap.Error(err),
+						zap.String("request_id", requestID),
+					)
+					continue
+				}
+				if _, err := fmt.Fprint(c.Writer, sse); err != nil {
+					clientDisconnected = true
+					logger.L().Info("openai chat_completions stream: client disconnected, continuing to drain upstream for billing",
+						zap.String("request_id", requestID),
+					)
+					break
+				}
 			}
 		}
-		if len(chunks) > 0 {
+		if len(chunks) > 0 && !clientDisconnected {
 			c.Writer.Flush()
 		}
-		return false
+		return isTerminalEvent
 	}
 
 	finalizeStream := func() (*OpenAIForwardResult, error) {
-		if finalChunks := apicompat.FinalizeResponsesChatStream(state); len(finalChunks) > 0 {
+		if finalChunks := apicompat.FinalizeResponsesChatStream(state); len(finalChunks) > 0 && !clientDisconnected {
 			for _, chunk := range finalChunks {
 				sse, err := apicompat.ChatChunkToSSE(chunk)
 				if err != nil {
 					continue
 				}
-				fmt.Fprint(c.Writer, sse) //nolint:errcheck
+				if _, err := fmt.Fprint(c.Writer, sse); err != nil {
+					clientDisconnected = true
+					logger.L().Info("openai chat_completions stream: client disconnected during final flush",
+						zap.String("request_id", requestID),
+					)
+					break
+				}
 			}
 		}
 		// Send [DONE] sentinel
-		fmt.Fprint(c.Writer, "data: [DONE]\n\n") //nolint:errcheck
-		c.Writer.Flush()
+		if !clientDisconnected {
+			if _, err := fmt.Fprint(c.Writer, "data: [DONE]\n\n"); err != nil {
+				clientDisconnected = true
+				logger.L().Info("openai chat_completions stream: client disconnected during done flush",
+					zap.String("request_id", requestID),
+				)
+			}
+		}
+		if !clientDisconnected {
+			c.Writer.Flush()
+		}
 		return resultWithUsage(), nil
 	}
 
@@ -620,7 +634,10 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 				continue
 			}
 			if processDataLine(payload) {
-				return resultWithUsage(), terminalErr
+				if terminalErr != nil {
+					return resultWithUsage(), terminalErr
+				}
+				return finalizeStream()
 			}
 		}
 		handleScanErr(scanner.Err())
@@ -676,10 +693,16 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 				continue
 			}
 			if processDataLine(payload) {
-				return resultWithUsage(), terminalErr
+				if terminalErr != nil {
+					return resultWithUsage(), terminalErr
+				}
+				return finalizeStream()
 			}
 
 		case <-keepaliveTicker.C:
+			if clientDisconnected {
+				continue
+			}
 			if time.Since(lastDataAt) < keepaliveInterval {
 				continue
 			}
@@ -688,7 +711,8 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 				logger.L().Info("openai chat_completions stream: client disconnected during keepalive",
 					zap.String("request_id", requestID),
 				)
-				return resultWithUsage(), nil
+				clientDisconnected = true
+				continue
 			}
 			c.Writer.Flush()
 		}

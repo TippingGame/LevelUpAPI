@@ -160,7 +160,7 @@ func ResponsesEventToChatChunks(evt *ResponsesStreamEvent, state *ResponsesEvent
 		return resToChatHandleReasoningDelta(evt, state)
 	case "response.reasoning_summary_text.done":
 		return nil
-	case "response.completed", "response.incomplete", "response.failed":
+	case "response.completed", "response.done", "response.incomplete", "response.failed":
 		return resToChatHandleCompleted(evt, state)
 	default:
 		return nil

@@ -1445,6 +1445,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 
 	cyberBlockedThisConn := false
 	hooks := &service.OpenAIWSIngressHooks{
+		InitialRequestModel: reqModel,
 		BeforeTurn: func(turn int) error {
 			if cyberBlockedThisConn {
 				return service.NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, cyberSessionBlockedClientMsg, nil)

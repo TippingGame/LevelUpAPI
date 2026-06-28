@@ -37,6 +37,30 @@ func TestWSResponseCreate_FilterStripsServiceTier(t *testing.T) {
 	require.Equal(t, "hi", gjson.GetBytes(updated, "input.0.text").String())
 }
 
+func TestOpenAIWSPassthroughUsageMetaTracksReasoningEffort(t *testing.T) {
+	meta := newOpenAIWSPassthroughUsageMeta(
+		"gpt-5.4-high",
+		[]byte(`{"type":"response.create","model":"gpt-5.4","service_tier":"priority"}`),
+	)
+
+	meta.initFromFirstFrame([]byte(`{"type":"response.create","model":"gpt-5.4","service_tier":"priority"}`))
+	require.NotNil(t, meta.serviceTier.Load())
+	require.Equal(t, "priority", *meta.serviceTier.Load())
+	require.NotNil(t, meta.reasoningEffort.Load())
+	require.Equal(t, "high", *meta.reasoningEffort.Load())
+
+	meta.updateSessionRequestModel([]byte(`{"type":"session.update","session":{"model":"gpt-5.4-low"}}`))
+	require.Equal(t, "gpt-5.4-low", meta.requestModelForFrame([]byte(`{"type":"response.create"}`)))
+
+	meta.updateFromResponseCreate(
+		[]byte(`{"type":"response.create","model":"gpt-5.4","reasoning":{"effort":"medium"}}`),
+		meta.requestModelForFrame([]byte(`{"type":"response.create"}`)),
+	)
+	require.Nil(t, meta.serviceTier.Load())
+	require.NotNil(t, meta.reasoningEffort.Load())
+	require.Equal(t, "medium", *meta.reasoningEffort.Load())
+}
+
 func TestWSResponseCreate_FastNormalizedToPriorityThenFiltered(t *testing.T) {
 	svc := newOpenAIGatewayServiceWithSettings(t, DefaultOpenAIFastPolicySettings())
 	account := &Account{Platform: PlatformOpenAI, Type: AccountTypeAPIKey}

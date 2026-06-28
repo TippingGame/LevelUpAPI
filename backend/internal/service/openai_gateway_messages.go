@@ -183,7 +183,9 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 	}
 
 	// 6. Build upstream request
-	upstreamReq, err := s.buildUpstreamRequest(ctx, c, account, responsesBody, token, isStream, promptCacheKey, false)
+	upstreamCtx, releaseUpstreamCtx := detachStreamUpstreamContext(ctx, true)
+	upstreamReq, err := s.buildUpstreamRequest(upstreamCtx, c, account, responsesBody, token, isStream, promptCacheKey, false)
+	releaseUpstreamCtx()
 	if err != nil {
 		return nil, fmt.Errorf("build upstream request: %w", err)
 	}
@@ -416,6 +418,29 @@ func (s *OpenAIGatewayService) handleAnthropicBufferedStreamingResponse(
 	}, nil
 }
 
+func isOpenAICompatResponsesTerminalEvent(eventType string) bool {
+	switch strings.TrimSpace(eventType) {
+	case "response.completed", "response.done", "response.incomplete", "response.failed":
+		return true
+	default:
+		return false
+	}
+}
+
+func copyOpenAIUsageFromResponsesUsage(usage *apicompat.ResponsesUsage) OpenAIUsage {
+	if usage == nil {
+		return OpenAIUsage{}
+	}
+	result := OpenAIUsage{
+		InputTokens:  usage.InputTokens,
+		OutputTokens: usage.OutputTokens,
+	}
+	if usage.InputTokensDetails != nil {
+		result.CacheReadInputTokens = usage.InputTokensDetails.CachedTokens
+	}
+	return result
+}
+
 // handleAnthropicStreamingResponse reads Responses SSE events from upstream,
 // converts each to Anthropic SSE events, and writes them to the client.
 // When StreamKeepaliveInterval is configured, it uses a goroutine + channel
@@ -447,6 +472,7 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 	var responseServiceTier string
 	firstChunk := true
 	var terminalErr error
+	clientDisconnected := false
 
 	scanner := bufio.NewScanner(resp.Body)
 	maxLineSize := defaultMaxLineSize
@@ -471,7 +497,7 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 	}
 
 	// processDataLine handles a single "data: ..." SSE line from upstream.
-	// Returns (clientDisconnected bool).
+	// Returns true when a terminal event was observed.
 	processDataLine := func(payload string) bool {
 		if firstChunk {
 			firstChunk = false
@@ -488,19 +514,12 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 			return false
 		}
 
-		// Extract usage from completion events
-		if (event.Type == "response.completed" || event.Type == "response.incomplete" || event.Type == "response.failed") &&
-			event.Response != nil && event.Response.Usage != nil {
+		isTerminalEvent := isOpenAICompatResponsesTerminalEvent(event.Type)
+		if isTerminalEvent && event.Response != nil && event.Response.Usage != nil {
 			if event.Response.ServiceTier != "" {
 				responseServiceTier = event.Response.ServiceTier
 			}
-			usage = OpenAIUsage{
-				InputTokens:  event.Response.Usage.InputTokens,
-				OutputTokens: event.Response.Usage.OutputTokens,
-			}
-			if event.Response.Usage.InputTokensDetails != nil {
-				usage.CacheReadInputTokens = event.Response.Usage.InputTokensDetails.CachedTokens
-			}
+			usage = copyOpenAIUsageFromResponsesUsage(event.Response.Usage)
 		}
 		if event.Type == "response.failed" {
 			if hit, _, msg := detectOpenAICyberPolicy([]byte(payload)); hit {
@@ -522,39 +541,50 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 
 		// Convert to Anthropic events
 		events := apicompat.ResponsesEventToAnthropicEvents(&event, state)
-		for _, evt := range events {
-			sse, err := apicompat.ResponsesAnthropicEventToSSE(evt)
-			if err != nil {
-				logger.L().Warn("openai messages stream: failed to marshal event",
-					zap.Error(err),
-					zap.String("request_id", requestID),
-				)
-				continue
-			}
-			if _, err := fmt.Fprint(c.Writer, sse); err != nil {
-				logger.L().Info("openai messages stream: client disconnected",
-					zap.String("request_id", requestID),
-				)
-				return true
+		if !clientDisconnected {
+			for _, evt := range events {
+				sse, err := apicompat.ResponsesAnthropicEventToSSE(evt)
+				if err != nil {
+					logger.L().Warn("openai messages stream: failed to marshal event",
+						zap.Error(err),
+						zap.String("request_id", requestID),
+					)
+					continue
+				}
+				if _, err := fmt.Fprint(c.Writer, sse); err != nil {
+					clientDisconnected = true
+					logger.L().Info("openai messages stream: client disconnected, continuing to drain upstream for billing",
+						zap.String("request_id", requestID),
+					)
+					break
+				}
 			}
 		}
-		if len(events) > 0 {
+		if len(events) > 0 && !clientDisconnected {
 			c.Writer.Flush()
 		}
-		return false
+		return isTerminalEvent
 	}
 
 	// finalizeStream sends any remaining Anthropic events and returns the result.
 	finalizeStream := func() (*OpenAIForwardResult, error) {
-		if finalEvents := apicompat.FinalizeResponsesAnthropicStream(state); len(finalEvents) > 0 {
+		if finalEvents := apicompat.FinalizeResponsesAnthropicStream(state); len(finalEvents) > 0 && !clientDisconnected {
 			for _, evt := range finalEvents {
 				sse, err := apicompat.ResponsesAnthropicEventToSSE(evt)
 				if err != nil {
 					continue
 				}
-				fmt.Fprint(c.Writer, sse) //nolint:errcheck
+				if _, err := fmt.Fprint(c.Writer, sse); err != nil {
+					clientDisconnected = true
+					logger.L().Info("openai messages stream: client disconnected during final flush",
+						zap.String("request_id", requestID),
+					)
+					break
+				}
 			}
-			c.Writer.Flush()
+			if !clientDisconnected {
+				c.Writer.Flush()
+			}
 		}
 		return resultWithUsage(), nil
 	}
@@ -584,7 +614,10 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 				continue
 			}
 			if processDataLine(payload) {
-				return resultWithUsage(), terminalErr
+				if terminalErr != nil {
+					return resultWithUsage(), terminalErr
+				}
+				return finalizeStream()
 			}
 		}
 		handleScanErr(scanner.Err())
@@ -641,10 +674,16 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 				continue
 			}
 			if processDataLine(payload) {
-				return resultWithUsage(), terminalErr
+				if terminalErr != nil {
+					return resultWithUsage(), terminalErr
+				}
+				return finalizeStream()
 			}
 
 		case <-keepaliveTicker.C:
+			if clientDisconnected {
+				continue
+			}
 			if time.Since(lastDataAt) < keepaliveInterval {
 				continue
 			}
@@ -654,7 +693,8 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 				logger.L().Info("openai messages stream: client disconnected during keepalive",
 					zap.String("request_id", requestID),
 				)
-				return resultWithUsage(), nil
+				clientDisconnected = true
+				continue
 			}
 			c.Writer.Flush()
 		}

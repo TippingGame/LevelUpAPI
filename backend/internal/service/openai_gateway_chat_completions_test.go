@@ -258,6 +258,91 @@ func TestForwardAsChatCompletions_RawChatDrainsUsageAfterClientDisconnect(t *tes
 	require.True(t, gjson.GetBytes(upstream.lastBody, "stream_options.include_usage").Bool())
 }
 
+func TestForwardAsChatCompletions_ConvertedStreamDrainsUsageAfterClientDisconnect(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Writer = &failingGinWriter{ResponseWriter: c.Writer, failAfter: 1}
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(nil))
+
+	upstreamSSE := strings.Join([]string{
+		`data: {"type":"response.output_text.delta","delta":"h"}`,
+		"",
+		`data: {"type":"response.done","response":{"status":"completed","usage":{"input_tokens":17,"output_tokens":8,"input_tokens_details":{"cached_tokens":6}}}}`,
+		"",
+		"data: [DONE]",
+		"",
+	}, "\n")
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}, "x-request-id": []string{"rid_converted_disconnect"}},
+		Body:       io.NopCloser(strings.NewReader(upstreamSSE)),
+	}}
+
+	svc := &OpenAIGatewayService{
+		cfg:          &config.Config{},
+		httpUpstream: upstream,
+	}
+	account := &Account{
+		ID:          1,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Credentials: map[string]any{"api_key": "sk-test", "base_url": "https://api.openai.com"},
+	}
+
+	result, err := svc.ForwardAsChatCompletions(context.Background(), c, account, []byte(`{"model":"gpt-5.5","stream":true,"stream_options":{"include_usage":true},"messages":[{"role":"user","content":"hi"}]}`), "", "")
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, 17, result.Usage.InputTokens)
+	require.Equal(t, 8, result.Usage.OutputTokens)
+	require.Equal(t, 6, result.Usage.CacheReadInputTokens)
+	require.NoError(t, upstream.lastReq.Context().Err())
+}
+
+func TestForwardAsAnthropic_ConvertedStreamDrainsUsageAfterClientDisconnect(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Writer = &failingGinWriter{ResponseWriter: c.Writer, failAfter: 1}
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(nil))
+
+	upstreamSSE := strings.Join([]string{
+		`data: {"type":"response.output_text.delta","delta":"h"}`,
+		"",
+		`data: {"type":"response.done","response":{"status":"completed","usage":{"input_tokens":21,"output_tokens":9,"input_tokens_details":{"cached_tokens":5}}}}`,
+		"",
+		"data: [DONE]",
+		"",
+	}, "\n")
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}, "x-request-id": []string{"rid_messages_disconnect"}},
+		Body:       io.NopCloser(strings.NewReader(upstreamSSE)),
+	}}
+
+	svc := &OpenAIGatewayService{
+		cfg:          &config.Config{},
+		httpUpstream: upstream,
+	}
+	account := &Account{
+		ID:          1,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Credentials: map[string]any{"api_key": "sk-test", "base_url": "https://api.openai.com"},
+	}
+
+	body := []byte(`{"model":"claude-sonnet-4-5","max_tokens":1024,"stream":true,"messages":[{"role":"user","content":"hi"}]}`)
+	result, err := svc.ForwardAsAnthropic(context.Background(), c, account, body, "", "")
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, 21, result.Usage.InputTokens)
+	require.Equal(t, 9, result.Usage.OutputTokens)
+	require.Equal(t, 5, result.Usage.CacheReadInputTokens)
+	require.NoError(t, upstream.lastReq.Context().Err())
+}
+
 func TestForwardAsChatCompletions_RawChatStreamDetachesUpstreamContext(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
