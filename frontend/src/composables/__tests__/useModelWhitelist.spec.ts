@@ -39,11 +39,20 @@ describe('useModelWhitelist', () => {
     expect(getModelsByPlatform('antigravity')).toContain('claude-opus-4-8')
   })
 
+  it('Claude/Antigravity 模型列表包含 Fable 5', () => {
+    expect(getModelsByPlatform('anthropic')).toContain('claude-fable-5')
+    expect(getModelsByPlatform('antigravity')).toContain('claude-fable-5')
+  })
+
   it('gemini 模型列表包含原生生图模型', () => {
     const models = getModelsByPlatform('gemini')
 
     expect(models).toContain('gemini-2.5-flash-image')
     expect(models).toContain('gemini-3.1-flash-image')
+  })
+
+  it('gemini 模型列表包含 Gemini 3.5 Flash', () => {
+    expect(getModelsByPlatform('gemini')).toContain('gemini-3.5-flash')
   })
 
   it('antigravity 模型列表会把新的 Gemini 图片模型排在前面', () => {

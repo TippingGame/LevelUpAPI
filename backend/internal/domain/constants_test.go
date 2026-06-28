@@ -36,3 +36,15 @@ func TestDefaultAntigravityModelMapping_IncludesOpus48(t *testing.T) {
 		t.Fatalf("DefaultAntigravityModelMapping[claude-opus-4-8] = %q, want claude-opus-4-8", got)
 	}
 }
+
+func TestDefaultAntigravityModelMapping_IncludesFable5(t *testing.T) {
+	t.Parallel()
+
+	got, ok := DefaultAntigravityModelMapping["claude-fable-5"]
+	if !ok {
+		t.Fatal("expected claude-fable-5 in DefaultAntigravityModelMapping")
+	}
+	if got != "claude-fable-5" {
+		t.Fatalf("DefaultAntigravityModelMapping[claude-fable-5] = %q, want claude-fable-5", got)
+	}
+}
