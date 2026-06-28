@@ -43,6 +43,14 @@ func (r *affiliateRepository) EnsureUserAffiliate(ctx context.Context, userID in
 	return ensureUserAffiliateWithClient(ctx, client, userID)
 }
 
+func (r *affiliateRepository) EnsureUserAffiliateWithPolicy(ctx context.Context, userID int64, weeklyLimit int, autoRotate bool) (*service.AffiliateSummary, error) {
+	if userID <= 0 {
+		return nil, service.ErrUserNotFound
+	}
+	client := clientFromContext(ctx, r.client)
+	return ensureUserAffiliateWithClientPolicy(ctx, client, userID, weeklyLimit, autoRotate)
+}
+
 func (r *affiliateRepository) GetAffiliateByCode(ctx context.Context, code string) (*service.AffiliateSummary, error) {
 	client := clientFromContext(ctx, r.client)
 	return queryAffiliateByCode(ctx, client, code)
@@ -776,6 +784,16 @@ func (r *affiliateRepository) withTx(ctx context.Context, fn func(txCtx context.
 }
 
 func ensureUserAffiliateWithClient(ctx context.Context, client affiliateQueryExecer, userID int64) (*service.AffiliateSummary, error) {
+	return ensureUserAffiliateWithClientPolicy(ctx, client, userID, service.AffiliateCodeWeeklyLimitDefault, service.AffiliateCodeAutoRotateDefault)
+}
+
+func ensureUserAffiliateWithClientPolicy(ctx context.Context, client affiliateQueryExecer, userID int64, weeklyLimit int, autoRotate bool) (*service.AffiliateSummary, error) {
+	if weeklyLimit < 0 {
+		weeklyLimit = service.AffiliateCodeWeeklyLimitDefault
+	}
+	if weeklyLimit > service.AffiliateCodeWeeklyLimitMax {
+		weeklyLimit = service.AffiliateCodeWeeklyLimitMax
+	}
 	summary, err := queryAffiliateByUserID(ctx, client, userID)
 	if err == nil {
 		return summary, nil
@@ -811,7 +829,7 @@ VALUES (
     NOW(),
     NOW()
 )
-ON CONFLICT (user_id) DO NOTHING`, userID, code, service.AffiliateCodeWeeklyLimitDefault, service.AffiliateCodeAutoRotateDefault)
+ON CONFLICT (user_id) DO NOTHING`, userID, code, weeklyLimit, autoRotate)
 		if insertErr == nil {
 			break
 		}

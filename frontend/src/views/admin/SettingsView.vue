@@ -2719,6 +2719,40 @@
                     {{ t("admin.settings.defaults.defaultUserRpmLimitHint") }}
                   </p>
                 </div>
+                <div>
+                  <label
+                    class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300"
+                  >
+                    {{ t("admin.settings.defaults.defaultAffiliateWeeklyLimit") }}
+                  </label>
+                  <input
+                    v-model.number="form.default_affiliate_weekly_limit"
+                    type="number"
+                    min="0"
+                    step="1"
+                    class="input"
+                    placeholder="0"
+                  />
+                  <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
+                    {{ t("admin.settings.defaults.defaultAffiliateWeeklyLimitHint") }}
+                  </p>
+                </div>
+                <div class="flex items-start justify-between gap-4 rounded border border-gray-200 p-4 dark:border-dark-600">
+                  <div>
+                    <label class="font-medium text-gray-900 dark:text-white">
+                      {{ t("admin.settings.defaults.defaultAffiliateCodeAutoRotate") }}
+                    </label>
+                    <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                      {{ t("admin.settings.defaults.defaultAffiliateCodeAutoRotateHint") }}
+                    </p>
+                  </div>
+                  <Toggle
+                    v-model="form.default_affiliate_code_auto_rotate"
+                    :aria-label="
+                      t('admin.settings.defaults.defaultAffiliateCodeAutoRotate')
+                    "
+                  />
+                </div>
               </div>
 
               <div class="border-t border-gray-100 pt-4 dark:border-dark-700">
@@ -6837,6 +6871,8 @@ const form = reactive<SettingsForm>({
   default_subscriptions: [],
   force_email_on_third_party_signup: false,
   default_user_rpm_limit: 0,
+  default_affiliate_weekly_limit: 0,
+  default_affiliate_code_auto_rotate: false,
   user_private_group_daily_limit_usd: null,
   user_private_group_weekly_limit_usd: null,
   user_private_group_monthly_limit_usd: null,
@@ -7654,6 +7690,13 @@ async function loadSettings() {
     form.default_subscriptions = normalizeDefaultSubscriptionSettings(
       settings.default_subscriptions,
     );
+    form.default_affiliate_weekly_limit = Math.max(
+      0,
+      Math.floor(Number(settings.default_affiliate_weekly_limit) || 0),
+    );
+    form.default_affiliate_code_auto_rotate = Boolean(
+      settings.default_affiliate_code_auto_rotate,
+    );
     registrationEmailSuffixWhitelistTags.value =
       normalizeRegistrationEmailSuffixDomains(
         settings.registration_email_suffix_whitelist,
@@ -8103,6 +8146,12 @@ async function saveSettings() {
       default_subscriptions: normalizedDefaultSubscriptions,
       force_email_on_third_party_signup: form.force_email_on_third_party_signup,
       default_user_rpm_limit: form.default_user_rpm_limit,
+      default_affiliate_weekly_limit: Math.max(
+        0,
+        Math.floor(Number(form.default_affiliate_weekly_limit) || 0),
+      ),
+      default_affiliate_code_auto_rotate:
+        form.default_affiliate_code_auto_rotate,
       user_private_group_daily_limit_usd: positiveNumberOrZero(
         form.user_private_group_daily_limit_usd,
       ),

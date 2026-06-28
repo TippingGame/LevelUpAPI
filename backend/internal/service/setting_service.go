@@ -1747,6 +1747,14 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 	}
 	updates[SettingKeyAffiliateRebatePerInviteeCap] = strconv.FormatFloat(settings.AffiliateRebatePerInviteeCap, 'f', 8, 64)
 	updates[SettingKeyDefaultUserRPMLimit] = strconv.Itoa(settings.DefaultUserRPMLimit)
+	if settings.DefaultAffiliateWeeklyLimit < 0 {
+		settings.DefaultAffiliateWeeklyLimit = AffiliateCodeWeeklyLimitDefault
+	}
+	if settings.DefaultAffiliateWeeklyLimit > AffiliateCodeWeeklyLimitMax {
+		settings.DefaultAffiliateWeeklyLimit = AffiliateCodeWeeklyLimitMax
+	}
+	updates[SettingKeyDefaultAffiliateWeeklyLimit] = strconv.Itoa(settings.DefaultAffiliateWeeklyLimit)
+	updates[SettingKeyDefaultAffiliateCodeAutoRotate] = strconv.FormatBool(settings.DefaultAffiliateCodeAutoRotate)
 	updates[SettingKeyUserPrivateGroupDailyLimitUSD] = formatPositiveOptionalFloat(settings.UserPrivateGroupDailyLimitUSD)
 	updates[SettingKeyUserPrivateGroupWeeklyLimitUSD] = formatPositiveOptionalFloat(settings.UserPrivateGroupWeeklyLimitUSD)
 	updates[SettingKeyUserPrivateGroupMonthlyLimitUSD] = formatPositiveOptionalFloat(settings.UserPrivateGroupMonthlyLimitUSD)
@@ -2355,6 +2363,28 @@ func (s *SettingService) GetDefaultUserRPMLimit(ctx context.Context) int {
 	return 0
 }
 
+// GetDefaultAffiliateInviteCodePolicy returns the invite-code policy used when
+// a user affiliate profile is created for the first time.
+func (s *SettingService) GetDefaultAffiliateInviteCodePolicy(ctx context.Context) (int, bool) {
+	if s == nil || s.settingRepo == nil {
+		return AffiliateCodeWeeklyLimitDefault, AffiliateCodeAutoRotateDefault
+	}
+	weeklyLimit := AffiliateCodeWeeklyLimitDefault
+	if value, err := s.settingRepo.GetValue(ctx, SettingKeyDefaultAffiliateWeeklyLimit); err == nil {
+		if v, parseErr := strconv.Atoi(value); parseErr == nil && v >= 0 {
+			if v > AffiliateCodeWeeklyLimitMax {
+				v = AffiliateCodeWeeklyLimitMax
+			}
+			weeklyLimit = v
+		}
+	}
+	autoRotate := AffiliateCodeAutoRotateDefault
+	if value, err := s.settingRepo.GetValue(ctx, SettingKeyDefaultAffiliateCodeAutoRotate); err == nil {
+		autoRotate = strings.EqualFold(strings.TrimSpace(value), "true")
+	}
+	return weeklyLimit, autoRotate
+}
+
 // GetUserPrivateGroupTemplate returns the default quota template for newly provisioned user-private groups.
 func (s *SettingService) GetUserPrivateGroupTemplate(ctx context.Context) (*UserPrivateGroupTemplate, error) {
 	settings, err := s.GetAllSettings(ctx)
@@ -2600,6 +2630,8 @@ func (s *SettingService) InitializeDefaultSettings(ctx context.Context) error {
 		SettingKeyAffiliateRebateDurationDays:              strconv.Itoa(AffiliateRebateDurationDaysDefault),
 		SettingKeyAffiliateRebatePerInviteeCap:             strconv.FormatFloat(AffiliateRebatePerInviteeCapDefault, 'f', 2, 64),
 		SettingKeyDefaultUserRPMLimit:                      "0",
+		SettingKeyDefaultAffiliateWeeklyLimit:              strconv.Itoa(AffiliateCodeWeeklyLimitDefault),
+		SettingKeyDefaultAffiliateCodeAutoRotate:           strconv.FormatBool(AffiliateCodeAutoRotateDefault),
 		SettingKeyDefaultSubscriptions:                     "[]",
 		SettingKeyAuthSourceDefaultEmailBalance:            "0",
 		SettingKeyAuthSourceDefaultEmailConcurrency:        "5",
@@ -2765,6 +2797,15 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 	if rpm, err := strconv.Atoi(settings[SettingKeyDefaultUserRPMLimit]); err == nil && rpm >= 0 {
 		result.DefaultUserRPMLimit = rpm
 	}
+	if weeklyLimit, err := strconv.Atoi(settings[SettingKeyDefaultAffiliateWeeklyLimit]); err == nil && weeklyLimit >= 0 {
+		if weeklyLimit > AffiliateCodeWeeklyLimitMax {
+			weeklyLimit = AffiliateCodeWeeklyLimitMax
+		}
+		result.DefaultAffiliateWeeklyLimit = weeklyLimit
+	} else {
+		result.DefaultAffiliateWeeklyLimit = AffiliateCodeWeeklyLimitDefault
+	}
+	result.DefaultAffiliateCodeAutoRotate = strings.EqualFold(strings.TrimSpace(settings[SettingKeyDefaultAffiliateCodeAutoRotate]), "true")
 
 	// 解析浮点数类型
 	result.UserPrivateGroupDailyLimitUSD = parsePositiveOptionalFloat(settings[SettingKeyUserPrivateGroupDailyLimitUSD])

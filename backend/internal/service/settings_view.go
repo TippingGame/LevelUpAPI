@@ -145,6 +145,8 @@ type SystemSettings struct {
 	AffiliateRebateDurationDays     int
 	AffiliateRebatePerInviteeCap    float64
 	DefaultUserRPMLimit             int
+	DefaultAffiliateWeeklyLimit     int
+	DefaultAffiliateCodeAutoRotate  bool
 	UserPrivateGroupDailyLimitUSD   *float64
 	UserPrivateGroupWeeklyLimitUSD  *float64
 	UserPrivateGroupMonthlyLimitUSD *float64

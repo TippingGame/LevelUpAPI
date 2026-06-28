@@ -238,6 +238,8 @@ func (h *SettingHandler) GetSettings(c *gin.Context) {
 		AffiliateRebateDurationDays:               settings.AffiliateRebateDurationDays,
 		AffiliateRebatePerInviteeCap:              settings.AffiliateRebatePerInviteeCap,
 		DefaultUserRPMLimit:                       settings.DefaultUserRPMLimit,
+		DefaultAffiliateWeeklyLimit:               settings.DefaultAffiliateWeeklyLimit,
+		DefaultAffiliateCodeAutoRotate:            settings.DefaultAffiliateCodeAutoRotate,
 		UserPrivateGroupDailyLimitUSD:             settings.UserPrivateGroupDailyLimitUSD,
 		UserPrivateGroupWeeklyLimitUSD:            settings.UserPrivateGroupWeeklyLimitUSD,
 		UserPrivateGroupMonthlyLimitUSD:           settings.UserPrivateGroupMonthlyLimitUSD,
@@ -516,6 +518,8 @@ type UpdateSettingsRequest struct {
 	AffiliateRebateDurationDays              *int                              `json:"affiliate_rebate_duration_days"`
 	AffiliateRebatePerInviteeCap             *float64                          `json:"affiliate_rebate_per_invitee_cap"`
 	DefaultUserRPMLimit                      int                               `json:"default_user_rpm_limit"`
+	DefaultAffiliateWeeklyLimit              int                               `json:"default_affiliate_weekly_limit"`
+	DefaultAffiliateCodeAutoRotate           bool                              `json:"default_affiliate_code_auto_rotate"`
 	UserPrivateGroupDailyLimitUSD            float64                           `json:"user_private_group_daily_limit_usd"`
 	UserPrivateGroupWeeklyLimitUSD           float64                           `json:"user_private_group_weekly_limit_usd"`
 	UserPrivateGroupMonthlyLimitUSD          float64                           `json:"user_private_group_monthly_limit_usd"`
@@ -708,6 +712,12 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 	}
 	if req.DefaultBalance < 0 {
 		req.DefaultBalance = 0
+	}
+	if req.DefaultAffiliateWeeklyLimit < 0 {
+		req.DefaultAffiliateWeeklyLimit = service.AffiliateCodeWeeklyLimitDefault
+	}
+	if req.DefaultAffiliateWeeklyLimit > service.AffiliateCodeWeeklyLimitMax {
+		req.DefaultAffiliateWeeklyLimit = service.AffiliateCodeWeeklyLimitMax
 	}
 	if req.CyberSessionBlockTTLSeconds != nil && *req.CyberSessionBlockTTLSeconds <= 0 {
 		response.Error(c, http.StatusBadRequest, "cyber_session_block_ttl_seconds must be greater than 0")
@@ -1530,6 +1540,8 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		AffiliateRebateDurationDays:     affiliateRebateDurationDays,
 		AffiliateRebatePerInviteeCap:    affiliateRebatePerInviteeCap,
 		DefaultUserRPMLimit:             req.DefaultUserRPMLimit,
+		DefaultAffiliateWeeklyLimit:     req.DefaultAffiliateWeeklyLimit,
+		DefaultAffiliateCodeAutoRotate:  req.DefaultAffiliateCodeAutoRotate,
 		UserPrivateGroupDailyLimitUSD:   positiveFloat64Ptr(req.UserPrivateGroupDailyLimitUSD),
 		UserPrivateGroupWeeklyLimitUSD:  positiveFloat64Ptr(req.UserPrivateGroupWeeklyLimitUSD),
 		UserPrivateGroupMonthlyLimitUSD: positiveFloat64Ptr(req.UserPrivateGroupMonthlyLimitUSD),
@@ -1966,6 +1978,8 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		AffiliateRebateDurationDays:               updatedSettings.AffiliateRebateDurationDays,
 		AffiliateRebatePerInviteeCap:              updatedSettings.AffiliateRebatePerInviteeCap,
 		DefaultUserRPMLimit:                       updatedSettings.DefaultUserRPMLimit,
+		DefaultAffiliateWeeklyLimit:               updatedSettings.DefaultAffiliateWeeklyLimit,
+		DefaultAffiliateCodeAutoRotate:            updatedSettings.DefaultAffiliateCodeAutoRotate,
 		UserPrivateGroupDailyLimitUSD:             updatedSettings.UserPrivateGroupDailyLimitUSD,
 		UserPrivateGroupWeeklyLimitUSD:            updatedSettings.UserPrivateGroupWeeklyLimitUSD,
 		UserPrivateGroupMonthlyLimitUSD:           updatedSettings.UserPrivateGroupMonthlyLimitUSD,
@@ -2375,6 +2389,12 @@ func preserveOmittedUpdateSettingsFields(req *UpdateSettingsRequest, previous *s
 	if !fieldProvided(fields, "default_user_rpm_limit") {
 		req.DefaultUserRPMLimit = previous.DefaultUserRPMLimit
 	}
+	if !fieldProvided(fields, "default_affiliate_weekly_limit") {
+		req.DefaultAffiliateWeeklyLimit = previous.DefaultAffiliateWeeklyLimit
+	}
+	if !fieldProvided(fields, "default_affiliate_code_auto_rotate") {
+		req.DefaultAffiliateCodeAutoRotate = previous.DefaultAffiliateCodeAutoRotate
+	}
 	if !fieldProvided(fields, "user_private_group_daily_limit_usd") {
 		req.UserPrivateGroupDailyLimitUSD = optionalFloat64Value(previous.UserPrivateGroupDailyLimitUSD)
 	}
@@ -2683,6 +2703,12 @@ func diffSettings(before *service.SystemSettings, after *service.SystemSettings,
 	}
 	if before.DefaultUserRPMLimit != after.DefaultUserRPMLimit {
 		changed = append(changed, "default_user_rpm_limit")
+	}
+	if before.DefaultAffiliateWeeklyLimit != after.DefaultAffiliateWeeklyLimit {
+		changed = append(changed, "default_affiliate_weekly_limit")
+	}
+	if before.DefaultAffiliateCodeAutoRotate != after.DefaultAffiliateCodeAutoRotate {
+		changed = append(changed, "default_affiliate_code_auto_rotate")
 	}
 	if before.AffiliateRebateRate != after.AffiliateRebateRate {
 		changed = append(changed, "affiliate_rebate_rate")

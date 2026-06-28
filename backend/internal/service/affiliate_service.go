@@ -131,6 +131,7 @@ type AffiliateDetail struct {
 
 type AffiliateRepository interface {
 	EnsureUserAffiliate(ctx context.Context, userID int64) (*AffiliateSummary, error)
+	EnsureUserAffiliateWithPolicy(ctx context.Context, userID int64, weeklyLimit int, autoRotate bool) (*AffiliateSummary, error)
 	GetAffiliateByCode(ctx context.Context, code string) (*AffiliateSummary, error)
 	ValidateAffiliateCode(ctx context.Context, code string, cycle AffiliateCodeCycle) (*AffiliateSummary, error)
 	ConsumeAffiliateCode(ctx context.Context, userID int64, code string, cycle AffiliateCodeCycle) (*AffiliateSummary, error)
@@ -268,7 +269,8 @@ func (s *AffiliateService) EnsureUserAffiliate(ctx context.Context, userID int64
 	if s == nil || s.repo == nil {
 		return nil, infraerrors.ServiceUnavailable("SERVICE_UNAVAILABLE", "affiliate service unavailable")
 	}
-	if _, err := s.repo.EnsureUserAffiliate(ctx, userID); err != nil {
+	weeklyLimit, autoRotate := s.defaultInviteCodePolicy(ctx)
+	if _, err := s.repo.EnsureUserAffiliateWithPolicy(ctx, userID, weeklyLimit, autoRotate); err != nil {
 		return nil, err
 	}
 	refreshed, err := s.repo.RefreshUserAffiliateCodeCycle(ctx, userID, currentAffiliateCodeCycle(time.Now()))
@@ -276,6 +278,13 @@ func (s *AffiliateService) EnsureUserAffiliate(ctx context.Context, userID int64
 		return nil, err
 	}
 	return refreshed, nil
+}
+
+func (s *AffiliateService) defaultInviteCodePolicy(ctx context.Context) (int, bool) {
+	if s == nil || s.settingService == nil {
+		return AffiliateCodeWeeklyLimitDefault, AffiliateCodeAutoRotateDefault
+	}
+	return s.settingService.GetDefaultAffiliateInviteCodePolicy(ctx)
 }
 
 func (s *AffiliateService) GetAffiliateDetail(ctx context.Context, userID int64, query AffiliateDetailQuery) (*AffiliateDetail, error) {
@@ -355,6 +364,10 @@ func (s *AffiliateService) ConsumeInvitationCode(ctx context.Context, userID int
 	}
 	if !isValidAffiliateCodeFormat(code) {
 		return ErrAffiliateCodeInvalid
+	}
+	weeklyLimit, autoRotate := s.defaultInviteCodePolicy(ctx)
+	if _, err := s.repo.EnsureUserAffiliateWithPolicy(ctx, userID, weeklyLimit, autoRotate); err != nil {
+		return err
 	}
 	if _, err := s.repo.ConsumeAffiliateCode(ctx, userID, code, currentAffiliateCodeCycle(time.Now())); err != nil {
 		if errors.Is(err, ErrAffiliateProfileNotFound) {

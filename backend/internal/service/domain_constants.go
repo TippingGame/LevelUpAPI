@@ -222,10 +222,12 @@ const (
 	SettingKeyGoogleOAuthFrontendRedirectURL = "google_oauth_frontend_redirect_url"
 
 	// 默认配置
-	SettingKeyDefaultConcurrency   = "default_concurrency"    // 新用户默认并发量
-	SettingKeyDefaultBalance       = "default_balance"        // 新用户默认余额
-	SettingKeyDefaultSubscriptions = "default_subscriptions"  // 新用户默认订阅列表（JSON）
-	SettingKeyDefaultUserRPMLimit  = "default_user_rpm_limit" // 新用户默认 RPM 限制（0 = 不限制）
+	SettingKeyDefaultConcurrency             = "default_concurrency"                // 新用户默认并发量
+	SettingKeyDefaultBalance                 = "default_balance"                    // 新用户默认余额
+	SettingKeyDefaultSubscriptions           = "default_subscriptions"              // 新用户默认订阅列表（JSON）
+	SettingKeyDefaultUserRPMLimit            = "default_user_rpm_limit"             // 新用户默认 RPM 限制（0 = 不限制）
+	SettingKeyDefaultAffiliateWeeklyLimit    = "default_affiliate_weekly_limit"     // 新用户邀请返利码每周可用次数（0 = 不限）
+	SettingKeyDefaultAffiliateCodeAutoRotate = "default_affiliate_code_auto_rotate" // 新用户邀请返利码是否每周自动换码
 
 	// 第三方认证来源默认授予配置
 	SettingKeyAuthSourceDefaultEmailBalance            = "auth_source_default_email_balance"

@@ -141,6 +141,8 @@ type SystemSettings struct {
 	AffiliateRebateDurationDays     int                          `json:"affiliate_rebate_duration_days"`
 	AffiliateRebatePerInviteeCap    float64                      `json:"affiliate_rebate_per_invitee_cap"`
 	DefaultUserRPMLimit             int                          `json:"default_user_rpm_limit"`
+	DefaultAffiliateWeeklyLimit     int                          `json:"default_affiliate_weekly_limit"`
+	DefaultAffiliateCodeAutoRotate  bool                         `json:"default_affiliate_code_auto_rotate"`
 	UserPrivateGroupDailyLimitUSD   *float64                     `json:"user_private_group_daily_limit_usd"`
 	UserPrivateGroupWeeklyLimitUSD  *float64                     `json:"user_private_group_weekly_limit_usd"`
 	UserPrivateGroupMonthlyLimitUSD *float64                     `json:"user_private_group_monthly_limit_usd"`

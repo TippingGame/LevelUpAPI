@@ -338,6 +338,8 @@ export interface SystemSettings {
   affiliate_rebate_per_invitee_cap: number;
   default_concurrency: number;
   default_user_rpm_limit: number;
+  default_affiliate_weekly_limit: number;
+  default_affiliate_code_auto_rotate: boolean;
   user_private_group_daily_limit_usd: number | null;
   user_private_group_weekly_limit_usd: number | null;
   user_private_group_monthly_limit_usd: number | null;
@@ -592,6 +594,8 @@ export interface UpdateSettingsRequest {
   affiliate_rebate_per_invitee_cap?: number;
   default_concurrency?: number;
   default_user_rpm_limit?: number;
+  default_affiliate_weekly_limit?: number;
+  default_affiliate_code_auto_rotate?: boolean;
   user_private_group_daily_limit_usd?: number | null;
   user_private_group_weekly_limit_usd?: number | null;
   user_private_group_monthly_limit_usd?: number | null;
