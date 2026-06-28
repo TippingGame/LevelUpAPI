@@ -299,11 +299,17 @@ func TestParseUsageAndEnrichCoverage(t *testing.T) {
 	require.Equal(t, 1, state.usage.OutputTokens)
 	require.Equal(t, 1, state.usage.CacheReadInputTokens)
 
+	parseUsageAndAccumulate(state, []byte(`{"type":"response.done","response":{"usage":{"prompt_tokens":12,"completion_tokens":6,"prompt_tokens_details":{"cached_tokens":4},"completion_tokens_details":{"image_tokens":2}}}}`), "response.done", nil)
+	require.Equal(t, 14, state.usage.InputTokens)
+	require.Equal(t, 7, state.usage.OutputTokens)
+	require.Equal(t, 5, state.usage.CacheReadInputTokens)
+	require.Equal(t, 2, state.usage.ImageOutputTokens)
+
 	state.imageCounter = newImageOutputCounter()
 	state.imageCounter.AddMessage([]byte(`{"type":"response.output_item.done","item":{"id":"ig_internal","type":"image_generation_call","result":"ZmluYWw="}}`))
 	parseUsageAndAccumulate(state, []byte(`{"type":"response.completed","response":{"usage":{"input_tokens":3,"output_tokens":2,"output_tokens_details":{"image_tokens":4}}}}`), "response.completed", nil)
 	require.Equal(t, 1, state.usage.ImageCount)
-	require.Equal(t, 4, state.usage.ImageOutputTokens)
+	require.Equal(t, 6, state.usage.ImageOutputTokens)
 
 	result := &RelayResult{}
 	enrichResult(result, state, 5*time.Millisecond)
@@ -311,7 +317,7 @@ func TestParseUsageAndEnrichCoverage(t *testing.T) {
 	require.Equal(t, 1, result.Usage.ImageCount)
 	require.Equal(t, 5*time.Millisecond, result.Duration)
 	parseUsageAndAccumulate(state, []byte(`{"type":"response.in_progress","response":{"usage":{"input_tokens":9}}}`), "response.in_progress", nil)
-	require.Equal(t, 5, state.usage.InputTokens)
+	require.Equal(t, 17, state.usage.InputTokens)
 	enrichResult(nil, state, 0)
 }
 

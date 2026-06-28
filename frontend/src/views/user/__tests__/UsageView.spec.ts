@@ -213,7 +213,7 @@ describe('user UsageView tooltip', () => {
         cache_read_cost: 0.069568,
         input_tokens: 4057,
         output_tokens: 101,
-        cache_creation_tokens: 4,
+        cache_creation_tokens: 139136,
         cache_read_tokens: 278272,
         cache_creation_5m_tokens: 0,
         cache_creation_1h_tokens: 0,
@@ -279,7 +279,7 @@ describe('user UsageView tooltip', () => {
       reader.readAsText(exportedBlob!)
     })
     expect(csvText).toContain('Cache Hit Rate')
-    expect(csvText).toContain('98.6%')
+    expect(csvText).toContain('66.0%')
     const hasSortedExportQuery = query.mock.calls.some((call) => {
       const params = call[0] as Record<string, unknown> | undefined
       const config = call[1]

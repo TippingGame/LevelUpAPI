@@ -800,14 +800,26 @@ func parseUsageAndAccumulate(
 	}
 
 	inputResult := gjson.GetBytes(message, "response.usage.input_tokens")
+	if !inputResult.Exists() {
+		inputResult = gjson.GetBytes(message, "response.usage.prompt_tokens")
+	}
 	textInputResult := gjson.GetBytes(message, "response.usage.input_tokens_details.text_tokens")
 	imageInputResult := gjson.GetBytes(message, "response.usage.input_tokens_details.image_tokens")
 	outputResult := gjson.GetBytes(message, "response.usage.output_tokens")
+	if !outputResult.Exists() {
+		outputResult = gjson.GetBytes(message, "response.usage.completion_tokens")
+	}
 	textOutputResult := gjson.GetBytes(message, "response.usage.output_tokens_details.text_tokens")
 	cachedResult := gjson.GetBytes(message, "response.usage.input_tokens_details.cached_tokens")
+	if !cachedResult.Exists() {
+		cachedResult = gjson.GetBytes(message, "response.usage.prompt_tokens_details.cached_tokens")
+	}
 	textCachedResult := gjson.GetBytes(message, "response.usage.input_tokens_details.cached_text_tokens")
 	imageCachedResult := gjson.GetBytes(message, "response.usage.input_tokens_details.cached_image_tokens")
 	imageTokensResult := gjson.GetBytes(message, "response.usage.output_tokens_details.image_tokens")
+	if !imageTokensResult.Exists() {
+		imageTokensResult = gjson.GetBytes(message, "response.usage.completion_tokens_details.image_tokens")
+	}
 
 	inputTokens, inputOK := parseUsageIntField(inputResult, true)
 	textInputTokens, textInputOK := parseUsageIntField(textInputResult, false)

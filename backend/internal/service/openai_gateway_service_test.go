@@ -2527,6 +2527,12 @@ func TestParseSSEUsage_SelectiveParsing(t *testing.T) {
 	require.Equal(t, 13, usage.InputTokens)
 	require.Equal(t, 15, usage.OutputTokens)
 	require.Equal(t, 4, usage.CacheReadInputTokens)
+
+	// 部分兼容上游会把 Chat Completions usage 放在 Responses 终态事件里。
+	svc.parseSSEUsage(`{"type":"response.completed","response":{"usage":{"prompt_tokens":21,"completion_tokens":8,"prompt_tokens_details":{"cached_tokens":6}}}}`, usage)
+	require.Equal(t, 21, usage.InputTokens)
+	require.Equal(t, 8, usage.OutputTokens)
+	require.Equal(t, 6, usage.CacheReadInputTokens)
 }
 
 func TestExtractOpenAIUsageFromJSONBytes_ImageTokenDetails(t *testing.T) {
@@ -2561,6 +2567,23 @@ func TestExtractOpenAIUsageFromJSONBytes_ImageTokenDetails(t *testing.T) {
 	require.Equal(t, 0, tokens.ImageInputTokens)
 	require.Equal(t, 196, tokens.OutputTokens)
 	require.Equal(t, 196, tokens.ImageOutputTokens)
+}
+
+func TestExtractOpenAIUsageFromJSONBytes_ChatCompletionsUsage(t *testing.T) {
+	usage, ok := extractOpenAIUsageFromJSONBytes([]byte(`{
+		"usage": {
+			"prompt_tokens": 13,
+			"completion_tokens": 7,
+			"prompt_tokens_details": {"cached_tokens": 4},
+			"completion_tokens_details": {"image_tokens": 2}
+		}
+	}`))
+
+	require.True(t, ok)
+	require.Equal(t, 13, usage.InputTokens)
+	require.Equal(t, 7, usage.OutputTokens)
+	require.Equal(t, 4, usage.CacheReadInputTokens)
+	require.Equal(t, 2, usage.ImageOutputTokens)
 }
 
 func TestExtractCodexFinalResponse_SampleReplay(t *testing.T) {

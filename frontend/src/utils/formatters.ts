@@ -8,12 +8,17 @@ export function formatCacheTokens(tokens: number): string {
 }
 
 /**
- * 格式化输入侧缓存命中率：缓存读取 Token /（实际输入 Token + 缓存读取 Token）
+ * 格式化输入侧缓存命中率：缓存读取 Token /（实际输入 Token + 缓存创建 Token + 缓存读取 Token）
  */
-export function formatCacheHitRate(inputTokens?: number | null, cacheReadTokens?: number | null): string {
+export function formatCacheHitRate(
+  inputTokens?: number | null,
+  cacheReadTokens?: number | null,
+  cacheCreationTokens?: number | null
+): string {
   const input = Math.max(0, Number(inputTokens) || 0)
   const cacheRead = Math.max(0, Number(cacheReadTokens) || 0)
-  const totalInputSide = input + cacheRead
+  const cacheCreation = Math.max(0, Number(cacheCreationTokens) || 0)
+  const totalInputSide = input + cacheCreation + cacheRead
   if (totalInputSide <= 0) return '0%'
 
   const percentage = (cacheRead / totalInputSide) * 100

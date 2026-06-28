@@ -395,27 +395,9 @@ func parseOpenAIWSResponseUsageFromCompletedEvent(message []byte, usage *OpenAIU
 	if usage == nil || len(message) == 0 {
 		return
 	}
-	values := gjson.GetManyBytes(
-		message,
-		"response.usage.input_tokens",
-		"response.usage.input_tokens_details.text_tokens",
-		"response.usage.input_tokens_details.image_tokens",
-		"response.usage.output_tokens",
-		"response.usage.output_tokens_details.text_tokens",
-		"response.usage.input_tokens_details.cached_tokens",
-		"response.usage.input_tokens_details.cached_text_tokens",
-		"response.usage.input_tokens_details.cached_image_tokens",
-		"response.usage.output_tokens_details.image_tokens",
-	)
-	usage.InputTokens = int(values[0].Int())
-	usage.TextInputTokens = int(values[1].Int())
-	usage.ImageInputTokens = int(values[2].Int())
-	usage.OutputTokens = int(values[3].Int())
-	usage.TextOutputTokens = int(values[4].Int())
-	usage.CacheReadInputTokens = int(values[5].Int())
-	usage.TextCacheReadInputTokens = int(values[6].Int())
-	usage.ImageCacheReadInputTokens = int(values[7].Int())
-	usage.ImageOutputTokens = int(values[8].Int())
+	if parsedUsage, ok := openAIUsageFromGJSON(gjson.GetBytes(message, "response.usage")); ok {
+		*usage = parsedUsage
+	}
 }
 
 func parseOpenAIWSErrorEventFields(message []byte) (code string, errType string, errMessage string) {

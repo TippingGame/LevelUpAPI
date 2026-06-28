@@ -4,6 +4,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net"
@@ -80,6 +81,19 @@ func TestParseSSEUsage_DeltaOverwritesWithNonZero(t *testing.T) {
 	require.Equal(t, 100, usage.OutputTokens)
 	require.Equal(t, 30, usage.CacheCreationInputTokens)
 	require.Equal(t, 60, usage.CacheReadInputTokens)
+}
+
+func TestMergeSSEUsagePatch_DoesNotMarkNativeCachedTokensIncluded(t *testing.T) {
+	var event map[string]any
+	require.NoError(t, json.Unmarshal([]byte(`{"type":"message_delta","usage":{"input_tokens":200,"output_tokens":100,"cache_read_input_tokens":60,"cached_tokens":60}}`), &event))
+
+	svc := newMinimalGatewayService()
+	usage := &ClaudeUsage{}
+	mergeSSEUsagePatch(usage, svc.extractSSEUsagePatch(event, false))
+
+	require.Equal(t, 200, usage.InputTokens)
+	require.Equal(t, 60, usage.CacheReadInputTokens)
+	require.False(t, usage.InputTokensIncludeCacheRead)
 }
 
 func TestParseSSEUsage_DeltaDoesNotResetCacheCreationBreakdown(t *testing.T) {

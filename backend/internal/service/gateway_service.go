@@ -498,13 +498,14 @@ type AccountSelectionResult struct {
 
 // ClaudeUsage 表示Claude API返回的usage信息
 type ClaudeUsage struct {
-	InputTokens              int `json:"input_tokens"`
-	OutputTokens             int `json:"output_tokens"`
-	CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
-	CacheReadInputTokens     int `json:"cache_read_input_tokens"`
-	CacheCreation5mTokens    int // 5分钟缓存创建token（来自嵌套 cache_creation 对象）
-	CacheCreation1hTokens    int // 1小时缓存创建token（来自嵌套 cache_creation 对象）
-	ImageOutputTokens        int `json:"image_output_tokens,omitempty"`
+	InputTokens                 int  `json:"input_tokens"`
+	OutputTokens                int  `json:"output_tokens"`
+	CacheCreationInputTokens    int  `json:"cache_creation_input_tokens"`
+	CacheReadInputTokens        int  `json:"cache_read_input_tokens"`
+	CacheCreation5mTokens       int  // 5分钟缓存创建token（来自嵌套 cache_creation 对象）
+	CacheCreation1hTokens       int  // 1小时缓存创建token（来自嵌套 cache_creation 对象）
+	ImageOutputTokens           int  `json:"image_output_tokens,omitempty"`
+	InputTokensIncludeCacheRead bool `json:"-"`
 }
 
 // ForwardResult 转发结果
@@ -562,6 +563,21 @@ func claudeUsageHasBillableTokens(usage *ClaudeUsage) bool {
 		usage.CacheCreation5mTokens > 0 ||
 		usage.CacheCreation1hTokens > 0 ||
 		usage.ImageOutputTokens > 0
+}
+
+func normalizeClaudeCompatibleUsageForBilling(usage *ClaudeUsage) {
+	if usage == nil || !usage.InputTokensIncludeCacheRead {
+		return
+	}
+	if usage.CacheReadInputTokens <= 0 || usage.InputTokens <= 0 {
+		usage.InputTokensIncludeCacheRead = false
+		return
+	}
+	usage.InputTokens -= usage.CacheReadInputTokens
+	if usage.InputTokens < 0 {
+		usage.InputTokens = 0
+	}
+	usage.InputTokensIncludeCacheRead = false
 }
 
 func streamingResultHasBillableUsage(result *streamingResult) bool {
@@ -6134,9 +6150,11 @@ func (s *GatewayService) parseSSEUsagePassthrough(data string, usage *ClaudeUsag
 	if usage.CacheReadInputTokens == 0 {
 		if cached := parsed.Get("message.usage.cached_tokens").Int(); cached > 0 {
 			usage.CacheReadInputTokens = int(cached)
+			usage.InputTokensIncludeCacheRead = true
 		}
 		if cached := parsed.Get("usage.cached_tokens").Int(); usage.CacheReadInputTokens == 0 && cached > 0 {
 			usage.CacheReadInputTokens = int(cached)
+			usage.InputTokensIncludeCacheRead = true
 		}
 	}
 	if usage.CacheCreationInputTokens == 0 {
@@ -6182,6 +6200,7 @@ func parseClaudeUsageFromResponseBody(body []byte) *ClaudeUsage {
 	if usage.CacheReadInputTokens == 0 {
 		if cached := usageNode.Get("cached_tokens").Int(); cached > 0 {
 			usage.CacheReadInputTokens = int(cached)
+			usage.InputTokensIncludeCacheRead = true
 		}
 	}
 	return usage
@@ -8015,18 +8034,27 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 			eventName = eventType
 		}
 		eventChanged := false
+		cachedTokensReconciled := false
 
 		// 兼容 Kimi cached_tokens → cache_read_input_tokens
-		if eventType == "message_start" {
-			if msg, ok := event["message"].(map[string]any); ok {
-				if u, ok := msg["usage"].(map[string]any); ok {
-					eventChanged = reconcileCachedTokens(u) || eventChanged
+		if usage.CacheReadInputTokens == 0 {
+			if eventType == "message_start" {
+				if msg, ok := event["message"].(map[string]any); ok {
+					if u, ok := msg["usage"].(map[string]any); ok {
+						if reconcileCachedTokens(u) {
+							cachedTokensReconciled = true
+							eventChanged = true
+						}
+					}
 				}
 			}
-		}
-		if eventType == "message_delta" {
-			if u, ok := event["usage"].(map[string]any); ok {
-				eventChanged = reconcileCachedTokens(u) || eventChanged
+			if eventType == "message_delta" {
+				if u, ok := event["usage"].(map[string]any); ok {
+					if reconcileCachedTokens(u) {
+						cachedTokensReconciled = true
+						eventChanged = true
+					}
+				}
 			}
 		}
 
@@ -8056,7 +8084,7 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 			}
 		}
 
-		usagePatch := s.extractSSEUsagePatch(event)
+		usagePatch := s.extractSSEUsagePatch(event, cachedTokensReconciled)
 		if anthropicStreamEventIsTerminal(eventName, dataLine) {
 			sawTerminalEvent = true
 		}
@@ -8268,27 +8296,28 @@ func (s *GatewayService) parseSSEUsage(data string, usage *ClaudeUsage) {
 		return
 	}
 
-	if patch := s.extractSSEUsagePatch(event); patch != nil {
+	if patch := s.extractSSEUsagePatch(event, false); patch != nil {
 		mergeSSEUsagePatch(usage, patch)
 	}
 }
 
 type sseUsagePatch struct {
-	inputTokens              int
-	hasInputTokens           bool
-	outputTokens             int
-	hasOutputTokens          bool
-	cacheCreationInputTokens int
-	hasCacheCreationInput    bool
-	cacheReadInputTokens     int
-	hasCacheReadInput        bool
-	cacheCreation5mTokens    int
-	hasCacheCreation5m       bool
-	cacheCreation1hTokens    int
-	hasCacheCreation1h       bool
+	inputTokens                 int
+	hasInputTokens              bool
+	outputTokens                int
+	hasOutputTokens             bool
+	cacheCreationInputTokens    int
+	hasCacheCreationInput       bool
+	cacheReadInputTokens        int
+	hasCacheReadInput           bool
+	cacheCreation5mTokens       int
+	hasCacheCreation5m          bool
+	cacheCreation1hTokens       int
+	hasCacheCreation1h          bool
+	inputTokensIncludeCacheRead bool
 }
 
-func (s *GatewayService) extractSSEUsagePatch(event map[string]any) *sseUsagePatch {
+func (s *GatewayService) extractSSEUsagePatch(event map[string]any, inputTokensIncludeCacheRead bool) *sseUsagePatch {
 	if len(event) == 0 {
 		return nil
 	}
@@ -8315,6 +8344,7 @@ func (s *GatewayService) extractSSEUsagePatch(event map[string]any) *sseUsagePat
 		if v, ok := parseSSEUsageInt(usageObj["cache_read_input_tokens"]); ok {
 			patch.cacheReadInputTokens = v
 		}
+		patch.inputTokensIncludeCacheRead = inputTokensIncludeCacheRead
 		if cc, ok := usageObj["cache_creation"].(map[string]any); ok {
 			if v, exists := parseSSEUsageInt(cc["ephemeral_5m_input_tokens"]); exists {
 				patch.cacheCreation5mTokens = v
@@ -8350,6 +8380,7 @@ func (s *GatewayService) extractSSEUsagePatch(event map[string]any) *sseUsagePat
 			patch.cacheReadInputTokens = v
 			patch.hasCacheReadInput = true
 		}
+		patch.inputTokensIncludeCacheRead = inputTokensIncludeCacheRead
 		if cc, ok := usageObj["cache_creation"].(map[string]any); ok {
 			if v, exists := parseSSEUsageInt(cc["ephemeral_5m_input_tokens"]); exists && v > 0 {
 				patch.cacheCreation5mTokens = v
@@ -8379,6 +8410,9 @@ func mergeSSEUsagePatch(usage *ClaudeUsage, patch *sseUsagePatch) {
 	}
 	if patch.hasCacheReadInput {
 		usage.CacheReadInputTokens = patch.cacheReadInputTokens
+	}
+	if patch.inputTokensIncludeCacheRead {
+		usage.InputTokensIncludeCacheRead = true
 	}
 	if patch.hasOutputTokens {
 		usage.OutputTokens = patch.outputTokens
@@ -8523,6 +8557,7 @@ func (s *GatewayService) handleNonStreamingResponse(ctx context.Context, resp *h
 		cachedTokens := gjson.GetBytes(body, "usage.cached_tokens").Int()
 		if cachedTokens > 0 {
 			response.Usage.CacheReadInputTokens = int(cachedTokens)
+			response.Usage.InputTokensIncludeCacheRead = true
 			if newBody, err := sjson.SetBytes(body, "usage.cache_read_input_tokens", cachedTokens); err == nil {
 				body = newBody
 			}
@@ -9269,6 +9304,8 @@ func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsage
 	user := input.User
 	account := input.Account
 	subscription := input.Subscription
+
+	normalizeClaudeCompatibleUsageForBilling(&result.Usage)
 
 	// 强制缓存计费：将 input_tokens 转为 cache_read_input_tokens
 	// 用于粘性会话切换时的特殊计费处理

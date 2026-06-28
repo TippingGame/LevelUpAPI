@@ -286,3 +286,37 @@ func TestNonStreamingReconcile_NoCachedTokens(t *testing.T) {
 	assert.Equal(t, 0, response.Usage.CacheReadInputTokens)
 	assert.Equal(t, int64(0), gjson.GetBytes(body, "usage.cache_read_input_tokens").Int())
 }
+
+func TestParseClaudeUsageFromResponseBody_MarksCompatCachedTokensIncluded(t *testing.T) {
+	body := []byte(`{
+		"usage": {
+			"input_tokens": 1000,
+			"output_tokens": 20,
+			"cache_read_input_tokens": 0,
+			"cached_tokens": 600
+		}
+	}`)
+
+	usage := parseClaudeUsageFromResponseBody(body)
+
+	require.Equal(t, 1000, usage.InputTokens)
+	require.Equal(t, 600, usage.CacheReadInputTokens)
+	require.True(t, usage.InputTokensIncludeCacheRead)
+
+	normalizeClaudeCompatibleUsageForBilling(usage)
+	require.Equal(t, 400, usage.InputTokens)
+	require.Equal(t, 600, usage.CacheReadInputTokens)
+	require.False(t, usage.InputTokensIncludeCacheRead)
+}
+
+func TestNormalizeClaudeCompatibleUsageForBilling_LeavesNativeClaudeInputUntouched(t *testing.T) {
+	usage := &ClaudeUsage{
+		InputTokens:          400,
+		CacheReadInputTokens: 600,
+	}
+
+	normalizeClaudeCompatibleUsageForBilling(usage)
+
+	require.Equal(t, 400, usage.InputTokens)
+	require.Equal(t, 600, usage.CacheReadInputTokens)
+}

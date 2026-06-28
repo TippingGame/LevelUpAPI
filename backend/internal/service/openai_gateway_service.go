@@ -4969,17 +4969,11 @@ func (s *OpenAIGatewayService) parseSSEUsageBytes(data []byte, usage *OpenAIUsag
 		return
 	}
 
-	usage.InputTokens = int(gjson.GetBytes(data, "response.usage.input_tokens").Int())
-	usage.TextInputTokens = int(gjson.GetBytes(data, "response.usage.input_tokens_details.text_tokens").Int())
-	usage.ImageInputTokens = int(gjson.GetBytes(data, "response.usage.input_tokens_details.image_tokens").Int())
-	usage.OutputTokens = int(gjson.GetBytes(data, "response.usage.output_tokens").Int())
-	usage.TextOutputTokens = int(gjson.GetBytes(data, "response.usage.output_tokens_details.text_tokens").Int())
-	usage.CacheReadInputTokens = int(gjson.GetBytes(data, "response.usage.input_tokens_details.cached_tokens").Int())
-	usage.TextCacheReadInputTokens = int(gjson.GetBytes(data, "response.usage.input_tokens_details.cached_text_tokens").Int())
-	usage.ImageCacheReadInputTokens = int(gjson.GetBytes(data, "response.usage.input_tokens_details.cached_image_tokens").Int())
-	usage.ImageOutputTokens = int(gjson.GetBytes(data, "response.usage.output_tokens_details.image_tokens").Int())
-	if responseServiceTier := strings.TrimSpace(gjson.GetBytes(data, "response.service_tier").String()); responseServiceTier != "" {
-		usage.ResponseServiceTier = responseServiceTier
+	if parsedUsage, ok := openAIUsageFromGJSON(gjson.GetBytes(data, "response.usage")); ok {
+		*usage = parsedUsage
+		if responseServiceTier := strings.TrimSpace(gjson.GetBytes(data, "response.service_tier").String()); responseServiceTier != "" {
+			usage.ResponseServiceTier = responseServiceTier
+		}
 	}
 }
 
@@ -4987,29 +4981,45 @@ func extractOpenAIUsageFromJSONBytes(body []byte) (OpenAIUsage, bool) {
 	if len(body) == 0 || !gjson.ValidBytes(body) {
 		return OpenAIUsage{}, false
 	}
-	values := gjson.GetManyBytes(
-		body,
-		"usage.input_tokens",
-		"usage.input_tokens_details.text_tokens",
-		"usage.input_tokens_details.image_tokens",
-		"usage.output_tokens",
-		"usage.output_tokens_details.text_tokens",
-		"usage.input_tokens_details.cached_tokens",
-		"usage.input_tokens_details.cached_text_tokens",
-		"usage.input_tokens_details.cached_image_tokens",
-		"usage.output_tokens_details.image_tokens",
-	)
+	usage, ok := openAIUsageFromGJSON(gjson.GetBytes(body, "usage"))
+	if !ok {
+		return OpenAIUsage{}, false
+	}
+	usage.ResponseServiceTier = strings.TrimSpace(gjson.GetBytes(body, "service_tier").String())
+	return usage, true
+}
+
+func openAIUsageFromGJSON(value gjson.Result) (OpenAIUsage, bool) {
+	if !value.Exists() || !value.IsObject() {
+		return OpenAIUsage{}, false
+	}
+	inputTokens := value.Get("input_tokens").Int()
+	if inputTokens == 0 {
+		inputTokens = value.Get("prompt_tokens").Int()
+	}
+	outputTokens := value.Get("output_tokens").Int()
+	if outputTokens == 0 {
+		outputTokens = value.Get("completion_tokens").Int()
+	}
+	cacheReadTokens := value.Get("input_tokens_details.cached_tokens").Int()
+	if cacheReadTokens == 0 {
+		cacheReadTokens = value.Get("prompt_tokens_details.cached_tokens").Int()
+	}
+	imageOutputTokens := value.Get("output_tokens_details.image_tokens").Int()
+	if imageOutputTokens == 0 {
+		imageOutputTokens = value.Get("completion_tokens_details.image_tokens").Int()
+	}
 	return OpenAIUsage{
-		InputTokens:               int(values[0].Int()),
-		TextInputTokens:           int(values[1].Int()),
-		ImageInputTokens:          int(values[2].Int()),
-		OutputTokens:              int(values[3].Int()),
-		TextOutputTokens:          int(values[4].Int()),
-		CacheReadInputTokens:      int(values[5].Int()),
-		TextCacheReadInputTokens:  int(values[6].Int()),
-		ImageCacheReadInputTokens: int(values[7].Int()),
-		ImageOutputTokens:         int(values[8].Int()),
-		ResponseServiceTier:       strings.TrimSpace(gjson.GetBytes(body, "service_tier").String()),
+		InputTokens:               int(inputTokens),
+		TextInputTokens:           int(value.Get("input_tokens_details.text_tokens").Int()),
+		ImageInputTokens:          int(value.Get("input_tokens_details.image_tokens").Int()),
+		OutputTokens:              int(outputTokens),
+		TextOutputTokens:          int(value.Get("output_tokens_details.text_tokens").Int()),
+		CacheCreationInputTokens:  int(value.Get("cache_creation_input_tokens").Int()),
+		CacheReadInputTokens:      int(cacheReadTokens),
+		TextCacheReadInputTokens:  int(value.Get("input_tokens_details.cached_text_tokens").Int()),
+		ImageCacheReadInputTokens: int(value.Get("input_tokens_details.cached_image_tokens").Int()),
+		ImageOutputTokens:         int(imageOutputTokens),
 	}, true
 }
 
