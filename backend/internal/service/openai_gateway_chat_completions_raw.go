@@ -80,7 +80,9 @@ func (s *OpenAIGatewayService) forwardAsRawChatCompletions(
 	}
 	targetURL := buildOpenAIChatCompletionsURL(validatedURL)
 
-	upstreamReq, err := http.NewRequestWithContext(ctx, http.MethodPost, targetURL, bytes.NewReader(upstreamBody))
+	upstreamCtx, releaseUpstreamCtx := detachStreamUpstreamContext(ctx, clientStream)
+	defer releaseUpstreamCtx()
+	upstreamReq, err := http.NewRequestWithContext(upstreamCtx, http.MethodPost, targetURL, bytes.NewReader(upstreamBody))
 	if err != nil {
 		return nil, fmt.Errorf("build upstream request: %w", err)
 	}
@@ -189,6 +191,7 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 
 	var usage OpenAIUsage
 	var firstTokenMs *int
+	clientDisconnected := false
 	for scanner.Scan() {
 		line := scanner.Text()
 		if payload, ok := extractOpenAISSEDataLine(line); ok && strings.TrimSpace(payload) != "[DONE]" {
@@ -201,13 +204,15 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 				firstTokenMs = &ms
 			}
 		}
-		if _, err := c.Writer.WriteString(line + "\n"); err != nil {
-			logger.L().Info("openai chat_completions raw: client disconnected",
-				zap.String("request_id", requestID),
-			)
-			break
+		if !clientDisconnected {
+			if _, err := c.Writer.WriteString(line + "\n"); err != nil {
+				clientDisconnected = true
+				logger.L().Info("openai chat_completions raw: client disconnected, continuing to drain upstream for billing",
+					zap.String("request_id", requestID),
+				)
+			}
 		}
-		if line == "" {
+		if line == "" && !clientDisconnected {
 			c.Writer.Flush()
 		}
 	}

@@ -249,6 +249,50 @@ data: {"type":"response.completed"}
 	require.Equal(t, "Bearer sk-test", upstream.requests[0].Header.Get("Authorization"))
 }
 
+func TestAccountTestService_OpenAIAPIKeyResponsesProbePersistsSupportFlag(t *testing.T) {
+	tests := []struct {
+		name      string
+		status    int
+		supported bool
+	}{
+		{name: "not_found", status: http.StatusNotFound, supported: false},
+		{name: "method_not_allowed", status: http.StatusMethodNotAllowed, supported: false},
+		{name: "bad_request_means_endpoint_exists", status: http.StatusBadRequest, supported: true},
+		{name: "unauthorized_means_endpoint_exists", status: http.StatusUnauthorized, supported: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			account := &Account{
+				ID:          104,
+				Platform:    PlatformOpenAI,
+				Type:        AccountTypeAPIKey,
+				Concurrency: 1,
+				Credentials: map[string]any{
+					"api_key":  "sk-test",
+					"base_url": "https://api.openai.com",
+				},
+			}
+			repo := &openAIAccountTestRepo{mockAccountRepoForGemini: mockAccountRepoForGemini{accountsByID: map[int64]*Account{
+				account.ID: account,
+			}}}
+			upstream := &httpUpstreamRecorder{resp: newJSONResponse(tt.status, `{"ok":false}`)}
+			svc := &AccountTestService{
+				cfg:          &config.Config{},
+				accountRepo:  repo,
+				httpUpstream: upstream,
+			}
+
+			svc.ProbeOpenAIAPIKeyResponsesSupport(context.Background(), account.ID)
+
+			require.NotNil(t, repo.updatedExtra)
+			require.Equal(t, tt.supported, repo.updatedExtra["openai_responses_supported"])
+			require.NotNil(t, upstream.lastReq)
+			require.Equal(t, "https://api.openai.com/v1/responses", upstream.lastReq.URL.String())
+		})
+	}
+}
+
 func TestAccountTestService_OpenAIStreamEOFBeforeCompletedFails(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	ctx, recorder := newTestContext()

@@ -21,6 +21,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/geminicli"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/openai_compat"
 	"github.com/Wei-Shaw/sub2api/internal/util/urlvalidator"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -560,6 +561,11 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 		normalizedBaseURL, err := s.validateUpstreamBaseURL(baseURL)
 		if err != nil {
 			return s.sendErrorAndEnd(c, fmt.Sprintf("Invalid base URL: %s", err.Error()))
+		}
+		if !openai_compat.ShouldUseResponsesAPI(account.Extra) {
+			return s.sendErrorAndEnd(c,
+				"账号已被探测为不支持 OpenAI Responses API，账号本身可通过网关正常使用，但当前测试接口仅支持 Responses API 路径。请直接通过实际 API 调用验证。",
+			)
 		}
 		apiURL = buildOpenAIResponsesURL(normalizedBaseURL)
 	} else {
