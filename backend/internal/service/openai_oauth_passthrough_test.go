@@ -312,6 +312,105 @@ func TestOpenAIGatewayService_OAuthPassthrough_CodexAutoReviewPreservesUpstreamM
 	require.Contains(t, rec.Body.String(), "resp_review")
 }
 
+func TestOpenAIGatewayService_ForwardCodexImageBridgeGated(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	tests := []struct {
+		name          string
+		bridgeEnabled bool
+		wantTool      bool
+		wantBridge    bool
+	}{
+		{name: "disabled by default", bridgeEnabled: false, wantTool: false, wantBridge: false},
+		{name: "enabled by config", bridgeEnabled: true, wantTool: true, wantBridge: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(rec)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(nil))
+			c.Request.Header.Set("User-Agent", "codex_cli_rs/0.124.0")
+			c.Request.Header.Set("Content-Type", "application/json")
+			c.Set("api_key", &APIKey{ID: 42, Group: &Group{AllowImageGeneration: true}})
+
+			upstream := &httpUpstreamRecorder{resp: &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": []string{"application/json"}, "x-request-id": []string{"rid-bridge"}},
+				Body:       io.NopCloser(strings.NewReader(`{"id":"resp_bridge","model":"gpt-5.4","usage":{"input_tokens":1,"output_tokens":1}}`)),
+			}}
+			svc := &OpenAIGatewayService{
+				cfg:          &config.Config{Gateway: config.GatewayConfig{CodexImageGenerationBridgeEnabled: tt.bridgeEnabled}},
+				httpUpstream: upstream,
+			}
+			account := &Account{
+				ID:          123,
+				Name:        "acc",
+				Platform:    PlatformOpenAI,
+				Type:        AccountTypeOAuth,
+				Concurrency: 1,
+				Credentials: map[string]any{"access_token": "oauth-token", "chatgpt_account_id": "chatgpt-acc"},
+				Status:      StatusActive,
+				Schedulable: true,
+			}
+
+			result, err := svc.Forward(context.Background(), c, account, []byte(`{"model":"gpt-5.4","stream":false,"input":"write code"}`))
+
+			require.NoError(t, err)
+			require.NotNil(t, result)
+			require.NotNil(t, upstream.lastReq)
+			require.Equal(t, tt.wantTool, gjson.GetBytes(upstream.lastBody, `tools.#(type=="image_generation")`).Exists())
+			instructions := gjson.GetBytes(upstream.lastBody, "instructions").String()
+			if tt.wantBridge {
+				require.Contains(t, instructions, codexImageGenerationBridgeMarker)
+			} else {
+				require.NotContains(t, instructions, codexImageGenerationBridgeMarker)
+			}
+		})
+	}
+}
+
+func TestOpenAIGatewayService_ForwardExplicitImageToolWorksWithBridgeDisabled(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(nil))
+	c.Request.Header.Set("User-Agent", "codex_cli_rs/0.124.0")
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Set("api_key", &APIKey{ID: 42, Group: &Group{AllowImageGeneration: true}})
+
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/json"}, "x-request-id": []string{"rid-explicit-image"}},
+		Body:       io.NopCloser(strings.NewReader(`{"id":"resp_explicit_image","model":"gpt-5.4","usage":{"input_tokens":1,"output_tokens":1}}`)),
+	}}
+	svc := &OpenAIGatewayService{
+		cfg:          &config.Config{},
+		httpUpstream: upstream,
+	}
+	account := &Account{
+		ID:          123,
+		Name:        "acc",
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeOAuth,
+		Concurrency: 1,
+		Credentials: map[string]any{"access_token": "oauth-token", "chatgpt_account_id": "chatgpt-acc"},
+		Status:      StatusActive,
+		Schedulable: true,
+	}
+
+	result, err := svc.Forward(context.Background(), c, account, []byte(`{"model":"gpt-5.4","stream":false,"input":"draw","tools":[{"type":"image_generation","format":"jpeg"}]}`))
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.NotNil(t, upstream.lastReq)
+	require.True(t, gjson.GetBytes(upstream.lastBody, `tools.#(type=="image_generation")`).Exists())
+	require.Equal(t, "jpeg", gjson.GetBytes(upstream.lastBody, `tools.#(type=="image_generation").output_format`).String())
+	require.False(t, gjson.GetBytes(upstream.lastBody, `tools.#(type=="image_generation").format`).Exists())
+	require.NotContains(t, gjson.GetBytes(upstream.lastBody, "instructions").String(), codexImageGenerationBridgeMarker)
+}
+
 func TestOpenAIGatewayService_OAuthPassthrough_CompactUsesJSONAndKeepsNonStreaming(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
