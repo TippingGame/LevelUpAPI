@@ -145,7 +145,6 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 			return
 		}
 
-		c.Set("openai_chat_completions_fallback_model", "")
 		reqLog.Debug("openai_chat_completions.account_selecting",
 			zap.Int("excluded_account_count", len(failedAccountIDs)),
 			zap.Int64p("group_id", currentAPIKey.GroupID),
@@ -180,45 +179,18 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 				zap.Int64p("group_id", currentAPIKey.GroupID),
 			)
 			if len(failedAccountIDs) == 0 {
-				defaultModel := ""
-				if currentAPIKey.Group != nil {
-					defaultModel = currentAPIKey.Group.DefaultMappedModel
-				}
-				if defaultModel != "" && defaultModel != reqModel {
-					reqLog.Info("openai_chat_completions.fallback_to_default_model",
-						zap.String("default_mapped_model", defaultModel),
-					)
-					selection, scheduleDecision, err = h.gatewayService.SelectAccountWithCleanRelayScheduler(
-						selectionCtx,
-						c,
-						currentAPIKey.GroupID,
-						"",
-						sessionHash,
-						defaultModel,
-						defaultModel,
-						failedAccountIDs,
-						service.OpenAIUpstreamTransportAny,
-						false,
-						body,
-					)
-					if err == nil && selection != nil {
-						c.Set("openai_chat_completions_fallback_model", defaultModel)
-					}
-				}
-				if err != nil {
-					if h.handleAccountShareModeSelectionError(c, err, streamStarted) {
-						return
-					}
-					if routeCursor.switchToNext(apiKey.ID, "account_select_failed", reqLog, zap.Error(err)) {
-						failedAccountIDs = make(map[int64]struct{})
-						sameAccountRetryCount = make(map[int64]int)
-						switchCount = 0
-						lastFailoverErr = nil
-						continue
-					}
-					h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "api_error", "Service temporarily unavailable", streamStarted)
+				if h.handleAccountShareModeSelectionError(c, err, streamStarted) {
 					return
 				}
+				if routeCursor.switchToNext(apiKey.ID, "account_select_failed", reqLog, zap.Error(err)) {
+					failedAccountIDs = make(map[int64]struct{})
+					sameAccountRetryCount = make(map[int64]int)
+					switchCount = 0
+					lastFailoverErr = nil
+					continue
+				}
+				h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "api_error", "Service temporarily unavailable", streamStarted)
+				return
 			} else {
 				if lastFailoverErr != nil {
 					if !streamStarted && shouldSwitchAPIKeyGroupRoute(lastFailoverErr) &&
@@ -259,12 +231,11 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 		forwardStart := time.Now()
 		writerSizeBeforeForward := c.Writer.Size()
 
-		defaultMappedModel := resolveOpenAIForwardDefaultMappedModel(currentAPIKey, c.GetString("openai_chat_completions_fallback_model"))
 		forwardBody := body
 		if channelMapping.Mapped {
 			forwardBody = h.gatewayService.ReplaceModelInBody(body, channelMapping.MappedModel)
 		}
-		result, err := h.gatewayService.ForwardAsChatCompletions(c.Request.Context(), c, account, forwardBody, promptCacheKey, defaultMappedModel)
+		result, err := h.gatewayService.ForwardAsChatCompletions(c.Request.Context(), c, account, forwardBody, promptCacheKey, "")
 		if service.GetOpsCyberPolicy(c) != nil {
 			h.gatewayService.MarkCyberSessionBlocked(c.Request.Context(), service.CyberSessionBlockKey(currentAPIKey.ID, c, body))
 		}

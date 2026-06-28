@@ -475,7 +475,7 @@ func normalizeCodexModel(model string) string {
 	if mapped, ok := normalizeKnownCodexModel(model); ok {
 		return mapped
 	}
-	return "gpt-5.4"
+	return model
 }
 
 func normalizeKnownCodexModel(model string) (string, bool) {
