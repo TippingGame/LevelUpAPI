@@ -186,6 +186,7 @@ type SystemSettings struct {
 	ClaudeOAuthSystemPromptBlocks          string `json:"claude_oauth_system_prompt_blocks"`
 	OpenAICleanRelayEnabled                bool   `json:"openai_clean_relay_enabled"`
 	EnableAnthropicCacheTTL1hInjection     bool   `json:"enable_anthropic_cache_ttl_1h_injection"`
+	RewriteMessageCacheControl             bool   `json:"rewrite_message_cache_control"`
 
 	// Web Search Emulation
 	WebSearchEmulationEnabled bool `json:"web_search_emulation_enabled"`

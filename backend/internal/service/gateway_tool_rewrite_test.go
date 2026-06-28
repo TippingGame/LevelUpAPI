@@ -1,9 +1,11 @@
 package service
 
 import (
+	"context"
 	"strings"
 	"testing"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
 )
@@ -84,6 +86,21 @@ func TestApplyToolNameRewriteToBody_RenamesToolsAndToolChoice(t *testing.T) {
 	require.Equal(t, "tool", gjson.GetBytes(out, "tool_choice.type").String())
 }
 
+func TestApplyToolNameRewriteToBody_RenamesToolUseInMessages(t *testing.T) {
+	body := []byte(`{"tools":[{"name":"sessions_list","input_schema":{}},{"name":"web_search","type":"web_search_20250305"}],"messages":[{"role":"user","content":[{"type":"text","text":"hi"}]},{"role":"assistant","content":[{"type":"tool_use","id":"tu_01","name":"sessions_list","input":{}},{"type":"text","text":"thinking"}]},{"role":"user","content":[{"type":"tool_result","tool_use_id":"tu_01","content":"ok"}]}]}`)
+	rw := buildToolNameRewriteFromBody(body)
+	require.NotNil(t, rw)
+	require.Equal(t, "cc_sess_list", rw.Forward["sessions_list"])
+
+	out := applyToolNameRewriteToBody(body, rw)
+
+	require.Equal(t, "cc_sess_list", gjson.GetBytes(out, "tools.0.name").String())
+	require.Equal(t, "web_search", gjson.GetBytes(out, "tools.1.name").String())
+	require.Equal(t, "cc_sess_list", gjson.GetBytes(out, "messages.1.content.0.name").String())
+	require.Equal(t, "thinking", gjson.GetBytes(out, "messages.1.content.1.text").String())
+	require.Equal(t, "ok", gjson.GetBytes(out, "messages.2.content.0.content").String())
+}
+
 func TestApplyToolsLastCacheBreakpoint_InjectsDefault(t *testing.T) {
 	body := []byte(`{"tools":[{"name":"a","input_schema":{}},{"name":"b","input_schema":{}}]}`)
 	out := applyToolsLastCacheBreakpoint(body)
@@ -139,6 +156,40 @@ func TestAddMessageCacheBreakpoints_StringContentPromoted(t *testing.T) {
 	require.Equal(t, "text", gjson.GetBytes(out, "messages.0.content.0.type").String())
 	require.Equal(t, "hi", gjson.GetBytes(out, "messages.0.content.0.text").String())
 	require.Equal(t, "5m", gjson.GetBytes(out, "messages.0.content.0.cache_control.ttl").String())
+}
+
+func TestRewriteMessageCacheControlIfEnabled_DefaultKeepsClientAnchors(t *testing.T) {
+	body := []byte(`{"messages":[
+		{"role":"user","content":[{"type":"text","text":"stable","cache_control":{"type":"ephemeral","ttl":"1h"}}]},
+		{"role":"assistant","content":[{"type":"text","text":"ok"}]},
+		{"role":"user","content":[{"type":"text","text":"latest","cache_control":{"type":"ephemeral","ttl":"5m"}}]}
+	]}`)
+
+	out := (&GatewayService{}).rewriteMessageCacheControlIfEnabled(context.Background(), body)
+
+	require.JSONEq(t, string(body), string(out))
+	require.Equal(t, "1h", gjson.GetBytes(out, "messages.0.content.0.cache_control.ttl").String())
+	require.Equal(t, "5m", gjson.GetBytes(out, "messages.2.content.0.cache_control.ttl").String())
+}
+
+func TestRewriteMessageCacheControlIfEnabled_OptInPreservesLegacyRewrite(t *testing.T) {
+	body := []byte(`{"messages":[
+		{"role":"user","content":[{"type":"text","text":"stable","cache_control":{"type":"ephemeral","ttl":"1h"}}]},
+		{"role":"assistant","content":[{"type":"text","text":"ok"}]},
+		{"role":"user","content":[{"type":"text","text":"latest","cache_control":{"type":"ephemeral","ttl":"1h"}}]},
+		{"role":"assistant","content":[{"type":"text","text":"done"}]}
+	]}`)
+	repo := &gatewayTTLSettingRepo{data: map[string]string{
+		SettingKeyRewriteMessageCacheControl: "true",
+	}}
+	gatewayForwardingCache.Store(&cachedGatewayForwardingSettings{})
+	svc := &GatewayService{settingService: NewSettingService(repo, &config.Config{})}
+
+	out := svc.rewriteMessageCacheControlIfEnabled(context.Background(), body)
+
+	require.Equal(t, "5m", gjson.GetBytes(out, "messages.0.content.0.cache_control.ttl").String())
+	require.False(t, gjson.GetBytes(out, "messages.2.content.0.cache_control").Exists())
+	require.Equal(t, "5m", gjson.GetBytes(out, "messages.3.content.0.cache_control.ttl").String())
 }
 
 func TestBuildToolNameRewriteFromBody_ReverseOrderedByLengthDesc(t *testing.T) {

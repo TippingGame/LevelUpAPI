@@ -3574,6 +3574,29 @@
                   v-model="form.enable_anthropic_cache_ttl_1h_injection"
                 />
               </div>
+
+              <!-- messages cache_control rewrite -->
+              <div class="flex items-center justify-between">
+                <div>
+                  <label
+                    class="text-sm font-medium text-gray-700 dark:text-gray-300"
+                  >
+                    {{
+                      t(
+                        "admin.settings.gatewayForwarding.rewriteMessageCacheControl",
+                      )
+                    }}
+                  </label>
+                  <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+                    {{
+                      t(
+                        "admin.settings.gatewayForwarding.rewriteMessageCacheControlHint",
+                      )
+                    }}
+                  </p>
+                </div>
+                <Toggle v-model="form.rewrite_message_cache_control" />
+              </div>
             </div>
           </div>
           <!-- Web Search Emulation -->
@@ -6842,6 +6865,7 @@ type SettingsForm = Omit<
   claude_oauth_system_prompt: string;
   claude_oauth_system_prompt_blocks: string;
   openai_clean_relay_enabled: boolean;
+  rewrite_message_cache_control: boolean;
 };
 
 const USER_ACCOUNT_IMPORT_LIMIT_DEFAULT = 100;
@@ -7048,6 +7072,7 @@ const form = reactive<SettingsForm>({
   claude_oauth_system_prompt_blocks: "",
   openai_clean_relay_enabled: false,
   enable_anthropic_cache_ttl_1h_injection: false,
+  rewrite_message_cache_control: false,
   // Balance & quota notification
   balance_low_notify_enabled: false,
   balance_low_notify_threshold: 0,
@@ -8281,6 +8306,7 @@ async function saveSettings() {
       openai_clean_relay_enabled: form.openai_clean_relay_enabled,
       enable_anthropic_cache_ttl_1h_injection:
         form.enable_anthropic_cache_ttl_1h_injection,
+      rewrite_message_cache_control: form.rewrite_message_cache_control,
       // Payment configuration
       payment_enabled: form.payment_enabled,
       payment_recharge_center_tab_enabled:

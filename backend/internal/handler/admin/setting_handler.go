@@ -270,6 +270,7 @@ func (h *SettingHandler) GetSettings(c *gin.Context) {
 		ClaudeOAuthSystemPromptBlocks:             settings.ClaudeOAuthSystemPromptBlocks,
 		OpenAICleanRelayEnabled:                   settings.OpenAICleanRelayEnabled,
 		EnableAnthropicCacheTTL1hInjection:        settings.EnableAnthropicCacheTTL1hInjection,
+		RewriteMessageCacheControl:                settings.RewriteMessageCacheControl,
 		WebSearchEmulationEnabled:                 settings.WebSearchEmulationEnabled,
 		PaymentVisibleMethodAlipaySource:          settings.PaymentVisibleMethodAlipaySource,
 		PaymentVisibleMethodWxpaySource:           settings.PaymentVisibleMethodWxpaySource,
@@ -594,6 +595,7 @@ type UpdateSettingsRequest struct {
 	ClaudeOAuthSystemPromptBlocks          *string `json:"claude_oauth_system_prompt_blocks"`
 	OpenAICleanRelayEnabled                *bool   `json:"openai_clean_relay_enabled"`
 	EnableAnthropicCacheTTL1hInjection     *bool   `json:"enable_anthropic_cache_ttl_1h_injection"`
+	RewriteMessageCacheControl             *bool   `json:"rewrite_message_cache_control"`
 
 	// Payment visible method routing
 	PaymentVisibleMethodAlipaySource  *string `json:"payment_visible_method_alipay_source"`
@@ -1632,6 +1634,12 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 			}
 			return previousSettings.EnableAnthropicCacheTTL1hInjection
 		}(),
+		RewriteMessageCacheControl: func() bool {
+			if req.RewriteMessageCacheControl != nil {
+				return *req.RewriteMessageCacheControl
+			}
+			return previousSettings.RewriteMessageCacheControl
+		}(),
 		PaymentVisibleMethodAlipaySource: func() string {
 			if req.PaymentVisibleMethodAlipaySource != nil {
 				return strings.TrimSpace(*req.PaymentVisibleMethodAlipaySource)
@@ -2010,6 +2018,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		ClaudeOAuthSystemPromptBlocks:             updatedSettings.ClaudeOAuthSystemPromptBlocks,
 		OpenAICleanRelayEnabled:                   updatedSettings.OpenAICleanRelayEnabled,
 		EnableAnthropicCacheTTL1hInjection:        updatedSettings.EnableAnthropicCacheTTL1hInjection,
+		RewriteMessageCacheControl:                updatedSettings.RewriteMessageCacheControl,
 		PaymentVisibleMethodAlipaySource:          updatedSettings.PaymentVisibleMethodAlipaySource,
 		PaymentVisibleMethodWxpaySource:           updatedSettings.PaymentVisibleMethodWxpaySource,
 		PaymentVisibleMethodAlipayEnabled:         updatedSettings.PaymentVisibleMethodAlipayEnabled,
@@ -2829,6 +2838,9 @@ func diffSettings(before *service.SystemSettings, after *service.SystemSettings,
 	}
 	if before.EnableAnthropicCacheTTL1hInjection != after.EnableAnthropicCacheTTL1hInjection {
 		changed = append(changed, "enable_anthropic_cache_ttl_1h_injection")
+	}
+	if before.RewriteMessageCacheControl != after.RewriteMessageCacheControl {
+		changed = append(changed, "rewrite_message_cache_control")
 	}
 	if before.PaymentVisibleMethodAlipaySource != after.PaymentVisibleMethodAlipaySource {
 		changed = append(changed, "payment_visible_method_alipay_source")

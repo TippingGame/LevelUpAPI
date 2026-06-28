@@ -92,6 +92,7 @@ type cachedGatewayForwardingSettings struct {
 	claudeOAuthSystemPromptBlocks    string
 	openAICleanRelay                 bool
 	anthropicCacheTTL1hInjection     bool
+	rewriteMessageCacheControl       bool
 	expiresAt                        int64 // unix nano
 }
 
@@ -1839,6 +1840,7 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 	updates[SettingKeyClaudeOAuthSystemPromptBlocks] = settings.ClaudeOAuthSystemPromptBlocks
 	updates[SettingKeyOpenAICleanRelayEnabled] = strconv.FormatBool(settings.OpenAICleanRelayEnabled)
 	updates[SettingKeyEnableAnthropicCacheTTL1hInjection] = strconv.FormatBool(settings.EnableAnthropicCacheTTL1hInjection)
+	updates[SettingKeyRewriteMessageCacheControl] = strconv.FormatBool(settings.RewriteMessageCacheControl)
 	updates[SettingPaymentVisibleMethodAlipaySource] = settings.PaymentVisibleMethodAlipaySource
 	updates[SettingPaymentVisibleMethodWxpaySource] = settings.PaymentVisibleMethodWxpaySource
 	updates[SettingPaymentVisibleMethodAlipayEnabled] = strconv.FormatBool(settings.PaymentVisibleMethodAlipayEnabled)
@@ -1922,6 +1924,7 @@ func (s *SettingService) refreshCachedSettings(settings *SystemSettings) {
 		claudeOAuthSystemPromptBlocks:    settings.ClaudeOAuthSystemPromptBlocks,
 		openAICleanRelay:                 settings.OpenAICleanRelayEnabled,
 		anthropicCacheTTL1hInjection:     settings.EnableAnthropicCacheTTL1hInjection,
+		rewriteMessageCacheControl:       settings.RewriteMessageCacheControl,
 		expiresAt:                        time.Now().Add(gatewayForwardingCacheTTL).UnixNano(),
 	})
 	cyberSessionBlockRuntimeSF.Forget("cyber_session_block_runtime")
@@ -2039,8 +2042,8 @@ func (s *SettingService) IsBackendModeEnabled(ctx context.Context) bool {
 }
 
 type gatewayForwardingSettingsResult struct {
-	fp, mp, cch, claudeOAuthSystemPromptInjection, cleanRelay, cacheTTL1h bool
-	claudeOAuthSystemPrompt, claudeOAuthSystemPromptBlocks                string
+	fp, mp, cch, claudeOAuthSystemPromptInjection, cleanRelay, cacheTTL1h, rewriteMessageCacheControl bool
+	claudeOAuthSystemPrompt, claudeOAuthSystemPromptBlocks                                            string
 }
 
 func (s *SettingService) getGatewayForwardingSettingsCached(ctx context.Context) gatewayForwardingSettingsResult {
@@ -2055,6 +2058,7 @@ func (s *SettingService) getGatewayForwardingSettingsCached(ctx context.Context)
 				claudeOAuthSystemPromptBlocks:    cached.claudeOAuthSystemPromptBlocks,
 				cleanRelay:                       cached.openAICleanRelay,
 				cacheTTL1h:                       cached.anthropicCacheTTL1hInjection,
+				rewriteMessageCacheControl:       cached.rewriteMessageCacheControl,
 			}
 		}
 	}
@@ -2070,6 +2074,7 @@ func (s *SettingService) getGatewayForwardingSettingsCached(ctx context.Context)
 					claudeOAuthSystemPromptBlocks:    cached.claudeOAuthSystemPromptBlocks,
 					cleanRelay:                       cached.openAICleanRelay,
 					cacheTTL1h:                       cached.anthropicCacheTTL1hInjection,
+					rewriteMessageCacheControl:       cached.rewriteMessageCacheControl,
 				}, nil
 			}
 		}
@@ -2084,6 +2089,7 @@ func (s *SettingService) getGatewayForwardingSettingsCached(ctx context.Context)
 			SettingKeyClaudeOAuthSystemPromptBlocks,
 			SettingKeyOpenAICleanRelayEnabled,
 			SettingKeyEnableAnthropicCacheTTL1hInjection,
+			SettingKeyRewriteMessageCacheControl,
 		})
 		if err != nil {
 			slog.Warn("failed to get gateway forwarding settings", "error", err)
@@ -2094,6 +2100,7 @@ func (s *SettingService) getGatewayForwardingSettingsCached(ctx context.Context)
 				claudeOAuthSystemPromptInjection: true,
 				openAICleanRelay:                 false,
 				anthropicCacheTTL1hInjection:     false,
+				rewriteMessageCacheControl:       false,
 				expiresAt:                        time.Now().Add(gatewayForwardingErrorTTL).UnixNano(),
 			})
 			return gatewayForwardingSettingsResult{fp: true, claudeOAuthSystemPromptInjection: true}, nil
@@ -2112,6 +2119,7 @@ func (s *SettingService) getGatewayForwardingSettingsCached(ctx context.Context)
 		systemPromptBlocks := values[SettingKeyClaudeOAuthSystemPromptBlocks]
 		cleanRelay := values[SettingKeyOpenAICleanRelayEnabled] == "true"
 		cacheTTL1h := values[SettingKeyEnableAnthropicCacheTTL1hInjection] == "true"
+		rewriteMessageCacheControl := values[SettingKeyRewriteMessageCacheControl] == "true"
 		gatewayForwardingCache.Store(&cachedGatewayForwardingSettings{
 			fingerprintUnification:           fp,
 			metadataPassthrough:              mp,
@@ -2121,6 +2129,7 @@ func (s *SettingService) getGatewayForwardingSettingsCached(ctx context.Context)
 			claudeOAuthSystemPromptBlocks:    systemPromptBlocks,
 			openAICleanRelay:                 cleanRelay,
 			anthropicCacheTTL1hInjection:     cacheTTL1h,
+			rewriteMessageCacheControl:       rewriteMessageCacheControl,
 			expiresAt:                        time.Now().Add(gatewayForwardingCacheTTL).UnixNano(),
 		})
 		return gatewayForwardingSettingsResult{
@@ -2132,6 +2141,7 @@ func (s *SettingService) getGatewayForwardingSettingsCached(ctx context.Context)
 			claudeOAuthSystemPromptBlocks:    systemPromptBlocks,
 			cleanRelay:                       cleanRelay,
 			cacheTTL1h:                       cacheTTL1h,
+			rewriteMessageCacheControl:       rewriteMessageCacheControl,
 		}, nil
 	})
 	if r, ok := val.(gatewayForwardingSettingsResult); ok {
@@ -2151,6 +2161,11 @@ func (s *SettingService) GetGatewayForwardingSettings(ctx context.Context) (fing
 // IsAnthropicCacheTTL1hInjectionEnabled 检查是否对 Anthropic OAuth/SetupToken 请求体注入 1h cache_control ttl。
 func (s *SettingService) IsAnthropicCacheTTL1hInjectionEnabled(ctx context.Context) bool {
 	return s.getGatewayForwardingSettingsCached(ctx).cacheTTL1h
+}
+
+// IsRewriteMessageCacheControlEnabled 检查是否启用 messages cache_control 改写。
+func (s *SettingService) IsRewriteMessageCacheControlEnabled(ctx context.Context) bool {
+	return s.getGatewayForwardingSettingsCached(ctx).rewriteMessageCacheControl
 }
 
 // IsOpenAICleanRelayEnabled 检查是否启用 OpenAI 洁净中继模式。
@@ -2710,6 +2725,7 @@ func (s *SettingService) InitializeDefaultSettings(ctx context.Context) error {
 		SettingKeyClaudeOAuthSystemPromptBlocks:             "",
 		SettingKeyOpenAICleanRelayEnabled:                   "false",
 		SettingKeyEnableAnthropicCacheTTL1hInjection:        "false",
+		SettingKeyRewriteMessageCacheControl:                "false",
 		SettingKeyUserPrivateGroupDailyLimitUSD:             "0",
 		SettingKeyUserPrivateGroupWeeklyLimitUSD:            "0",
 		SettingKeyUserPrivateGroupMonthlyLimitUSD:           "0",
@@ -3143,6 +3159,7 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 	result.ClaudeOAuthSystemPromptBlocks = settings[SettingKeyClaudeOAuthSystemPromptBlocks]
 	result.OpenAICleanRelayEnabled = settings[SettingKeyOpenAICleanRelayEnabled] == "true"
 	result.EnableAnthropicCacheTTL1hInjection = settings[SettingKeyEnableAnthropicCacheTTL1hInjection] == "true"
+	result.RewriteMessageCacheControl = settings[SettingKeyRewriteMessageCacheControl] == "true"
 
 	// Web search emulation: quick enabled check from the JSON config
 	if raw := settings[SettingKeyWebSearchEmulationConfig]; raw != "" {

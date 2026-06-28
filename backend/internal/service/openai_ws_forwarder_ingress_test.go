@@ -696,6 +696,19 @@ func TestBuildOpenAIWSReplayInputSequence(t *testing.T) {
 	})
 }
 
+func TestOpenAIWSRawItemsHasFunctionCallOutput(t *testing.T) {
+	t.Parallel()
+
+	require.False(t, openAIWSRawItemsHasFunctionCallOutput([]json.RawMessage{
+		json.RawMessage(`{"type":"input_text","text":"hello"}`),
+		json.RawMessage(`{"type":"function_call","call_id":"call_1"}`),
+	}))
+	require.True(t, openAIWSRawItemsHasFunctionCallOutput([]json.RawMessage{
+		json.RawMessage(`{"type":"input_text","text":"hello"}`),
+		json.RawMessage(`{"type":"function_call_output","call_id":"call_1","output":"ok"}`),
+	}))
+}
+
 func TestSetOpenAIWSPayloadInputSequence(t *testing.T) {
 	t.Parallel()
 
