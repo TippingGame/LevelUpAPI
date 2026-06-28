@@ -24,3 +24,15 @@ func TestDefaultAntigravityModelMapping_IncludesImageCompatibilityAliases(t *tes
 		}
 	}
 }
+
+func TestDefaultAntigravityModelMapping_IncludesOpus48(t *testing.T) {
+	t.Parallel()
+
+	got, ok := DefaultAntigravityModelMapping["claude-opus-4-8"]
+	if !ok {
+		t.Fatal("expected claude-opus-4-8 in DefaultAntigravityModelMapping")
+	}
+	if got != "claude-opus-4-8" {
+		t.Fatalf("DefaultAntigravityModelMapping[claude-opus-4-8] = %q, want claude-opus-4-8", got)
+	}
+}

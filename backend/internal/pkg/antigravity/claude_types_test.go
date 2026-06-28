@@ -15,6 +15,10 @@ func TestDefaultModels_ExcludesImageModels(t *testing.T) {
 		t.Fatalf("expected non-image model %q to be exposed in DefaultModels", "claude-opus-4-6-thinking")
 	}
 
+	if _, ok := byID["claude-opus-4-8"]; !ok {
+		t.Fatalf("expected Opus model %q to be exposed in DefaultModels", "claude-opus-4-8")
+	}
+
 	blockedIDs := []string{
 		"gemini-2.5-flash-image",
 		"gemini-2.5-flash-image-preview",
