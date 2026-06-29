@@ -356,8 +356,10 @@
             />
           </template>
 
-          <template #cell-priority="{ value }">
-            <span class="text-sm text-gray-700 dark:text-gray-300">{{ value }}</span>
+          <template #cell-priority="{ row }">
+            <span class="text-sm text-gray-700 dark:text-gray-300">
+              {{ row.private_priority ?? row.priority }}
+            </span>
           </template>
 
           <template #cell-last_used_at="{ value }">
@@ -743,7 +745,7 @@ const columns = computed<Column[]>(() => [
   { key: 'today_stats', label: t('admin.accounts.columns.todayStats'), sortable: false },
   { key: 'groups', label: t('admin.accounts.columns.groups'), sortable: false, class: 'min-w-[180px] max-w-[220px]' },
   { key: 'usage', label: t('admin.accounts.columns.usageWindows'), sortable: false, class: 'min-w-[180px]' },
-  { key: 'priority', label: t('admin.accounts.columns.priority'), sortable: true },
+  { key: 'priority', label: t('admin.accounts.privatePriority'), sortable: true },
   { key: 'last_used_at', label: t('admin.accounts.columns.lastUsed'), sortable: true },
   { key: 'expires_at', label: t('admin.accounts.columns.expiresAt'), sortable: true },
   { key: 'notes', label: t('admin.accounts.columns.notes'), sortable: false },

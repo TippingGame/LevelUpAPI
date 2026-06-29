@@ -53,6 +53,8 @@ const (
 	FieldLoadFactorPaidCeiling = "load_factor_paid_ceiling"
 	// FieldPriority holds the string denoting the priority field in the database.
 	FieldPriority = "priority"
+	// FieldPrivatePriority holds the string denoting the private_priority field in the database.
+	FieldPrivatePriority = "private_priority"
 	// FieldRateMultiplier holds the string denoting the rate_multiplier field in the database.
 	FieldRateMultiplier = "rate_multiplier"
 	// FieldStatus holds the string denoting the status field in the database.
@@ -152,6 +154,7 @@ var Columns = []string{
 	FieldLoadFactor,
 	FieldLoadFactorPaidCeiling,
 	FieldPriority,
+	FieldPrivatePriority,
 	FieldRateMultiplier,
 	FieldStatus,
 	FieldErrorMessage,
@@ -332,6 +335,11 @@ func ByLoadFactorPaidCeiling(opts ...sql.OrderTermOption) OrderOption {
 // ByPriority orders the results by the priority field.
 func ByPriority(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldPriority, opts...).ToFunc()
+}
+
+// ByPrivatePriority orders the results by the private_priority field.
+func ByPrivatePriority(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldPrivatePriority, opts...).ToFunc()
 }
 
 // ByRateMultiplier orders the results by the rate_multiplier field.

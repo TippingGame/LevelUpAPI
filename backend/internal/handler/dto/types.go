@@ -210,6 +210,7 @@ type Account struct {
 	LoadFactor                *int            `json:"load_factor,omitempty"`
 	LoadFactorPaidCeiling     int             `json:"load_factor_paid_ceiling"`
 	Priority                  int             `json:"priority"`
+	PrivatePriority           *int            `json:"private_priority,omitempty"`
 	RateMultiplier            float64         `json:"rate_multiplier"`
 	Status                    string          `json:"status"`
 	ErrorMessage              string          `json:"error_message"`

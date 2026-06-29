@@ -58,6 +58,8 @@ type Account struct {
 	LoadFactorPaidCeiling int `json:"load_factor_paid_ceiling,omitempty"`
 	// Priority holds the value of the "priority" field.
 	Priority int `json:"priority,omitempty"`
+	// Owner-only scheduling priority used when the account owner consumes this account.
+	PrivatePriority *int `json:"private_priority,omitempty"`
 	// RateMultiplier holds the value of the "rate_multiplier" field.
 	RateMultiplier float64 `json:"rate_multiplier,omitempty"`
 	// Status holds the value of the "status" field.
@@ -171,7 +173,7 @@ func (*Account) scanValues(columns []string) ([]any, error) {
 			values[i] = new(sql.NullBool)
 		case account.FieldRateMultiplier:
 			values[i] = new(sql.NullFloat64)
-		case account.FieldID, account.FieldOwnerUserID, account.FieldSharePolicyID, account.FieldProxyID, account.FieldConcurrency, account.FieldLoadFactor, account.FieldLoadFactorPaidCeiling, account.FieldPriority:
+		case account.FieldID, account.FieldOwnerUserID, account.FieldSharePolicyID, account.FieldProxyID, account.FieldConcurrency, account.FieldLoadFactor, account.FieldLoadFactorPaidCeiling, account.FieldPriority, account.FieldPrivatePriority:
 			values[i] = new(sql.NullInt64)
 		case account.FieldName, account.FieldAccountLevel, account.FieldNotes, account.FieldPlatform, account.FieldType, account.FieldShareMode, account.FieldShareStatus, account.FieldStatus, account.FieldErrorMessage, account.FieldTempUnschedulableReason, account.FieldSessionWindowStatus:
 			values[i] = new(sql.NullString)
@@ -321,6 +323,13 @@ func (_m *Account) assignValues(columns []string, values []any) error {
 				return fmt.Errorf("unexpected type %T for field priority", values[i])
 			} else if value.Valid {
 				_m.Priority = int(value.Int64)
+			}
+		case account.FieldPrivatePriority:
+			if value, ok := values[i].(*sql.NullInt64); !ok {
+				return fmt.Errorf("unexpected type %T for field private_priority", values[i])
+			} else if value.Valid {
+				_m.PrivatePriority = new(int)
+				*_m.PrivatePriority = int(value.Int64)
 			}
 		case account.FieldRateMultiplier:
 			if value, ok := values[i].(*sql.NullFloat64); !ok {
@@ -552,6 +561,11 @@ func (_m *Account) String() string {
 	builder.WriteString(", ")
 	builder.WriteString("priority=")
 	builder.WriteString(fmt.Sprintf("%v", _m.Priority))
+	builder.WriteString(", ")
+	if v := _m.PrivatePriority; v != nil {
+		builder.WriteString("private_priority=")
+		builder.WriteString(fmt.Sprintf("%v", *v))
+	}
 	builder.WriteString(", ")
 	builder.WriteString("rate_multiplier=")
 	builder.WriteString(fmt.Sprintf("%v", _m.RateMultiplier))

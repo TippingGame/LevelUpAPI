@@ -1703,7 +1703,7 @@ func (s *OpenAIGatewayService) selectBestAccount(ctx context.Context, groupID *i
 			continue
 		}
 
-		if s.isBetterAccount(fresh, selected) {
+		if s.isBetterAccount(ctx, fresh, selected) {
 			selected = fresh
 			selectedCompactTier = compactTier
 		}
@@ -1715,13 +1715,15 @@ func (s *OpenAIGatewayService) selectBestAccount(ctx context.Context, groupID *i
 // isBetterAccount 鍒ゆ柇 candidate 鏄惁姣?current 鏇翠紭銆?// 瑙勫垯锛氫紭鍏堢骇鏇撮珮锛堟暟鍊兼洿灏忥級浼樺厛锛涘悓浼樺厛绾ф椂锛屾湭浣跨敤杩囩殑浼樺厛锛屽叾娆℃槸鏈€涔呮湭浣跨敤鐨勩€?//
 // isBetterAccount checks if candidate is better than current.
 // Rules: higher priority (lower value) wins; same priority: never used > least recently used.
-func (s *OpenAIGatewayService) isBetterAccount(candidate, current *Account) bool {
+func (s *OpenAIGatewayService) isBetterAccount(ctx context.Context, candidate, current *Account) bool {
 	// 浼樺厛绾ф洿楂橈紙鏁板€兼洿灏忥級
 	// Higher priority (lower value)
-	if candidate.Priority < current.Priority {
+	priorityCandidate := accountPriorityForRequest(ctx, candidate)
+	priorityCurrent := accountPriorityForRequest(ctx, current)
+	if priorityCandidate < priorityCurrent {
 		return true
 	}
-	if candidate.Priority > current.Priority {
+	if priorityCandidate > priorityCurrent {
 		return false
 	}
 
@@ -1907,7 +1909,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 	loadMap, err := s.concurrencyService.GetAccountsLoadBatch(ctx, accountLoads)
 	if err != nil {
 		ordered := append([]*Account(nil), candidates...)
-		sortAccountsByPriorityAndLastUsed(ordered, false)
+		sortAccountsByPriorityAndLastUsedForRequest(ctx, ordered, false)
 		if requireCompact {
 			ordered = prioritizeOpenAICompactAccounts(ordered)
 		}
@@ -1949,8 +1951,10 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 		if len(available) > 0 {
 			sort.SliceStable(available, func(i, j int) bool {
 				a, b := available[i], available[j]
-				if a.account.Priority != b.account.Priority {
-					return a.account.Priority < b.account.Priority
+				priorityA := accountWithLoadPriorityForRequest(ctx, a)
+				priorityB := accountWithLoadPriorityForRequest(ctx, b)
+				if priorityA != priorityB {
+					return priorityA < priorityB
 				}
 				if a.loadInfo.LoadRate != b.loadInfo.LoadRate {
 					return a.loadInfo.LoadRate < b.loadInfo.LoadRate
@@ -1966,7 +1970,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 					return a.account.LastUsedAt.Before(*b.account.LastUsedAt)
 				}
 			})
-			shuffleWithinSortGroups(available)
+			shuffleWithinSortGroupsForRequest(ctx, available)
 
 			selectionOrder := make([]accountWithLoad, 0, len(available))
 			if requireCompact {
@@ -2011,7 +2015,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 	}
 
 	// ============ Layer 3: Fallback wait ============
-	sortAccountsByPriorityAndLastUsed(candidates, false)
+	sortAccountsByPriorityAndLastUsedForRequest(ctx, candidates, false)
 	if requireCompact {
 		candidates = prioritizeOpenAICompactAccounts(candidates)
 	}

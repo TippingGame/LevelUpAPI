@@ -252,6 +252,20 @@ func (_c *AccountCreate) SetNillablePriority(v *int) *AccountCreate {
 	return _c
 }
 
+// SetPrivatePriority sets the "private_priority" field.
+func (_c *AccountCreate) SetPrivatePriority(v int) *AccountCreate {
+	_c.mutation.SetPrivatePriority(v)
+	return _c
+}
+
+// SetNillablePrivatePriority sets the "private_priority" field if the given value is not nil.
+func (_c *AccountCreate) SetNillablePrivatePriority(v *int) *AccountCreate {
+	if v != nil {
+		_c.SetPrivatePriority(*v)
+	}
+	return _c
+}
+
 // SetRateMultiplier sets the "rate_multiplier" field.
 func (_c *AccountCreate) SetRateMultiplier(v float64) *AccountCreate {
 	_c.mutation.SetRateMultiplier(v)
@@ -812,6 +826,10 @@ func (_c *AccountCreate) createSpec() (*Account, *sqlgraph.CreateSpec) {
 		_spec.SetField(account.FieldPriority, field.TypeInt, value)
 		_node.Priority = value
 	}
+	if value, ok := _c.mutation.PrivatePriority(); ok {
+		_spec.SetField(account.FieldPrivatePriority, field.TypeInt, value)
+		_node.PrivatePriority = &value
+	}
 	if value, ok := _c.mutation.RateMultiplier(); ok {
 		_spec.SetField(account.FieldRateMultiplier, field.TypeFloat64, value)
 		_node.RateMultiplier = value
@@ -1273,6 +1291,30 @@ func (u *AccountUpsert) UpdatePriority() *AccountUpsert {
 // AddPriority adds v to the "priority" field.
 func (u *AccountUpsert) AddPriority(v int) *AccountUpsert {
 	u.Add(account.FieldPriority, v)
+	return u
+}
+
+// SetPrivatePriority sets the "private_priority" field.
+func (u *AccountUpsert) SetPrivatePriority(v int) *AccountUpsert {
+	u.Set(account.FieldPrivatePriority, v)
+	return u
+}
+
+// UpdatePrivatePriority sets the "private_priority" field to the value that was provided on create.
+func (u *AccountUpsert) UpdatePrivatePriority() *AccountUpsert {
+	u.SetExcluded(account.FieldPrivatePriority)
+	return u
+}
+
+// AddPrivatePriority adds v to the "private_priority" field.
+func (u *AccountUpsert) AddPrivatePriority(v int) *AccountUpsert {
+	u.Add(account.FieldPrivatePriority, v)
+	return u
+}
+
+// ClearPrivatePriority clears the value of the "private_priority" field.
+func (u *AccountUpsert) ClearPrivatePriority() *AccountUpsert {
+	u.SetNull(account.FieldPrivatePriority)
 	return u
 }
 
@@ -1899,6 +1941,34 @@ func (u *AccountUpsertOne) AddPriority(v int) *AccountUpsertOne {
 func (u *AccountUpsertOne) UpdatePriority() *AccountUpsertOne {
 	return u.Update(func(s *AccountUpsert) {
 		s.UpdatePriority()
+	})
+}
+
+// SetPrivatePriority sets the "private_priority" field.
+func (u *AccountUpsertOne) SetPrivatePriority(v int) *AccountUpsertOne {
+	return u.Update(func(s *AccountUpsert) {
+		s.SetPrivatePriority(v)
+	})
+}
+
+// AddPrivatePriority adds v to the "private_priority" field.
+func (u *AccountUpsertOne) AddPrivatePriority(v int) *AccountUpsertOne {
+	return u.Update(func(s *AccountUpsert) {
+		s.AddPrivatePriority(v)
+	})
+}
+
+// UpdatePrivatePriority sets the "private_priority" field to the value that was provided on create.
+func (u *AccountUpsertOne) UpdatePrivatePriority() *AccountUpsertOne {
+	return u.Update(func(s *AccountUpsert) {
+		s.UpdatePrivatePriority()
+	})
+}
+
+// ClearPrivatePriority clears the value of the "private_priority" field.
+func (u *AccountUpsertOne) ClearPrivatePriority() *AccountUpsertOne {
+	return u.Update(func(s *AccountUpsert) {
+		s.ClearPrivatePriority()
 	})
 }
 
@@ -2733,6 +2803,34 @@ func (u *AccountUpsertBulk) AddPriority(v int) *AccountUpsertBulk {
 func (u *AccountUpsertBulk) UpdatePriority() *AccountUpsertBulk {
 	return u.Update(func(s *AccountUpsert) {
 		s.UpdatePriority()
+	})
+}
+
+// SetPrivatePriority sets the "private_priority" field.
+func (u *AccountUpsertBulk) SetPrivatePriority(v int) *AccountUpsertBulk {
+	return u.Update(func(s *AccountUpsert) {
+		s.SetPrivatePriority(v)
+	})
+}
+
+// AddPrivatePriority adds v to the "private_priority" field.
+func (u *AccountUpsertBulk) AddPrivatePriority(v int) *AccountUpsertBulk {
+	return u.Update(func(s *AccountUpsert) {
+		s.AddPrivatePriority(v)
+	})
+}
+
+// UpdatePrivatePriority sets the "private_priority" field to the value that was provided on create.
+func (u *AccountUpsertBulk) UpdatePrivatePriority() *AccountUpsertBulk {
+	return u.Update(func(s *AccountUpsert) {
+		s.UpdatePrivatePriority()
+	})
+}
+
+// ClearPrivatePriority clears the value of the "private_priority" field.
+func (u *AccountUpsertBulk) ClearPrivatePriority() *AccountUpsertBulk {
+	return u.Update(func(s *AccountUpsert) {
+		s.ClearPrivatePriority()
 	})
 }
 

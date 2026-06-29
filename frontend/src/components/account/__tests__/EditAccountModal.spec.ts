@@ -240,6 +240,7 @@ describe('EditAccountModal', () => {
     expect(payload).not.toHaveProperty('account_level')
     expect(payload?.concurrency).toBe(12)
     expect(payload?.load_factor).toBe(10)
+    expect(payload?.private_priority).toBe(1)
     expect(payload).not.toHaveProperty('priority')
     expect(payload).not.toHaveProperty('auto_pause_on_expired')
     expect(payload?.credentials?.model_mapping).toEqual({

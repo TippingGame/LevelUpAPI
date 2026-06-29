@@ -614,7 +614,7 @@
               class="input-label mb-0"
               for="bulk-edit-priority-enabled"
             >
-              {{ t('admin.accounts.priority') }}
+              {{ isUserScope ? t('admin.accounts.privatePriority') : t('admin.accounts.priority') }}
             </label>
             <input
               v-model="enablePriority"
@@ -634,6 +634,9 @@
             :class="!enablePriority && 'cursor-not-allowed opacity-50'"
             aria-labelledby="bulk-edit-priority-label"
           />
+          <p class="input-hint">
+            {{ isUserScope ? t('admin.accounts.privatePriorityHint') : t('admin.accounts.priorityHint') }}
+          </p>
         </div>
         <div v-if="canManageBillingRate">
           <div class="mb-3 flex items-center justify-between">
@@ -1657,7 +1660,11 @@ const buildUpdatePayload = (): Record<string, unknown> | null => {
   }
 
   if (enablePriority.value) {
-    updates.priority = priority.value
+    if (isUserScope.value) {
+      updates.private_priority = priority.value
+    } else {
+      updates.priority = priority.value
+    }
   }
 
   if (canManageAccountLevel.value && enableAccountLevel.value) {
@@ -1850,10 +1857,13 @@ const sanitizeBulkUpdatePayload = (payload: Record<string, unknown>) => {
     if ('load_factor' in next) {
       next.load_factor = normalizePersonalAccountLoadFactor(next.load_factor)
     }
-    if ('priority' in next) {
-      next.priority = typeof next.priority === 'number' && Number(next.priority) > 0
-        ? next.priority
+    if ('priority' in next || 'private_priority' in next) {
+      const priorityValue = 'private_priority' in next ? next.private_priority : next.priority
+      const normalizedPriority = typeof priorityValue === 'number' && Number(priorityValue) > 0
+        ? priorityValue
         : PERSONAL_ACCOUNT_DEFAULT_PRIORITY
+      next.private_priority = normalizedPriority
+      delete next.priority
     }
   }
   if (next.credentials && typeof next.credentials === 'object') {

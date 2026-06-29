@@ -140,6 +140,11 @@ func Priority(v int) predicate.Account {
 	return predicate.Account(sql.FieldEQ(FieldPriority, v))
 }
 
+// PrivatePriority applies equality check predicate on the "private_priority" field. It's identical to PrivatePriorityEQ.
+func PrivatePriority(v int) predicate.Account {
+	return predicate.Account(sql.FieldEQ(FieldPrivatePriority, v))
+}
+
 // RateMultiplier applies equality check predicate on the "rate_multiplier" field. It's identical to RateMultiplierEQ.
 func RateMultiplier(v float64) predicate.Account {
 	return predicate.Account(sql.FieldEQ(FieldRateMultiplier, v))
@@ -1088,6 +1093,56 @@ func PriorityLT(v int) predicate.Account {
 // PriorityLTE applies the LTE predicate on the "priority" field.
 func PriorityLTE(v int) predicate.Account {
 	return predicate.Account(sql.FieldLTE(FieldPriority, v))
+}
+
+// PrivatePriorityEQ applies the EQ predicate on the "private_priority" field.
+func PrivatePriorityEQ(v int) predicate.Account {
+	return predicate.Account(sql.FieldEQ(FieldPrivatePriority, v))
+}
+
+// PrivatePriorityNEQ applies the NEQ predicate on the "private_priority" field.
+func PrivatePriorityNEQ(v int) predicate.Account {
+	return predicate.Account(sql.FieldNEQ(FieldPrivatePriority, v))
+}
+
+// PrivatePriorityIn applies the In predicate on the "private_priority" field.
+func PrivatePriorityIn(vs ...int) predicate.Account {
+	return predicate.Account(sql.FieldIn(FieldPrivatePriority, vs...))
+}
+
+// PrivatePriorityNotIn applies the NotIn predicate on the "private_priority" field.
+func PrivatePriorityNotIn(vs ...int) predicate.Account {
+	return predicate.Account(sql.FieldNotIn(FieldPrivatePriority, vs...))
+}
+
+// PrivatePriorityGT applies the GT predicate on the "private_priority" field.
+func PrivatePriorityGT(v int) predicate.Account {
+	return predicate.Account(sql.FieldGT(FieldPrivatePriority, v))
+}
+
+// PrivatePriorityGTE applies the GTE predicate on the "private_priority" field.
+func PrivatePriorityGTE(v int) predicate.Account {
+	return predicate.Account(sql.FieldGTE(FieldPrivatePriority, v))
+}
+
+// PrivatePriorityLT applies the LT predicate on the "private_priority" field.
+func PrivatePriorityLT(v int) predicate.Account {
+	return predicate.Account(sql.FieldLT(FieldPrivatePriority, v))
+}
+
+// PrivatePriorityLTE applies the LTE predicate on the "private_priority" field.
+func PrivatePriorityLTE(v int) predicate.Account {
+	return predicate.Account(sql.FieldLTE(FieldPrivatePriority, v))
+}
+
+// PrivatePriorityIsNil applies the IsNil predicate on the "private_priority" field.
+func PrivatePriorityIsNil() predicate.Account {
+	return predicate.Account(sql.FieldIsNull(FieldPrivatePriority))
+}
+
+// PrivatePriorityNotNil applies the NotNil predicate on the "private_priority" field.
+func PrivatePriorityNotNil() predicate.Account {
+	return predicate.Account(sql.FieldNotNull(FieldPrivatePriority))
 }
 
 // RateMultiplierEQ applies the EQ predicate on the "rate_multiplier" field.

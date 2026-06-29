@@ -150,6 +150,7 @@ type createUserAccountRequest struct {
 	Concurrency        int            `json:"concurrency"`
 	LoadFactor         *int           `json:"load_factor"`
 	Priority           int            `json:"priority"`
+	PrivatePriority    *int           `json:"private_priority"`
 	GroupIDs           []int64        `json:"group_ids"`
 	ExpiresAt          *int64         `json:"expires_at"`
 	AutoPauseOnExpired *bool          `json:"auto_pause_on_expired"`
@@ -163,6 +164,7 @@ type importUserAccountCredentialsRequest struct {
 	Concurrency        int      `json:"concurrency"`
 	LoadFactor         *int     `json:"load_factor"`
 	Priority           int      `json:"priority"`
+	PrivatePriority    *int     `json:"private_priority"`
 	GroupIDs           []int64  `json:"group_ids"`
 	ExpiresAt          *int64   `json:"expires_at"`
 	AutoPauseOnExpired *bool    `json:"auto_pause_on_expired"`
@@ -179,6 +181,7 @@ type updateUserAccountRequest struct {
 	Concurrency        *int            `json:"concurrency"`
 	LoadFactor         *int            `json:"load_factor"`
 	Priority           *int            `json:"priority"`
+	PrivatePriority    *int            `json:"private_priority"`
 	Status             *string         `json:"status" binding:"omitempty,oneof=active disabled inactive"`
 	Schedulable        *bool           `json:"schedulable"`
 	GroupIDs           *[]int64        `json:"group_ids"`
@@ -187,19 +190,20 @@ type updateUserAccountRequest struct {
 }
 
 type bulkUpdateUserAccountsRequest struct {
-	AccountIDs     []int64        `json:"account_ids"`
-	ProxyID        *int64         `json:"proxy_id"`
-	Concurrency    *int           `json:"concurrency"`
-	LoadFactor     *int           `json:"load_factor"`
-	Priority       *int           `json:"priority"`
-	RateMultiplier *float64       `json:"rate_multiplier"`
-	Status         string         `json:"status" binding:"omitempty,oneof=active disabled inactive"`
-	Schedulable    *bool          `json:"schedulable"`
-	AccountLevel   *string        `json:"account_level" binding:"omitempty,oneof=unknown free plus pro team"`
-	ShareMode      *string        `json:"share_mode" binding:"omitempty,oneof=private public"`
-	GroupIDs       *[]int64       `json:"group_ids"`
-	Credentials    map[string]any `json:"credentials"`
-	Extra          map[string]any `json:"extra"`
+	AccountIDs      []int64        `json:"account_ids"`
+	ProxyID         *int64         `json:"proxy_id"`
+	Concurrency     *int           `json:"concurrency"`
+	LoadFactor      *int           `json:"load_factor"`
+	Priority        *int           `json:"priority"`
+	PrivatePriority *int           `json:"private_priority"`
+	RateMultiplier  *float64       `json:"rate_multiplier"`
+	Status          string         `json:"status" binding:"omitempty,oneof=active disabled inactive"`
+	Schedulable     *bool          `json:"schedulable"`
+	AccountLevel    *string        `json:"account_level" binding:"omitempty,oneof=unknown free plus pro team"`
+	ShareMode       *string        `json:"share_mode" binding:"omitempty,oneof=private public"`
+	GroupIDs        *[]int64       `json:"group_ids"`
+	Credentials     map[string]any `json:"credentials"`
+	Extra           map[string]any `json:"extra"`
 }
 
 type bulkUpdateUserAccountsAsyncResponse struct {
@@ -222,6 +226,31 @@ type verifyUserAccountLevelResponse struct {
 	AppliedLevel string                 `json:"applied_level"`
 	Reason       string                 `json:"reason,omitempty"`
 	ErrorMessage string                 `json:"error_message,omitempty"`
+}
+
+func normalizeUserPrivatePriority(priority int, privatePriority *int) *int {
+	if privatePriority != nil && *privatePriority > 0 {
+		value := *privatePriority
+		return &value
+	}
+	if priority > 0 {
+		value := priority
+		return &value
+	}
+	value := userOwnedDefaultPriority
+	return &value
+}
+
+func normalizeUserUpdatePrivatePriority(priority, privatePriority *int) *int {
+	if privatePriority != nil {
+		value := *privatePriority
+		return &value
+	}
+	if priority != nil {
+		value := *priority
+		return &value
+	}
+	return nil
 }
 
 type userAccountWithRuntime struct {
@@ -484,6 +513,7 @@ func isUserBulkPublicShareOnlyUpdate(req bulkUpdateUserAccountsRequest, normaliz
 	return req.Concurrency == nil &&
 		req.LoadFactor == nil &&
 		req.Priority == nil &&
+		req.PrivatePriority == nil &&
 		normalizedStatus == "" &&
 		req.Schedulable == nil &&
 		req.AccountLevel == nil &&
@@ -1085,9 +1115,7 @@ func (h *UserAccountHandler) Create(c *gin.Context) {
 	if req.Concurrency <= 0 {
 		req.Concurrency = userOwnedDefaultConcurrency
 	}
-	if req.Priority <= 0 {
-		req.Priority = userOwnedDefaultPriority
-	}
+	privatePriority := normalizeUserPrivatePriority(req.Priority, req.PrivatePriority)
 
 	executeUserIdempotentJSON(c, "user.accounts.create", req, service.DefaultWriteIdempotencyTTL(), func(ctx context.Context) (any, error) {
 		account, err := h.accountService.CreateOwned(ctx, subject.UserID, service.CreateAccountRequest{
@@ -1102,7 +1130,7 @@ func (h *UserAccountHandler) Create(c *gin.Context) {
 			ProxyID:            req.ProxyID,
 			Concurrency:        req.Concurrency,
 			LoadFactor:         req.LoadFactor,
-			Priority:           req.Priority,
+			PrivatePriority:    privatePriority,
 			GroupIDs:           req.GroupIDs,
 			ExpiresAt:          userUnixSecondsToTime(req.ExpiresAt),
 			AutoPauseOnExpired: req.AutoPauseOnExpired,
@@ -1135,9 +1163,7 @@ func (h *UserAccountHandler) Import(c *gin.Context) {
 	if req.Concurrency <= 0 {
 		req.Concurrency = userOwnedDefaultConcurrency
 	}
-	if req.Priority <= 0 {
-		req.Priority = userOwnedDefaultPriority
-	}
+	privatePriority := normalizeUserPrivatePriority(req.Priority, req.PrivatePriority)
 
 	executeUserIdempotentJSON(c, "user.accounts.import", req, service.DefaultWriteIdempotencyTTL(), func(ctx context.Context) (any, error) {
 		account, err := h.accountService.ImportOwned(ctx, subject.UserID, service.CreateAccountRequest{
@@ -1152,7 +1178,7 @@ func (h *UserAccountHandler) Import(c *gin.Context) {
 			ProxyID:            req.ProxyID,
 			Concurrency:        req.Concurrency,
 			LoadFactor:         req.LoadFactor,
-			Priority:           req.Priority,
+			PrivatePriority:    privatePriority,
 			GroupIDs:           req.GroupIDs,
 			ExpiresAt:          userUnixSecondsToTime(req.ExpiresAt),
 			AutoPauseOnExpired: req.AutoPauseOnExpired,
@@ -1180,9 +1206,7 @@ func (h *UserAccountHandler) ImportCredentials(c *gin.Context) {
 		response.BadRequest(c, "Invalid request: "+err.Error())
 		return
 	}
-	if req.Priority <= 0 {
-		req.Priority = userOwnedDefaultPriority
-	}
+	req.PrivatePriority = normalizeUserPrivatePriority(req.Priority, req.PrivatePriority)
 	if req.Concurrency <= 0 {
 		req.Concurrency = userOwnedDefaultConcurrency
 	}
@@ -1268,7 +1292,7 @@ func (h *UserAccountHandler) createOwnedAccountFromCredentialImportSource(
 		ProxyID:            nil,
 		Concurrency:        defaults.Concurrency,
 		LoadFactor:         defaults.LoadFactor,
-		Priority:           defaults.Priority,
+		PrivatePriority:    defaults.PrivatePriority,
 		GroupIDs:           defaults.GroupIDs,
 		ExpiresAt:          userUnixSecondsToTime(defaults.ExpiresAt),
 		AutoPauseOnExpired: defaults.AutoPauseOnExpired,
@@ -1357,6 +1381,11 @@ func (h *UserAccountHandler) Update(c *gin.Context) {
 		return
 	}
 	status := normalizeUserAccountStatus(req.Status)
+	privatePriority := normalizeUserUpdatePrivatePriority(req.Priority, req.PrivatePriority)
+	if privatePriority != nil && *privatePriority <= 0 {
+		response.BadRequest(c, "priority must be > 0")
+		return
+	}
 	account, err := h.accountService.UpdateOwned(c.Request.Context(), subject.UserID, accountID, service.UpdateAccountRequest{
 		Name:               req.Name,
 		Notes:              req.Notes,
@@ -1367,7 +1396,7 @@ func (h *UserAccountHandler) Update(c *gin.Context) {
 		ProxyID:            nil,
 		Concurrency:        req.Concurrency,
 		LoadFactor:         req.LoadFactor,
-		Priority:           req.Priority,
+		PrivatePriority:    privatePriority,
 		Status:             status,
 		Schedulable:        req.Schedulable,
 		GroupIDs:           req.GroupIDs,
@@ -1583,7 +1612,8 @@ func (h *UserAccountHandler) BulkUpdate(c *gin.Context) {
 		response.BadRequest(c, "concurrency must be > 0")
 		return
 	}
-	if req.Priority != nil && *req.Priority <= 0 {
+	privatePriority := normalizeUserUpdatePrivatePriority(req.Priority, req.PrivatePriority)
+	if privatePriority != nil && *privatePriority <= 0 {
 		response.BadRequest(c, "priority must be > 0")
 		return
 	}
@@ -1595,6 +1625,7 @@ func (h *UserAccountHandler) BulkUpdate(c *gin.Context) {
 	hasUpdates := req.Concurrency != nil ||
 		req.LoadFactor != nil ||
 		req.Priority != nil ||
+		req.PrivatePriority != nil ||
 		status != "" ||
 		req.Schedulable != nil ||
 		req.AccountLevel != nil ||
@@ -1627,17 +1658,17 @@ func (h *UserAccountHandler) BulkUpdate(c *gin.Context) {
 	}
 
 	result, err := h.accountService.BulkUpdateOwned(c.Request.Context(), subject.UserID, &service.BulkUpdateOwnedAccountsInput{
-		AccountIDs:   accountIDs,
-		Concurrency:  req.Concurrency,
-		LoadFactor:   req.LoadFactor,
-		Priority:     req.Priority,
-		Status:       status,
-		Schedulable:  req.Schedulable,
-		AccountLevel: req.AccountLevel,
-		ShareMode:    req.ShareMode,
-		GroupIDs:     req.GroupIDs,
-		Credentials:  req.Credentials,
-		Extra:        req.Extra,
+		AccountIDs:      accountIDs,
+		Concurrency:     req.Concurrency,
+		LoadFactor:      req.LoadFactor,
+		PrivatePriority: privatePriority,
+		Status:          status,
+		Schedulable:     req.Schedulable,
+		AccountLevel:    req.AccountLevel,
+		ShareMode:       req.ShareMode,
+		GroupIDs:        req.GroupIDs,
+		Credentials:     req.Credentials,
+		Extra:           req.Extra,
 	})
 	if err != nil {
 		response.ErrorFrom(c, err)

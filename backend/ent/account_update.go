@@ -331,6 +331,33 @@ func (_u *AccountUpdate) AddPriority(v int) *AccountUpdate {
 	return _u
 }
 
+// SetPrivatePriority sets the "private_priority" field.
+func (_u *AccountUpdate) SetPrivatePriority(v int) *AccountUpdate {
+	_u.mutation.ResetPrivatePriority()
+	_u.mutation.SetPrivatePriority(v)
+	return _u
+}
+
+// SetNillablePrivatePriority sets the "private_priority" field if the given value is not nil.
+func (_u *AccountUpdate) SetNillablePrivatePriority(v *int) *AccountUpdate {
+	if v != nil {
+		_u.SetPrivatePriority(*v)
+	}
+	return _u
+}
+
+// AddPrivatePriority adds value to the "private_priority" field.
+func (_u *AccountUpdate) AddPrivatePriority(v int) *AccountUpdate {
+	_u.mutation.AddPrivatePriority(v)
+	return _u
+}
+
+// ClearPrivatePriority clears the value of the "private_priority" field.
+func (_u *AccountUpdate) ClearPrivatePriority() *AccountUpdate {
+	_u.mutation.ClearPrivatePriority()
+	return _u
+}
+
 // SetRateMultiplier sets the "rate_multiplier" field.
 func (_u *AccountUpdate) SetRateMultiplier(v float64) *AccountUpdate {
 	_u.mutation.ResetRateMultiplier()
@@ -901,6 +928,15 @@ func (_u *AccountUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	if value, ok := _u.mutation.AddedPriority(); ok {
 		_spec.AddField(account.FieldPriority, field.TypeInt, value)
 	}
+	if value, ok := _u.mutation.PrivatePriority(); ok {
+		_spec.SetField(account.FieldPrivatePriority, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedPrivatePriority(); ok {
+		_spec.AddField(account.FieldPrivatePriority, field.TypeInt, value)
+	}
+	if _u.mutation.PrivatePriorityCleared() {
+		_spec.ClearField(account.FieldPrivatePriority, field.TypeInt)
+	}
 	if value, ok := _u.mutation.RateMultiplier(); ok {
 		_spec.SetField(account.FieldRateMultiplier, field.TypeFloat64, value)
 	}
@@ -1458,6 +1494,33 @@ func (_u *AccountUpdateOne) SetNillablePriority(v *int) *AccountUpdateOne {
 // AddPriority adds value to the "priority" field.
 func (_u *AccountUpdateOne) AddPriority(v int) *AccountUpdateOne {
 	_u.mutation.AddPriority(v)
+	return _u
+}
+
+// SetPrivatePriority sets the "private_priority" field.
+func (_u *AccountUpdateOne) SetPrivatePriority(v int) *AccountUpdateOne {
+	_u.mutation.ResetPrivatePriority()
+	_u.mutation.SetPrivatePriority(v)
+	return _u
+}
+
+// SetNillablePrivatePriority sets the "private_priority" field if the given value is not nil.
+func (_u *AccountUpdateOne) SetNillablePrivatePriority(v *int) *AccountUpdateOne {
+	if v != nil {
+		_u.SetPrivatePriority(*v)
+	}
+	return _u
+}
+
+// AddPrivatePriority adds value to the "private_priority" field.
+func (_u *AccountUpdateOne) AddPrivatePriority(v int) *AccountUpdateOne {
+	_u.mutation.AddPrivatePriority(v)
+	return _u
+}
+
+// ClearPrivatePriority clears the value of the "private_priority" field.
+func (_u *AccountUpdateOne) ClearPrivatePriority() *AccountUpdateOne {
+	_u.mutation.ClearPrivatePriority()
 	return _u
 }
 
@@ -2060,6 +2123,15 @@ func (_u *AccountUpdateOne) sqlSave(ctx context.Context) (_node *Account, err er
 	}
 	if value, ok := _u.mutation.AddedPriority(); ok {
 		_spec.AddField(account.FieldPriority, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.PrivatePriority(); ok {
+		_spec.SetField(account.FieldPrivatePriority, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedPrivatePriority(); ok {
+		_spec.AddField(account.FieldPrivatePriority, field.TypeInt, value)
+	}
+	if _u.mutation.PrivatePriorityCleared() {
+		_spec.ClearField(account.FieldPrivatePriority, field.TypeInt)
 	}
 	if value, ok := _u.mutation.RateMultiplier(); ok {
 		_spec.SetField(account.FieldRateMultiplier, field.TypeFloat64, value)

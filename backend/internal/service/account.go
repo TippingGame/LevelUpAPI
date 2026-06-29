@@ -36,6 +36,7 @@ type Account struct {
 	ProxyID                   *int64
 	Concurrency               int
 	Priority                  int
+	PrivatePriority           *int
 	// RateMultiplier 账号计费倍率（>=0，允许 0 表示该账号计费为 0）。
 	// 使用指针用于兼容旧版本调度缓存（Redis）中缺字段的情况：nil 表示按 1.0 处理。
 	RateMultiplier        *float64

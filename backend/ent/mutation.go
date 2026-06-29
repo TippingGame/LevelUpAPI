@@ -3304,6 +3304,8 @@ type AccountMutation struct {
 	addload_factor_paid_ceiling *int
 	priority                    *int
 	addpriority                 *int
+	private_priority            *int
+	addprivate_priority         *int
 	rate_multiplier             *float64
 	addrate_multiplier          *float64
 	status                      *string
@@ -4298,6 +4300,76 @@ func (m *AccountMutation) ResetPriority() {
 	m.addpriority = nil
 }
 
+// SetPrivatePriority sets the "private_priority" field.
+func (m *AccountMutation) SetPrivatePriority(i int) {
+	m.private_priority = &i
+	m.addprivate_priority = nil
+}
+
+// PrivatePriority returns the value of the "private_priority" field in the mutation.
+func (m *AccountMutation) PrivatePriority() (r int, exists bool) {
+	v := m.private_priority
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldPrivatePriority returns the old "private_priority" field's value of the Account entity.
+// If the Account object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *AccountMutation) OldPrivatePriority(ctx context.Context) (v *int, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldPrivatePriority is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldPrivatePriority requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldPrivatePriority: %w", err)
+	}
+	return oldValue.PrivatePriority, nil
+}
+
+// AddPrivatePriority adds i to the "private_priority" field.
+func (m *AccountMutation) AddPrivatePriority(i int) {
+	if m.addprivate_priority != nil {
+		*m.addprivate_priority += i
+	} else {
+		m.addprivate_priority = &i
+	}
+}
+
+// AddedPrivatePriority returns the value that was added to the "private_priority" field in this mutation.
+func (m *AccountMutation) AddedPrivatePriority() (r int, exists bool) {
+	v := m.addprivate_priority
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ClearPrivatePriority clears the value of the "private_priority" field.
+func (m *AccountMutation) ClearPrivatePriority() {
+	m.private_priority = nil
+	m.addprivate_priority = nil
+	m.clearedFields[account.FieldPrivatePriority] = struct{}{}
+}
+
+// PrivatePriorityCleared returns if the "private_priority" field was cleared in this mutation.
+func (m *AccountMutation) PrivatePriorityCleared() bool {
+	_, ok := m.clearedFields[account.FieldPrivatePriority]
+	return ok
+}
+
+// ResetPrivatePriority resets all changes to the "private_priority" field.
+func (m *AccountMutation) ResetPrivatePriority() {
+	m.private_priority = nil
+	m.addprivate_priority = nil
+	delete(m.clearedFields, account.FieldPrivatePriority)
+}
+
 // SetRateMultiplier sets the "rate_multiplier" field.
 func (m *AccountMutation) SetRateMultiplier(f float64) {
 	m.rate_multiplier = &f
@@ -5210,7 +5282,7 @@ func (m *AccountMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *AccountMutation) Fields() []string {
-	fields := make([]string, 0, 34)
+	fields := make([]string, 0, 35)
 	if m.created_at != nil {
 		fields = append(fields, account.FieldCreatedAt)
 	}
@@ -5267,6 +5339,9 @@ func (m *AccountMutation) Fields() []string {
 	}
 	if m.priority != nil {
 		fields = append(fields, account.FieldPriority)
+	}
+	if m.private_priority != nil {
+		fields = append(fields, account.FieldPrivatePriority)
 	}
 	if m.rate_multiplier != nil {
 		fields = append(fields, account.FieldRateMultiplier)
@@ -5359,6 +5434,8 @@ func (m *AccountMutation) Field(name string) (ent.Value, bool) {
 		return m.LoadFactorPaidCeiling()
 	case account.FieldPriority:
 		return m.Priority()
+	case account.FieldPrivatePriority:
+		return m.PrivatePriority()
 	case account.FieldRateMultiplier:
 		return m.RateMultiplier()
 	case account.FieldStatus:
@@ -5436,6 +5513,8 @@ func (m *AccountMutation) OldField(ctx context.Context, name string) (ent.Value,
 		return m.OldLoadFactorPaidCeiling(ctx)
 	case account.FieldPriority:
 		return m.OldPriority(ctx)
+	case account.FieldPrivatePriority:
+		return m.OldPrivatePriority(ctx)
 	case account.FieldRateMultiplier:
 		return m.OldRateMultiplier(ctx)
 	case account.FieldStatus:
@@ -5608,6 +5687,13 @@ func (m *AccountMutation) SetField(name string, value ent.Value) error {
 		}
 		m.SetPriority(v)
 		return nil
+	case account.FieldPrivatePriority:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetPrivatePriority(v)
+		return nil
 	case account.FieldRateMultiplier:
 		v, ok := value.(float64)
 		if !ok {
@@ -5736,6 +5822,9 @@ func (m *AccountMutation) AddedFields() []string {
 	if m.addpriority != nil {
 		fields = append(fields, account.FieldPriority)
 	}
+	if m.addprivate_priority != nil {
+		fields = append(fields, account.FieldPrivatePriority)
+	}
 	if m.addrate_multiplier != nil {
 		fields = append(fields, account.FieldRateMultiplier)
 	}
@@ -5757,6 +5846,8 @@ func (m *AccountMutation) AddedField(name string) (ent.Value, bool) {
 		return m.AddedLoadFactorPaidCeiling()
 	case account.FieldPriority:
 		return m.AddedPriority()
+	case account.FieldPrivatePriority:
+		return m.AddedPrivatePriority()
 	case account.FieldRateMultiplier:
 		return m.AddedRateMultiplier()
 	}
@@ -5803,6 +5894,13 @@ func (m *AccountMutation) AddField(name string, value ent.Value) error {
 		}
 		m.AddPriority(v)
 		return nil
+	case account.FieldPrivatePriority:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddPrivatePriority(v)
+		return nil
 	case account.FieldRateMultiplier:
 		v, ok := value.(float64)
 		if !ok {
@@ -5835,6 +5933,9 @@ func (m *AccountMutation) ClearedFields() []string {
 	}
 	if m.FieldCleared(account.FieldLoadFactor) {
 		fields = append(fields, account.FieldLoadFactor)
+	}
+	if m.FieldCleared(account.FieldPrivatePriority) {
+		fields = append(fields, account.FieldPrivatePriority)
 	}
 	if m.FieldCleared(account.FieldErrorMessage) {
 		fields = append(fields, account.FieldErrorMessage)
@@ -5900,6 +6001,9 @@ func (m *AccountMutation) ClearField(name string) error {
 		return nil
 	case account.FieldLoadFactor:
 		m.ClearLoadFactor()
+		return nil
+	case account.FieldPrivatePriority:
+		m.ClearPrivatePriority()
 		return nil
 	case account.FieldErrorMessage:
 		m.ClearErrorMessage()
@@ -5998,6 +6102,9 @@ func (m *AccountMutation) ResetField(name string) error {
 		return nil
 	case account.FieldPriority:
 		m.ResetPriority()
+		return nil
+	case account.FieldPrivatePriority:
+		m.ResetPrivatePriority()
 		return nil
 	case account.FieldRateMultiplier:
 		m.ResetRateMultiplier()

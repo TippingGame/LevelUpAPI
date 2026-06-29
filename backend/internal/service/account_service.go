@@ -48,6 +48,7 @@ const AccountPrivacyModeUnsetFilter = "__unset__"
 const ownedPersonalMinConcurrency = 3
 const ownedPersonalMaxConcurrency = 50
 const ownedPersonalDefaultConcurrency = ownedPersonalMinConcurrency
+const accountDefaultPriority = 50
 const ownedPersonalDefaultPriority = 1
 const ownedPersonalDefaultOpenAICompactMode = "force_on"
 const ownedPersonalDefaultOpenAIWSMode = OpenAIWSIngressModeOff
@@ -123,17 +124,18 @@ type AccountRepository interface {
 // AccountBulkUpdate describes the fields that can be updated in a bulk operation.
 // Nil pointers mean "do not change".
 type AccountBulkUpdate struct {
-	Name           *string
-	ProxyID        *int64
-	Concurrency    *int
-	Priority       *int
-	RateMultiplier *float64
-	LoadFactor     *int
-	Status         *string
-	Schedulable    *bool
-	AccountLevel   *string
-	Credentials    map[string]any
-	Extra          map[string]any
+	Name            *string
+	ProxyID         *int64
+	Concurrency     *int
+	Priority        *int
+	PrivatePriority *int
+	RateMultiplier  *float64
+	LoadFactor      *int
+	Status          *string
+	Schedulable     *bool
+	AccountLevel    *string
+	Credentials     map[string]any
+	Extra           map[string]any
 }
 
 // CreateAccountRequest 创建账号请求
@@ -150,6 +152,7 @@ type CreateAccountRequest struct {
 	Concurrency        int            `json:"concurrency"`
 	LoadFactor         *int           `json:"load_factor"`
 	Priority           int            `json:"priority"`
+	PrivatePriority    *int           `json:"private_priority"`
 	GroupIDs           []int64        `json:"group_ids"`
 	ExpiresAt          *time.Time     `json:"expires_at"`
 	AutoPauseOnExpired *bool          `json:"auto_pause_on_expired"`
@@ -167,6 +170,7 @@ type UpdateAccountRequest struct {
 	Concurrency        *int            `json:"concurrency"`
 	LoadFactor         *int            `json:"load_factor"`
 	Priority           *int            `json:"priority"`
+	PrivatePriority    *int            `json:"private_priority"`
 	Status             *string         `json:"status"`
 	Schedulable        *bool           `json:"schedulable"`
 	GroupIDs           *[]int64        `json:"group_ids"`
@@ -242,17 +246,18 @@ type AccountListFilters struct {
 }
 
 type BulkUpdateOwnedAccountsInput struct {
-	AccountIDs   []int64
-	Concurrency  *int
-	Priority     *int
-	LoadFactor   *int
-	Status       string
-	Schedulable  *bool
-	AccountLevel *string
-	ShareMode    *string
-	GroupIDs     *[]int64
-	Credentials  map[string]any
-	Extra        map[string]any
+	AccountIDs      []int64
+	Concurrency     *int
+	Priority        *int
+	PrivatePriority *int
+	LoadFactor      *int
+	Status          string
+	Schedulable     *bool
+	AccountLevel    *string
+	ShareMode       *string
+	GroupIDs        *[]int64
+	Credentials     map[string]any
+	Extra           map[string]any
 }
 
 // NewAccountService 创建账号服务实例
@@ -308,20 +313,21 @@ func (s *AccountService) Create(ctx context.Context, req CreateAccountRequest) (
 
 	// 创建账号
 	account := &Account{
-		Name:         req.Name,
-		Notes:        normalizeAccountNotes(req.Notes),
-		Platform:     req.Platform,
-		AccountLevel: NormalizeOpenAIAccountLevel(req.Platform, req.AccountLevel, req.Credentials, req.Extra),
-		Type:         req.Type,
-		Credentials:  req.Credentials,
-		Extra:        req.Extra,
-		ShareMode:    NormalizeAccountShareMode(req.ShareMode),
-		ProxyID:      req.ProxyID,
-		Concurrency:  req.Concurrency,
-		LoadFactor:   normalizeLoadFactor(req.LoadFactor),
-		Priority:     req.Priority,
-		Status:       StatusActive,
-		ExpiresAt:    req.ExpiresAt,
+		Name:            req.Name,
+		Notes:           normalizeAccountNotes(req.Notes),
+		Platform:        req.Platform,
+		AccountLevel:    NormalizeOpenAIAccountLevel(req.Platform, req.AccountLevel, req.Credentials, req.Extra),
+		Type:            req.Type,
+		Credentials:     req.Credentials,
+		Extra:           req.Extra,
+		ShareMode:       NormalizeAccountShareMode(req.ShareMode),
+		ProxyID:         req.ProxyID,
+		Concurrency:     req.Concurrency,
+		LoadFactor:      normalizeLoadFactor(req.LoadFactor),
+		Priority:        normalizeAccountPriority(req.Priority),
+		PrivatePriority: normalizeOptionalPositiveInt(req.PrivatePriority),
+		Status:          StatusActive,
+		ExpiresAt:       req.ExpiresAt,
 	}
 	if req.AutoPauseOnExpired != nil {
 		account.AutoPauseOnExpired = *req.AutoPauseOnExpired
@@ -493,6 +499,7 @@ func (s *AccountService) createOwned(ctx context.Context, ownerUserID int64, req
 		LoadFactor:            normalizeLoadFactor(req.LoadFactor),
 		LoadFactorPaidCeiling: OwnedPersonalDefaultLoadFactor,
 		Priority:              req.Priority,
+		PrivatePriority:       req.PrivatePriority,
 		Status:                StatusActive,
 		ExpiresAt:             req.ExpiresAt,
 		AutoPauseOnExpired:    true,
@@ -618,6 +625,21 @@ func normalizeLoadFactor(value *int) *int {
 	return &normalized
 }
 
+func normalizeAccountPriority(priority int) int {
+	if priority <= 0 {
+		return accountDefaultPriority
+	}
+	return priority
+}
+
+func normalizeOptionalPositiveInt(value *int) *int {
+	if value == nil || *value <= 0 {
+		return nil
+	}
+	normalized := *value
+	return &normalized
+}
+
 func ownedPersonalDefaultModelMapping(platform string) map[string]any {
 	models := make([]string, 0)
 	switch platform {
@@ -700,15 +722,21 @@ func applyOwnedPersonalAccountTemplateToCreate(req *CreateAccountRequest) error 
 	if req == nil {
 		return nil
 	}
+	if req.PrivatePriority == nil && req.Priority > 0 {
+		priority := req.Priority
+		req.PrivatePriority = &priority
+	}
 	req.Concurrency = normalizeOwnedPersonalAccountConcurrency(req.Concurrency)
 	if err := validateOwnedPersonalAccountConcurrency(req.Concurrency); err != nil {
 		return err
 	}
 	loadFactor := OwnedPersonalDefaultLoadFactor
 	req.LoadFactor = &loadFactor
-	if req.Priority <= 0 {
-		req.Priority = ownedPersonalDefaultPriority
+	if req.PrivatePriority == nil || *req.PrivatePriority <= 0 {
+		priority := ownedPersonalDefaultPriority
+		req.PrivatePriority = &priority
 	}
+	req.Priority = accountDefaultPriority
 	autoPause := true
 	req.AutoPauseOnExpired = &autoPause
 	req.GroupIDs = nil
@@ -733,10 +761,15 @@ func sanitizeOwnedPersonalAccountUpdate(account *Account, req *UpdateAccountRequ
 			return err
 		}
 	}
+	if req.PrivatePriority == nil && req.Priority != nil {
+		priority := *req.Priority
+		req.PrivatePriority = &priority
+	}
+	req.Priority = nil
 	req.AutoPauseOnExpired = nil
-	if req.Priority != nil && *req.Priority <= 0 {
+	if req.PrivatePriority != nil && *req.PrivatePriority <= 0 {
 		priority := ownedPersonalDefaultPriority
-		req.Priority = &priority
+		req.PrivatePriority = &priority
 	}
 	if req.Credentials != nil {
 		nextCredentials := mergeAccountMap(nil, *req.Credentials)
@@ -949,6 +982,9 @@ func (s *AccountService) Update(ctx context.Context, id int64, req UpdateAccount
 	if req.Priority != nil {
 		account.Priority = *req.Priority
 	}
+	if req.PrivatePriority != nil {
+		account.PrivatePriority = normalizeOptionalPositiveInt(req.PrivatePriority)
+	}
 
 	if req.Status != nil {
 		account.Status = *req.Status
@@ -1052,6 +1088,9 @@ func (s *AccountService) UpdateOwned(ctx context.Context, ownerUserID, accountID
 	}
 	if req.Priority != nil {
 		account.Priority = *req.Priority
+	}
+	if req.PrivatePriority != nil {
+		account.PrivatePriority = normalizeOptionalPositiveInt(req.PrivatePriority)
 	}
 	if req.Status != nil {
 		switch *req.Status {
@@ -1478,13 +1517,18 @@ func (s *AccountService) BulkUpdateOwned(ctx context.Context, ownerUserID int64,
 	if len(accountIDs) == 0 {
 		return result, nil
 	}
+	if input.PrivatePriority == nil && input.Priority != nil {
+		priority := *input.Priority
+		input.PrivatePriority = &priority
+	}
+	input.Priority = nil
 
 	if input.Concurrency != nil {
 		if err := validateOwnedPersonalAccountConcurrency(*input.Concurrency); err != nil {
 			return nil, err
 		}
 	}
-	if input.Priority != nil && *input.Priority <= 0 {
+	if input.PrivatePriority != nil && *input.PrivatePriority <= 0 {
 		return nil, fmt.Errorf("priority must be > 0")
 	}
 	if input.LoadFactor != nil {
@@ -1579,11 +1623,11 @@ func (s *AccountService) BulkUpdateOwned(ctx context.Context, ownerUserID int64,
 			account := accountsByID[accountID]
 			entry := BulkUpdateAccountResult{AccountID: accountID}
 			updateReq := UpdateAccountRequest{
-				Concurrency:  input.Concurrency,
-				LoadFactor:   input.LoadFactor,
-				Priority:     input.Priority,
-				Schedulable:  input.Schedulable,
-				AccountLevel: input.AccountLevel,
+				Concurrency:     input.Concurrency,
+				LoadFactor:      input.LoadFactor,
+				PrivatePriority: input.PrivatePriority,
+				Schedulable:     input.Schedulable,
+				AccountLevel:    input.AccountLevel,
 			}
 			if status != "" {
 				updateReq.Status = &status
@@ -1625,12 +1669,12 @@ func (s *AccountService) BulkUpdateOwned(ctx context.Context, ownerUserID int64,
 	}
 
 	repoUpdates := AccountBulkUpdate{
-		Concurrency: input.Concurrency,
-		Priority:    input.Priority,
-		LoadFactor:  nil,
-		Schedulable: input.Schedulable,
-		Credentials: map[string]any{},
-		Extra:       map[string]any{},
+		Concurrency:     input.Concurrency,
+		PrivatePriority: input.PrivatePriority,
+		LoadFactor:      nil,
+		Schedulable:     input.Schedulable,
+		Credentials:     map[string]any{},
+		Extra:           map[string]any{},
 	}
 	if input.AccountLevel != nil {
 		level := NormalizeAccountLevel(*input.AccountLevel)

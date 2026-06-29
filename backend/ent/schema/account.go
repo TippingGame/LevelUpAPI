@@ -123,6 +123,10 @@ func (Account) Fields() []ent.Field {
 		// 调度器会优先使用高优先级的账户
 		field.Int("priority").
 			Default(50),
+		field.Int("private_priority").
+			Optional().
+			Nillable().
+			Comment("Owner-only scheduling priority used when the account owner consumes this account."),
 
 		// rate_multiplier: 账号计费倍率（>=0，允许 0 表示该账号计费为 0）
 		// 仅影响账号维度计费口径，不影响用户/API Key 扣费（分组倍率）
@@ -256,6 +260,7 @@ func (Account) Indexes() []ent.Index {
 		index.Fields("platform", "priority"),
 		index.Fields("priority", "status"),
 		index.Fields("owner_user_id"),
+		index.Fields("owner_user_id", "private_priority"),
 		index.Fields("share_mode", "share_status"),
 		index.Fields("deleted_at"), // 软删除查询优化
 	}

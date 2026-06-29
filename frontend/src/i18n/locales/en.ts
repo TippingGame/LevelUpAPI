@@ -4459,6 +4459,8 @@ export default {
       loadFactorHint: 'Higher load factor increases scheduling frequency',
       priority: 'Priority',
       priorityHint: 'Lower value accounts are used first',
+      privatePriority: 'Private Priority',
+      privatePriorityHint: 'Only affects scheduling when you use this account yourself; shared pool priority stays global',
       billingRateMultiplier: 'Billing Rate Multiplier',
       billingRateMultiplierHint: '0 = free, affects account billing only',
       expiresAt: 'Expires At',

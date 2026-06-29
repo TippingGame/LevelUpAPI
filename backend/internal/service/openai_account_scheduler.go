@@ -401,10 +401,21 @@ func (s *defaultOpenAIAccountScheduler) selectBySessionHash(
 type openAIAccountCandidateScore struct {
 	account   *Account
 	loadInfo  *AccountLoadInfo
+	priority  int
 	score     float64
 	errorRate float64
 	ttft      float64
 	hasTTFT   bool
+}
+
+func openAICandidatePriority(candidate openAIAccountCandidateScore) int {
+	if candidate.priority > 0 {
+		return candidate.priority
+	}
+	if candidate.account != nil {
+		return candidate.account.Priority
+	}
+	return 0
 }
 
 type openAIAccountCandidateHeap []openAIAccountCandidateScore
@@ -445,8 +456,10 @@ func isOpenAIAccountCandidateBetter(left openAIAccountCandidateScore, right open
 	if left.account == nil || right.account == nil {
 		return left.account != nil
 	}
-	if left.account.Priority != right.account.Priority {
-		return left.account.Priority < right.account.Priority
+	leftPriority := openAICandidatePriority(left)
+	rightPriority := openAICandidatePriority(right)
+	if leftPriority != rightPriority {
+		return leftPriority < rightPriority
 	}
 	if loadA, loadB := openAICandidateLoadRate(left.loadInfo), openAICandidateLoadRate(right.loadInfo); loadA != loadB {
 		return loadA < loadB
@@ -614,8 +627,10 @@ func selectFairOpenAICandidates(candidates []openAIAccountCandidateScore, count 
 		if a.account == nil || b.account == nil {
 			return a.account != nil
 		}
-		if a.account.Priority != b.account.Priority {
-			return a.account.Priority < b.account.Priority
+		priorityA := openAICandidatePriority(a)
+		priorityB := openAICandidatePriority(b)
+		if priorityA != priorityB {
+			return priorityA < priorityB
 		}
 		if bucketA, bucketB := openAICandidateLoadBucket(a.loadInfo), openAICandidateLoadBucket(b.loadInfo); bucketA != bucketB {
 			return bucketA < bucketB
@@ -885,6 +900,7 @@ func (s *defaultOpenAIAccountScheduler) selectByLoadBalance(
 		allCandidates = append(allCandidates, openAIAccountCandidateScore{
 			account:   account,
 			loadInfo:  loadInfo,
+			priority:  accountPriorityForRequest(ctx, account),
 			errorRate: errorRate,
 			ttft:      ttft,
 			hasTTFT:   hasTTFT,
@@ -912,18 +928,19 @@ func (s *defaultOpenAIAccountScheduler) selectByLoadBalance(
 	candidateCount := len(candidates)
 	loadSkew := 0.0
 	if len(candidates) > 0 {
-		minPriority, maxPriority := candidates[0].account.Priority, candidates[0].account.Priority
+		minPriority, maxPriority := openAICandidatePriority(candidates[0]), openAICandidatePriority(candidates[0])
 		maxWaiting := 1
 		loadRateSum := 0.0
 		loadRateSumSquares := 0.0
 		minTTFT, maxTTFT := 0.0, 0.0
 		hasTTFTSample := false
 		for _, candidate := range candidates {
-			if candidate.account.Priority < minPriority {
-				minPriority = candidate.account.Priority
+			priority := openAICandidatePriority(candidate)
+			if priority < minPriority {
+				minPriority = priority
 			}
-			if candidate.account.Priority > maxPriority {
-				maxPriority = candidate.account.Priority
+			if priority > maxPriority {
+				maxPriority = priority
 			}
 			if candidate.loadInfo.WaitingCount > maxWaiting {
 				maxWaiting = candidate.loadInfo.WaitingCount
@@ -952,7 +969,7 @@ func (s *defaultOpenAIAccountScheduler) selectByLoadBalance(
 			item := &candidates[i]
 			priorityFactor := 1.0
 			if maxPriority > minPriority {
-				priorityFactor = 1 - float64(item.account.Priority-minPriority)/float64(maxPriority-minPriority)
+				priorityFactor = 1 - float64(openAICandidatePriority(*item)-minPriority)/float64(maxPriority-minPriority)
 			}
 			loadFactor := 1 - clamp01(float64(item.loadInfo.LoadRate)/100.0)
 			queueFactor := 1 - clamp01(float64(item.loadInfo.WaitingCount)/float64(maxWaiting))
@@ -993,8 +1010,10 @@ func (s *defaultOpenAIAccountScheduler) selectByLoadBalance(
 		ordered := append([]openAIAccountCandidateScore(nil), pool...)
 		sort.SliceStable(ordered, func(i, j int) bool {
 			a, b := ordered[i], ordered[j]
-			if a.account.Priority != b.account.Priority {
-				return a.account.Priority < b.account.Priority
+			priorityA := openAICandidatePriority(a)
+			priorityB := openAICandidatePriority(b)
+			if priorityA != priorityB {
+				return priorityA < priorityB
 			}
 			if a.loadInfo.LoadRate != b.loadInfo.LoadRate {
 				return a.loadInfo.LoadRate < b.loadInfo.LoadRate

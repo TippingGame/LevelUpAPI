@@ -81,6 +81,7 @@ export interface ImportCredentialContentsRequest {
   concurrency?: number
   load_factor?: number | null
   priority?: number
+  private_priority?: number | null
   group_ids?: number[]
   expires_at?: number | null
   auto_pause_on_expired?: boolean

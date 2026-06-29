@@ -2563,8 +2563,8 @@
             @input="form.load_factor = (form.load_factor &amp;&amp; form.load_factor >= 1) ? form.load_factor : null" />
           <p class="input-hint">{{ t('admin.accounts.loadFactorHint') }}</p>
         </div>
-        <div v-if="!isUserScope">
-          <label class="input-label">{{ t('admin.accounts.priority') }}</label>
+        <div>
+          <label class="input-label">{{ isUserScope ? t('admin.accounts.privatePriority') : t('admin.accounts.priority') }}</label>
           <input
             v-model.number="form.priority"
             type="number"
@@ -2572,7 +2572,7 @@
             class="input"
             data-tour="account-form-priority"
           />
-          <p class="input-hint">{{ t('admin.accounts.priorityHint') }}</p>
+          <p class="input-hint">{{ isUserScope ? t('admin.accounts.privatePriorityHint') : t('admin.accounts.priorityHint') }}</p>
         </div>
         <div v-if="canManageBillingRate">
           <label class="input-label">{{ t('admin.accounts.billingRateMultiplier') }}</label>
@@ -4323,7 +4323,10 @@ const sanitizeCreatePayload = (payload: CreateAccountRequest): CreateAccountRequ
     delete next.group_ids
     next.concurrency = normalizePersonalAccountConcurrency(next.concurrency)
     next.load_factor = undefined
-    next.priority = PERSONAL_ACCOUNT_DEFAULT_PRIORITY
+    next.private_priority = typeof next.priority === 'number' && Number(next.priority) > 0
+      ? next.priority
+      : PERSONAL_ACCOUNT_DEFAULT_PRIORITY
+    delete next.priority
     next.auto_pause_on_expired = PERSONAL_ACCOUNT_DEFAULT_AUTO_PAUSE_ON_EXPIRED
     const templated = applyPersonalAccountTemplate(
       next.platform,

@@ -122,6 +122,9 @@ func (r *accountRepository) Create(ctx context.Context, account *service.Account
 	if account.RateMultiplier != nil {
 		builder.SetRateMultiplier(*account.RateMultiplier)
 	}
+	if account.PrivatePriority != nil {
+		builder.SetPrivatePriority(*account.PrivatePriority)
+	}
 	if account.LoadFactor != nil {
 		builder.SetLoadFactor(*account.LoadFactor)
 	}
@@ -422,6 +425,11 @@ func applyAccountUpdateFields(builder *dbent.AccountUpdateOne, account *service.
 
 	if account.RateMultiplier != nil {
 		builder.SetRateMultiplier(*account.RateMultiplier)
+	}
+	if account.PrivatePriority != nil {
+		builder.SetPrivatePriority(*account.PrivatePriority)
+	} else {
+		builder.ClearPrivatePriority()
 	}
 	if account.LoadFactor != nil {
 		builder.SetLoadFactor(*account.LoadFactor)
@@ -1288,7 +1296,7 @@ func (r *accountRepository) listWithFilters(ctx context.Context, params paginati
 	accountsQuery := q.
 		Offset(params.Offset()).
 		Limit(params.Limit())
-	for _, order := range accountListOrder(params) {
+	for _, order := range accountListOrder(params, ownerUserID != nil) {
 		accountsQuery = accountsQuery.Order(order)
 	}
 
@@ -1304,7 +1312,7 @@ func (r *accountRepository) listWithFilters(ctx context.Context, params paginati
 	return outAccounts, paginationResultFromTotal(int64(total), params), nil
 }
 
-func accountListOrder(params pagination.PaginationParams) []func(*entsql.Selector) {
+func accountListOrder(params pagination.PaginationParams, ownedScope bool) []func(*entsql.Selector) {
 	sortBy := strings.ToLower(strings.TrimSpace(params.SortBy))
 	sortOrder := params.NormalizedSortOrder(pagination.SortOrderAsc)
 
@@ -1323,6 +1331,9 @@ func accountListOrder(params pagination.PaginationParams) []func(*entsql.Selecto
 		field = dbaccount.FieldSchedulable
 		defaultOrder = false
 	case "priority":
+		if ownedScope {
+			return accountListOwnedPriorityOrder(sortOrder)
+		}
 		field = dbaccount.FieldPriority
 		defaultOrder = false
 	case "rate_multiplier":
@@ -1346,6 +1357,26 @@ func accountListOrder(params pagination.PaginationParams) []func(*entsql.Selecto
 		return []func(*entsql.Selector){dbent.Asc(dbaccount.FieldName), dbent.Asc(dbaccount.FieldID)}
 	}
 	return []func(*entsql.Selector){dbent.Asc(field), dbent.Asc(dbaccount.FieldID)}
+}
+
+func accountListOwnedPriorityOrder(sortOrder string) []func(*entsql.Selector) {
+	orderExpr := func(direction string, tieOrder func(string) string) func(*entsql.Selector) {
+		return func(s *entsql.Selector) {
+			expr := fmt.Sprintf(
+				"CASE WHEN %s > 0 THEN %s ELSE %s END %s",
+				s.C(dbaccount.FieldPrivatePriority),
+				s.C(dbaccount.FieldPrivatePriority),
+				s.C(dbaccount.FieldPriority),
+				direction,
+			)
+			s.OrderExpr(entsql.Expr(expr))
+			s.OrderBy(tieOrder(s.C(dbaccount.FieldID)))
+		}
+	}
+	if sortOrder == pagination.SortOrderDesc {
+		return []func(*entsql.Selector){orderExpr("DESC", entsql.Desc)}
+	}
+	return []func(*entsql.Selector){orderExpr("ASC", entsql.Asc)}
 }
 
 func accountHasNoNonPrivateGroups() dbpredicate.Account {
@@ -2329,6 +2360,11 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 		args = append(args, *updates.Priority)
 		idx++
 	}
+	if updates.PrivatePriority != nil {
+		setClauses = append(setClauses, "private_priority = $"+itoa(idx))
+		args = append(args, *updates.PrivatePriority)
+		idx++
+	}
 	if updates.RateMultiplier != nil {
 		setClauses = append(setClauses, "rate_multiplier = $"+itoa(idx))
 		args = append(args, *updates.RateMultiplier)
@@ -2801,6 +2837,7 @@ func accountEntityToService(m *dbent.Account) *service.Account {
 		ProxyID:                 m.ProxyID,
 		Concurrency:             m.Concurrency,
 		Priority:                m.Priority,
+		PrivatePriority:         m.PrivatePriority,
 		RateMultiplier:          &rateMultiplier,
 		LoadFactor:              m.LoadFactor,
 		LoadFactorPaidCeiling:   m.LoadFactorPaidCeiling,

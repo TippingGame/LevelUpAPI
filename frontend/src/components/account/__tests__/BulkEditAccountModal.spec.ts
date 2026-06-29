@@ -484,6 +484,25 @@ describe('BulkEditAccountModal', () => {
     expect(adminAPI.accounts.bulkUpdate).not.toHaveBeenCalled()
   })
 
+  it('用户作用域批量编辑优先级时提交私有优先级', async () => {
+    const wrapper = mountModal({
+      accountScope: 'user',
+      selectedPlatforms: ['openai'],
+      selectedTypes: ['oauth']
+    })
+
+    await wrapper.get('#bulk-edit-priority-enabled').setValue(true)
+    await wrapper.get('#bulk-edit-priority').setValue('7')
+    await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(accountsAPI.bulkUpdate).toHaveBeenCalledTimes(1)
+    expect(accountsAPI.bulkUpdate).toHaveBeenCalledWith([1, 2], {
+      private_priority: 7
+    })
+    expect(adminAPI.accounts.bulkUpdate).not.toHaveBeenCalled()
+  })
+
   it('用户作用域批量改为公共共享时支持后台任务响应', async () => {
     vi.mocked(accountsAPI.bulkUpdate).mockResolvedValueOnce({
       async: true,

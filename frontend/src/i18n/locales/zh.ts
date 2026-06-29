@@ -4612,6 +4612,8 @@ export default {
       loadFactorHint: '提高负载因子可以提高对账号的调度频率',
       priority: '优先级',
       priorityHint: '优先级越小的账号优先使用',
+      privatePriority: '私有优先级',
+      privatePriorityHint: '只影响你自己使用该账号时的调度顺序，不影响共享号池全局优先级',
       billingRateMultiplier: '账号计费倍率',
       billingRateMultiplierHint: '0 表示不计费，仅影响账号计费',
       expiresAt: '过期时间',

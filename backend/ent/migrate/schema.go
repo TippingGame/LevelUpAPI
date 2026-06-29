@@ -162,6 +162,7 @@ var (
 		{Name: "load_factor", Type: field.TypeInt, Nullable: true},
 		{Name: "load_factor_paid_ceiling", Type: field.TypeInt, Default: 10},
 		{Name: "priority", Type: field.TypeInt, Default: 50},
+		{Name: "private_priority", Type: field.TypeInt, Nullable: true},
 		{Name: "rate_multiplier", Type: field.TypeFloat64, Default: 1, SchemaType: map[string]string{"postgres": "decimal(10,4)"}},
 		{Name: "status", Type: field.TypeString, Size: 20, Default: "active"},
 		{Name: "error_message", Type: field.TypeString, Nullable: true, SchemaType: map[string]string{"postgres": "text"}},
@@ -188,13 +189,13 @@ var (
 		ForeignKeys: []*schema.ForeignKey{
 			{
 				Symbol:     "accounts_proxies_proxy",
-				Columns:    []*schema.Column{AccountsColumns[33]},
+				Columns:    []*schema.Column{AccountsColumns[34]},
 				RefColumns: []*schema.Column{ProxiesColumns[0]},
 				OnDelete:   schema.SetNull,
 			},
 			{
 				Symbol:     "accounts_users_owned_accounts",
-				Columns:    []*schema.Column{AccountsColumns[34]},
+				Columns:    []*schema.Column{AccountsColumns[35]},
 				RefColumns: []*schema.Column{UsersColumns[0]},
 				OnDelete:   schema.SetNull,
 			},
@@ -213,12 +214,12 @@ var (
 			{
 				Name:    "account_status",
 				Unique:  false,
-				Columns: []*schema.Column{AccountsColumns[19]},
+				Columns: []*schema.Column{AccountsColumns[20]},
 			},
 			{
 				Name:    "account_proxy_id",
 				Unique:  false,
-				Columns: []*schema.Column{AccountsColumns[33]},
+				Columns: []*schema.Column{AccountsColumns[34]},
 			},
 			{
 				Name:    "account_priority",
@@ -228,27 +229,27 @@ var (
 			{
 				Name:    "account_last_used_at",
 				Unique:  false,
-				Columns: []*schema.Column{AccountsColumns[21]},
+				Columns: []*schema.Column{AccountsColumns[22]},
 			},
 			{
 				Name:    "account_schedulable",
 				Unique:  false,
-				Columns: []*schema.Column{AccountsColumns[24]},
+				Columns: []*schema.Column{AccountsColumns[25]},
 			},
 			{
 				Name:    "account_rate_limited_at",
 				Unique:  false,
-				Columns: []*schema.Column{AccountsColumns[25]},
+				Columns: []*schema.Column{AccountsColumns[26]},
 			},
 			{
 				Name:    "account_rate_limit_reset_at",
 				Unique:  false,
-				Columns: []*schema.Column{AccountsColumns[26]},
+				Columns: []*schema.Column{AccountsColumns[27]},
 			},
 			{
 				Name:    "account_overload_until",
 				Unique:  false,
-				Columns: []*schema.Column{AccountsColumns[27]},
+				Columns: []*schema.Column{AccountsColumns[28]},
 			},
 			{
 				Name:    "account_platform_priority",
@@ -258,12 +259,17 @@ var (
 			{
 				Name:    "account_priority_status",
 				Unique:  false,
-				Columns: []*schema.Column{AccountsColumns[17], AccountsColumns[19]},
+				Columns: []*schema.Column{AccountsColumns[17], AccountsColumns[20]},
 			},
 			{
 				Name:    "account_owner_user_id",
 				Unique:  false,
-				Columns: []*schema.Column{AccountsColumns[34]},
+				Columns: []*schema.Column{AccountsColumns[35]},
+			},
+			{
+				Name:    "account_owner_user_id_private_priority",
+				Unique:  false,
+				Columns: []*schema.Column{AccountsColumns[35], AccountsColumns[18]},
 			},
 			{
 				Name:    "account_share_mode_share_status",

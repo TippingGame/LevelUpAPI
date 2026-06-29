@@ -1110,6 +1110,7 @@ export interface Account {
   load_factor_paid_ceiling?: number
   current_concurrency?: number // Real-time concurrency count from Redis
   priority: number
+  private_priority?: number | null
   rate_multiplier?: number // Account billing multiplier (>=0, 0 means free)
   status: AccountStatus
   error_message: string | null
@@ -1373,6 +1374,7 @@ export interface CreateAccountRequest {
   concurrency?: number
   load_factor?: number | null
   priority?: number
+  private_priority?: number | null
   rate_multiplier?: number // Account billing multiplier (>=0, 0 means free)
   share_mode?: AccountShareMode
   group_ids?: number[]
@@ -1392,6 +1394,7 @@ export interface UpdateAccountRequest {
   concurrency?: number
   load_factor?: number | null
   priority?: number
+  private_priority?: number | null
   rate_multiplier?: number // Account billing multiplier (>=0, 0 means free)
   schedulable?: boolean
   status?: AccountStatus

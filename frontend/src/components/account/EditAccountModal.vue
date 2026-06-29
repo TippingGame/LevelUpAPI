@@ -1347,8 +1347,8 @@
             {{ t('userAccounts.loadFactorCreditsInsufficient') }}
           </p>
         </div>
-        <div v-if="!isUserScope">
-          <label class="input-label">{{ t('admin.accounts.priority') }}</label>
+        <div>
+          <label class="input-label">{{ isUserScope ? t('admin.accounts.privatePriority') : t('admin.accounts.priority') }}</label>
           <input
             v-model.number="form.priority"
             type="number"
@@ -1356,7 +1356,7 @@
             class="input"
             data-tour="account-form-priority"
           />
-          <p class="input-hint">{{ t('admin.accounts.priorityHint') }}</p>
+          <p class="input-hint">{{ isUserScope ? t('admin.accounts.privatePriorityHint') : t('admin.accounts.priorityHint') }}</p>
         </div>
         <div v-if="canManageBillingRate">
           <label class="input-label">{{ t('admin.accounts.billingRateMultiplier') }}</label>
@@ -2700,7 +2700,7 @@ const syncFormFromAccount = (newAccount: Account | null) => {
     ? normalizePersonalAccountLoadFactor(newAccount.load_factor ?? PERSONAL_ACCOUNT_DEFAULT_LOAD_FACTOR)
     : (newAccount.load_factor ?? null)
   form.priority = isUserScope.value
-    ? (newAccount.priority > 0 ? newAccount.priority : PERSONAL_ACCOUNT_DEFAULT_PRIORITY)
+    ? ((newAccount.private_priority ?? newAccount.priority) > 0 ? (newAccount.private_priority ?? newAccount.priority) : PERSONAL_ACCOUNT_DEFAULT_PRIORITY)
     : newAccount.priority
   form.rate_multiplier = newAccount.rate_multiplier ?? 1
   form.status = (newAccount.status === 'active' || newAccount.status === 'inactive' || newAccount.status === 'disabled' || newAccount.status === 'error')
@@ -3471,6 +3471,9 @@ const sanitizeUpdatePayload = (payload: Record<string, unknown>) => {
     if (isAccountShareModeOnly.value) {
       delete next.share_mode
     }
+    next.private_priority = typeof next.priority === 'number' && Number(next.priority) > 0
+      ? next.priority
+      : PERSONAL_ACCOUNT_DEFAULT_PRIORITY
     delete next.priority
     delete next.rate_multiplier
     delete next.auto_pause_on_expired
