@@ -4679,13 +4679,12 @@ func rewriteSystemForNonClaudeCodeWithPromptBlocks(body []byte, system any, expa
 	}
 
 	// 2. 构造 system 数组，对齐真实 Claude Code CLI 的 configurable block 形态：
-	//    [0] billing attribution block（cc_version={cliVer}.{fp}; cc_entrypoint=cli; cch=00000;）
+	//    [0] billing attribution block（cc_version={cliVer}.{fp}; cc_entrypoint=cli;）
 	//    [1] "You are Claude Code..." prompt block
 	//    [2] 可配置的扩展 prompt block（默认带 cache_control 作为稳定缓存断点）
 	//
-	//    billing block 的 cch=00000 是占位符，会被 buildUpstreamRequest 里的
-	//    signBillingHeaderCCH 替换成 xxhash64 签名。缺失 billing block 的系统 payload
-	//    是 Anthropic 判定第三方的关键信号之一（真实 CLI 每个请求都带）。
+	//    新版 Claude Code CLI 已不再携带 cch 签名字段；缺失 billing block 的
+	//    system payload 仍是 Anthropic 判定第三方的关键信号之一（真实 CLI 每个请求都带）。
 	systemBlocks, blockErr := buildClaudeOAuthSystemPromptBlocksJSON(body, expansionPrompt, blocksConfig)
 	if blockErr != nil {
 		logger.LegacyPrintf("service.gateway", "Warning: failed to build configured Claude OAuth system blocks: %v", blockErr)
@@ -6840,9 +6839,9 @@ func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Contex
 
 	// OAuth账号：应用统一指纹和metadata重写（受设置开关控制）
 	var fingerprint *Fingerprint
-	enableFP, enableMPT, enableCCH := true, false, false
+	enableFP, enableMPT := true, false
 	if s.settingService != nil {
-		enableFP, enableMPT, enableCCH = s.settingService.GetGatewayForwardingSettings(ctx)
+		enableFP, enableMPT, _ = s.settingService.GetGatewayForwardingSettings(ctx)
 	}
 	if account.IsOAuth() && s.identityService != nil {
 		// 1. 获取或创建指纹（包含随机生成的ClientID）
@@ -6881,11 +6880,6 @@ func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Contex
 	)
 	if sanitized, changed := sanitizeAnthropicBodyForBetaTokens(body, finalBetaHeader); changed {
 		body = sanitized
-	}
-
-	// CCH 签名：将 cch=00000 占位符替换为 xxHash64 签名（需在所有 body 修改之后）
-	if enableCCH {
-		body = signBillingHeaderCCH(body)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, "POST", targetURL, bytes.NewReader(body))
@@ -6986,11 +6980,17 @@ func (s *GatewayService) buildUpstreamRequestAnthropicVertex(
 	if err != nil {
 		return nil, err
 	}
+	clientBeta := ""
 	if c != nil && c.Request != nil {
-		clientBeta := getHeaderRaw(c.Request.Header, "anthropic-beta")
-		if sanitized, changed := sanitizeAnthropicBodyForBetaTokens(vertexBody, clientBeta); changed {
-			vertexBody = sanitized
-		}
+		clientBeta = getHeaderRaw(c.Request.Header, "anthropic-beta")
+	}
+	policy := s.evaluateBetaPolicy(ctx, clientBeta, account, modelID)
+	if policy.blockErr != nil {
+		return nil, policy.blockErr
+	}
+	finalBeta := filterVertexBetaTokens(clientBeta, mergeDropSets(policy.filterSet))
+	if sanitized, changed := sanitizeAnthropicBodyForBetaTokens(vertexBody, finalBeta); changed {
+		vertexBody = sanitized
 	}
 	setOpsUpstreamRequestBody(c, vertexBody)
 	fullURL, err := buildVertexAnthropicURL(account.VertexProjectID(), account.VertexLocation(modelID), modelID, reqStream)
@@ -7020,8 +7020,12 @@ func (s *GatewayService) buildUpstreamRequestAnthropicVertex(
 	req.Header.Del("x-goog-api-key")
 	req.Header.Del("cookie")
 	req.Header.Del("anthropic-version")
+	deleteHeaderAllForms(req.Header, "anthropic-beta")
 	setHeaderRaw(req.Header, "authorization", "Bearer "+token)
 	setHeaderRaw(req.Header, "content-type", "application/json")
+	if finalBeta != "" {
+		setHeaderRaw(req.Header, "anthropic-beta", finalBeta)
+	}
 
 	s.debugLogGatewaySnapshot("UPSTREAM_FORWARD_VERTEX_ANTHROPIC", req.Header, vertexBody, map[string]string{
 		"url":        req.URL.String(),
@@ -7031,6 +7035,33 @@ func (s *GatewayService) buildUpstreamRequestAnthropicVertex(
 	})
 
 	return req, nil
+}
+
+var vertexSupportedBetaTokens = map[string]bool{
+	"context-1m-2025-08-07":                  true,
+	"context-management-2025-06-27":          true,
+	"fine-grained-tool-streaming-2025-05-14": true,
+	"interleaved-thinking-2025-05-14":        true,
+}
+
+func filterVertexBetaTokens(header string, drop map[string]struct{}) string {
+	tokens := parseAnthropicBetaHeader(header)
+	if len(tokens) == 0 {
+		return ""
+	}
+	out := make([]string, 0, len(tokens))
+	seen := make(map[string]bool, len(tokens))
+	for _, token := range tokens {
+		if _, dropped := drop[token]; dropped {
+			continue
+		}
+		if !vertexSupportedBetaTokens[token] || seen[token] {
+			continue
+		}
+		seen[token] = true
+		out = append(out, token)
+	}
+	return strings.Join(out, ",")
 }
 
 // getBetaHeader 处理anthropic-beta header
@@ -10358,9 +10389,9 @@ func (s *GatewayService) buildCountTokensRequest(ctx context.Context, c *gin.Con
 
 	// OAuth 账号：应用统一指纹和重写 userID（受设置开关控制）
 	// 如果启用了会话ID伪装，会在重写后替换 session 部分为固定值
-	ctEnableFP, ctEnableMPT, ctEnableCCH := true, false, false
+	ctEnableFP, ctEnableMPT := true, false
 	if s.settingService != nil {
-		ctEnableFP, ctEnableMPT, ctEnableCCH = s.settingService.GetGatewayForwardingSettings(ctx)
+		ctEnableFP, ctEnableMPT, _ = s.settingService.GetGatewayForwardingSettings(ctx)
 	}
 	var ctFingerprint *Fingerprint
 	if account.IsOAuth() && s.identityService != nil {
@@ -10390,10 +10421,6 @@ func (s *GatewayService) buildCountTokensRequest(ctx context.Context, c *gin.Con
 	)
 	if sanitized, changed := sanitizeAnthropicBodyForBetaTokens(body, finalBetaHeader); changed {
 		body = sanitized
-	}
-
-	if ctEnableCCH {
-		body = signBillingHeaderCCH(body)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, "POST", targetURL, bytes.NewReader(body))

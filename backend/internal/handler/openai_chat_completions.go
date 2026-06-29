@@ -329,7 +329,7 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 				Account:            account,
 				Subscription:       currentSubscription,
 				InboundEndpoint:    GetInboundEndpoint(c),
-				UpstreamEndpoint:   resolveRawCCUpstreamEndpoint(c, account),
+				UpstreamEndpoint:   resolveOpenAIUpstreamEndpoint(c, account),
 				UserAgent:          userAgent,
 				IPAddress:          clientIP,
 				APIKeyService:      h.apiKeyService,
@@ -353,7 +353,7 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 	}
 }
 
-func resolveRawCCUpstreamEndpoint(c *gin.Context, account *service.Account) string {
+func resolveOpenAIUpstreamEndpoint(c *gin.Context, account *service.Account) string {
 	if account == nil {
 		return GetUpstreamEndpoint(c, "")
 	}

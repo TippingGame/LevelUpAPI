@@ -144,6 +144,40 @@ func TestForwardAsChatCompletions_FilteredFastTierBillsAsStandardWhenUpstreamOmi
 	require.False(t, gjson.GetBytes(upstream.lastBody, "service_tier").Exists())
 }
 
+func TestForwardAsChatCompletions_NormalizesGLMReasoningEffortForRawUpstream(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(nil))
+
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/json"}, "x-request-id": []string{"rid_glm_effort"}},
+		Body:       io.NopCloser(strings.NewReader(`{"id":"chatcmpl_glm","object":"chat.completion","model":"glm-5.2","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":2,"total_tokens":3}}`)),
+	}}
+
+	svc := &OpenAIGatewayService{
+		cfg:          &config.Config{},
+		httpUpstream: upstream,
+	}
+	account := &Account{
+		ID:       1,
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeAPIKey,
+		Credentials: map[string]any{
+			"api_key":  "sk-test",
+			"base_url": "https://compat.example.com/v1",
+		},
+		Extra: map[string]any{"openai_responses_supported": false},
+	}
+
+	result, err := svc.ForwardAsChatCompletions(context.Background(), c, account, []byte(`{"model":"glm-5.2","stream":false,"reasoning_effort":"xhigh","messages":[{"role":"user","content":"hi"}]}`), "", "")
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, "max", gjson.GetBytes(upstream.lastBody, "reasoning_effort").String())
+}
+
 func TestForwardAsChatCompletions_UpstreamTierOverridesRequestFallback(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 

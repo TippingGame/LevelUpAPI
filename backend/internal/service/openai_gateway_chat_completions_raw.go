@@ -48,6 +48,9 @@ func (s *OpenAIGatewayService) forwardAsRawChatCompletions(
 	if upstreamModel != originalModel {
 		upstreamBody = ReplaceModelInBody(body, upstreamModel)
 	}
+	if normalizedBody, normalized := NormalizeGLMOpenAIReasoningEffort(upstreamBody, upstreamModel); normalized {
+		upstreamBody = normalizedBody
+	}
 
 	var err error
 	upstreamBody, err = s.applyOpenAIFastPolicyToBody(ctx, account, upstreamModel, upstreamBody)

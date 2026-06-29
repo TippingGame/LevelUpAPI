@@ -308,6 +308,50 @@ func TestGeminiMessagesCompatServiceForward_NormalizesWebSearchToolForAIStudio(t
 	require.False(t, hasFuncDecl)
 }
 
+func TestCleanToolSchema_NormalizesGeminiUnsupportedSchemaFields(t *testing.T) {
+	schema := map[string]any{
+		"type": "object",
+		"$defs": map[string]any{
+			"unused": map[string]any{"type": "string"},
+		},
+		"definitions": map[string]any{
+			"legacy": map[string]any{"type": "number"},
+		},
+		"properties": map[string]any{
+			"path": map[string]any{
+				"type": []any{"string", "null"},
+			},
+			"count": map[string]any{
+				"type": []any{"null", "integer"},
+			},
+			"empty": map[string]any{
+				"type": []any{"null"},
+			},
+		},
+	}
+
+	cleaned, ok := cleanToolSchema(schema).(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "OBJECT", cleaned["type"])
+	require.NotContains(t, cleaned, "$defs")
+	require.NotContains(t, cleaned, "definitions")
+
+	properties, ok := cleaned["properties"].(map[string]any)
+	require.True(t, ok)
+
+	pathSchema, ok := properties["path"].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "STRING", pathSchema["type"])
+
+	countSchema, ok := properties["count"].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "INTEGER", countSchema["type"])
+
+	emptySchema, ok := properties["empty"].(map[string]any)
+	require.True(t, ok)
+	require.NotContains(t, emptySchema, "type")
+}
+
 func TestConvertClaudeMessagesToGeminiGenerateContent_AddsThoughtSignatureForToolUse(t *testing.T) {
 	claudeReq := map[string]any{
 		"model":      "claude-haiku-4-5-20251001",

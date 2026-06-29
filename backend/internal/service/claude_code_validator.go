@@ -25,6 +25,11 @@ var (
 	systemPromptThreshold = 0.5
 )
 
+const (
+	claudeCodeBillingHeaderPrefix = "x-anthropic-billing-header"
+	claudeCodeEntrypointMarker    = "cc_entrypoint="
+)
+
 // Claude Code 官方 System Prompt 模板
 // 从 claude-relay-service/src/utils/contents.js 提取
 var claudeCodeSystemPrompts = []string{
@@ -165,6 +170,11 @@ func (v *ClaudeCodeValidator) hasClaudeCodeSystemPrompt(body map[string]any) boo
 		text, ok := entryMap["text"].(string)
 		if !ok || text == "" {
 			continue
+		}
+
+		if strings.HasPrefix(text, claudeCodeBillingHeaderPrefix) &&
+			strings.Contains(text, claudeCodeEntrypointMarker) {
+			return true
 		}
 
 		// 计算与所有模板的最佳相似度

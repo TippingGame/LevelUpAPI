@@ -1044,6 +1044,50 @@ func ApplyThinkingEnabledFallback(effort *string, body []byte, mappedModel strin
 	return DefaultEffortForThinkingEnabled(mappedModel)
 }
 
+func NormalizeGLMOpenAIReasoningEffort(body []byte, mappedModel string) ([]byte, bool) {
+	if !strings.HasPrefix(strings.ToLower(strings.TrimSpace(mappedModel)), "glm-") {
+		return body, false
+	}
+
+	path := "reasoning.effort"
+	raw := strings.TrimSpace(gjson.GetBytes(body, path).String())
+	if raw == "" {
+		path = "reasoning_effort"
+		raw = strings.TrimSpace(gjson.GetBytes(body, path).String())
+	}
+	if raw == "" {
+		return body, false
+	}
+
+	mapped := normalizeGLMOpenAIReasoningEffort(raw)
+	if mapped == "" || mapped == raw {
+		return body, false
+	}
+
+	modified, err := sjson.SetBytes(body, path, mapped)
+	if err != nil {
+		return body, false
+	}
+	return modified, true
+}
+
+func normalizeGLMOpenAIReasoningEffort(raw string) string {
+	value := strings.ToLower(strings.TrimSpace(raw))
+	if value == "" {
+		return ""
+	}
+	value = strings.NewReplacer("-", "", "_", "", " ", "").Replace(value)
+
+	switch value {
+	case "low", "medium", "high":
+		return "high"
+	case "xhigh", "extrahigh", "max", "ultracode":
+		return "max"
+	default:
+		return ""
+	}
+}
+
 func OpenAIRequestMapHasThinkingEnabled(reqBody map[string]any) bool {
 	if len(reqBody) == 0 {
 		return false

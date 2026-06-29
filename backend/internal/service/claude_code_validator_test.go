@@ -79,6 +79,52 @@ func TestClaudeCodeValidator_NonMessagesPathUAOnly(t *testing.T) {
 	require.True(t, ok)
 }
 
+func TestClaudeCodeValidator_BillingBlockVSCodeEntrypointRecognized(t *testing.T) {
+	validator := NewClaudeCodeValidator()
+	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/messages", nil)
+	req.Header.Set("User-Agent", "claude-cli/2.1.181 (external, claude-vscode, agent-sdk/0.3.181)")
+	req.Header.Set("X-App", "cli")
+	req.Header.Set("anthropic-beta", "claude-code-20250219")
+	req.Header.Set("anthropic-version", "2023-06-01")
+
+	ok := validator.Validate(req, map[string]any{
+		"model": "claude-opus-4-8",
+		"system": []any{
+			map[string]any{
+				"type": "text",
+				"text": "x-anthropic-billing-header: cc_version=2.1.181.f17; cc_entrypoint=claude-vscode;",
+			},
+		},
+		"metadata": map[string]any{
+			"user_id": `{"device_id":"a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2","account_uuid":"","session_id":"123e4567-e89b-12d3-a456-426614174000"}`,
+		},
+	})
+	require.True(t, ok)
+}
+
+func TestClaudeCodeValidator_BillingBlockWithoutEntrypointFallsThrough(t *testing.T) {
+	validator := NewClaudeCodeValidator()
+	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/messages", nil)
+	req.Header.Set("User-Agent", "claude-cli/2.1.162 (external, cli)")
+	req.Header.Set("X-App", "cli")
+	req.Header.Set("anthropic-beta", "claude-code-20250219")
+	req.Header.Set("anthropic-version", "2023-06-01")
+
+	ok := validator.Validate(req, map[string]any{
+		"model": "claude-3-5-haiku-20241022",
+		"system": []any{
+			map[string]any{
+				"type": "text",
+				"text": "x-anthropic-billing-header: cc_version=2.1.162.884; cch=d8726;",
+			},
+		},
+		"metadata": map[string]any{
+			"user_id": `{"device_id":"a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2","account_uuid":"","session_id":"123e4567-e89b-12d3-a456-426614174000"}`,
+		},
+	})
+	require.False(t, ok)
+}
+
 func TestExtractVersion(t *testing.T) {
 	v := NewClaudeCodeValidator()
 	tests := []struct {

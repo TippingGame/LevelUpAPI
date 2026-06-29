@@ -1249,6 +1249,38 @@ func TestNormalizeClaudeOutputEffort(t *testing.T) {
 	}
 }
 
+func TestNormalizeGLMOpenAIReasoningEffort(t *testing.T) {
+	cases := []struct {
+		name        string
+		model       string
+		input       string
+		wantApplied bool
+		wantPath    string
+		wantValue   string
+	}{
+		{"flat xhigh maps to max", "glm-5.2", `{"reasoning_effort":"xhigh"}`, true, "reasoning_effort", "max"},
+		{"flat x-high maps to max", "GLM-5.2", `{"reasoning_effort":"x-high"}`, true, "reasoning_effort", "max"},
+		{"flat ultracode maps to max", "glm-5.2", `{"reasoning_effort":"ultracode"}`, true, "reasoning_effort", "max"},
+		{"flat medium maps to high", "glm-5.2", `{"reasoning_effort":"medium"}`, true, "reasoning_effort", "high"},
+		{"nested high case-normalizes", "glm-5.2", `{"reasoning":{"effort":"HIGH"}}`, true, "reasoning.effort", "high"},
+		{"native max unchanged", "glm-5.2", `{"reasoning_effort":"max"}`, false, "reasoning_effort", ""},
+		{"non glm unchanged", "deepseek-v4-pro", `{"reasoning_effort":"xhigh"}`, false, "reasoning_effort", ""},
+		{"unknown effort unchanged", "glm-5.2", `{"reasoning_effort":"banana"}`, false, "reasoning_effort", ""},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, applied := NormalizeGLMOpenAIReasoningEffort([]byte(tc.input), tc.model)
+			require.Equal(t, tc.wantApplied, applied)
+			if !tc.wantApplied {
+				require.Equal(t, tc.input, string(got))
+				return
+			}
+			require.Equal(t, tc.wantValue, gjson.GetBytes(got, tc.wantPath).String())
+		})
+	}
+}
+
 func BenchmarkParseGatewayRequest_New_Large(b *testing.B) {
 	data := buildLargeJSON()
 	b.SetBytes(int64(len(data)))

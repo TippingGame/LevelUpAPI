@@ -176,8 +176,8 @@ func TestResolveRawCCUpstreamEndpoint_APIKeyUnsupportedResponses(t *testing.T) {
 		},
 	}
 
-	require.Equal(t, EndpointChatCompletions, resolveRawCCUpstreamEndpoint(c, account))
+	require.Equal(t, EndpointChatCompletions, resolveOpenAIUpstreamEndpoint(c, account))
 
 	account.Extra["openai_responses_supported"] = true
-	require.Equal(t, EndpointResponses, resolveRawCCUpstreamEndpoint(c, account))
+	require.Equal(t, EndpointResponses, resolveOpenAIUpstreamEndpoint(c, account))
 }
