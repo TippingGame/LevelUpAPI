@@ -11,14 +11,49 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/apicompat"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/tlsfingerprint"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
 )
+
+type sequenceHTTPUpstreamRecorder struct {
+	mu        sync.Mutex
+	responses []*http.Response
+	err       error
+	bodies    [][]byte
+	requests  []*http.Request
+}
+
+func (u *sequenceHTTPUpstreamRecorder) Do(req *http.Request, proxyURL string, accountID int64, accountConcurrency int) (*http.Response, error) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	if req != nil && req.Body != nil {
+		b, _ := io.ReadAll(req.Body)
+		u.bodies = append(u.bodies, append([]byte(nil), b...))
+		_ = req.Body.Close()
+		req.Body = io.NopCloser(bytes.NewReader(b))
+	}
+	u.requests = append(u.requests, req)
+	if u.err != nil {
+		return nil, u.err
+	}
+	if len(u.responses) == 0 {
+		return nil, fmt.Errorf("unexpected upstream request")
+	}
+	resp := u.responses[0]
+	u.responses = u.responses[1:]
+	return resp, nil
+}
+
+func (u *sequenceHTTPUpstreamRecorder) DoWithTLS(req *http.Request, proxyURL string, accountID int64, accountConcurrency int, profile *tlsfingerprint.Profile) (*http.Response, error) {
+	return u.Do(req, proxyURL, accountID, accountConcurrency)
+}
 
 func TestNormalizeOpenAICompatRequestedModel(t *testing.T) {
 	t.Parallel()
@@ -201,6 +236,147 @@ func TestForwardAsAnthropic_APIKeyCompatAppliesReplayAndTodoGuard(t *testing.T) 
 	require.Equal(t, "message-03", input[1].Get("content").String())
 	require.Equal(t, "message-14", input[len(input)-1].Get("content").String())
 	require.Equal(t, "stable-cache-key", gjson.GetBytes(upstream.lastBody, "prompt_cache_key").String())
+}
+
+func TestForwardAsAnthropic_APIKeyCompatBindsPreviousResponseID(t *testing.T) {
+	t.Parallel()
+	gin.SetMode(gin.TestMode)
+
+	body := []byte(`{"model":"gpt-5.4","max_tokens":16,"metadata":{"user_id":"device/account/session"},"messages":[{"role":"user","content":"hello"}],"stream":false}`)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Set("api_key", &APIKey{ID: 7})
+
+	upstreamBody := func(id string) string {
+		return strings.Join([]string{
+			fmt.Sprintf(`data: {"type":"response.completed","response":{"id":%q,"object":"response","model":"gpt-5.4","status":"completed","output":[{"type":"message","id":"msg_1","role":"assistant","status":"completed","content":[{"type":"output_text","text":"ok"}]}],"usage":{"input_tokens":5,"output_tokens":2,"total_tokens":7}}}`, id),
+			"",
+			"data: [DONE]",
+			"",
+		}, "\n")
+	}
+	upstream := &httpUpstreamRecorder{}
+	svc := &OpenAIGatewayService{
+		cfg:          &config.Config{Security: config.SecurityConfig{URLAllowlist: config.URLAllowlistConfig{Enabled: false}}},
+		httpUpstream: upstream,
+	}
+	account := &Account{
+		ID:          11,
+		Name:        "openai-api-key",
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Concurrency: 1,
+		Credentials: map[string]any{
+			"api_key": "sk-test",
+			"model_mapping": map[string]any{
+				"gpt-5.4": "gpt-5.4",
+			},
+		},
+	}
+
+	upstream.resp = &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}, "x-request-id": []string{"rid_first"}},
+		Body:       io.NopCloser(strings.NewReader(upstreamBody("resp_first"))),
+	}
+	result, err := svc.ForwardAsAnthropic(context.Background(), c, account, body, "", "gpt-5.1")
+	require.NoError(t, err)
+	require.Equal(t, "resp_first", result.ResponseID)
+	promptCacheKey := gjson.GetBytes(upstream.lastBody, "prompt_cache_key").String()
+	require.NotEmpty(t, promptCacheKey)
+	require.False(t, gjson.GetBytes(upstream.lastBody, "previous_response_id").Exists())
+
+	upstream.resp = &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}, "x-request-id": []string{"rid_second"}},
+		Body:       io.NopCloser(strings.NewReader(upstreamBody("resp_second"))),
+	}
+	rec = httptest.NewRecorder()
+	c, _ = gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Set("api_key", &APIKey{ID: 7})
+
+	result, err = svc.ForwardAsAnthropic(context.Background(), c, account, body, "", "gpt-5.1")
+	require.NoError(t, err)
+	require.Equal(t, "resp_second", result.ResponseID)
+	require.Equal(t, promptCacheKey, gjson.GetBytes(upstream.lastBody, "prompt_cache_key").String())
+	require.Equal(t, "resp_first", gjson.GetBytes(upstream.lastBody, "previous_response_id").String())
+}
+
+func TestForwardAsAnthropic_APIKeyCompatRetriesWhenPreviousResponseMissing(t *testing.T) {
+	t.Parallel()
+	gin.SetMode(gin.TestMode)
+
+	body := []byte(`{"model":"gpt-5.4","max_tokens":16,"metadata":{"user_id":"device/account/session"},"messages":[{"role":"user","content":"hello"}],"stream":false}`)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Set("api_key", &APIKey{ID: 7})
+
+	upstreamBody := func(id string) string {
+		return strings.Join([]string{
+			fmt.Sprintf(`data: {"type":"response.completed","response":{"id":%q,"object":"response","model":"gpt-5.4","status":"completed","output":[{"type":"message","id":"msg_1","role":"assistant","status":"completed","content":[{"type":"output_text","text":"ok"}]}],"usage":{"input_tokens":5,"output_tokens":2,"total_tokens":7}}}`, id),
+			"",
+			"data: [DONE]",
+			"",
+		}, "\n")
+	}
+	upstream := &sequenceHTTPUpstreamRecorder{
+		responses: []*http.Response{
+			{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": []string{"text/event-stream"}, "x-request-id": []string{"rid_first"}},
+				Body:       io.NopCloser(strings.NewReader(upstreamBody("resp_first"))),
+			},
+			{
+				StatusCode: http.StatusBadRequest,
+				Header:     http.Header{"Content-Type": []string{"application/json"}, "x-request-id": []string{"rid_missing"}},
+				Body:       io.NopCloser(strings.NewReader(`{"error":{"code":"previous_response_not_found","message":"missing"}}`)),
+			},
+			{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": []string{"text/event-stream"}, "x-request-id": []string{"rid_retry"}},
+				Body:       io.NopCloser(strings.NewReader(upstreamBody("resp_retry"))),
+			},
+		},
+	}
+	svc := &OpenAIGatewayService{
+		cfg:          &config.Config{Security: config.SecurityConfig{URLAllowlist: config.URLAllowlistConfig{Enabled: false}}},
+		httpUpstream: upstream,
+	}
+	account := &Account{
+		ID:          11,
+		Name:        "openai-api-key",
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Concurrency: 1,
+		Credentials: map[string]any{
+			"api_key": "sk-test",
+			"model_mapping": map[string]any{
+				"gpt-5.4": "gpt-5.4",
+			},
+		},
+	}
+
+	_, err := svc.ForwardAsAnthropic(context.Background(), c, account, body, "", "gpt-5.1")
+	require.NoError(t, err)
+
+	rec = httptest.NewRecorder()
+	c, _ = gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Set("api_key", &APIKey{ID: 7})
+
+	result, err := svc.ForwardAsAnthropic(context.Background(), c, account, body, "", "gpt-5.1")
+	require.NoError(t, err)
+	require.Equal(t, "resp_retry", result.ResponseID)
+	require.Len(t, upstream.bodies, 3)
+	require.Equal(t, "resp_first", gjson.GetBytes(upstream.bodies[1], "previous_response_id").String())
+	require.False(t, gjson.GetBytes(upstream.bodies[2], "previous_response_id").Exists())
 }
 
 func TestForwardAsAnthropic_FilteredFastTierBillsAsStandardWhenUpstreamOmitsTier(t *testing.T) {

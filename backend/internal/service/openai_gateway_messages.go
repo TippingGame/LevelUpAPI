@@ -39,6 +39,7 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 	if err := json.Unmarshal(body, &anthropicReq); err != nil {
 		return nil, fmt.Errorf("parse anthropic request: %w", err)
 	}
+	anthropicDigestReq := cloneAnthropicRequestForDigest(&anthropicReq)
 	originalModel := anthropicReq.Model
 	applyOpenAICompatModelNormalization(&anthropicReq)
 	normalizedModel := anthropicReq.Model
@@ -47,8 +48,36 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 	billingModel := resolveOpenAIForwardModel(account, normalizedModel, defaultMappedModel)
 	upstreamModel := normalizeOpenAIModelForUpstream(account, billingModel)
 	compatGuardEnabled := shouldAutoInjectPromptCacheKeyForCompat(upstreamModel)
+	promptCacheKey = strings.TrimSpace(promptCacheKey)
+	apiKeyID := getAPIKeyIDFromContext(c)
+	anthropicDigestChain := ""
+	anthropicMatchedDigestChain := ""
+	compatPromptCacheInjected := false
+	if promptCacheKey == "" && compatGuardEnabled {
+		promptCacheKey = promptCacheKeyFromAnthropicMetadataSession(&anthropicReq)
+		if promptCacheKey == "" {
+			promptCacheKey = deriveAnthropicCacheControlPromptCacheKey(&anthropicReq)
+		}
+		if promptCacheKey == "" {
+			anthropicDigestChain = buildOpenAICompatAnthropicDigestChain(anthropicDigestReq)
+			if reusedKey, matchedChain := s.findOpenAICompatAnthropicDigestPromptCacheKey(account, apiKeyID, anthropicDigestChain); reusedKey != "" {
+				promptCacheKey = reusedKey
+				anthropicMatchedDigestChain = matchedChain
+			} else {
+				promptCacheKey = promptCacheKeyFromAnthropicDigest(anthropicDigestChain)
+			}
+		}
+		compatPromptCacheInjected = promptCacheKey != ""
+	}
+	compatContinuationEnabled := openAICompatContinuationEnabled(account, upstreamModel)
+	previousResponseID := ""
+	if compatContinuationEnabled {
+		previousResponseID = s.getOpenAICompatSessionResponseID(ctx, c, account, promptCacheKey)
+	}
+	compatContinuationDisabled := compatContinuationEnabled &&
+		s.isOpenAICompatSessionContinuationDisabled(ctx, c, account, promptCacheKey)
 	compatReplayTrimmed := false
-	if compatGuardEnabled && account.Type != AccountTypeOAuth {
+	if compatGuardEnabled && account.Type != AccountTypeOAuth && previousResponseID == "" && !compatContinuationDisabled {
 		compatReplayTrimmed = applyAnthropicCompatFullReplayGuard(&anthropicReq)
 	}
 
@@ -70,6 +99,10 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 
 	// 3. Model mapping
 	responsesReq.Model = upstreamModel
+	if previousResponseID != "" {
+		responsesReq.PreviousResponseID = previousResponseID
+		trimAnthropicCompatResponsesInputToLatestTurn(responsesReq)
+	}
 	if compatGuardEnabled && account.Type != AccountTypeOAuth {
 		appendOpenAICompatClaudeCodeTodoGuard(responsesReq)
 	}
@@ -82,10 +115,22 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 		zap.String("upstream_model", upstreamModel),
 		zap.Bool("stream", isStream),
 	}
+	if compatPromptCacheInjected {
+		logFields = append(logFields,
+			zap.Bool("compat_prompt_cache_key_injected", true),
+			zap.String("compat_prompt_cache_key_sha256", hashSensitiveValueForLog(promptCacheKey)),
+		)
+	}
 	if compatReplayTrimmed {
 		logFields = append(logFields,
 			zap.Bool("compat_full_replay_trimmed", true),
 			zap.Int("compat_messages_after_trim", len(anthropicReq.Messages)),
+		)
+	}
+	if previousResponseID != "" {
+		logFields = append(logFields,
+			zap.Bool("compat_previous_response_id_attached", true),
+			zap.String("compat_previous_response_id", truncateOpenAIWSLogValue(previousResponseID, openAIWSIDValueMaxLen)),
 		)
 	}
 	logger.L().Debug("openai messages: model mapping applied", logFields...)
@@ -227,6 +272,19 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 
 		upstreamMsg := strings.TrimSpace(extractUpstreamErrorMessage(respBody))
 		upstreamMsg = sanitizeUpstreamErrorMessage(upstreamMsg)
+		if previousResponseID != "" && (isOpenAICompatPreviousResponseNotFound(resp.StatusCode, upstreamMsg, respBody) || isOpenAICompatPreviousResponseUnsupported(resp.StatusCode, upstreamMsg, respBody)) {
+			if isOpenAICompatPreviousResponseUnsupported(resp.StatusCode, upstreamMsg, respBody) {
+				s.disableOpenAICompatSessionContinuation(ctx, c, account, promptCacheKey)
+			} else {
+				s.deleteOpenAICompatSessionResponseID(ctx, c, account, promptCacheKey)
+			}
+			logger.L().Info("openai messages: previous_response_id unavailable, retrying without continuation",
+				zap.Int64("account_id", account.ID),
+				zap.String("previous_response_id", truncateOpenAIWSLogValue(previousResponseID, openAIWSIDValueMaxLen)),
+				zap.String("upstream_model", upstreamModel),
+			)
+			return s.ForwardAsAnthropic(ctx, c, account, body, promptCacheKey, defaultMappedModel)
+		}
 		if s.shouldFailoverOpenAIUpstreamResponse(resp.StatusCode, upstreamMsg, respBody) {
 			upstreamDetail := ""
 			if s.cfg != nil && s.cfg.Gateway.LogUpstreamErrorBody {
@@ -272,6 +330,12 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 
 	// Propagate ServiceTier and ReasoningEffort to result for billing
 	if handleErr == nil && result != nil {
+		if compatContinuationEnabled && promptCacheKey != "" && result.ResponseID != "" {
+			s.bindOpenAICompatSessionResponseID(ctx, c, account, promptCacheKey, result.ResponseID)
+		}
+		if promptCacheKey != "" && anthropicDigestChain != "" {
+			s.bindOpenAICompatAnthropicDigestPromptCacheKey(account, apiKeyID, anthropicDigestChain, promptCacheKey, anthropicMatchedDigestChain)
+		}
 		if upstreamServiceTier := extractOpenAIServiceTierFromResponses(result.ResponseServiceTier); upstreamServiceTier != nil {
 			result.ServiceTier = upstreamServiceTier
 		} else if forwardedServiceTier != nil {
@@ -422,6 +486,7 @@ func (s *OpenAIGatewayService) handleAnthropicBufferedStreamingResponse(
 
 	return &OpenAIForwardResult{
 		RequestID:           requestID,
+		ResponseID:          finalResponse.ID,
 		Usage:               usage,
 		Model:               originalModel,
 		BillingModel:        billingModel,
@@ -482,6 +547,7 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 	state := apicompat.NewResponsesEventToAnthropicState()
 	state.Model = originalModel
 	var usage OpenAIUsage
+	responseID := ""
 	var firstTokenMs *int
 	var responseServiceTier string
 	firstChunk := true
@@ -499,6 +565,7 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 	resultWithUsage := func() *OpenAIForwardResult {
 		return &OpenAIForwardResult{
 			RequestID:           requestID,
+			ResponseID:          responseID,
 			Usage:               usage,
 			Model:               originalModel,
 			BillingModel:        billingModel,
@@ -529,11 +596,16 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 		}
 
 		isTerminalEvent := isOpenAICompatResponsesTerminalEvent(event.Type)
-		if isTerminalEvent && event.Response != nil && event.Response.Usage != nil {
+		if isTerminalEvent && event.Response != nil {
+			if id := strings.TrimSpace(event.Response.ID); id != "" {
+				responseID = id
+			}
 			if event.Response.ServiceTier != "" {
 				responseServiceTier = event.Response.ServiceTier
 			}
-			usage = copyOpenAIUsageFromResponsesUsage(event.Response.Usage)
+			if event.Response.Usage != nil {
+				usage = copyOpenAIUsageFromResponsesUsage(event.Response.Usage)
+			}
 		}
 		if event.Type == "response.failed" {
 			if hit, _, msg := detectOpenAICyberPolicy([]byte(payload)); hit {
