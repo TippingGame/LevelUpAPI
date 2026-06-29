@@ -306,6 +306,84 @@ func TestForwardAsAnthropic_APIKeyCompatBindsPreviousResponseID(t *testing.T) {
 	require.Equal(t, "resp_first", gjson.GetBytes(upstream.lastBody, "previous_response_id").String())
 }
 
+func TestForwardAsAnthropic_PreviousResponseIDKeepsMultiToolCallContext(t *testing.T) {
+	t.Parallel()
+	gin.SetMode(gin.TestMode)
+
+	upstreamBody := func(id string) string {
+		return strings.Join([]string{
+			fmt.Sprintf(`data: {"type":"response.completed","response":{"id":%q,"object":"response","model":"gpt-5.4","status":"completed","output":[{"type":"message","id":"msg_1","role":"assistant","status":"completed","content":[{"type":"output_text","text":"ok"}]}],"usage":{"input_tokens":5,"output_tokens":2,"total_tokens":7}}}`, id),
+			"",
+			"data: [DONE]",
+			"",
+		}, "\n")
+	}
+	upstream := &httpUpstreamRecorder{}
+	svc := &OpenAIGatewayService{
+		cfg:          &config.Config{Security: config.SecurityConfig{URLAllowlist: config.URLAllowlistConfig{Enabled: false}}},
+		httpUpstream: upstream,
+	}
+	account := &Account{
+		ID:          11,
+		Name:        "openai-api-key",
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Concurrency: 1,
+		Credentials: map[string]any{
+			"api_key": "sk-test",
+			"model_mapping": map[string]any{
+				"gpt-5.4": "gpt-5.4",
+			},
+		},
+	}
+
+	firstBody := []byte(`{"model":"gpt-5.4","max_tokens":16,"metadata":{"user_id":"device/account/session"},"messages":[{"role":"user","content":"inspect files"}],"stream":false}`)
+	upstream.resp = &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}, "x-request-id": []string{"rid_first_tools"}},
+		Body:       io.NopCloser(strings.NewReader(upstreamBody("resp_first_tools"))),
+	}
+	firstRec := httptest.NewRecorder()
+	firstCtx, _ := gin.CreateTestContext(firstRec)
+	firstCtx.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(firstBody))
+	firstCtx.Request.Header.Set("Content-Type", "application/json")
+	firstCtx.Set("api_key", &APIKey{ID: 7})
+
+	firstResult, err := svc.ForwardAsAnthropic(context.Background(), firstCtx, account, firstBody, "", "gpt-5.1")
+	require.NoError(t, err)
+	require.Equal(t, "resp_first_tools", firstResult.ResponseID)
+	promptCacheKey := gjson.GetBytes(upstream.lastBody, "prompt_cache_key").String()
+	require.NotEmpty(t, promptCacheKey)
+
+	secondBody := []byte(`{"model":"gpt-5.4","max_tokens":16,"metadata":{"user_id":"device/account/session"},"messages":[{"role":"user","content":"inspect files"},{"role":"assistant","content":[{"type":"tool_use","id":"call_one","name":"Read","input":{"file_path":"a.go"}},{"type":"tool_use","id":"call_two","name":"Read","input":{"file_path":"b.go"}}]},{"role":"user","content":[{"type":"tool_result","tool_use_id":"call_one","content":"package a"},{"type":"tool_result","tool_use_id":"call_two","content":"package b"},{"type":"text","text":"continue"}]}],"tools":[{"name":"Read","description":"read a file","input_schema":{"type":"object","properties":{"file_path":{"type":"string"}}}}],"stream":false}`)
+	upstream.resp = &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}, "x-request-id": []string{"rid_second_tools"}},
+		Body:       io.NopCloser(strings.NewReader(upstreamBody("resp_second_tools"))),
+	}
+	secondRec := httptest.NewRecorder()
+	secondCtx, _ := gin.CreateTestContext(secondRec)
+	secondCtx.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(secondBody))
+	secondCtx.Request.Header.Set("Content-Type", "application/json")
+	secondCtx.Set("api_key", &APIKey{ID: 7})
+
+	secondResult, err := svc.ForwardAsAnthropic(context.Background(), secondCtx, account, secondBody, "", "gpt-5.1")
+	require.NoError(t, err)
+	require.Equal(t, "resp_second_tools", secondResult.ResponseID)
+	require.Equal(t, promptCacheKey, gjson.GetBytes(upstream.lastBody, "prompt_cache_key").String())
+	require.Equal(t, "resp_first_tools", gjson.GetBytes(upstream.lastBody, "previous_response_id").String())
+
+	require.Equal(t, "function_call", gjson.GetBytes(upstream.lastBody, "input.1.type").String())
+	require.Equal(t, "call_one", gjson.GetBytes(upstream.lastBody, "input.1.call_id").String())
+	require.Equal(t, "function_call", gjson.GetBytes(upstream.lastBody, "input.2.type").String())
+	require.Equal(t, "call_two", gjson.GetBytes(upstream.lastBody, "input.2.call_id").String())
+	require.Equal(t, "function_call_output", gjson.GetBytes(upstream.lastBody, "input.3.type").String())
+	require.Equal(t, "call_one", gjson.GetBytes(upstream.lastBody, "input.3.call_id").String())
+	require.Equal(t, "function_call_output", gjson.GetBytes(upstream.lastBody, "input.4.type").String())
+	require.Equal(t, "call_two", gjson.GetBytes(upstream.lastBody, "input.4.call_id").String())
+	require.Equal(t, "continue", gjson.GetBytes(upstream.lastBody, "input.5.content.0.text").String())
+}
+
 func TestForwardAsAnthropic_APIKeyCompatRetriesWhenPreviousResponseMissing(t *testing.T) {
 	t.Parallel()
 	gin.SetMode(gin.TestMode)
