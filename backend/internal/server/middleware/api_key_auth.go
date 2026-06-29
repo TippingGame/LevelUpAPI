@@ -108,6 +108,9 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
 			AbortWithError(c, 401, "USER_INACTIVE", "User account is not active")
 			return
 		}
+		if abortIfAPIKeyGroupUnavailable(c, apiKey) {
+			return
+		}
 
 		// ── 4. SimpleMode → early return ─────────────────────────────
 
@@ -262,4 +265,27 @@ func setAuthenticatedUserIDContext(c *gin.Context, userID int64) {
 	}
 	ctx := context.WithValue(c.Request.Context(), ctxkey.AuthenticatedUserID, userID)
 	c.Request = c.Request.WithContext(ctx)
+}
+
+func abortIfAPIKeyGroupUnavailable(c *gin.Context, apiKey *service.APIKey) bool {
+	code, message, ok := validateAPIKeyGroupAvailable(apiKey)
+	if ok {
+		return false
+	}
+	AbortWithError(c, 403, code, message)
+	return true
+}
+
+func validateAPIKeyGroupAvailable(apiKey *service.APIKey) (string, string, bool) {
+	if apiKey == nil || apiKey.GroupID == nil {
+		return "", "", true
+	}
+	group := apiKey.Group
+	if group == nil || strings.EqualFold(group.Status, "deleted") {
+		return "GROUP_DELETED", "API Key 所属分组已删除", false
+	}
+	if !group.IsActive() {
+		return "GROUP_DISABLED", "API Key 所属分组已停用", false
+	}
+	return "", "", true
 }

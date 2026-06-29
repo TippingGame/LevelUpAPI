@@ -161,19 +161,23 @@ export default {
     dateRangeToday: '今日',
     dateRange7d: '7 天',
     dateRange30d: '30 天',
+    dateRange90d: '90 天',
     dateRangeCustom: '自定义',
     apply: '应用',
     used: '已使用',
     detailInfo: '详细信息',
     tokenStats: 'Token 统计',
+    dailyDetail: '按日明细',
     modelStats: '模型用量统计',
     // Table headers
+    date: '日期',
     model: '模型',
     requests: '请求数',
     inputTokens: '输入 Tokens',
     outputTokens: '输出 Tokens',
     cacheCreationTokens: '缓存创建',
     cacheReadTokens: '缓存读取',
+    cacheWriteTokens: '缓存写入',
     totalTokens: '总 Tokens',
     cost: '费用',
     // Status
@@ -217,6 +221,7 @@ export default {
     querySuccess: '查询成功',
     queryFailed: '查询失败',
     queryFailedRetry: '查询失败，请稍后重试',
+    noDailyUsage: '暂无按日用量数据',
   },
 
   // Setup Wizard

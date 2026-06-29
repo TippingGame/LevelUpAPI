@@ -161,19 +161,23 @@ export default {
     dateRangeToday: 'Today',
     dateRange7d: '7 Days',
     dateRange30d: '30 Days',
+    dateRange90d: '90 Days',
     dateRangeCustom: 'Custom',
     apply: 'Apply',
     used: 'Used',
     detailInfo: 'Detail Information',
     tokenStats: 'Token Statistics',
+    dailyDetail: 'Daily Detail',
     modelStats: 'Model Usage Statistics',
     // Table headers
+    date: 'Date',
     model: 'Model',
     requests: 'Requests',
     inputTokens: 'Input Tokens',
     outputTokens: 'Output Tokens',
     cacheCreationTokens: 'Cache Creation',
     cacheReadTokens: 'Cache Read',
+    cacheWriteTokens: 'Cache Write',
     totalTokens: 'Total Tokens',
     cost: 'Cost',
     // Status
@@ -217,6 +221,7 @@ export default {
     querySuccess: 'Query successful',
     queryFailed: 'Query failed',
     queryFailedRetry: 'Query failed, please try again later',
+    noDailyUsage: 'No daily usage data',
   },
 
   // Setup Wizard

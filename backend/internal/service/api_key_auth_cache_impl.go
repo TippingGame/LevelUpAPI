@@ -14,7 +14,7 @@ import (
 	"github.com/dgraph-io/ristretto"
 )
 
-const apiKeyAuthSnapshotVersion = 11 // v11: include user points fields for points billing eligibility
+const apiKeyAuthSnapshotVersion = 12 // v12: reload snapshots for group availability checks; keeps v11 points fields
 
 type apiKeyAuthCacheConfig struct {
 	l1Size        int

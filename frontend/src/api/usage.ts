@@ -66,6 +66,25 @@ export interface ModelStatsResponse {
   end_date: string
 }
 
+export interface ApiKeyDailyUsagePoint {
+  date: string
+  requests: number
+  input_tokens: number
+  output_tokens: number
+  cache_read_tokens: number
+  cache_write_tokens: number
+  total_tokens: number
+  cost: number
+  actual_cost: number
+}
+
+export interface ApiKeyDailyUsageResponse {
+  items: ApiKeyDailyUsagePoint[]
+  days: number
+  start_date: string
+  end_date: string
+}
+
 export interface AccountSharingSummary {
   owned_accounts: number
   private_accounts: number
@@ -308,6 +327,23 @@ export async function getDashboardModels(params?: {
   return data
 }
 
+/**
+ * Get daily usage details for one API key owned by the current user.
+ * @param apiKeyId - API key ID
+ * @param days - Number of days to include (1-90)
+ * @returns Daily usage detail rows
+ */
+export async function getMyApiKeyDailyUsage(
+  apiKeyId: number,
+  days: number = 30
+): Promise<ApiKeyDailyUsageResponse> {
+  const { data } = await apiClient.get<ApiKeyDailyUsageResponse>(
+    `/user/api-keys/${apiKeyId}/usage/daily`,
+    { params: { days } }
+  )
+  return data
+}
+
 export async function getDashboardAccountSharing(params?: TrendParams): Promise<AccountSharingDashboardStats> {
   const { data } = await apiClient.get<AccountSharingDashboardStats>('/usage/dashboard/account-sharing', { params })
   return data
@@ -360,6 +396,7 @@ export const usageAPI = {
   getDashboardStats,
   getDashboardTrend,
   getDashboardModels,
+  getMyApiKeyDailyUsage,
   getDashboardAccountSharing,
   getDashboardApiKeysUsage
 }
