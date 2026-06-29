@@ -126,6 +126,7 @@ func responsesInputToChatMessages(instructions string, inputRaw json.RawMessage)
 		if role == "" {
 			role = "user"
 		}
+		role = chatCompletionsRoleFromResponsesRole(role)
 		content := item["content"]
 		if len(bytesTrimSpace(content)) == 0 {
 			if text := rawString(item["text"]); text != "" {
@@ -140,6 +141,14 @@ func responsesInputToChatMessages(instructions string, inputRaw json.RawMessage)
 	}
 
 	return messages, nil
+}
+
+func chatCompletionsRoleFromResponsesRole(role string) string {
+	role = strings.TrimSpace(role)
+	if role == "developer" {
+		return "system"
+	}
+	return role
 }
 
 func responsesContentToChatContent(raw json.RawMessage, role string) (json.RawMessage, error) {

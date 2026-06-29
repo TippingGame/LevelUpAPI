@@ -363,6 +363,24 @@ func TestChatCompletionsToResponses_TemperaturePreservedForNonReasoningModel(t *
 	assert.InDelta(t, 0.7, *resp.TopP, 1e-9)
 }
 
+func TestResponsesToChatCompletions_DeveloperRoleMapsToSystem(t *testing.T) {
+	input := json.RawMessage(`[
+		{"type":"message","role":"developer","content":[{"type":"input_text","text":"You are concise."}]},
+		{"type":"message","role":"user","content":[{"type":"input_text","text":"Hi"}]}
+	]`)
+	req := &ResponsesRequest{
+		Model: "gpt-5.4",
+		Input: input,
+	}
+
+	resp, err := ResponsesToChatCompletionsRequest(req)
+
+	require.NoError(t, err)
+	require.Len(t, resp.Messages, 2)
+	require.Equal(t, "system", resp.Messages[0].Role)
+	require.Equal(t, "user", resp.Messages[1].Role)
+}
+
 func TestChatCompletionsToResponses_AssistantWithTextAndToolCalls(t *testing.T) {
 	req := &ChatCompletionsRequest{
 		Model: "gpt-4o",

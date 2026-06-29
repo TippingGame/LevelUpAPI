@@ -28,6 +28,66 @@ type openAIResponsesImageResult struct {
 	Model         string
 }
 
+type OpenAIImagesUpstreamError struct {
+	StatusCode        int
+	ErrorType         string
+	Code              string
+	Message           string
+	Param             string
+	UpstreamRequestID string
+}
+
+func (e *OpenAIImagesUpstreamError) Error() string {
+	if e == nil {
+		return ""
+	}
+	code := strings.TrimSpace(e.Code)
+	if code == "" {
+		code = strings.TrimSpace(e.ErrorType)
+	}
+	message := strings.TrimSpace(e.Message)
+	if code != "" && message != "" {
+		return fmt.Sprintf("openai images upstream error: %s: %s", code, message)
+	}
+	if message != "" {
+		return "openai images upstream error: " + message
+	}
+	if code != "" {
+		return "openai images upstream error: " + code
+	}
+	return "openai images upstream error"
+}
+
+func (e *OpenAIImagesUpstreamError) clientStatusCode() int {
+	if e == nil || e.StatusCode <= 0 {
+		return http.StatusBadGateway
+	}
+	return e.StatusCode
+}
+
+func (e *OpenAIImagesUpstreamError) clientErrorType() string {
+	if e == nil {
+		return "upstream_error"
+	}
+	if trimmed := strings.TrimSpace(e.ErrorType); trimmed != "" {
+		return trimmed
+	}
+	return "upstream_error"
+}
+
+func (e *OpenAIImagesUpstreamError) clientMessage() string {
+	if e == nil {
+		return "Upstream request failed"
+	}
+	if trimmed := strings.TrimSpace(e.Message); trimmed != "" {
+		return trimmed
+	}
+	if trimmed := strings.TrimSpace(e.Code); trimmed != "" {
+		return trimmed
+	}
+	return "Upstream request failed"
+}
+
 func openAIResponsesImageResultKey(itemID string, result openAIResponsesImageResult) string {
 	if strings.TrimSpace(result.Result) != "" {
 		return strings.TrimSpace(result.OutputFormat) + "|" + strings.TrimSpace(result.Result)
@@ -502,6 +562,95 @@ func buildOpenAIImagesStreamErrorBody(message string) []byte {
 	return body
 }
 
+func buildOpenAIImagesStreamErrorBodyFromUpstream(err *OpenAIImagesUpstreamError) []byte {
+	if err == nil {
+		return buildOpenAIImagesStreamErrorBody("")
+	}
+	body := buildOpenAIImagesStreamErrorBody(err.clientMessage())
+	body, _ = sjson.SetBytes(body, "error.type", err.clientErrorType())
+	if code := strings.TrimSpace(err.Code); code != "" {
+		body, _ = sjson.SetBytes(body, "error.code", code)
+	}
+	if param := strings.TrimSpace(err.Param); param != "" {
+		body, _ = sjson.SetBytes(body, "error.param", param)
+	}
+	return body
+}
+
+func writeOpenAIImagesUpstreamErrorResponse(c *gin.Context, err *OpenAIImagesUpstreamError) bool {
+	if c == nil || c.Writer == nil || c.Writer.Written() || err == nil {
+		return false
+	}
+	errorObj := gin.H{
+		"type":    err.clientErrorType(),
+		"message": err.clientMessage(),
+	}
+	if code := strings.TrimSpace(err.Code); code != "" {
+		errorObj["code"] = code
+	}
+	if param := strings.TrimSpace(err.Param); param != "" {
+		errorObj["param"] = param
+	}
+	c.JSON(err.clientStatusCode(), gin.H{"error": errorObj})
+	return true
+}
+
+func extractOpenAIImagesUpstreamError(body []byte) *OpenAIImagesUpstreamError {
+	var upstreamErr *OpenAIImagesUpstreamError
+	for _, line := range bytes.Split(body, []byte("\n")) {
+		if upstreamErr != nil {
+			break
+		}
+		line = bytes.TrimRight(line, "\r")
+		data, ok := extractOpenAISSEDataLine(string(line))
+		if !ok || data == "" || data == "[DONE]" {
+			continue
+		}
+		upstreamErr = openAIImagesUpstreamErrorFromSSEPayload([]byte(data))
+	}
+	return upstreamErr
+}
+
+func openAIImagesUpstreamErrorFromSSEPayload(payload []byte) *OpenAIImagesUpstreamError {
+	if !gjson.ValidBytes(payload) {
+		return nil
+	}
+	switch gjson.GetBytes(payload, "type").String() {
+	case "error":
+		return openAIImagesUpstreamErrorFromGJSON(gjson.GetBytes(payload, "error"), "")
+	case "response.failed":
+		response := gjson.GetBytes(payload, "response")
+		return openAIImagesUpstreamErrorFromGJSON(response.Get("error"), response.Get("id").String())
+	default:
+		return nil
+	}
+}
+
+func openAIImagesUpstreamErrorFromGJSON(errorObj gjson.Result, upstreamRequestID string) *OpenAIImagesUpstreamError {
+	if !errorObj.Exists() {
+		return nil
+	}
+	code := strings.TrimSpace(errorObj.Get("code").String())
+	errType := strings.TrimSpace(errorObj.Get("type").String())
+	message := strings.TrimSpace(errorObj.Get("message").String())
+	param := strings.TrimSpace(errorObj.Get("param").String())
+	statusCode := http.StatusBadGateway
+	if strings.EqualFold(code, "moderation_blocked") || strings.EqualFold(errType, "image_generation_user_error") {
+		statusCode = http.StatusBadRequest
+	}
+	if message == "" {
+		message = "Upstream request failed"
+	}
+	return &OpenAIImagesUpstreamError{
+		StatusCode:        statusCode,
+		ErrorType:         errType,
+		Code:              code,
+		Message:           sanitizeUpstreamErrorMessage(message),
+		Param:             param,
+		UpstreamRequestID: strings.TrimSpace(upstreamRequestID),
+	}
+}
+
 func openAIImagesResponsesFailure(body []byte) (int, string, bool) {
 	for _, line := range bytes.Split(body, []byte("\n")) {
 		line = bytes.TrimRight(line, "\r")
@@ -565,6 +714,11 @@ func (s *OpenAIGatewayService) handleOpenAIImagesOAuthNonStreamingResponse(
 	body, err := ReadUpstreamResponseBody(resp.Body, s.cfg, c, openAITooLargeError)
 	if err != nil {
 		return OpenAIUsage{}, 0, err
+	}
+	if upstreamErr := extractOpenAIImagesUpstreamError(body); upstreamErr != nil && upstreamErr.clientStatusCode() < http.StatusInternalServerError {
+		setOpsUpstreamError(c, upstreamErr.clientStatusCode(), upstreamErr.clientMessage(), "")
+		writeOpenAIImagesUpstreamErrorResponse(c, upstreamErr)
+		return OpenAIUsage{}, 0, upstreamErr
 	}
 	if status, message, failed := openAIImagesResponsesFailure(body); failed {
 		return OpenAIUsage{}, 0, &UpstreamFailoverError{
@@ -660,6 +814,12 @@ func (s *OpenAIGatewayService) handleOpenAIImagesOAuthStreamingResponse(
 						}
 					}
 					switch gjson.GetBytes(dataBytes, "type").String() {
+					case "error", "response.failed":
+						if upstreamErr := openAIImagesUpstreamErrorFromSSEPayload(dataBytes); upstreamErr != nil && upstreamErr.clientStatusCode() < http.StatusInternalServerError {
+							_ = s.writeOpenAIImagesStreamEvent(c, flusher, "error", buildOpenAIImagesStreamErrorBodyFromUpstream(upstreamErr))
+							setOpsUpstreamError(c, upstreamErr.clientStatusCode(), upstreamErr.clientMessage(), "")
+							return OpenAIUsage{}, imageCount, firstTokenMs, upstreamErr
+						}
 					case "response.image_generation_call.partial_image":
 						b64 := strings.TrimSpace(gjson.GetBytes(dataBytes, "partial_image_b64").String())
 						if b64 != "" {
