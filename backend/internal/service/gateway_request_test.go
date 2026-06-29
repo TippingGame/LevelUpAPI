@@ -380,6 +380,33 @@ func TestFilterThinkingBlocksForRetry_RemovesRedactedThinkingAndKeepsValidConten
 	require.Equal(t, "Visible", content0["text"])
 }
 
+func TestFilterThinkingBlocksForRetry_DropsThinkingBlockWithEmptyContent(t *testing.T) {
+	input := []byte(`{
+		"thinking":{"type":"enabled","budget_tokens":1024},
+		"messages":[
+			{"role":"user","content":[{"type":"text","text":"Hi"}]},
+			{"role":"assistant","content":[
+				{"type":"thinking","thinking":"","signature":"sig"},
+				{"type":"text","text":"Answer"}
+			]}
+		]
+	}`)
+
+	out := FilterThinkingBlocksForRetry(input)
+
+	var req map[string]any
+	require.NoError(t, json.Unmarshal(out, &req))
+	_, hasThinking := req["thinking"]
+	require.False(t, hasThinking, "top-level thinking should be removed")
+
+	msgs := req["messages"].([]any)
+	assistant := msgs[1].(map[string]any)
+	content := assistant["content"].([]any)
+	require.Len(t, content, 1, "empty thinking block should be dropped, only text remains")
+	require.Equal(t, "text", content[0].(map[string]any)["type"])
+	require.Equal(t, "Answer", content[0].(map[string]any)["text"])
+}
+
 func TestFilterThinkingBlocksForRetry_EmptyContentGetsPlaceholder(t *testing.T) {
 	input := []byte(`{
 		"thinking":{"type":"enabled"},

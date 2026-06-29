@@ -83,6 +83,11 @@ cors:
 # 安全配置
 # =============================================================================
 security:
+  # Trust forwarded client IP headers for API Key IP whitelist/blacklist checks.
+  # API Key IP 白/黑名单检查是否信任转发的客户端 IP 头。
+  # Enable only behind a trusted reverse proxy that strips spoofed IP headers.
+  # 仅在可信反向代理后方启用，并确保代理会清理伪造的 IP 头。
+  trust_forwarded_ip_for_api_key_acl: false
   url_allowlist:
     # Enable URL allowlist validation (disable to skip all URL checks)
     # 启用 URL 白名单验证（禁用则跳过所有 URL 检查）

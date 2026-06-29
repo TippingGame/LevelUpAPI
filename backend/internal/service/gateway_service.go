@@ -7562,6 +7562,15 @@ func (s *GatewayService) isThinkingBlockSignatureError(respBody []byte) bool {
 		return true
 	}
 
+	// 检测 thinking block 缺少 thinking 字段的错误（跨模型切换时常见：
+	// 其他模型回过的 assistant 历史里有 type=thinking 但没有 thinking 文本，
+	// 喂给开启 extended thinking 的 Claude 时会被拒）。
+	// 例如: "messages.1.content.0.thinking: each thinking block must contain thinking"
+	if strings.Contains(msg, "thinking block must contain") {
+		logger.LegacyPrintf("service.gateway", "[SignatureCheck] Detected thinking block missing content error")
+		return true
+	}
+
 	// 检测空消息内容错误（可能是过滤 thinking blocks 后导致的，或客户端发送了空 text block）
 	// 例如: "all messages must have non-empty content"
 	//       "messages: text content blocks must be non-empty"
