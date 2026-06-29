@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"context"
 	"io"
 	"net/http"
 	"sync/atomic"
@@ -8,6 +9,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 )
@@ -61,11 +63,51 @@ func (s *HTTPUpstreamSuite) TestCustomResponseHeaderTimeout() {
 	require.Equal(s.T(), 7*time.Second, transport.ResponseHeaderTimeout, "ResponseHeaderTimeout mismatch")
 }
 
+func (s *HTTPUpstreamSuite) TestOpenAIProfileDisablesResponseHeaderTimeoutByDefault() {
+	s.cfg.Gateway = config.GatewayConfig{ResponseHeaderTimeout: 7}
+	svc := s.newService()
+	entry, err := svc.getClientEntry("", 1, 1, service.HTTPUpstreamProfileOpenAI, false, false)
+	require.NoError(s.T(), err)
+
+	transport, ok := entry.client.Transport.(*http.Transport)
+	require.True(s.T(), ok, "expected *http.Transport")
+	require.Zero(s.T(), transport.ResponseHeaderTimeout, "OpenAI profile should not inherit generic response header timeout")
+}
+
+func (s *HTTPUpstreamSuite) TestOpenAIProfileCustomResponseHeaderTimeout() {
+	s.cfg.Gateway = config.GatewayConfig{
+		ResponseHeaderTimeout:       7,
+		OpenAIResponseHeaderTimeout: 13,
+	}
+	svc := s.newService()
+	entry, err := svc.getClientEntry("", 1, 1, service.HTTPUpstreamProfileOpenAI, false, false)
+	require.NoError(s.T(), err)
+
+	transport, ok := entry.client.Transport.(*http.Transport)
+	require.True(s.T(), ok, "expected *http.Transport")
+	require.Equal(s.T(), 13*time.Second, transport.ResponseHeaderTimeout)
+}
+
+func (s *HTTPUpstreamSuite) TestOpenAIProfileUsesSeparateClientCache() {
+	s.cfg.Gateway = config.GatewayConfig{
+		ConnectionPoolIsolation:     config.ConnectionPoolIsolationAccountProxy,
+		ResponseHeaderTimeout:       7,
+		OpenAIResponseHeaderTimeout: 13,
+	}
+	svc := s.newService()
+	defaultEntry := mustGetOrCreateClient(s.T(), svc, "", 1, 1)
+	openAIEntry, err := svc.getClientEntry("", 1, 1, service.HTTPUpstreamProfileOpenAI, false, false)
+	require.NoError(s.T(), err)
+
+	require.NotSame(s.T(), defaultEntry, openAIEntry)
+	require.Len(s.T(), svc.clients, 2)
+}
+
 // TestGetOrCreateClient_InvalidURLReturnsError 测试无效代理 URL 返回错误
 // 验证解析失败时拒绝回退到直连模式
 func (s *HTTPUpstreamSuite) TestGetOrCreateClient_InvalidURLReturnsError() {
 	svc := s.newService()
-	_, err := svc.getClientEntry("://bad-proxy-url", 1, 1, false, false)
+	_, err := svc.getClientEntry("://bad-proxy-url", 1, 1, service.HTTPUpstreamProfileDefault, false, false)
 	require.Error(s.T(), err, "expected error for invalid proxy URL")
 }
 
@@ -87,13 +129,41 @@ func (s *HTTPUpstreamSuite) TestAcquireClient_OverLimitReturnsError() {
 		MaxUpstreamClients:      1,
 	}
 	svc := s.newService()
-	entry1, err := svc.acquireClient("http://proxy-a:8080", 1, 1)
+	entry1, err := svc.acquireClient("http://proxy-a:8080", 1, 1, service.HTTPUpstreamProfileDefault)
 	require.NoError(s.T(), err, "expected first acquire to succeed")
 	require.NotNil(s.T(), entry1, "expected entry")
 
-	entry2, err := svc.acquireClient("http://proxy-b:8080", 2, 1)
+	entry2, err := svc.acquireClient("http://proxy-b:8080", 2, 1, service.HTTPUpstreamProfileDefault)
 	require.Error(s.T(), err, "expected error when cache limit reached")
 	require.Nil(s.T(), entry2, "expected nil entry when cache limit reached")
+}
+
+func (s *HTTPUpstreamSuite) TestDoUsesOpenAIProfileFromRequestContext() {
+	upstream := newLocalTestServer(s.T(), http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, "ok")
+	}))
+	s.T().Cleanup(upstream.Close)
+
+	s.cfg.Gateway = config.GatewayConfig{ResponseHeaderTimeout: 7}
+	svc := s.newService()
+	req, err := http.NewRequestWithContext(
+		service.WithHTTPUpstreamProfile(context.Background(), service.HTTPUpstreamProfileOpenAI),
+		http.MethodGet,
+		upstream.URL+"/x",
+		nil,
+	)
+	require.NoError(s.T(), err)
+	resp, err := svc.Do(req, "", 1, 1)
+	require.NoError(s.T(), err)
+	defer func() { _ = resp.Body.Close() }()
+
+	require.Len(s.T(), svc.clients, 1)
+	for key, entry := range svc.clients {
+		require.Contains(s.T(), key, "profile:openai")
+		transport, ok := entry.client.Transport.(*http.Transport)
+		require.True(s.T(), ok)
+		require.Zero(s.T(), transport.ResponseHeaderTimeout)
+	}
 }
 
 // TestDo_WithoutProxy_GoesDirect 测试无代理时直连

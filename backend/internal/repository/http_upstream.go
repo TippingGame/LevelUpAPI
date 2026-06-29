@@ -134,8 +134,9 @@ func (s *httpUpstreamService) Do(req *http.Request, proxyURL string, accountID i
 		return nil, err
 	}
 
+	profile := service.HTTPUpstreamProfileFromContext(req.Context())
 	// 获取或创建对应的客户端，并标记请求占用
-	entry, err := s.acquireClient(proxyURL, accountID, accountConcurrency)
+	entry, err := s.acquireClient(proxyURL, accountID, accountConcurrency, profile)
 	if err != nil {
 		return nil, err
 	}
@@ -185,7 +186,8 @@ func (s *httpUpstreamService) DoWithTLS(req *http.Request, proxyURL string, acco
 		return nil, err
 	}
 
-	entry, err := s.acquireClientWithTLS(proxyURL, accountID, accountConcurrency, profile)
+	upstreamProfile := service.HTTPUpstreamProfileFromContext(req.Context())
+	entry, err := s.acquireClientWithTLS(proxyURL, accountID, accountConcurrency, profile, upstreamProfile)
 	if err != nil {
 		slog.Debug("tls_fingerprint_acquire_client_failed", "account_id", accountID, "error", err)
 		return nil, err
@@ -210,21 +212,21 @@ func (s *httpUpstreamService) DoWithTLS(req *http.Request, proxyURL string, acco
 }
 
 // acquireClientWithTLS 获取或创建带 TLS 指纹的客户端
-func (s *httpUpstreamService) acquireClientWithTLS(proxyURL string, accountID int64, accountConcurrency int, profile *tlsfingerprint.Profile) (*upstreamClientEntry, error) {
-	return s.getClientEntryWithTLS(proxyURL, accountID, accountConcurrency, profile, true, true)
+func (s *httpUpstreamService) acquireClientWithTLS(proxyURL string, accountID int64, accountConcurrency int, profile *tlsfingerprint.Profile, upstreamProfile service.HTTPUpstreamProfile) (*upstreamClientEntry, error) {
+	return s.getClientEntryWithTLS(proxyURL, accountID, accountConcurrency, profile, upstreamProfile, true, true)
 }
 
 // getClientEntryWithTLS 获取或创建带 TLS 指纹的客户端条目
 // TLS 指纹客户端使用独立的缓存键，与普通客户端隔离
-func (s *httpUpstreamService) getClientEntryWithTLS(proxyURL string, accountID int64, accountConcurrency int, profile *tlsfingerprint.Profile, markInFlight bool, enforceLimit bool) (*upstreamClientEntry, error) {
+func (s *httpUpstreamService) getClientEntryWithTLS(proxyURL string, accountID int64, accountConcurrency int, profile *tlsfingerprint.Profile, upstreamProfile service.HTTPUpstreamProfile, markInFlight bool, enforceLimit bool) (*upstreamClientEntry, error) {
 	isolation := s.getIsolationMode()
 	proxyKey, parsedProxy, err := normalizeProxyURL(proxyURL)
 	if err != nil {
 		return nil, err
 	}
 	// TLS 指纹客户端使用独立的缓存键，加 "tls:" 前缀
-	cacheKey := "tls:" + buildCacheKey(isolation, proxyKey, accountID)
-	poolKey := s.buildPoolKey(isolation, accountConcurrency) + ":tls"
+	cacheKey := "tls:" + buildCacheKey(isolation, proxyKey, accountID, upstreamProfile)
+	poolKey := s.buildPoolKey(isolation, accountConcurrency, upstreamProfile) + ":tls"
 
 	now := time.Now()
 	nowUnix := now.UnixNano()
@@ -275,7 +277,7 @@ func (s *httpUpstreamService) getClientEntryWithTLS(proxyURL string, accountID i
 
 	// 创建带 TLS 指纹的 Transport
 	slog.Debug("tls_fingerprint_creating_new_client", "account_id", accountID, "cache_key", cacheKey, "proxy", proxyKey)
-	settings := s.resolvePoolSettings(isolation, accountConcurrency)
+	settings := s.resolvePoolSettings(isolation, accountConcurrency, upstreamProfile)
 	transport, err := buildUpstreamTransportWithTLSFingerprint(settings, parsedProxy, profile)
 	if err != nil {
 		s.mu.Unlock()
@@ -340,8 +342,8 @@ func (s *httpUpstreamService) redirectChecker(req *http.Request, via []*http.Req
 
 // acquireClient 获取或创建客户端，并标记为进行中请求
 // 用于请求路径，避免在获取后被淘汰
-func (s *httpUpstreamService) acquireClient(proxyURL string, accountID int64, accountConcurrency int) (*upstreamClientEntry, error) {
-	return s.getClientEntry(proxyURL, accountID, accountConcurrency, true, true)
+func (s *httpUpstreamService) acquireClient(proxyURL string, accountID int64, accountConcurrency int, profile service.HTTPUpstreamProfile) (*upstreamClientEntry, error) {
+	return s.getClientEntry(proxyURL, accountID, accountConcurrency, profile, true, true)
 }
 
 // getOrCreateClient 获取或创建客户端
@@ -360,13 +362,13 @@ func (s *httpUpstreamService) acquireClient(proxyURL string, accountID int64, ac
 //   - account: 按账户隔离，同一账户共享客户端（代理变更时重建）
 //   - account_proxy: 按账户+代理组合隔离，最细粒度
 func (s *httpUpstreamService) getOrCreateClient(proxyURL string, accountID int64, accountConcurrency int) (*upstreamClientEntry, error) {
-	return s.getClientEntry(proxyURL, accountID, accountConcurrency, false, false)
+	return s.getClientEntry(proxyURL, accountID, accountConcurrency, service.HTTPUpstreamProfileDefault, false, false)
 }
 
 // getClientEntry 获取或创建客户端条目
 // markInFlight=true 时会标记进行中请求，用于请求路径防止被淘汰
 // enforceLimit=true 时会限制客户端数量，超限且无法淘汰时返回错误
-func (s *httpUpstreamService) getClientEntry(proxyURL string, accountID int64, accountConcurrency int, markInFlight bool, enforceLimit bool) (*upstreamClientEntry, error) {
+func (s *httpUpstreamService) getClientEntry(proxyURL string, accountID int64, accountConcurrency int, profile service.HTTPUpstreamProfile, markInFlight bool, enforceLimit bool) (*upstreamClientEntry, error) {
 	// 获取隔离模式
 	isolation := s.getIsolationMode()
 	// 标准化代理 URL 并解析
@@ -375,9 +377,9 @@ func (s *httpUpstreamService) getClientEntry(proxyURL string, accountID int64, a
 		return nil, err
 	}
 	// 构建缓存键（根据隔离策略不同）
-	cacheKey := buildCacheKey(isolation, proxyKey, accountID)
+	cacheKey := buildCacheKey(isolation, proxyKey, accountID, profile)
 	// 构建连接池配置键（用于检测配置变更）
-	poolKey := s.buildPoolKey(isolation, accountConcurrency)
+	poolKey := s.buildPoolKey(isolation, accountConcurrency, profile)
 
 	now := time.Now()
 	nowUnix := now.UnixNano()
@@ -420,7 +422,7 @@ func (s *httpUpstreamService) getClientEntry(proxyURL string, accountID int64, a
 	}
 
 	// 缓存未命中或需要重建，创建新客户端
-	settings := s.resolvePoolSettings(isolation, accountConcurrency)
+	settings := s.resolvePoolSettings(isolation, accountConcurrency, profile)
 	transport, err := buildUpstreamTransport(settings, parsedProxy)
 	if err != nil {
 		s.mu.Unlock()
@@ -606,13 +608,19 @@ func (s *httpUpstreamService) clientIdleTTL() time.Duration {
 // 说明:
 //   - 账户隔离模式下，连接池大小与账户并发数对应
 //   - 这确保了单账户不会占用过多连接资源
-func (s *httpUpstreamService) resolvePoolSettings(isolation string, accountConcurrency int) poolSettings {
+func (s *httpUpstreamService) resolvePoolSettings(isolation string, accountConcurrency int, profile service.HTTPUpstreamProfile) poolSettings {
 	settings := defaultPoolSettings(s.cfg)
 	// 账户隔离模式下，根据账户并发数调整连接池大小
 	if (isolation == config.ConnectionPoolIsolationAccount || isolation == config.ConnectionPoolIsolationAccountProxy) && accountConcurrency > 0 {
 		settings.maxIdleConns = accountConcurrency
 		settings.maxIdleConnsPerHost = accountConcurrency
 		settings.maxConnsPerHost = accountConcurrency
+	}
+	if profile == service.HTTPUpstreamProfileOpenAI {
+		settings.responseHeaderTimeout = 0
+		if s != nil && s.cfg != nil && s.cfg.Gateway.OpenAIResponseHeaderTimeout > 0 {
+			settings.responseHeaderTimeout = time.Duration(s.cfg.Gateway.OpenAIResponseHeaderTimeout) * time.Second
+		}
 	}
 	return settings
 }
@@ -626,13 +634,17 @@ func (s *httpUpstreamService) resolvePoolSettings(isolation string, accountConcu
 //
 // 返回:
 //   - string: 配置键
-func (s *httpUpstreamService) buildPoolKey(isolation string, accountConcurrency int) string {
+func (s *httpUpstreamService) buildPoolKey(isolation string, accountConcurrency int, profile service.HTTPUpstreamProfile) string {
+	profileKey := ""
+	if profile != service.HTTPUpstreamProfileDefault {
+		profileKey = "|profile:" + string(profile)
+	}
 	if isolation == config.ConnectionPoolIsolationAccount || isolation == config.ConnectionPoolIsolationAccountProxy {
 		if accountConcurrency > 0 {
-			return fmt.Sprintf("account:%d", accountConcurrency)
+			return fmt.Sprintf("account:%d%s", accountConcurrency, profileKey)
 		}
 	}
-	return "default"
+	return "default" + profileKey
 }
 
 // buildCacheKey 构建客户端缓存键
@@ -650,14 +662,18 @@ func (s *httpUpstreamService) buildPoolKey(isolation string, accountConcurrency 
 //   - proxy 模式: "proxy:{proxyKey}"
 //   - account 模式: "account:{accountID}"
 //   - account_proxy 模式: "account:{accountID}|proxy:{proxyKey}"
-func buildCacheKey(isolation, proxyKey string, accountID int64) string {
+func buildCacheKey(isolation, proxyKey string, accountID int64, profile service.HTTPUpstreamProfile) string {
+	profileKey := ""
+	if profile != service.HTTPUpstreamProfileDefault {
+		profileKey = "|profile:" + string(profile)
+	}
 	switch isolation {
 	case config.ConnectionPoolIsolationAccount:
-		return fmt.Sprintf("account:%d", accountID)
+		return fmt.Sprintf("account:%d%s", accountID, profileKey)
 	case config.ConnectionPoolIsolationAccountProxy:
-		return fmt.Sprintf("account:%d|proxy:%s", accountID, proxyKey)
+		return fmt.Sprintf("account:%d|proxy:%s%s", accountID, proxyKey, profileKey)
 	default:
-		return fmt.Sprintf("proxy:%s", proxyKey)
+		return fmt.Sprintf("proxy:%s%s", proxyKey, profileKey)
 	}
 }
 

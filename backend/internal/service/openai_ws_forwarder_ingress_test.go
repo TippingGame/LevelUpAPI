@@ -703,10 +703,29 @@ func TestOpenAIWSRawItemsHasFunctionCallOutput(t *testing.T) {
 		json.RawMessage(`{"type":"input_text","text":"hello"}`),
 		json.RawMessage(`{"type":"function_call","call_id":"call_1"}`),
 	}))
-	require.True(t, openAIWSRawItemsHasFunctionCallOutput([]json.RawMessage{
-		json.RawMessage(`{"type":"input_text","text":"hello"}`),
-		json.RawMessage(`{"type":"function_call_output","call_id":"call_1","output":"ok"}`),
-	}))
+	for _, typ := range []string{
+		"function_call_output",
+		"tool_search_output",
+		"custom_tool_call_output",
+		"mcp_tool_call_output",
+	} {
+		typ := typ
+		t.Run(typ, func(t *testing.T) {
+			t.Parallel()
+			require.True(t, openAIWSRawItemsHasFunctionCallOutput([]json.RawMessage{
+				json.RawMessage(`{"type":"input_text","text":"hello"}`),
+				json.RawMessage(`{"type":"` + typ + `","call_id":"call_1","output":"ok"}`),
+			}))
+		})
+	}
+}
+
+func TestOpenAIWSRawPayloadHasToolCallOutput(t *testing.T) {
+	t.Parallel()
+
+	require.True(t, openAIWSRawPayloadHasToolCallOutput([]byte(`{"input":[{"type":"tool_search_output","call_id":"call_1","output":"ok"}]}`)))
+	require.True(t, openAIWSRawPayloadHasToolCallOutput([]byte(`{"input":{"type":"custom_tool_call_output","call_id":"call_1","output":"ok"}}`)))
+	require.False(t, openAIWSRawPayloadHasToolCallOutput([]byte(`{"input":[{"type":"input_text","text":"hello"}]}`)))
 }
 
 func TestSetOpenAIWSPayloadInputSequence(t *testing.T) {
