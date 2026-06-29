@@ -1,6 +1,11 @@
 package service
 
-import "strings"
+import (
+	"encoding/json"
+	"strings"
+
+	"github.com/tidwall/sjson"
+)
 
 // ToolContinuationSignals 聚合工具续链相关信号，避免重复遍历 input。
 type ToolContinuationSignals struct {
@@ -148,6 +153,14 @@ func AnalyzeToolContinuationSignals(reqBody map[string]any) ToolContinuationSign
 	return signals
 }
 
+func RemovePreviousResponseIDFromBody(body []byte) []byte {
+	updated, err := sjson.DeleteBytes(body, "previous_response_id")
+	if err != nil {
+		return body
+	}
+	return updated
+}
+
 // ValidateFunctionCallOutputContext 为 handler 提供低开销校验结果：
 // 1) 无工具输出直接返回
 // 2) 若已存在工具调用上下文则提前返回
@@ -225,6 +238,14 @@ func ValidateFunctionCallOutputContext(reqBody map[string]any) FunctionCallOutpu
 	}
 	result.HasItemReferenceForAllCallIDs = allReferenced
 	return result
+}
+
+func ValidateFunctionCallOutputContextBytes(body []byte) FunctionCallOutputValidation {
+	var reqBody map[string]any
+	if err := json.Unmarshal(body, &reqBody); err != nil {
+		return FunctionCallOutputValidation{}
+	}
+	return ValidateFunctionCallOutputContext(reqBody)
 }
 
 // HasFunctionCallOutput 判断 input 是否包含 function_call_output，用于触发续链校验。
