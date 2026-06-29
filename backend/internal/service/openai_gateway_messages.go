@@ -421,6 +421,12 @@ func (s *OpenAIGatewayService) handleAnthropicBufferedStreamingResponse(
 			event.Type == "response.incomplete" || event.Type == "response.failed") &&
 			event.Response != nil {
 			finalResponse = event.Response
+			if event.Usage != nil {
+				usage = copyOpenAIUsageFromResponsesUsage(event.Usage)
+				if event.Response.Usage == nil {
+					event.Response.Usage = event.Usage
+				}
+			}
 			if event.Response.Usage != nil {
 				usage = OpenAIUsage{
 					InputTokens:  event.Response.Usage.InputTokens,
@@ -439,6 +445,12 @@ func (s *OpenAIGatewayService) handleAnthropicBufferedStreamingResponse(
 			acc.ProcessEvent(&event)
 			if isOpenAICompatResponsesTerminalEvent(event.Type) && event.Response != nil {
 				finalResponse = event.Response
+				if event.Usage != nil {
+					usage = copyOpenAIUsageFromResponsesUsage(event.Usage)
+					if event.Response.Usage == nil {
+						event.Response.Usage = event.Usage
+					}
+				}
 				if event.Response.Usage != nil {
 					usage = copyOpenAIUsageFromResponsesUsage(event.Response.Usage)
 				}
@@ -596,15 +608,20 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 		}
 
 		isTerminalEvent := isOpenAICompatResponsesTerminalEvent(event.Type)
-		if isTerminalEvent && event.Response != nil {
-			if id := strings.TrimSpace(event.Response.ID); id != "" {
-				responseID = id
+		if isTerminalEvent {
+			if event.Response != nil {
+				if id := strings.TrimSpace(event.Response.ID); id != "" {
+					responseID = id
+				}
+				if event.Response.ServiceTier != "" {
+					responseServiceTier = event.Response.ServiceTier
+				}
+				if event.Response.Usage != nil {
+					usage = copyOpenAIUsageFromResponsesUsage(event.Response.Usage)
+				}
 			}
-			if event.Response.ServiceTier != "" {
-				responseServiceTier = event.Response.ServiceTier
-			}
-			if event.Response.Usage != nil {
-				usage = copyOpenAIUsageFromResponsesUsage(event.Response.Usage)
+			if event.Usage != nil {
+				usage = copyOpenAIUsageFromResponsesUsage(event.Usage)
 			}
 		}
 		if event.Type == "response.failed" {
