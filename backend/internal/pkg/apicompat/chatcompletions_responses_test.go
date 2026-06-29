@@ -2,6 +2,7 @@ package apicompat
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -1186,6 +1187,59 @@ func TestChatCompletionsStreamRoundTrip(t *testing.T) {
 	for _, c := range allChunks {
 		assert.Equal(t, "resp_rt", c.ID)
 	}
+}
+
+func TestChatCompletionsStreamToolCallArgumentsInFirstChunkNotDoubled(t *testing.T) {
+	idx := 0
+	finishReason := "tool_calls"
+	state := NewChatCompletionsToResponsesStreamState("gpt-5.4")
+
+	chunks := []*ChatCompletionsChunk{
+		{
+			Choices: []ChatChunkChoice{{Index: 0, Delta: ChatDelta{Role: "assistant"}}},
+		},
+		{
+			Choices: []ChatChunkChoice{{
+				Index: 0,
+				Delta: ChatDelta{
+					ToolCalls: []ChatToolCall{{
+						Index: &idx,
+						ID:    "call_a",
+						Type:  "function",
+						Function: ChatFunctionCall{
+							Name:      "exec",
+							Arguments: `{"cmd":"ls"}`,
+						},
+					}},
+				},
+			}},
+		},
+		{
+			Choices: []ChatChunkChoice{{Index: 0, Delta: ChatDelta{}, FinishReason: &finishReason}},
+		},
+	}
+
+	var events []ResponsesStreamEvent
+	for _, chunk := range chunks {
+		events = append(events, ChatCompletionsChunkToResponsesEvents(chunk, state)...)
+	}
+	events = append(events, FinalizeChatCompletionsResponsesStream(state)...)
+
+	var argsDelta strings.Builder
+	var completed *ResponsesResponse
+	for _, event := range events {
+		switch event.Type {
+		case "response.function_call_arguments.delta":
+			_, _ = argsDelta.WriteString(event.Delta)
+		case "response.completed":
+			completed = event.Response
+		}
+	}
+	require.Equal(t, `{"cmd":"ls"}`, argsDelta.String())
+	require.NotNil(t, completed)
+	require.Len(t, completed.Output, 1)
+	require.Equal(t, "function_call", completed.Output[0].Type)
+	require.Equal(t, `{"cmd":"ls"}`, completed.Output[0].Arguments)
 }
 
 // ---------------------------------------------------------------------------

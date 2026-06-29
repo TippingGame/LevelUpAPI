@@ -505,6 +505,7 @@ func ChatCompletionsChunkToResponsesEvents(chunk *ChatCompletionsChunk, state *C
 					copyCall.ID = generateItemID()
 				}
 				copyCall.Type = "function"
+				copyCall.Function.Arguments = ""
 				state.ToolCalls[idx] = &copyCall
 				stored = &copyCall
 				events = append(events, chatToResponsesEvent(state, "response.output_item.added", &ResponsesStreamEvent{
