@@ -9,7 +9,6 @@ import (
 	"strings"
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
-	"github.com/Wei-Shaw/sub2api/ent/apikey"
 	"github.com/Wei-Shaw/sub2api/ent/apikeygrouproute"
 	"github.com/Wei-Shaw/sub2api/ent/group"
 	"github.com/Wei-Shaw/sub2api/ent/predicate"
@@ -665,15 +664,9 @@ func (r *groupRepository) DeleteCascade(ctx context.Context, id int64) ([]int64,
 		}
 	}
 
-	// 2. Clear group_id for api keys bound to this group.
-	// 仅更新未软删除的记录，避免修改已删除数据，保证审计与历史回溯一致性。
-	// 与 APIKeyRepository 的软删除语义保持一致，减少跨模块行为差异。
-	if _, err := txClient.APIKey.Update().
-		Where(apikey.GroupIDEQ(id), apikey.DeletedAtIsNil()).
-		ClearGroupID().
-		Save(ctx); err != nil {
-		return nil, err
-	}
+	// 2. Keep API keys bound to the deleted group. Auth rejects keys whose
+	// group edge can no longer be loaded, so retaining group_id prevents a
+	// deleted-group key from silently becoming an ungrouped key.
 	if _, err := txClient.APIKeyGroupRoute.Delete().
 		Where(apikeygrouproute.GroupIDEQ(id)).
 		Exec(ctx); err != nil {
