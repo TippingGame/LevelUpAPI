@@ -398,7 +398,7 @@ func parseOpenAIWSResponseUsageFromCompletedEvent(message []byte, usage *OpenAIU
 	if usage == nil || len(message) == 0 {
 		return
 	}
-	if parsedUsage, ok := openAIUsageFromGJSON(gjson.GetBytes(message, "response.usage")); ok {
+	if parsedUsage, ok := extractOpenAIUsageFromJSONBytes(message); ok {
 		*usage = parsedUsage
 	}
 }

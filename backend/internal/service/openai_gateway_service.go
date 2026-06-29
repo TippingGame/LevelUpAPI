@@ -3668,6 +3668,9 @@ func openAIStreamDataStartsClientOutput(data, eventType string) bool {
 }
 
 func openAIStreamFailedEventShouldFailover(payload []byte, message string) bool {
+	if isOpenAITransientProcessingError(http.StatusBadRequest, message, payload) {
+		return true
+	}
 	code := strings.ToLower(strings.TrimSpace(gjson.GetBytes(payload, "response.error.code").String()))
 	if code == "" {
 		code = strings.ToLower(strings.TrimSpace(gjson.GetBytes(payload, "error.code").String()))
@@ -4930,6 +4933,76 @@ func extractOpenAISSEDataLine(line string) (string, bool) {
 	return line[start:], true
 }
 
+func extractOpenAISSEEventLine(line string) (string, bool) {
+	if !strings.HasPrefix(line, "event:") {
+		return "", false
+	}
+	start := len("event:")
+	for start < len(line) {
+		if line[start] != ' ' && line[start] != '	' {
+			break
+		}
+		start++
+	}
+	return strings.TrimSpace(line[start:]), true
+}
+
+type openAICompatSSEFrame struct {
+	EventType string
+	Data      string
+}
+
+type openAICompatSSEFrameParser struct {
+	eventType string
+	dataLines []string
+}
+
+func (p *openAICompatSSEFrameParser) AddLine(line string) (openAICompatSSEFrame, bool) {
+	if line == "" {
+		return p.dispatch()
+	}
+	if strings.HasPrefix(line, ":") {
+		return openAICompatSSEFrame{}, false
+	}
+	if eventType, ok := extractOpenAISSEEventLine(line); ok {
+		p.eventType = eventType
+		return openAICompatSSEFrame{}, false
+	}
+	if data, ok := extractOpenAISSEDataLine(line); ok {
+		p.dataLines = append(p.dataLines, data)
+	}
+	return openAICompatSSEFrame{}, false
+}
+
+func (p *openAICompatSSEFrameParser) Finish() (openAICompatSSEFrame, bool) {
+	return p.dispatch()
+}
+
+func (p *openAICompatSSEFrameParser) dispatch() (openAICompatSSEFrame, bool) {
+	frame := openAICompatSSEFrame{
+		EventType: p.eventType,
+		Data:      strings.Join(p.dataLines, "\n"),
+	}
+	p.eventType = ""
+	p.dataLines = nil
+	return frame, frame.Data != ""
+}
+
+func openAICompatPayloadWithEventType(payload, eventType string) string {
+	eventType = strings.TrimSpace(eventType)
+	if eventType == "" || strings.TrimSpace(payload) == "" || strings.TrimSpace(payload) == "[DONE]" {
+		return payload
+	}
+	if gjson.Get(payload, "type").Exists() {
+		return payload
+	}
+	patched, err := sjson.Set(payload, "type", eventType)
+	if err != nil {
+		return payload
+	}
+	return patched
+}
+
 func (s *OpenAIGatewayService) replaceModelInSSELine(line, fromModel, toModel string) string {
 	data, ok := extractOpenAISSEDataLine(line)
 	if !ok {
@@ -4991,7 +5064,7 @@ func (s *OpenAIGatewayService) parseSSEUsageBytes(data []byte, usage *OpenAIUsag
 		return
 	}
 
-	if parsedUsage, ok := openAIUsageFromGJSON(gjson.GetBytes(data, "response.usage")); ok {
+	if parsedUsage, ok := extractOpenAIUsageFromJSONBytes(data); ok {
 		*usage = parsedUsage
 		if responseServiceTier := strings.TrimSpace(gjson.GetBytes(data, "response.service_tier").String()); responseServiceTier != "" {
 			usage.ResponseServiceTier = responseServiceTier
@@ -5004,11 +5077,16 @@ func extractOpenAIUsageFromJSONBytes(body []byte) (OpenAIUsage, bool) {
 		return OpenAIUsage{}, false
 	}
 	usage, ok := openAIUsageFromGJSON(gjson.GetBytes(body, "usage"))
-	if !ok {
-		return OpenAIUsage{}, false
+	if ok {
+		usage.ResponseServiceTier = strings.TrimSpace(gjson.GetBytes(body, "service_tier").String())
+		return usage, true
 	}
-	usage.ResponseServiceTier = strings.TrimSpace(gjson.GetBytes(body, "service_tier").String())
-	return usage, true
+	usage, ok = openAIUsageFromGJSON(gjson.GetBytes(body, "response.usage"))
+	if ok {
+		usage.ResponseServiceTier = strings.TrimSpace(gjson.GetBytes(body, "response.service_tier").String())
+		return usage, true
+	}
+	return OpenAIUsage{}, false
 }
 
 func openAIUsageFromGJSON(value gjson.Result) (OpenAIUsage, bool) {
@@ -5429,14 +5507,7 @@ func (s *OpenAIGatewayService) validateUpstreamBaseURL(raw string) (string, erro
 // buildOpenAIResponsesURL 缁勮 OpenAI Responses 绔偣銆?// - base 浠?/v1 缁撳熬锛氳拷鍔?/responses
 // - base 宸叉槸 /responses锛氬師鏍疯繑鍥?// - 鍏朵粬鎯呭喌锛氳拷鍔?/v1/responses
 func buildOpenAIResponsesURL(base string) string {
-	normalized := strings.TrimRight(strings.TrimSpace(base), "/")
-	if strings.HasSuffix(normalized, "/responses") {
-		return normalized
-	}
-	if strings.HasSuffix(normalized, "/v1") {
-		return normalized + "/responses"
-	}
-	return normalized + "/v1/responses"
+	return buildOpenAIEndpointURL(base, "/v1/responses")
 }
 
 func trimOpenAIEncryptedReasoningItems(reqBody map[string]any) bool {
@@ -6613,7 +6684,7 @@ func writeOpenAIFastPolicyBlockedResponse(c *gin.Context, err *OpenAIFastBlocked
 // applyOpenAIFastPolicyToBody contract but operates on a Realtime/Responses
 // WS payload:
 //
-//   - pass: returns frame unchanged (newBytes == frame, blocked == nil)
+//   - pass: keeps service_tier, normalizing aliases such as "fast" to "priority"
 //   - filter: returns a copy with top-level service_tier removed
 //   - block: returns (frame, *OpenAIFastBlockedError)
 //
@@ -6675,7 +6746,14 @@ func (s *OpenAIGatewayService) applyOpenAIFastPolicyToWSResponseCreate(
 		}
 		return trimmed, nil, nil
 	default:
-		return frame, nil, nil
+		if normTier == rawTier {
+			return frame, nil, nil
+		}
+		updated, err := sjson.SetBytes(frame, "service_tier", normTier)
+		if err != nil {
+			return frame, nil, fmt.Errorf("normalize service_tier in ws frame: %w", err)
+		}
+		return updated, nil, nil
 	}
 }
 

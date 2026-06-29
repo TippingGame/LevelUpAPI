@@ -229,7 +229,7 @@ func TestForwardAsAnthropic_FilteredFastTierBillsAsStandardWhenUpstreamOmitsTier
 	svc := &OpenAIGatewayService{
 		cfg:            &config.Config{Security: config.SecurityConfig{URLAllowlist: config.URLAllowlistConfig{Enabled: false}}},
 		httpUpstream:   upstream,
-		settingService: newOpenAIFastPolicySettingServiceForTest(t, DefaultOpenAIFastPolicySettings()),
+		settingService: newOpenAIFastPolicySettingServiceForTest(t, openAIFastFilterPriorityPolicy()),
 	}
 	account := &Account{
 		ID:          1,

@@ -157,7 +157,7 @@ func (s *OpenAIGatewayService) forwardAsRawChatCompletions(
 	}
 
 	if clientStream {
-		return s.streamRawChatCompletions(c, resp, originalModel, billingModel, upstreamModel, reasoningEffort, serviceTier, startTime)
+		return s.streamRawChatCompletions(c, resp, account, originalModel, billingModel, upstreamModel, reasoningEffort, serviceTier, startTime, len(body))
 	}
 	return s.bufferRawChatCompletions(c, resp, originalModel, billingModel, upstreamModel, reasoningEffort, serviceTier, startTime)
 }
@@ -165,22 +165,31 @@ func (s *OpenAIGatewayService) forwardAsRawChatCompletions(
 func (s *OpenAIGatewayService) streamRawChatCompletions(
 	c *gin.Context,
 	resp *http.Response,
+	account *Account,
 	originalModel string,
 	billingModel string,
 	upstreamModel string,
 	reasoningEffort *string,
 	serviceTier *string,
 	startTime time.Time,
+	requestBodyLen int,
 ) (*OpenAIForwardResult, error) {
 	requestID := resp.Header.Get("x-request-id")
-	if s.responseHeaderFilter != nil {
-		responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
+	headersWritten := false
+	writeStreamHeaders := func() {
+		if headersWritten {
+			return
+		}
+		headersWritten = true
+		if s.responseHeaderFilter != nil {
+			responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
+		}
+		c.Writer.Header().Set("Content-Type", "text/event-stream")
+		c.Writer.Header().Set("Cache-Control", "no-cache")
+		c.Writer.Header().Set("Connection", "keep-alive")
+		c.Writer.Header().Set("X-Accel-Buffering", "no")
+		c.Writer.WriteHeader(http.StatusOK)
 	}
-	c.Writer.Header().Set("Content-Type", "text/event-stream")
-	c.Writer.Header().Set("Cache-Control", "no-cache")
-	c.Writer.Header().Set("Connection", "keep-alive")
-	c.Writer.Header().Set("X-Accel-Buffering", "no")
-	c.Writer.WriteHeader(http.StatusOK)
 
 	scanner := bufio.NewScanner(resp.Body)
 	maxLineSize := defaultMaxLineSize
@@ -192,8 +201,42 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 	var usage OpenAIUsage
 	var firstTokenMs *int
 	clientDisconnected := false
+	clientOutputStarted := false
+	pendingLines := make([]string, 0, 8)
+	refusalDetector := newOpenAIChatSilentRefusalDetector(requestBodyLen)
+
+	writeLine := func(line string) {
+		if clientDisconnected {
+			return
+		}
+		if !clientOutputStarted && !refusalDetector.ShouldReleaseClientOutput() {
+			pendingLines = append(pendingLines, line)
+			return
+		}
+		if !clientOutputStarted {
+			writeStreamHeaders()
+			for _, pending := range pendingLines {
+				if _, err := c.Writer.WriteString(pending + "\n"); err != nil {
+					clientDisconnected = true
+					logger.L().Info("openai chat_completions raw: client disconnected, continuing to drain upstream for billing",
+						zap.String("request_id", requestID),
+					)
+					return
+				}
+			}
+			pendingLines = pendingLines[:0]
+			clientOutputStarted = true
+		}
+		if _, err := c.Writer.WriteString(line + "\n"); err != nil {
+			clientDisconnected = true
+			logger.L().Info("openai chat_completions raw: client disconnected, continuing to drain upstream for billing",
+				zap.String("request_id", requestID),
+			)
+		}
+	}
 	for scanner.Scan() {
 		line := scanner.Text()
+		refusalDetector.ObserveSSELine(line)
 		if payload, ok := extractOpenAISSEDataLine(line); ok && strings.TrimSpace(payload) != "[DONE]" {
 			usageOnlyChunk := isOpenAIChatUsageOnlyStreamChunk(payload)
 			if u := extractOpenAIChatStreamUsage(payload); u != nil {
@@ -204,15 +247,8 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 				firstTokenMs = &ms
 			}
 		}
-		if !clientDisconnected {
-			if _, err := c.Writer.WriteString(line + "\n"); err != nil {
-				clientDisconnected = true
-				logger.L().Info("openai chat_completions raw: client disconnected, continuing to drain upstream for billing",
-					zap.String("request_id", requestID),
-				)
-			}
-		}
-		if line == "" && !clientDisconnected {
+		writeLine(line)
+		if line == "" && !clientDisconnected && clientOutputStarted {
 			c.Writer.Flush()
 		}
 	}
@@ -221,6 +257,26 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 			zap.Error(err),
 			zap.String("request_id", requestID),
 		)
+	} else if !clientDisconnected && !clientOutputStarted {
+		if refusalDetector.IsSilentRefusal() {
+			return nil, newOpenAISilentRefusalFailoverError(c, account, requestID)
+		}
+		if len(pendingLines) > 0 {
+			writeStreamHeaders()
+			for _, pending := range pendingLines {
+				if _, err := c.Writer.WriteString(pending + "\n"); err != nil {
+					clientDisconnected = true
+					logger.L().Info("openai chat_completions raw: client disconnected during final flush",
+						zap.String("request_id", requestID),
+					)
+					break
+				}
+			}
+			if !clientDisconnected {
+				clientOutputStarted = true
+				c.Writer.Flush()
+			}
+		}
 	}
 
 	return &OpenAIForwardResult{
@@ -325,18 +381,5 @@ func openAIUsageFromChatCompletionsUsage(payload string) *OpenAIUsage {
 }
 
 func buildOpenAIChatCompletionsURL(base string) string {
-	normalized := strings.TrimRight(strings.TrimSpace(base), "/")
-	if strings.HasSuffix(normalized, "/chat/completions") {
-		return normalized
-	}
-	lastSlash := strings.LastIndex(normalized, "/")
-	lastSegment := normalized
-	if lastSlash >= 0 {
-		lastSegment = normalized[lastSlash+1:]
-	}
-	lowerSegment := strings.ToLower(lastSegment)
-	if len(lowerSegment) >= 2 && lowerSegment[0] == 'v' && lowerSegment[1] >= '0' && lowerSegment[1] <= '9' {
-		return normalized + "/chat/completions"
-	}
-	return normalized + "/v1/chat/completions"
+	return buildOpenAIEndpointURL(base, "/v1/chat/completions")
 }

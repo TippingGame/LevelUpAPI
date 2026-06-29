@@ -2506,6 +2506,32 @@ func TestExtractOpenAISSEDataLine(t *testing.T) {
 	}
 }
 
+func TestOpenAICompatSSEFrameParserResetsEventTypeAtFrameBoundary(t *testing.T) {
+	var parser openAICompatSSEFrameParser
+
+	frame, ok := parser.AddLine("event: response.created")
+	require.False(t, ok)
+	require.Empty(t, frame)
+
+	frame, ok = parser.AddLine(`data: {"response":{"id":"resp_1"}}`)
+	require.False(t, ok)
+	require.Empty(t, frame)
+
+	frame, ok = parser.AddLine("")
+	require.True(t, ok)
+	require.Equal(t, "response.created", frame.EventType)
+	require.JSONEq(t, `{"response":{"id":"resp_1"}}`, frame.Data)
+
+	frame, ok = parser.AddLine(`data: {"delta":"ok"}`)
+	require.False(t, ok)
+	require.Empty(t, frame.EventType)
+
+	frame, ok = parser.AddLine("")
+	require.True(t, ok)
+	require.Empty(t, frame.EventType)
+	require.JSONEq(t, `{"delta":"ok"}`, frame.Data)
+}
+
 func TestParseSSEUsage_SelectiveParsing(t *testing.T) {
 	svc := &OpenAIGatewayService{}
 	usage := &OpenAIUsage{InputTokens: 9, OutputTokens: 8, CacheReadInputTokens: 7}

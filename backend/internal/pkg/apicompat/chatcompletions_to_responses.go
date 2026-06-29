@@ -150,6 +150,11 @@ func chatUserToResponses(m ChatMessage) ([]ResponsesInputItem, error) {
 // empty/nil and there are tool_calls, only function_call items are emitted.
 func chatAssistantToResponses(m ChatMessage) ([]ResponsesInputItem, error) {
 	var items []ResponsesInputItem
+	content := ""
+
+	if m.ReasoningContent != "" {
+		content = "<thinking>" + m.ReasoningContent + "</thinking>"
+	}
 
 	// Emit assistant message with output_text if content is non-empty.
 	if len(m.Content) > 0 {
@@ -158,16 +163,15 @@ func chatAssistantToResponses(m ChatMessage) ([]ResponsesInputItem, error) {
 			return nil, err
 		}
 		if s != "" {
-			parts := []ResponsesContentPart{{Type: "output_text", Text: s}}
-			partsJSON, err := json.Marshal(parts)
-			if err != nil {
-				return nil, err
+			if content != "" {
+				content += "\n"
 			}
-			items = append(items, ResponsesInputItem{Role: "assistant", Content: partsJSON})
+			content += s
 		}
 	}
-	if len(items) == 0 && strings.TrimSpace(m.ReasoningContent) != "" && len(m.ToolCalls) == 0 {
-		parts := []ResponsesContentPart{{Type: "output_text", Text: m.ReasoningContent}}
+
+	if content != "" {
+		parts := []ResponsesContentPart{{Type: "output_text", Text: content}}
 		partsJSON, err := json.Marshal(parts)
 		if err != nil {
 			return nil, err
@@ -333,7 +337,11 @@ func marshalChatInputContent(content chatMessageContent) (json.RawMessage, error
 	if content.Text != nil {
 		return json.Marshal(*content.Text)
 	}
-	return json.Marshal(convertChatContentPartsToResponses(content.Parts))
+	parts := convertChatContentPartsToResponses(content.Parts)
+	if len(parts) == 0 {
+		return json.Marshal("")
+	}
+	return json.Marshal(parts)
 }
 
 func convertChatContentPartsToResponses(parts []ChatContentPart) []ResponsesContentPart {

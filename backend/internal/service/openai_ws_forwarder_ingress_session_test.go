@@ -589,7 +589,8 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_PassthroughModeR
 		require.Equal(t, "1K", result.ImageSize)
 		require.Equal(t, "gpt-image-2", result.BillingModel)
 		require.Equal(t, "gpt-image-2", result.Model)
-		require.Nil(t, result.ServiceTier)
+		require.NotNil(t, result.ServiceTier)
+		require.Equal(t, "priority", *result.ServiceTier)
 	case <-time.After(2 * time.Second):
 		t.Fatal("未收到 passthrough turn 结果回调")
 	}

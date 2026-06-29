@@ -22,7 +22,7 @@ import (
 
 // --- Helper-level (unit) tests for applyOpenAIFastPolicyToWSResponseCreate ---
 
-func TestWSResponseCreate_FilterStripsServiceTier(t *testing.T) {
+func TestWSResponseCreate_DefaultPassesPriorityAndNormalizesFast(t *testing.T) {
 	svc := newOpenAIGatewayServiceWithSettings(t, DefaultOpenAIFastPolicySettings())
 	account := &Account{Platform: PlatformOpenAI, Type: AccountTypeAPIKey}
 
@@ -30,11 +30,40 @@ func TestWSResponseCreate_FilterStripsServiceTier(t *testing.T) {
 	updated, blocked, err := svc.applyOpenAIFastPolicyToWSResponseCreate(context.Background(), account, "gpt-5.5", frame)
 	require.NoError(t, err)
 	require.Nil(t, blocked)
-	require.NotContains(t, string(updated), `"service_tier"`, "filter action should strip service_tier")
+	require.Equal(t, "priority", gjson.GetBytes(updated, "service_tier").String(), "default policy should preserve priority tier")
 	// Other fields preserved.
 	require.Equal(t, "response.create", gjson.GetBytes(updated, "type").String())
 	require.Equal(t, "gpt-5.5", gjson.GetBytes(updated, "model").String())
 	require.Equal(t, "hi", gjson.GetBytes(updated, "input.0.text").String())
+
+	frame = []byte(`{"type":"response.create","model":"gpt-5.5","service_tier":"fast"}`)
+	updated, blocked, err = svc.applyOpenAIFastPolicyToWSResponseCreate(context.Background(), account, "gpt-5.5", frame)
+	require.NoError(t, err)
+	require.Nil(t, blocked)
+	require.Equal(t, "priority", gjson.GetBytes(updated, "service_tier").String(), "fast alias should normalize before reaching upstream")
+
+	frame = []byte(`{"type":"response.create","model":"gpt-5.5","service_tier":"  Fast  "}`)
+	updated, blocked, err = svc.applyOpenAIFastPolicyToWSResponseCreate(context.Background(), account, "gpt-5.5", frame)
+	require.NoError(t, err)
+	require.Nil(t, blocked)
+	require.Equal(t, "priority", gjson.GetBytes(updated, "service_tier").String())
+}
+
+func TestWSResponseCreate_ExplicitFilterStripsServiceTier(t *testing.T) {
+	svc := newOpenAIGatewayServiceWithSettings(t, openAIFastFilterPriorityPolicy())
+	account := &Account{Platform: PlatformOpenAI, Type: AccountTypeAPIKey}
+
+	frame := []byte(`{"type":"response.create","model":"gpt-5.5","service_tier":"priority","input":[{"type":"input_text","text":"hi"}]}`)
+	updated, blocked, err := svc.applyOpenAIFastPolicyToWSResponseCreate(context.Background(), account, "gpt-5.5", frame)
+	require.NoError(t, err)
+	require.Nil(t, blocked)
+	require.NotContains(t, string(updated), `"service_tier"`, "filter action should strip service_tier")
+
+	frame = []byte(`{"type":"response.create","model":"gpt-5.5","service_tier":"fast"}`)
+	updated, blocked, err = svc.applyOpenAIFastPolicyToWSResponseCreate(context.Background(), account, "gpt-5.5", frame)
+	require.NoError(t, err)
+	require.Nil(t, blocked)
+	require.NotContains(t, string(updated), `"service_tier"`)
 }
 
 func TestOpenAIWSPassthroughUsageMetaTracksReasoningEffort(t *testing.T) {
@@ -61,30 +90,11 @@ func TestOpenAIWSPassthroughUsageMetaTracksReasoningEffort(t *testing.T) {
 	require.Equal(t, "medium", *meta.reasoningEffort.Load())
 }
 
-func TestWSResponseCreate_FastNormalizedToPriorityThenFiltered(t *testing.T) {
-	svc := newOpenAIGatewayServiceWithSettings(t, DefaultOpenAIFastPolicySettings())
-	account := &Account{Platform: PlatformOpenAI, Type: AccountTypeAPIKey}
-
-	// Verbatim "fast" → normalized to "priority" → matches default rule → filter.
-	frame := []byte(`{"type":"response.create","model":"gpt-5.5","service_tier":"fast"}`)
-	updated, blocked, err := svc.applyOpenAIFastPolicyToWSResponseCreate(context.Background(), account, "gpt-5.5", frame)
-	require.NoError(t, err)
-	require.Nil(t, blocked)
-	require.NotContains(t, string(updated), `"service_tier"`)
-
-	// Mixed-case + whitespace variant should also normalize and filter.
-	frame = []byte(`{"type":"response.create","model":"gpt-5.5","service_tier":"  Fast  "}`)
-	updated, blocked, err = svc.applyOpenAIFastPolicyToWSResponseCreate(context.Background(), account, "gpt-5.5", frame)
-	require.NoError(t, err)
-	require.Nil(t, blocked)
-	require.NotContains(t, string(updated), `"service_tier"`)
-}
-
 func TestWSResponseCreate_FlexPassThrough(t *testing.T) {
 	svc := newOpenAIGatewayServiceWithSettings(t, DefaultOpenAIFastPolicySettings())
 	account := &Account{Platform: PlatformOpenAI, Type: AccountTypeAPIKey}
 
-	// Default policy targets priority only; flex is left untouched.
+	// Default policy has no rules; flex is left untouched.
 	frame := []byte(`{"type":"response.create","model":"gpt-5.5","service_tier":"flex"}`)
 	updated, blocked, err := svc.applyOpenAIFastPolicyToWSResponseCreate(context.Background(), account, "gpt-5.5", frame)
 	require.NoError(t, err)
@@ -334,13 +344,13 @@ func TestPolicyEnforcingFrameConn_WithoutCapturedFallbackPolicyMisses(t *testing
 		"sanity: without capturedSessionModel fallback the leak (D5) reproduces — confirms the fix is load-bearing")
 }
 
-// --- Ingress end-to-end test (filter path) ---
+// --- Ingress end-to-end test (explicit filter path) ---
 
 // TestWSResponseCreate_IngressFiltersServiceTierBeforeUpstream wires up the
 // real ProxyResponsesWebSocketFromClient ingress session pipeline against a
 // captureConn upstream and asserts that a client frame with service_tier=fast
 // is normalized + filtered out before being written upstream. This is the
-// integration flavour of TestWSResponseCreate_FilterStripsServiceTier.
+// integration flavour of TestWSResponseCreate_ExplicitFilterStripsServiceTier.
 func TestWSResponseCreate_IngressFiltersServiceTierBeforeUpstream(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -369,9 +379,9 @@ func TestWSResponseCreate_IngressFiltersServiceTierBeforeUpstream(t *testing.T) 
 	pool.setClientDialerForTest(captureDialer)
 
 	repo := &openAIFastPolicyRepoStub{values: map[string]string{}}
-	defaultJSON, err := json.Marshal(DefaultOpenAIFastPolicySettings())
+	filterPolicyJSON, err := json.Marshal(openAIFastFilterPriorityPolicy())
 	require.NoError(t, err)
-	repo.values[SettingKeyOpenAIFastPolicySettings] = string(defaultJSON)
+	repo.values[SettingKeyOpenAIFastPolicySettings] = string(filterPolicyJSON)
 
 	svc := &OpenAIGatewayService{
 		cfg:              cfg,
@@ -655,13 +665,12 @@ func TestApplyOpenAIFastPolicyToBody_BlockShortCircuitsUpstream(t *testing.T) {
 	require.Equal(t, string(body), string(updated), "block must not mutate body")
 }
 
-// TestForwardAsAnthropicMessages_BetaFastModeTriggersOpenAIFastPolicy verifies
+// TestForwardAsAnthropicMessages_BetaFastModePassesOpenAIFastPolicyByDefault verifies
 // the Anthropic-compat entrypoint chain: anthropic-beta: fast-mode → BetaFastMode
-// detection → ServiceTier="priority" injection (openai_gateway_messages.go:60)
-// → applyOpenAIFastPolicyToBody filter on default policy → upstream body has
-// no service_tier. We exercise the same internal pipeline (Anthropic→Responses
-// + BetaFastMode + policy) without spinning up a real upstream HTTP server.
-func TestForwardAsAnthropicMessages_BetaFastModeTriggersOpenAIFastPolicy(t *testing.T) {
+// detection → ServiceTier="priority" injection → default OpenAI fast policy pass.
+// We exercise the same internal pipeline (Anthropic→Responses + BetaFastMode +
+// policy) without spinning up a real upstream HTTP server.
+func TestForwardAsAnthropicMessages_BetaFastModePassesOpenAIFastPolicyByDefault(t *testing.T) {
 	svc := newOpenAIGatewayServiceWithSettings(t, DefaultOpenAIFastPolicySettings())
 	account := &Account{Platform: PlatformOpenAI, Type: AccountTypeAPIKey}
 
@@ -687,8 +696,9 @@ func TestForwardAsAnthropicMessages_BetaFastModeTriggersOpenAIFastPolicy(t *test
 	upstreamBody, policyErr := svc.applyOpenAIFastPolicyToBody(context.Background(), account, "gpt-5.5", responsesBody)
 	require.NoError(t, policyErr)
 
-	// Step 4: assert that policy filtered the field before the upstream HTTP request.
-	require.NotContains(t, string(upstreamBody), `"service_tier"`, "default policy 命中 gpt-5.5 priority 应当 filter 掉 service_tier")
+	// Step 4: default policy must preserve the explicit fast/priority request.
+	require.Equal(t, "priority", gjson.GetBytes(upstreamBody, "service_tier").String(),
+		"default policy should pass service_tier=priority through to upstream")
 }
 
 // --- Fix1: passthrough capturedSessionModel must follow session.update ---
@@ -832,7 +842,7 @@ func TestApplyOpenAIFastPolicyToBody_PassNormalizesFastAlias(t *testing.T) {
 // tier) instead of the user-requested "priority". This test pins the
 // contract those two helpers must uphold for the adapter's billing path.
 func TestPassthroughBilling_PostFilterServiceTier(t *testing.T) {
-	svc := newOpenAIGatewayServiceWithSettings(t, DefaultOpenAIFastPolicySettings())
+	svc := newOpenAIGatewayServiceWithSettings(t, openAIFastFilterPriorityPolicy())
 	account := &Account{Platform: PlatformOpenAI, Type: AccountTypeAPIKey}
 
 	raw := []byte(`{"type":"response.create","model":"gpt-5.5","service_tier":"priority"}`)
@@ -845,7 +855,7 @@ func TestPassthroughBilling_PostFilterServiceTier(t *testing.T) {
 	require.Equal(t, "priority", *pre,
 		"sanity: raw first frame carries priority that pre-fix billing would have reported")
 
-	// Apply policy filter (default rule: gpt-5.5 + priority → filter).
+	// Apply explicit policy filter (gpt-5.5 + priority → filter).
 	filtered, blocked, err := svc.applyOpenAIFastPolicyToWSResponseCreate(context.Background(), account, "gpt-5.5", raw)
 	require.NoError(t, err)
 	require.Nil(t, blocked)
@@ -916,7 +926,7 @@ func TestApplyOpenAIFastPolicyToBody_NonStringServiceTier(t *testing.T) {
 // This test pins the four legs of the semantic contract:
 //   - turn 1: service_tier=priority hits the default whitelist filter, so
 //     after filter the upstream sees no tier → billing is nil.
-//   - turn 2: service_tier=flex passes (default rule targets priority only),
+//   - turn 2: service_tier=flex passes (the explicit filter rule targets priority only),
 //     billing should now reflect "flex".
 //   - turn 3: response.create without any service_tier — the upstream will
 //     treat it as default; we choose to mirror that and overwrite billing
@@ -924,7 +934,7 @@ func TestApplyOpenAIFastPolicyToBody_NonStringServiceTier(t *testing.T) {
 //   - non-response.create frame (response.cancel here) carrying a stray
 //     service_tier-shaped field must NOT clobber the billing pointer.
 func TestPassthroughBilling_MultiTurnServiceTierFollowsFilteredFrames(t *testing.T) {
-	svc := newOpenAIGatewayServiceWithSettings(t, DefaultOpenAIFastPolicySettings())
+	svc := newOpenAIGatewayServiceWithSettings(t, openAIFastFilterPriorityPolicy())
 	account := &Account{Platform: PlatformOpenAI, Type: AccountTypeAPIKey}
 
 	// Mirror the production filter closure (openai_ws_v2_passthrough_adapter.go

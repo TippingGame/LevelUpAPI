@@ -330,14 +330,15 @@ func (s *OpenAIGatewayService) handleAnthropicBufferedStreamingResponse(
 	var finalResponse *apicompat.ResponsesResponse
 	var usage OpenAIUsage
 	acc := apicompat.NewBufferedResponseAccumulator()
+	var parser openAICompatSSEFrameParser
 
 	for scanner.Scan() {
 		line := scanner.Text()
-
-		payload, ok := extractOpenAISSEDataLine(line)
-		if !ok || strings.TrimSpace(payload) == "[DONE]" {
+		frame, ok := parser.AddLine(line)
+		if !ok || strings.TrimSpace(frame.Data) == "[DONE]" {
 			continue
 		}
+		payload := openAICompatPayloadWithEventType(frame.Data, frame.EventType)
 
 		var event apicompat.ResponsesStreamEvent
 		if err := json.Unmarshal([]byte(payload), &event); err != nil {
@@ -363,6 +364,19 @@ func (s *OpenAIGatewayService) handleAnthropicBufferedStreamingResponse(
 				}
 				if event.Response.Usage.InputTokensDetails != nil {
 					usage.CacheReadInputTokens = event.Response.Usage.InputTokensDetails.CachedTokens
+				}
+			}
+		}
+	}
+	if frame, ok := parser.Finish(); ok && strings.TrimSpace(frame.Data) != "[DONE]" {
+		payload := openAICompatPayloadWithEventType(frame.Data, frame.EventType)
+		var event apicompat.ResponsesStreamEvent
+		if err := json.Unmarshal([]byte(payload), &event); err == nil {
+			acc.ProcessEvent(&event)
+			if isOpenAICompatResponsesTerminalEvent(event.Type) && event.Response != nil {
+				finalResponse = event.Response
+				if event.Response.Usage != nil {
+					usage = copyOpenAIUsageFromResponsesUsage(event.Response.Usage)
 				}
 			}
 		}
@@ -565,6 +579,13 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 		}
 		return isTerminalEvent
 	}
+	processFrame := func(frame openAICompatSSEFrame) bool {
+		payload := openAICompatPayloadWithEventType(frame.Data, frame.EventType)
+		if strings.TrimSpace(payload) == "[DONE]" {
+			return false
+		}
+		return processDataLine(payload)
+	}
 
 	// finalizeStream sends any remaining Anthropic events and returns the result.
 	finalizeStream := func() (*OpenAIForwardResult, error) {
@@ -607,13 +628,14 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 
 	// ── No keepalive: fast synchronous path (no goroutine overhead) ──
 	if keepaliveInterval <= 0 {
+		var parser openAICompatSSEFrameParser
 		for scanner.Scan() {
 			line := scanner.Text()
-			payload, ok := extractOpenAISSEDataLine(line)
-			if !ok || strings.TrimSpace(payload) == "[DONE]" {
+			frame, ok := parser.AddLine(line)
+			if !ok || strings.TrimSpace(frame.Data) == "[DONE]" {
 				continue
 			}
-			if processDataLine(payload) {
+			if processFrame(frame) {
 				if terminalErr != nil {
 					return resultWithUsage(), terminalErr
 				}
@@ -621,6 +643,12 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 			}
 		}
 		handleScanErr(scanner.Err())
+		if frame, ok := parser.Finish(); ok && strings.TrimSpace(frame.Data) != "[DONE]" && processFrame(frame) {
+			if terminalErr != nil {
+				return resultWithUsage(), terminalErr
+			}
+			return finalizeStream()
+		}
 		return finalizeStream()
 	}
 
@@ -655,12 +683,19 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 	keepaliveTicker := time.NewTicker(keepaliveInterval)
 	defer keepaliveTicker.Stop()
 	lastDataAt := time.Now()
+	var parser openAICompatSSEFrameParser
 
 	for {
 		select {
 		case ev, ok := <-events:
 			if !ok {
 				// Upstream closed
+				if frame, ok := parser.Finish(); ok && strings.TrimSpace(frame.Data) != "[DONE]" && processFrame(frame) {
+					if terminalErr != nil {
+						return resultWithUsage(), terminalErr
+					}
+					return finalizeStream()
+				}
 				return finalizeStream()
 			}
 			if ev.err != nil {
@@ -669,11 +704,11 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 			}
 			lastDataAt = time.Now()
 			line := ev.line
-			payload, ok := extractOpenAISSEDataLine(line)
-			if !ok || strings.TrimSpace(payload) == "[DONE]" {
+			frame, ok := parser.AddLine(line)
+			if !ok || strings.TrimSpace(frame.Data) == "[DONE]" {
 				continue
 			}
-			if processDataLine(payload) {
+			if processFrame(frame) {
 				if terminalErr != nil {
 					return resultWithUsage(), terminalErr
 				}

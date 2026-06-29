@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -16,6 +17,28 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
 )
+
+func TestBuildOpenAIChatCompletionsURL_VersionedBase(t *testing.T) {
+	require.Equal(t,
+		"https://open.bigmodel.cn/api/paas/v4/chat/completions",
+		buildOpenAIChatCompletionsURL("https://open.bigmodel.cn/api/paas/v4"),
+	)
+	require.Equal(t,
+		"https://api.openai.com/v1/chat/completions",
+		buildOpenAIChatCompletionsURL("https://api.openai.com/v1"),
+	)
+}
+
+func TestBuildOpenAIResponsesURL_VersionedBase(t *testing.T) {
+	require.Equal(t,
+		"https://open.bigmodel.cn/api/paas/v4/responses",
+		buildOpenAIResponsesURL("https://open.bigmodel.cn/api/paas/v4"),
+	)
+	require.Equal(t,
+		"https://api.openai.com/v1/responses",
+		buildOpenAIResponsesURL("https://api.openai.com/v1"),
+	)
+}
 
 func TestNormalizeResponsesRequestServiceTier(t *testing.T) {
 	t.Parallel()
@@ -105,7 +128,7 @@ func TestForwardAsChatCompletions_FilteredFastTierBillsAsStandardWhenUpstreamOmi
 	svc := &OpenAIGatewayService{
 		cfg:            &config.Config{},
 		httpUpstream:   upstream,
-		settingService: newOpenAIFastPolicySettingServiceForTest(t, DefaultOpenAIFastPolicySettings()),
+		settingService: newOpenAIFastPolicySettingServiceForTest(t, openAIFastFilterPriorityPolicy()),
 	}
 	account := &Account{
 		ID:          1,
@@ -256,6 +279,55 @@ func TestForwardAsChatCompletions_RawChatDrainsUsageAfterClientDisconnect(t *tes
 	require.Equal(t, 8, result.Usage.OutputTokens)
 	require.Equal(t, 6, result.Usage.CacheReadInputTokens)
 	require.True(t, gjson.GetBytes(upstream.lastBody, "stream_options.include_usage").Bool())
+}
+
+func TestForwardAsChatCompletions_RawChatSilentRefusalTriggersFailover(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	body := largeOpenAIChatCompletionsBody()
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	upstreamSSE := strings.Join([]string{
+		`data: {"id":"chatcmpl_silent","object":"chat.completion.chunk","model":"gpt-5.5","choices":[{"index":0,"delta":{"role":"assistant"}}]}`,
+		"",
+		`data: {"id":"chatcmpl_silent","object":"chat.completion.chunk","model":"gpt-5.5","choices":[{"index":0,"delta":{"content":""},"finish_reason":"stop"}]}`,
+		"",
+		"data: [DONE]",
+		"",
+	}, "\n")
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}, "x-request-id": []string{"rid_silent"}},
+		Body:       io.NopCloser(strings.NewReader(upstreamSSE)),
+	}}
+
+	svc := &OpenAIGatewayService{
+		cfg:          &config.Config{},
+		httpUpstream: upstream,
+	}
+	account := &Account{
+		ID:       1,
+		Name:     "openai-apikey",
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeAPIKey,
+		Credentials: map[string]any{
+			"api_key":  "sk-test",
+			"base_url": "https://compat.example.com/v1",
+		},
+		Extra: map[string]any{"openai_responses_supported": false},
+	}
+
+	result, err := svc.ForwardAsChatCompletions(context.Background(), c, account, body, "", "")
+	require.Nil(t, result)
+	var failoverErr *UpstreamFailoverError
+	require.True(t, errors.As(err, &failoverErr))
+	require.Equal(t, http.StatusBadGateway, failoverErr.StatusCode)
+	require.True(t, IsOpenAISilentRefusalErrorBody(failoverErr.ResponseBody))
+	require.False(t, c.Writer.Written(), "silent refusal must not commit a 200 response before failover")
+	require.Empty(t, rec.Body.String())
 }
 
 func TestForwardAsChatCompletions_ConvertedStreamDrainsUsageAfterClientDisconnect(t *testing.T) {
@@ -432,4 +504,10 @@ func newOpenAIFastPolicySettingServiceForTest(t *testing.T, settings *OpenAIFast
 		repo.values[SettingKeyOpenAIFastPolicySettings] = string(raw)
 	}
 	return NewSettingService(repo, &config.Config{})
+}
+
+func largeOpenAIChatCompletionsBody() []byte {
+	return []byte(`{"model":"gpt-5.5","stream":true,"messages":[{"role":"user","content":"` +
+		strings.Repeat("x", openAISilentRefusalMinRequestBodyBytes) +
+		`"}]}`)
 }
