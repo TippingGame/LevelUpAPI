@@ -378,6 +378,36 @@ func TestGeminiErrorPolicy_NilRateLimitService(t *testing.T) {
 	})
 }
 
+func TestHandleGeminiUpstreamError_GoogleOneCapacityExhaustedUsesTierCooldown(t *testing.T) {
+	repo := &geminiErrorPolicyRepo{}
+	quotaSvc := NewGeminiQuotaService(&config.Config{}, nil)
+	rlSvc := NewRateLimitService(repo, nil, &config.Config{}, quotaSvc, nil)
+	svc := &GeminiMessagesCompatService{
+		accountRepo:      repo,
+		rateLimitService: rlSvc,
+	}
+	account := &Account{
+		ID:       511,
+		Platform: PlatformGemini,
+		Type:     AccountTypeOAuth,
+		Credentials: map[string]any{
+			"oauth_type": "google_one",
+			"tier_id":    "google_ai_pro",
+		},
+	}
+	body := []byte(`{"error":{"code":429,"details":[{"@type":"type.googleapis.com/google.rpc.ErrorInfo","domain":"cloudcode-pa.googleapis.com","metadata":{"model":"gemini-3.1-pro-preview"},"reason":"MODEL_CAPACITY_EXHAUSTED"}],"message":"No capacity available for model gemini-3.1-pro-preview on the server","status":"RESOURCE_EXHAUSTED"}}`)
+
+	before := time.Now()
+	svc.handleGeminiUpstreamError(context.Background(), account, http.StatusTooManyRequests, http.Header{}, body)
+	after := time.Now()
+
+	require.Equal(t, 1, repo.setRateLimitedCalls)
+	require.Equal(t, int64(511), repo.lastRateLimitedID)
+	require.WithinDuration(t, before.Add(5*time.Minute), repo.lastRateLimitedReset, 2*time.Second)
+	require.True(t, repo.lastRateLimitedReset.After(before))
+	require.True(t, repo.lastRateLimitedReset.Before(after.Add(5*time.Minute).Add(2*time.Second)))
+}
+
 // ---------------------------------------------------------------------------
 // geminiErrorPolicyRepo — minimal AccountRepository stub for Gemini error
 // policy tests. Embeds mockAccountRepoForGemini and adds tracking.
@@ -385,9 +415,11 @@ func TestGeminiErrorPolicy_NilRateLimitService(t *testing.T) {
 
 type geminiErrorPolicyRepo struct {
 	mockAccountRepoForGemini
-	setErrorCalls       int
-	setRateLimitedCalls int
-	setTempCalls        int
+	setErrorCalls        int
+	setRateLimitedCalls  int
+	setTempCalls         int
+	lastRateLimitedID    int64
+	lastRateLimitedReset time.Time
 }
 
 func (r *geminiErrorPolicyRepo) SetError(_ context.Context, _ int64, _ string) error {
@@ -395,8 +427,10 @@ func (r *geminiErrorPolicyRepo) SetError(_ context.Context, _ int64, _ string) e
 	return nil
 }
 
-func (r *geminiErrorPolicyRepo) SetRateLimited(_ context.Context, _ int64, _ time.Time) error {
+func (r *geminiErrorPolicyRepo) SetRateLimited(_ context.Context, id int64, resetAt time.Time) error {
 	r.setRateLimitedCalls++
+	r.lastRateLimitedID = id
+	r.lastRateLimitedReset = resetAt
 	return nil
 }
 

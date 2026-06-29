@@ -153,6 +153,14 @@ func (p *OpenAITokenProvider) GetAccessToken(ctx context.Context, account *Accou
 	expiresAt := account.GetCredentialAsTime("expires_at")
 	needsRefresh := expiresAt == nil || time.Until(*expiresAt) <= openAITokenRefreshSkew
 	refreshFailed := false
+	if needsRefresh && strings.TrimSpace(account.GetOpenAIRefreshToken()) == "" {
+		if expiresAt != nil && !time.Now().Before(*expiresAt) {
+			const reason = "openai access_token expired and refresh_token is missing"
+			p.disableAccountMissingRefreshToken(account, reason)
+			return "", errors.New(reason)
+		}
+		needsRefresh = false
+	}
 
 	if needsRefresh && p.refreshAPI != nil && p.executor != nil {
 		p.metrics.refreshRequests.Add(1)
@@ -253,6 +261,33 @@ func (p *OpenAITokenProvider) GetAccessToken(ctx context.Context, account *Accou
 	}
 
 	return accessToken, nil
+}
+
+func (p *OpenAITokenProvider) disableAccountMissingRefreshToken(account *Account, reason string) {
+	if p == nil || p.accountRepo == nil || account == nil {
+		return
+	}
+	bgCtx := context.Background()
+	if err := p.accountRepo.SetError(bgCtx, account.ID, reason); err != nil {
+		slog.Warn("openai_token_provider.set_error_failed",
+			"account_id", account.ID,
+			"error", err,
+		)
+		return
+	}
+	if p.tokenCache != nil {
+		cacheKey := OpenAITokenCacheKey(account)
+		if err := p.tokenCache.DeleteAccessToken(bgCtx, cacheKey); err != nil {
+			slog.Warn("openai_token_provider.cache_delete_failed",
+				"account_id", account.ID,
+				"error", err,
+			)
+		}
+	}
+	slog.Warn("openai_token_provider.account_disabled_missing_refresh_token",
+		"account_id", account.ID,
+		"reason", reason,
+	)
 }
 
 func (p *OpenAITokenProvider) waitForTokenAfterLockRace(ctx context.Context, cacheKey string) (string, error) {
