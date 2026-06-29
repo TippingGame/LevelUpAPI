@@ -314,6 +314,18 @@ gateway:
       queue: 0.7
       error_rate: 0.8
       ttft: 0.5
+  # OpenAI HTTP upstream protocol strategy.
+  # OpenAI HTTP 上游协议策略。
+  openai_http2:
+    # Prefer HTTP/2 for OpenAI HTTP upstream requests.
+    # OpenAI HTTP 上游请求优先使用 HTTP/2。
+    enabled: true
+    # Temporarily fallback to HTTP/1.1 when an HTTP/HTTPS proxy has clear H2 compatibility errors.
+    # 当 HTTP/HTTPS 代理出现明确 H2 兼容错误时，临时回退 HTTP/1.1。
+    allow_proxy_fallback_to_http1: true
+    fallback_error_threshold: 2
+    fallback_window_seconds: 60
+    fallback_ttl_seconds: 600
   # HTTP upstream connection pool settings (HTTP/2 + multi-proxy scenario defaults)
   # HTTP 上游连接池配置（HTTP/2 + 多代理场景默认值）
   # Max idle connections across all hosts

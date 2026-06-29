@@ -195,6 +195,31 @@ func TestLoadDefaultOpenAIWSConfig(t *testing.T) {
 	}
 }
 
+func TestLoadDefaultOpenAIHTTP2Config(t *testing.T) {
+	resetViperWithJWTSecret(t)
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+
+	if !cfg.Gateway.OpenAIHTTP2.Enabled {
+		t.Fatalf("Gateway.OpenAIHTTP2.Enabled = false, want true")
+	}
+	if !cfg.Gateway.OpenAIHTTP2.AllowProxyFallbackToHTTP1 {
+		t.Fatalf("Gateway.OpenAIHTTP2.AllowProxyFallbackToHTTP1 = false, want true")
+	}
+	if cfg.Gateway.OpenAIHTTP2.FallbackErrorThreshold != 2 {
+		t.Fatalf("Gateway.OpenAIHTTP2.FallbackErrorThreshold = %d, want 2", cfg.Gateway.OpenAIHTTP2.FallbackErrorThreshold)
+	}
+	if cfg.Gateway.OpenAIHTTP2.FallbackWindowSeconds != 60 {
+		t.Fatalf("Gateway.OpenAIHTTP2.FallbackWindowSeconds = %d, want 60", cfg.Gateway.OpenAIHTTP2.FallbackWindowSeconds)
+	}
+	if cfg.Gateway.OpenAIHTTP2.FallbackTTLSeconds != 600 {
+		t.Fatalf("Gateway.OpenAIHTTP2.FallbackTTLSeconds = %d, want 600", cfg.Gateway.OpenAIHTTP2.FallbackTTLSeconds)
+	}
+}
+
 func TestLoadOpenAIWSStickyTTLCompatibility(t *testing.T) {
 	resetViperWithJWTSecret(t)
 	t.Setenv("GATEWAY_OPENAI_WS_STICKY_RESPONSE_ID_TTL_SECONDS", "0")

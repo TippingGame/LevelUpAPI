@@ -802,6 +802,8 @@ type GatewayConfig struct {
 	OpenAIPassthroughAllowTimeoutHeaders bool `mapstructure:"openai_passthrough_allow_timeout_headers"`
 	// OpenAIWS: OpenAI Responses WebSocket 配置（默认开启，可按需回滚到 HTTP）
 	OpenAIWS GatewayOpenAIWSConfig `mapstructure:"openai_ws"`
+	// OpenAIHTTP2: OpenAI HTTP 上游协议策略（默认启用 HTTP/2，可按代理能力回退 HTTP/1.1）
+	OpenAIHTTP2 GatewayOpenAIHTTP2Config `mapstructure:"openai_http2"`
 
 	// HTTP 上游连接池配置（性能优化：支持高并发场景调优）
 	// MaxIdleConns: 所有主机的最大空闲连接总数
@@ -872,6 +874,20 @@ type GatewayConfig struct {
 	// UserMessageQueue: 用户消息串行队列配置
 	// 对 role:"user" 的真实用户消息实施账号级串行化 + RPM 自适应延迟
 	UserMessageQueue UserMessageQueueConfig `mapstructure:"user_message_queue"`
+}
+
+// GatewayOpenAIHTTP2Config OpenAI HTTP 上游协议配置。
+type GatewayOpenAIHTTP2Config struct {
+	// Enabled: 是否启用 OpenAI HTTP/2 优先策略
+	Enabled bool `mapstructure:"enabled"`
+	// AllowProxyFallbackToHTTP1: HTTP/HTTPS 代理出现明确 H2 兼容错误时，临时回退 HTTP/1.1
+	AllowProxyFallbackToHTTP1 bool `mapstructure:"allow_proxy_fallback_to_http1"`
+	// FallbackErrorThreshold: 回退窗口内累计多少次兼容错误后触发回退
+	FallbackErrorThreshold int `mapstructure:"fallback_error_threshold"`
+	// FallbackWindowSeconds: 统计兼容错误的时间窗口（秒）
+	FallbackWindowSeconds int `mapstructure:"fallback_window_seconds"`
+	// FallbackTTLSeconds: 触发后回退 HTTP/1.1 的持续时间（秒）
+	FallbackTTLSeconds int `mapstructure:"fallback_ttl_seconds"`
 }
 
 // UserMessageQueueConfig 用户消息串行队列配置
@@ -1996,6 +2012,12 @@ func setDefaults() {
 	viper.SetDefault("gateway.openai_ws.scheduler_score_weights.queue", 0.7)
 	viper.SetDefault("gateway.openai_ws.scheduler_score_weights.error_rate", 0.8)
 	viper.SetDefault("gateway.openai_ws.scheduler_score_weights.ttft", 0.5)
+	// OpenAI HTTP upstream protocol strategy
+	viper.SetDefault("gateway.openai_http2.enabled", true)
+	viper.SetDefault("gateway.openai_http2.allow_proxy_fallback_to_http1", true)
+	viper.SetDefault("gateway.openai_http2.fallback_error_threshold", 2)
+	viper.SetDefault("gateway.openai_http2.fallback_window_seconds", 60)
+	viper.SetDefault("gateway.openai_http2.fallback_ttl_seconds", 600)
 	viper.SetDefault("gateway.antigravity_fallback_cooldown_minutes", 1)
 	viper.SetDefault("gateway.antigravity_extra_retries", 10)
 	viper.SetDefault("gateway.max_body_size", int64(256*1024*1024))
@@ -2648,6 +2670,15 @@ func (c *Config) Validate() error {
 	}
 	if c.Gateway.OpenAIResponseHeaderTimeout < 0 {
 		return fmt.Errorf("gateway.openai_response_header_timeout must be non-negative")
+	}
+	if c.Gateway.OpenAIHTTP2.FallbackErrorThreshold < 0 {
+		return fmt.Errorf("gateway.openai_http2.fallback_error_threshold must be non-negative")
+	}
+	if c.Gateway.OpenAIHTTP2.FallbackWindowSeconds < 0 {
+		return fmt.Errorf("gateway.openai_http2.fallback_window_seconds must be non-negative")
+	}
+	if c.Gateway.OpenAIHTTP2.FallbackTTLSeconds < 0 {
+		return fmt.Errorf("gateway.openai_http2.fallback_ttl_seconds must be non-negative")
 	}
 	if strings.TrimSpace(c.Gateway.ConnectionPoolIsolation) != "" {
 		switch c.Gateway.ConnectionPoolIsolation {

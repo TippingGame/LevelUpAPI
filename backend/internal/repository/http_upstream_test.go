@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"sync/atomic"
@@ -101,6 +102,93 @@ func (s *HTTPUpstreamSuite) TestOpenAIProfileUsesSeparateClientCache() {
 
 	require.NotSame(s.T(), defaultEntry, openAIEntry)
 	require.Len(s.T(), svc.clients, 2)
+}
+
+func (s *HTTPUpstreamSuite) TestOpenAIHTTP2ProtocolModes() {
+	s.cfg.Gateway = config.GatewayConfig{
+		OpenAIHTTP2: config.GatewayOpenAIHTTP2Config{
+			Enabled:                   true,
+			AllowProxyFallbackToHTTP1: true,
+		},
+	}
+	svc := s.newService()
+
+	directEntry, err := svc.getClientEntry("", 1, 1, service.HTTPUpstreamProfileOpenAI, false, false)
+	require.NoError(s.T(), err)
+	require.Equal(s.T(), upstreamProtocolModeOpenAIH2, directEntry.protocolMode)
+	directTransport, ok := directEntry.client.Transport.(*http.Transport)
+	require.True(s.T(), ok)
+	require.True(s.T(), directTransport.ForceAttemptHTTP2)
+
+	proxyEntry, err := svc.getClientEntry("http://proxy.local:8080", 1, 1, service.HTTPUpstreamProfileOpenAI, false, false)
+	require.NoError(s.T(), err)
+	require.Equal(s.T(), upstreamProtocolModeOpenAIH2, proxyEntry.protocolMode)
+	require.Contains(s.T(), proxyEntry.poolKey, "proto:"+upstreamProtocolModeOpenAIH2)
+}
+
+func (s *HTTPUpstreamSuite) TestOpenAIHTTP2DisabledUsesHTTP1() {
+	s.cfg.Gateway = config.GatewayConfig{
+		OpenAIHTTP2: config.GatewayOpenAIHTTP2Config{Enabled: false},
+	}
+	svc := s.newService()
+
+	entry, err := svc.getClientEntry("", 1, 1, service.HTTPUpstreamProfileOpenAI, false, false)
+	require.NoError(s.T(), err)
+	require.Equal(s.T(), upstreamProtocolModeOpenAIH1, entry.protocolMode)
+	transport, ok := entry.client.Transport.(*http.Transport)
+	require.True(s.T(), ok)
+	require.False(s.T(), transport.ForceAttemptHTTP2)
+	require.NotNil(s.T(), transport.TLSNextProto)
+}
+
+func (s *HTTPUpstreamSuite) TestOpenAIHTTP2ProxyFallbackActivatesAfterCompatibilityErrors() {
+	s.cfg.Gateway = config.GatewayConfig{
+		ConnectionPoolIsolation: config.ConnectionPoolIsolationAccountProxy,
+		OpenAIHTTP2: config.GatewayOpenAIHTTP2Config{
+			Enabled:                   true,
+			AllowProxyFallbackToHTTP1: true,
+			FallbackErrorThreshold:    2,
+			FallbackWindowSeconds:     60,
+			FallbackTTLSeconds:        600,
+		},
+	}
+	svc := s.newService()
+	proxyKey := "http://proxy.local:8080"
+
+	svc.recordOpenAIHTTP2Failure(service.HTTPUpstreamProfileOpenAI, upstreamProtocolModeOpenAIH2, proxyKey, errors.New("http2: protocol error"))
+	entry, err := svc.getClientEntry(proxyKey, 1, 1, service.HTTPUpstreamProfileOpenAI, false, false)
+	require.NoError(s.T(), err)
+	require.Equal(s.T(), upstreamProtocolModeOpenAIH2, entry.protocolMode)
+
+	svc.recordOpenAIHTTP2Failure(service.HTTPUpstreamProfileOpenAI, upstreamProtocolModeOpenAIH2, proxyKey, errors.New("http2: stream error: stream ID 1; PROTOCOL_ERROR"))
+	fallbackEntry, err := svc.getClientEntry(proxyKey, 1, 1, service.HTTPUpstreamProfileOpenAI, false, false)
+	require.NoError(s.T(), err)
+	require.Equal(s.T(), upstreamProtocolModeOpenAIH1Fallback, fallbackEntry.protocolMode)
+	require.NotSame(s.T(), entry, fallbackEntry)
+
+	transport, ok := fallbackEntry.client.Transport.(*http.Transport)
+	require.True(s.T(), ok)
+	require.False(s.T(), transport.ForceAttemptHTTP2)
+	require.NotNil(s.T(), transport.TLSNextProto)
+}
+
+func (s *HTTPUpstreamSuite) TestOpenAIHTTP2ProxyFallbackIgnoresTimeouts() {
+	s.cfg.Gateway = config.GatewayConfig{
+		OpenAIHTTP2: config.GatewayOpenAIHTTP2Config{
+			Enabled:                   true,
+			AllowProxyFallbackToHTTP1: true,
+			FallbackErrorThreshold:    1,
+			FallbackWindowSeconds:     60,
+			FallbackTTLSeconds:        600,
+		},
+	}
+	svc := s.newService()
+	proxyKey := "http://proxy.local:8080"
+
+	svc.recordOpenAIHTTP2Failure(service.HTTPUpstreamProfileOpenAI, upstreamProtocolModeOpenAIH2, proxyKey, context.DeadlineExceeded)
+	entry, err := svc.getClientEntry(proxyKey, 1, 1, service.HTTPUpstreamProfileOpenAI, false, false)
+	require.NoError(s.T(), err)
+	require.Equal(s.T(), upstreamProtocolModeOpenAIH2, entry.protocolMode)
 }
 
 // TestGetOrCreateClient_InvalidURLReturnsError 测试无效代理 URL 返回错误
