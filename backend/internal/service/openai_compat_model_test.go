@@ -233,8 +233,8 @@ func TestForwardAsAnthropic_APIKeyCompatAppliesReplayAndTodoGuard(t *testing.T) 
 	input := gjson.GetBytes(upstream.lastBody, "input").Array()
 	require.Len(t, input, openAICompatAnthropicReplayMaxTailMessages+1)
 	require.Contains(t, input[0].Get("content.0.text").String(), openAICompatClaudeCodeTodoGuardMarker)
-	require.Equal(t, "message-03", input[1].Get("content").String())
-	require.Equal(t, "message-14", input[len(input)-1].Get("content").String())
+	require.Equal(t, "message-03", input[1].Get("content.0.text").String())
+	require.Equal(t, "message-14", input[len(input)-1].Get("content.0.text").String())
 	require.Equal(t, "stable-cache-key", gjson.GetBytes(upstream.lastBody, "prompt_cache_key").String())
 }
 

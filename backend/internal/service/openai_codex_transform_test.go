@@ -1038,6 +1038,27 @@ func TestExtractSystemMessagesFromInput(t *testing.T) {
 		require.Len(t, input, 0)
 	})
 
+	t.Run("developer input_text content message", func(t *testing.T) {
+		reqBody := map[string]any{
+			"input": []any{
+				map[string]any{
+					"type": "message",
+					"role": "developer",
+					"content": []any{
+						map[string]any{"type": "input_text", "text": "Project rules."},
+					},
+				},
+				map[string]any{"type": "message", "role": "user", "content": "hi"},
+			},
+		}
+		result := extractSystemMessagesFromInput(reqBody)
+		require.True(t, result)
+		require.Equal(t, "Project rules.", reqBody["instructions"])
+		input, ok := reqBody["input"].([]any)
+		require.True(t, ok)
+		require.Len(t, input, 1)
+	})
+
 	t.Run("multiple system messages concatenated", func(t *testing.T) {
 		reqBody := map[string]any{
 			"input": []any{
@@ -1153,6 +1174,35 @@ func TestApplyCodexOAuthTransform_ExtractsSystemMessages(t *testing.T) {
 	instructions, ok := reqBody["instructions"].(string)
 	require.True(t, ok)
 	require.Equal(t, "You are a coding assistant.", instructions)
+}
+
+func TestApplyCodexOAuthTransform_ExtractsDeveloperInputTextMessages(t *testing.T) {
+	reqBody := map[string]any{
+		"model": "gpt-5.1",
+		"input": []any{
+			map[string]any{
+				"type": "message",
+				"role": "developer",
+				"content": []any{
+					map[string]any{"type": "input_text", "text": "You are a coding assistant."},
+				},
+			},
+			map[string]any{"type": "message", "role": "user", "content": []any{
+				map[string]any{"type": "input_text", "text": "Write a function."},
+			}},
+		},
+	}
+
+	result := applyCodexOAuthTransform(reqBody, false, false)
+
+	require.True(t, result.Modified)
+	require.Equal(t, "You are a coding assistant.", reqBody["instructions"])
+	input, ok := reqBody["input"].([]any)
+	require.True(t, ok)
+	require.Len(t, input, 1)
+	msg, ok := input[0].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "user", msg["role"])
 }
 
 func TestIsInstructionsEmpty(t *testing.T) {

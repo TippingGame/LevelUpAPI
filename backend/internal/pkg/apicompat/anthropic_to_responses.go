@@ -35,6 +35,8 @@ func AnthropicToResponses(req *AnthropicRequest) (*ResponsesRequest, error) {
 
 	storeFalse := false
 	out.Store = &storeFalse
+	out.ParallelToolCalls = boolPtr(true)
+	out.Text = &ResponsesText{Verbosity: "medium"}
 
 	if req.MaxTokens > 0 {
 		v := req.MaxTokens
@@ -49,10 +51,10 @@ func AnthropicToResponses(req *AnthropicRequest) (*ResponsesRequest, error) {
 	}
 
 	// Determine reasoning effort: only output_config.effort controls the
-	// level; thinking.type is ignored. Default is high when unset (both
-	// Anthropic and OpenAI default to high).
+	// level; thinking.type is ignored. Default follows the Codex bridge shape,
+	// which uses medium when unset.
 	// Anthropic levels map 1:1 to OpenAI: low→low, medium→medium, high→high, max→xhigh.
-	effort := "high" // default → both sides' default
+	effort := "medium"
 	if req.OutputConfig != nil && req.OutputConfig.Effort != "" {
 		effort = req.OutputConfig.Effort
 	}
@@ -111,16 +113,18 @@ func convertAnthropicToolChoiceToResponses(raw json.RawMessage) (json.RawMessage
 func convertAnthropicToResponsesInput(system json.RawMessage, msgs []AnthropicMessage) ([]ResponsesInputItem, error) {
 	var out []ResponsesInputItem
 
-	// System prompt → system role input item.
+	// System prompt → developer role input item. Keeping it in input preserves
+	// the conversation/cache shape used by Codex-style clients.
 	if len(system) > 0 {
-		sysText, err := parseAnthropicSystemPrompt(system)
+		sysParts, err := parseAnthropicSystemContentParts(system)
 		if err != nil {
 			return nil, err
 		}
-		if sysText != "" {
-			content, _ := json.Marshal(sysText)
+		if len(sysParts) > 0 {
+			content, _ := json.Marshal(sysParts)
 			out = append(out, ResponsesInputItem{
-				Role:    "system",
+				Type:    "message",
+				Role:    "developer",
 				Content: content,
 			})
 		}
@@ -136,24 +140,31 @@ func convertAnthropicToResponsesInput(system json.RawMessage, msgs []AnthropicMe
 	return out, nil
 }
 
-// parseAnthropicSystemPrompt handles the Anthropic system field which can be
-// a plain string or an array of text blocks.
-func parseAnthropicSystemPrompt(raw json.RawMessage) (string, error) {
+// parseAnthropicSystemContentParts handles the Anthropic system field which can
+// be a plain string or an array of text blocks.
+func parseAnthropicSystemContentParts(raw json.RawMessage) ([]ResponsesContentPart, error) {
 	var s string
 	if err := json.Unmarshal(raw, &s); err == nil {
-		return s, nil
+		if s == "" || isAnthropicBillingHeaderText(s) {
+			return nil, nil
+		}
+		return []ResponsesContentPart{{Type: "input_text", Text: s}}, nil
 	}
 	var blocks []AnthropicContentBlock
 	if err := json.Unmarshal(raw, &blocks); err != nil {
-		return "", err
+		return nil, err
 	}
-	var parts []string
+	var parts []ResponsesContentPart
 	for _, b := range blocks {
-		if b.Type == "text" && b.Text != "" {
-			parts = append(parts, b.Text)
+		if b.Type == "text" && b.Text != "" && !isAnthropicBillingHeaderText(b.Text) {
+			parts = append(parts, ResponsesContentPart{Type: "input_text", Text: b.Text})
 		}
 	}
-	return strings.Join(parts, "\n\n"), nil
+	return parts, nil
+}
+
+func isAnthropicBillingHeaderText(text string) bool {
+	return strings.HasPrefix(text, "x-anthropic-billing-header: ")
 }
 
 // anthropicMsgToResponsesItems converts a single Anthropic message into one
@@ -176,8 +187,12 @@ func anthropicUserToResponses(raw json.RawMessage) ([]ResponsesInputItem, error)
 	// Try plain string.
 	var s string
 	if err := json.Unmarshal(raw, &s); err == nil {
-		content, _ := json.Marshal(s)
-		return []ResponsesInputItem{{Role: "user", Content: content}}, nil
+		parts := []ResponsesContentPart{{Type: "input_text", Text: s}}
+		content, err := json.Marshal(parts)
+		if err != nil {
+			return nil, err
+		}
+		return []ResponsesInputItem{{Type: "message", Role: "user", Content: content}}, nil
 	}
 
 	var blocks []AnthropicContentBlock
@@ -226,7 +241,7 @@ func anthropicUserToResponses(raw json.RawMessage) ([]ResponsesInputItem, error)
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, ResponsesInputItem{Role: "user", Content: content})
+		out = append(out, ResponsesInputItem{Type: "message", Role: "user", Content: content})
 	}
 
 	return out, nil
@@ -245,7 +260,7 @@ func anthropicAssistantToResponses(raw json.RawMessage) ([]ResponsesInputItem, e
 		if err != nil {
 			return nil, err
 		}
-		return []ResponsesInputItem{{Role: "assistant", Content: partsJSON}}, nil
+		return []ResponsesInputItem{{Type: "message", Role: "assistant", Content: partsJSON}}, nil
 	}
 
 	var blocks []AnthropicContentBlock
@@ -263,7 +278,7 @@ func anthropicAssistantToResponses(raw json.RawMessage) ([]ResponsesInputItem, e
 		if err != nil {
 			return nil, err
 		}
-		items = append(items, ResponsesInputItem{Role: "assistant", Content: partsJSON})
+		items = append(items, ResponsesInputItem{Type: "message", Role: "assistant", Content: partsJSON})
 	}
 
 	// tool_use → function_call items.
@@ -287,17 +302,14 @@ func anthropicAssistantToResponses(raw json.RawMessage) ([]ResponsesInputItem, e
 	return items, nil
 }
 
-// toResponsesCallID converts an Anthropic tool ID (toolu_xxx / call_xxx) to a
-// Responses API function_call ID that starts with "fc_".
+// toResponsesCallID preserves Anthropic tool IDs as Responses call_id values.
+// Claude Code sends tool_result.tool_use_id back verbatim, and Responses
+// continuation expects the call_id to match the original tool_use id.
 func toResponsesCallID(id string) string {
-	if strings.HasPrefix(id, "fc_") {
-		return id
-	}
-	return "fc_" + id
+	return id
 }
 
-// fromResponsesCallID reverses toResponsesCallID, stripping the "fc_" prefix
-// that was added during request conversion.
+// fromResponsesCallID reverses old prefixed IDs while preserving current IDs.
 func fromResponsesCallID(id string) string {
 	if after, ok := strings.CutPrefix(id, "fc_"); ok {
 		// Only strip if the remainder doesn't look like it was already "fc_" prefixed.
@@ -415,6 +427,7 @@ func convertAnthropicToolsToResponses(tools []AnthropicTool) []ResponsesTool {
 			Name:        t.Name,
 			Description: t.Description,
 			Parameters:  normalizeToolParameters(t.InputSchema),
+			Strict:      boolPtr(false),
 		})
 	}
 	return out
