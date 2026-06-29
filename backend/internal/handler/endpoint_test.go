@@ -159,3 +159,23 @@ func TestGetUpstreamEndpoint_FullFlow(t *testing.T) {
 	got := GetUpstreamEndpoint(c, service.PlatformOpenAI)
 	require.Equal(t, "/v1/responses/compact", got)
 }
+
+func TestResolveRawCCUpstreamEndpoint_APIKeyUnsupportedResponses(t *testing.T) {
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	c.Set(ctxKeyInboundEndpoint, EndpointChatCompletions)
+
+	account := &service.Account{
+		Platform: service.PlatformOpenAI,
+		Type:     service.AccountTypeAPIKey,
+		Extra: map[string]any{
+			"openai_responses_supported": false,
+		},
+	}
+
+	require.Equal(t, EndpointChatCompletions, resolveRawCCUpstreamEndpoint(c, account))
+
+	account.Extra["openai_responses_supported"] = true
+	require.Equal(t, EndpointResponses, resolveRawCCUpstreamEndpoint(c, account))
+}
