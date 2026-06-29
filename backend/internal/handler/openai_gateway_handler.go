@@ -55,6 +55,30 @@ func resolveOpenAIAccountSelectionModel(requestedModel string, mapping service.C
 	return strings.TrimSpace(requestedModel)
 }
 
+type openAIModelBodyReplaceFunc func([]byte, string) []byte
+
+func openAIModelMappedBody(body []byte, mapped bool, mappedModel string, replace openAIModelBodyReplaceFunc) []byte {
+	if !mapped || replace == nil {
+		return body
+	}
+	return replace(body, mappedModel)
+}
+
+func newOpenAIModelMappedBodyCache(body []byte, replace openAIModelBodyReplaceFunc) func(bool, string) []byte {
+	replacedBodies := make(map[string][]byte)
+	return func(mapped bool, mappedModel string) []byte {
+		if !mapped {
+			return body
+		}
+		if cachedBody, ok := replacedBodies[mappedModel]; ok {
+			return cachedBody
+		}
+		replacedBody := openAIModelMappedBody(body, true, mappedModel, replace)
+		replacedBodies[mappedModel] = replacedBody
+		return replacedBody
+	}
+}
+
 func usageRecordContext(parent context.Context, base context.Context) context.Context {
 	if base == nil {
 		base = context.Background()
@@ -223,6 +247,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 
 	setOpsRequestContext(c, reqModel, reqStream, body)
 	setOpsEndpointContext(c, "", int16(service.RequestTypeFromLegacy(reqStream, false)))
+	mappedBody := newOpenAIModelMappedBodyCache(body, h.gatewayService.ReplaceModelInBody)
 
 	// 解析渠道级模型映射
 	// 提前校验 function_call_output 是否具备可关联上下文，避免上游 400。
@@ -400,10 +425,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		forwardStart := time.Now()
 		writerSizeBeforeForward := c.Writer.Size()
 		// 应用渠道模型映射到请求体
-		forwardBody := body
-		if channelMapping.Mapped {
-			forwardBody = h.gatewayService.ReplaceModelInBody(body, channelMapping.MappedModel)
-		}
+		forwardBody := mappedBody(channelMapping.Mapped, channelMapping.MappedModel)
 		result, err := h.gatewayService.Forward(c.Request.Context(), c, account, forwardBody)
 		if service.GetOpsCyberPolicy(c) != nil {
 			h.gatewayService.MarkCyberSessionBlocked(c.Request.Context(), service.CyberSessionBlockKey(currentAPIKey.ID, c, sessionHashBody))
@@ -704,6 +726,7 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 	sessionHash := h.gatewayService.GenerateSessionHash(c, body)
 	promptCacheKey := h.gatewayService.ExtractSessionID(c, body)
 	sessionHash, promptCacheKey = resolveOpenAIMessagesMetadataSession(sessionHash, promptCacheKey, reqModel, body)
+	mappedBodyForMessages := newOpenAIModelMappedBodyCache(body, h.gatewayService.ReplaceModelInBody)
 
 	routeCursor := newAPIKeyGroupRouteCursor(apiKey)
 	if _, ok := routeCursor.current(); !ok {
@@ -856,10 +879,7 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 
 		defaultMappedModel := strings.TrimSpace(effectiveMappedModel)
 		// 应用渠道模型映射到请求体
-		forwardBody := body
-		if channelMappingMsg.Mapped {
-			forwardBody = h.gatewayService.ReplaceModelInBody(body, channelMappingMsg.MappedModel)
-		}
+		forwardBody := mappedBodyForMessages(channelMappingMsg.Mapped, channelMappingMsg.MappedModel)
 		result, err := h.gatewayService.ForwardAsAnthropic(c.Request.Context(), c, account, forwardBody, promptCacheKey, defaultMappedModel)
 		if service.GetOpsCyberPolicy(c) != nil {
 			h.gatewayService.MarkCyberSessionBlocked(c.Request.Context(), service.CyberSessionBlockKey(currentAPIKey.ID, c, body))

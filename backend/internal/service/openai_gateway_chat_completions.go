@@ -174,6 +174,19 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 			return nil, fmt.Errorf("remarshal after codex transform: %w", err)
 		}
 	}
+	if account.Type == AccountTypeAPIKey && promptCacheKey != "" {
+		var reqBody map[string]any
+		if err := json.Unmarshal(responsesBody, &reqBody); err != nil {
+			return nil, fmt.Errorf("unmarshal for prompt cache key injection: %w", err)
+		}
+		if existing, ok := reqBody["prompt_cache_key"].(string); !ok || strings.TrimSpace(existing) == "" {
+			reqBody["prompt_cache_key"] = promptCacheKey
+			responsesBody, err = json.Marshal(reqBody)
+			if err != nil {
+				return nil, fmt.Errorf("remarshal after prompt cache key injection: %w", err)
+			}
+		}
+	}
 
 	// 4b. Apply OpenAI fast policy (may filter service_tier or block the request).
 	updatedBody, policyErr := s.applyOpenAIFastPolicyToBody(ctx, account, upstreamModel, responsesBody)
@@ -202,7 +215,8 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 	}
 
 	if promptCacheKey != "" {
-		upstreamReq.Header.Set("session_id", generateSessionUUID(promptCacheKey))
+		apiKeyID := getAPIKeyIDFromContext(c)
+		upstreamReq.Header.Set("session_id", generateSessionUUID(isolateOpenAISessionID(apiKeyID, promptCacheKey)))
 	}
 
 	// 7. Send request

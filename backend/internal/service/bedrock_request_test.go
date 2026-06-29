@@ -263,6 +263,25 @@ func TestPrepareBedrockRequestBody_BetaHeader(t *testing.T) {
 		assert.False(t, gjson.GetBytes(result, "anthropic_beta").Exists())
 	})
 
+	t.Run("client injected anthropic_beta is removed when final tokens empty", func(t *testing.T) {
+		body := []byte(`{"messages":[{"role":"user","content":"hi"}],"max_tokens":100,"anthropic_beta":["files-api-2025-04-14"]}`)
+
+		result, err := PrepareBedrockRequestBody(body, "us.anthropic.claude-opus-4-6-v1", "files-api-2025-04-14")
+
+		require.NoError(t, err)
+		assert.False(t, gjson.GetBytes(result, "anthropic_beta").Exists())
+	})
+
+	t.Run("unsupported top-level fields are removed", func(t *testing.T) {
+		body := []byte(`{"messages":[{"role":"user","content":"hi"}],"max_tokens":100,"provider":"anthropic","metadata":{"user_id":"u1"}}`)
+
+		result, err := PrepareBedrockRequestBody(body, "us.anthropic.claude-opus-4-6-v1", "")
+
+		require.NoError(t, err)
+		assert.False(t, gjson.GetBytes(result, "provider").Exists())
+		assert.False(t, gjson.GetBytes(result, "metadata").Exists())
+	})
+
 	t.Run("single beta token", func(t *testing.T) {
 		result, err := PrepareBedrockRequestBody([]byte(input), "us.anthropic.claude-opus-4-6-v1", "interleaved-thinking-2025-05-14")
 		require.NoError(t, err)
@@ -650,6 +669,12 @@ func TestResolveBedrockBetaTokens(t *testing.T) {
 		body := []byte(`{"messages":[{"role":"user","content":"hi"}]}`)
 		result := ResolveBedrockBetaTokens("interleaved-thinking-2025-05-14,files-api-2025-04-14", body, "us.anthropic.claude-opus-4-6-v1")
 		assert.Equal(t, []string{"interleaved-thinking-2025-05-14"}, result)
+	})
+
+	t.Run("fine grained tool streaming beta is supported", func(t *testing.T) {
+		body := []byte(`{"messages":[{"role":"user","content":"hi"}]}`)
+		result := ResolveBedrockBetaTokens("fine-grained-tool-streaming-2025-05-14", body, "us.anthropic.claude-opus-4-6-v1")
+		assert.Equal(t, []string{"fine-grained-tool-streaming-2025-05-14"}, result)
 	})
 }
 

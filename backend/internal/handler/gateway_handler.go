@@ -445,12 +445,17 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 						return
 					}
 				}
-				wroteFallback := h.ensureForwardErrorResponse(c, streamStarted)
+				upstreamErrorAlreadyCommunicated := gatewayForwardErrorAlreadyCommunicated(c, writerSizeBeforeForward, err)
+				wroteFallback := false
+				if !upstreamErrorAlreadyCommunicated {
+					wroteFallback = h.ensureForwardErrorResponse(c, streamStarted)
+				}
 				forwardFailedFields := []zap.Field{
 					zap.Int64("account_id", account.ID),
 					zap.String("account_name", account.Name),
 					zap.String("account_platform", account.Platform),
 					zap.Bool("fallback_error_response_written", wroteFallback),
+					zap.Bool("upstream_error_response_already_written", upstreamErrorAlreadyCommunicated),
 					zap.Error(err),
 				}
 				if account.Proxy != nil {
@@ -990,12 +995,17 @@ routeLoop:
 						return
 					}
 				}
-				wroteFallback := h.ensureForwardErrorResponse(c, streamStarted)
+				upstreamErrorAlreadyCommunicated := gatewayForwardErrorAlreadyCommunicated(c, writerSizeBeforeForward, err)
+				wroteFallback := false
+				if !upstreamErrorAlreadyCommunicated {
+					wroteFallback = h.ensureForwardErrorResponse(c, streamStarted)
+				}
 				forwardFailedFields := []zap.Field{
 					zap.Int64("account_id", account.ID),
 					zap.String("account_name", account.Name),
 					zap.String("account_platform", account.Platform),
 					zap.Bool("fallback_error_response_written", wroteFallback),
+					zap.Bool("upstream_error_response_already_written", upstreamErrorAlreadyCommunicated),
 					zap.Error(err),
 				}
 				if account.Proxy != nil {
@@ -1789,6 +1799,21 @@ func (h *GatewayHandler) handleStreamingAwareError(c *gin.Context, status int, e
 
 	// Normal case: return JSON response with proper status code
 	h.errorResponse(c, status, errType, message)
+}
+
+func gatewayForwardErrorAlreadyCommunicated(c *gin.Context, writerSizeBeforeForward int, err error) bool {
+	if err == nil || c == nil || c.Writer == nil {
+		return false
+	}
+	if c.Writer.Size() == writerSizeBeforeForward {
+		return false
+	}
+
+	contentType := strings.ToLower(strings.TrimSpace(c.Writer.Header().Get("Content-Type")))
+	if contentType == "" {
+		return false
+	}
+	return !strings.Contains(contentType, "text/event-stream")
 }
 
 // ensureForwardErrorResponse 在 Forward 返回错误但尚未写响应时补写统一错误响应。

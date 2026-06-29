@@ -2,8 +2,10 @@ package handler
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -64,4 +66,90 @@ func TestGatewayEnsureForwardErrorResponse_ResponsesRouteAfterWrittenEmitsRespon
 	assert.Contains(t, body, ":\n\n")
 	assert.Contains(t, body, "event: response.failed\n")
 	assert.Contains(t, body, `"type":"response.failed"`)
+}
+
+func TestGatewayForwardErrorAlreadyCommunicated(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	t.Run("json error already written", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		c.Request = httptest.NewRequest(http.MethodPost, EndpointMessages, nil)
+		before := c.Writer.Size()
+		c.JSON(http.StatusBadGateway, gin.H{
+			"type": "error",
+			"error": gin.H{
+				"type":    "upstream_error",
+				"message": "Upstream request failed",
+			},
+		})
+
+		reported := gatewayForwardErrorAlreadyCommunicated(c, before, errors.New("upstream error"))
+
+		require.True(t, reported)
+		assert.NotContains(t, w.Body.String(), `data: {"type":"error"`)
+	})
+
+	t.Run("sse ping still needs fallback", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		c.Request = httptest.NewRequest(http.MethodPost, EndpointMessages, nil)
+		c.Header("Content-Type", "text/event-stream")
+		before := c.Writer.Size()
+		_, _ = c.Writer.WriteString(":\n\n")
+
+		reported := gatewayForwardErrorAlreadyCommunicated(c, before, errors.New("stream read error"))
+
+		require.False(t, reported)
+	})
+
+	t.Run("no write still needs fallback", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		c.Request = httptest.NewRequest(http.MethodPost, EndpointMessages, nil)
+
+		reported := gatewayForwardErrorAlreadyCommunicated(c, c.Writer.Size(), errors.New("upstream request failed"))
+
+		require.False(t, reported)
+	})
+
+	t.Run("upstream json passthrough via c.Data", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		c.Request = httptest.NewRequest(http.MethodPost, EndpointMessages, nil)
+		before := c.Writer.Size()
+		upstreamBody := []byte(`{"type":"error","error":{"type":"upstream_error","message":"version too low"}}`)
+		c.Data(http.StatusBadRequest, "application/json", upstreamBody)
+
+		reported := gatewayForwardErrorAlreadyCommunicated(c, before, errors.New("upstream error: 400 message=version too low"))
+
+		require.True(t, reported)
+		body := w.Body.String()
+		assert.NotContains(t, body, `data: {"type":"error"`)
+		assert.Equal(t, 1, strings.Count(body, `"type":"error"`))
+	})
+
+	t.Run("streaming error still needs fallback", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		c.Request = httptest.NewRequest(http.MethodPost, EndpointMessages, nil)
+		c.Header("Content-Type", "text/event-stream")
+		before := c.Writer.Size()
+		_, _ = c.Writer.WriteString("event: message_start\ndata: {\"type\":\"message_start\"}\n\n")
+
+		reported := gatewayForwardErrorAlreadyCommunicated(c, before, errors.New("stream read error"))
+
+		require.False(t, reported)
+	})
+
+	t.Run("nil error never reports communicated", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		c.Request = httptest.NewRequest(http.MethodPost, EndpointMessages, nil)
+		c.JSON(http.StatusOK, gin.H{"ok": true})
+
+		reported := gatewayForwardErrorAlreadyCommunicated(c, 0, nil)
+
+		require.False(t, reported)
+	})
 }
