@@ -339,7 +339,6 @@ export default {
     disabled: 'Disabled',
     total: 'Total',
     balance: 'Balance',
-    balanceExchangeRate: '1 coins = 1 ￥',
     balanceExchangeRateTip: 'Top-up rate: 1 coins = 1 ￥',
     points: 'Points',
     available: 'Available',

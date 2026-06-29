@@ -339,7 +339,6 @@ export default {
     disabled: '已禁用',
     total: '总计',
     balance: '余额',
-    balanceExchangeRate: '1 coins = 1 ￥',
     balanceExchangeRateTip: '充值比例：1 coins = 1 ￥',
     points: '积分',
     available: '可用',
