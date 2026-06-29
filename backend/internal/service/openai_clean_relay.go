@@ -113,7 +113,7 @@ func (s *OpenAIGatewayService) SelectAccountWithCleanRelayScheduler(
 		effectiveModel = strings.TrimSpace(requestedModel)
 	}
 	if s.accountShareModeService != nil && groupID != nil && *groupID > 0 && s.accountShareModeService.IsModeGroup(ctx, *groupID) {
-		return s.SelectAccountWithScheduler(
+		return s.SelectAccountWithSchedulerForCapability(
 			ctx,
 			groupID,
 			previousResponseID,
@@ -121,6 +121,7 @@ func (s *OpenAIGatewayService) SelectAccountWithCleanRelayScheduler(
 			effectiveModel,
 			excludedIDs,
 			requiredTransport,
+			OpenAIEndpointCapabilityChatCompletions,
 			requireCompact,
 		)
 	}
@@ -140,7 +141,7 @@ func (s *OpenAIGatewayService) SelectAccountWithCleanRelayScheduler(
 	if hit {
 		return selection, decision, nil
 	}
-	return s.SelectAccountWithScheduler(
+	return s.SelectAccountWithSchedulerForCapability(
 		ctx,
 		groupID,
 		previousResponseID,
@@ -148,6 +149,7 @@ func (s *OpenAIGatewayService) SelectAccountWithCleanRelayScheduler(
 		effectiveModel,
 		excludedIDs,
 		requiredTransport,
+		OpenAIEndpointCapabilityChatCompletions,
 		requireCompact,
 	)
 }
@@ -256,7 +258,7 @@ func (s *OpenAIGatewayService) selectOpenAICleanRelayAccountByID(
 	if !s.isOpenAIAccountTransportCompatible(account, requiredTransport) {
 		return nil, nil
 	}
-	account = s.recheckSelectedOpenAIAccountFromDB(ctx, groupID, account, requestedModel, requireCompact)
+	account = s.recheckSelectedOpenAIAccountFromDB(ctx, groupID, account, requestedModel, requireCompact, OpenAIEndpointCapabilityChatCompletions)
 	if account == nil || !s.isOpenAICleanRelayAccountCandidate(ctx, account) {
 		return nil, nil
 	}
