@@ -47,12 +47,26 @@
         <!-- Balance Display -->
         <div
           v-if="user"
-          class="hidden items-center gap-2 rounded-xl bg-primary-50 px-3 py-1.5 dark:bg-primary-900/20 sm:flex"
+          class="group relative hidden items-center gap-2 rounded-xl bg-primary-50 px-3 py-1.5 dark:bg-primary-900/20 sm:flex"
+          :title="balanceExchangeRateTip"
+          :aria-label="balanceExchangeRateTip"
         >
           <Icon name="coin" size="sm" class="text-primary-600 dark:text-primary-400" />
-          <span class="text-sm font-semibold text-primary-700 dark:text-primary-300">
-            {{ formatGameCoins(user.balance) }}
-          </span>
+          <div class="leading-tight">
+            <span class="block text-sm font-semibold text-primary-700 dark:text-primary-300">
+              {{ formatGameCoins(user.balance) }}
+            </span>
+            <span class="block whitespace-nowrap text-[10px] font-medium text-primary-500 dark:text-primary-300/80">
+              {{ balanceExchangeRateText }}
+            </span>
+          </div>
+          <div
+            role="tooltip"
+            class="pointer-events-none absolute right-0 top-full z-50 mt-2 hidden max-w-[220px] whitespace-nowrap rounded-lg bg-gray-900 px-3 py-2 text-xs font-medium text-white shadow-xl ring-1 ring-white/10 group-hover:block dark:bg-gray-800"
+          >
+            {{ balanceExchangeRateTip }}
+            <div class="absolute -top-1 right-6 h-2 w-2 rotate-45 bg-gray-900 dark:bg-gray-800"></div>
+          </div>
         </div>
 
         <!-- User Dropdown -->
@@ -100,6 +114,9 @@
                 </div>
                 <div class="text-sm font-semibold text-primary-600 dark:text-primary-400">
                   {{ formatGameCoins(user.balance) }}
+                </div>
+                <div class="mt-0.5 text-[11px] font-medium text-primary-500 dark:text-primary-300">
+                  {{ balanceExchangeRateText }}
                 </div>
               </div>
 
@@ -215,6 +232,8 @@ const dropdownRef = ref<HTMLElement | null>(null)
 const contactInfo = computed(() => appStore.contactInfo)
 const docUrl = computed(() => appStore.docUrl)
 const avatarUrl = computed(() => user.value?.avatar_url?.trim() || '')
+const balanceExchangeRateText = computed(() => t('common.balanceExchangeRate'))
+const balanceExchangeRateTip = computed(() => t('common.balanceExchangeRateTip'))
 
 // 只在标准模式的管理员下显示新手引导按钮
 const showOnboardingButton = computed(() => {

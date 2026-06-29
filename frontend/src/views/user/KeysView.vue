@@ -1180,7 +1180,6 @@ import type { BatchApiKeyUsageStats } from '@/api/usage'
 import { formatDateTime } from '@/utils/format'
 import { maskApiKey } from '@/utils/maskApiKey'
 import { buildCcSwitchImportDeeplink } from '@/utils/ccswitchImport'
-import { buildImagePlaygroundImportUrl } from '@/utils/imagePlaygroundImport'
 import { formatGameCoins } from '@/utils/gameCurrency'
 
 // Helper to format date for datetime-local input
@@ -2011,22 +2010,8 @@ const executeCcsImport = (row: ApiKey, clientType: 'claude' | 'gemini') => {
   }
 }
 
-const openImagePlayground = (row: ApiKey) => {
-  try {
-    const baseUrl = publicSettings.value?.api_base_url || window.location.origin
-    const siteName = (publicSettings.value?.site_name || 'Pixel API').trim() || 'Pixel API'
-    const url = buildImagePlaygroundImportUrl({
-      apiBaseUrl: baseUrl,
-      apiKey: row.key,
-      keyId: row.id,
-      keyName: row.name,
-      sourceName: siteName
-    })
-
-    window.open(url, '_blank', 'noopener,noreferrer')
-  } catch {
-    appStore.showError(t('keys.openImagePlaygroundFailed'))
-  }
+const openImagePlayground = (_row: ApiKey) => {
+  appStore.showInfo(t('keys.imagePlaygroundUnavailable'))
 }
 
 const handleCcsClientSelect = (clientType: 'claude' | 'gemini') => {
