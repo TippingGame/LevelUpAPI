@@ -6028,6 +6028,22 @@ func (s *GatewayService) handleStreamingResponseAnthropicAPIKeyPassthrough(
 	if intervalTicker != nil {
 		intervalCh = intervalTicker.C
 	}
+	keepaliveInterval := time.Duration(0)
+	if s.cfg != nil && s.cfg.Gateway.StreamKeepaliveInterval > 0 {
+		keepaliveInterval = time.Duration(s.cfg.Gateway.StreamKeepaliveInterval) * time.Second
+	}
+	var keepaliveTicker *time.Ticker
+	if keepaliveInterval > 0 {
+		keepaliveTicker = time.NewTicker(keepaliveInterval)
+		defer keepaliveTicker.Stop()
+	}
+	var keepaliveCh <-chan time.Time
+	if keepaliveTicker != nil {
+		keepaliveCh = keepaliveTicker.C
+	}
+	lastDataAt := time.Now()
+	inPartialEvent := false
+
 	streamIdleTimedOut := func() bool {
 		if streamInterval <= 0 {
 			return false
@@ -6101,6 +6117,10 @@ func (s *GatewayService) handleStreamingResponseAnthropicAPIKeyPassthrough(
 				} else if line == "" {
 					// 按 SSE 事件边界刷出，减少每行 flush 带来的 syscall 开销。
 					flusher.Flush()
+					lastDataAt = time.Now()
+					inPartialEvent = false
+				} else {
+					inPartialEvent = true
 				}
 			}
 
@@ -6117,6 +6137,21 @@ func (s *GatewayService) handleStreamingResponseAnthropicAPIKeyPassthrough(
 				s.rateLimitService.HandleStreamTimeout(ctx, account, model)
 			}
 			return &streamingResult{usage: usage, firstTokenMs: firstTokenMs}, fmt.Errorf("stream data interval timeout")
+
+		case <-keepaliveCh:
+			if clientDisconnected || inPartialEvent {
+				continue
+			}
+			if time.Since(lastDataAt) < keepaliveInterval {
+				continue
+			}
+			if _, err := fmt.Fprint(w, "event: ping\ndata: {\"type\": \"ping\"}\n\n"); err != nil {
+				clientDisconnected = true
+				logger.LegacyPrintf("service.gateway", "[Anthropic passthrough] Client disconnected during keepalive ping, continue draining upstream for usage: account=%d", account.ID)
+				continue
+			}
+			flusher.Flush()
+			lastDataAt = time.Now()
 		}
 	}
 }
@@ -9557,6 +9592,7 @@ func (s *GatewayService) calculateImageCost(
 	billingModel string,
 	multiplier float64,
 ) *CostBreakdown {
+	sizeTier := NormalizeImageBillingTierOrDefault(result.ImageSize)
 	if resolved := s.resolveChannelPricing(ctx, billingModel, apiKey); resolved != nil {
 		tokens := UsageTokens{
 			InputTokens:       result.Usage.InputTokens,
@@ -9569,7 +9605,8 @@ func (s *GatewayService) calculateImageCost(
 			Model:          billingModel,
 			GroupID:        &gid,
 			Tokens:         tokens,
-			RequestCount:   1,
+			RequestCount:   result.ImageCount,
+			SizeTier:       sizeTier,
 			RateMultiplier: multiplier,
 			Resolver:       s.resolver,
 			Resolved:       resolved,
@@ -9589,7 +9626,7 @@ func (s *GatewayService) calculateImageCost(
 			Price4K: apiKey.Group.ImagePrice4K,
 		}
 	}
-	return s.billingService.CalculateImageCost(billingModel, result.ImageSize, result.ImageCount, groupConfig, multiplier)
+	return s.billingService.CalculateImageCost(billingModel, sizeTier, result.ImageCount, groupConfig, multiplier)
 }
 
 // calculateTokenCost 计算 Token 计费：根据 opts 决定走普通/长上下文/渠道统一计费。

@@ -48,6 +48,28 @@ func TestCalculateImageCost_GroupCustomPricing(t *testing.T) {
 	require.InDelta(t, 0.30, cost.TotalCost, 0.0001)
 }
 
+func TestCalculateImageCost_NormalizesRawImageSize(t *testing.T) {
+	svc := &BillingService{}
+
+	price1K := 0.10
+	price2K := 0.20
+	price4K := 0.40
+	groupConfig := &ImagePriceConfig{
+		Price1K: &price1K,
+		Price2K: &price2K,
+		Price4K: &price4K,
+	}
+
+	cost := svc.CalculateImageCost("gemini-3-pro-image", "1024x1024", 1, groupConfig, 1.0)
+	require.InDelta(t, 0.10, cost.TotalCost, 0.0001)
+
+	cost = svc.CalculateImageCost("gemini-3-pro-image", "4k", 1, groupConfig, 1.0)
+	require.InDelta(t, 0.40, cost.TotalCost, 0.0001)
+
+	cost = svc.CalculateImageCost("gemini-3-pro-image", "auto", 1, groupConfig, 1.0)
+	require.InDelta(t, 0.20, cost.TotalCost, 0.0001)
+}
+
 // TestCalculateImageCost_4KDoublePrice 测试 4K 默认价格翻倍
 func TestCalculateImageCost_4KDoublePrice(t *testing.T) {
 	svc := &BillingService{}
