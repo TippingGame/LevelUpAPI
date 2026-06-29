@@ -330,6 +330,89 @@ func TestForwardAsChatCompletions_RawChatSilentRefusalTriggersFailover(t *testin
 	require.Empty(t, rec.Body.String())
 }
 
+func TestForwardAsChatCompletions_BufferedResponseFailedTriggersFailover(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(nil))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	upstreamSSE := strings.Join([]string{
+		"event: response.failed",
+		`data: {"type":"response.failed","response":{"id":"resp_failed","object":"response","model":"gpt-5.5","status":"failed","output":[],"error":{"code":"upstream_error","message":"input exceeds the context window"}}}`,
+		"",
+	}, "\n")
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}, "x-request-id": []string{"rid_chat_failed_buffered"}},
+		Body:       io.NopCloser(strings.NewReader(upstreamSSE)),
+	}}
+
+	svc := &OpenAIGatewayService{
+		cfg:          &config.Config{},
+		httpUpstream: upstream,
+	}
+	account := &Account{
+		ID:          1,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Credentials: map[string]any{"api_key": "sk-test", "base_url": "https://api.openai.com"},
+	}
+
+	result, err := svc.ForwardAsChatCompletions(context.Background(), c, account, []byte(`{"model":"gpt-5.5","stream":false,"messages":[{"role":"user","content":"large prompt"}]}`), "", "")
+	require.Error(t, err)
+	require.Nil(t, result)
+	var failoverErr *UpstreamFailoverError
+	require.ErrorAs(t, err, &failoverErr)
+	require.Equal(t, http.StatusBadGateway, failoverErr.StatusCode)
+	require.Contains(t, string(failoverErr.ResponseBody), "input exceeds the context window")
+	require.False(t, c.Writer.Written())
+}
+
+func TestForwardAsChatCompletions_StreamResponseFailedTriggersFailoverBeforeFlush(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(nil))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	upstreamSSE := strings.Join([]string{
+		`data: {"type":"response.created","response":{"id":"resp_failed","model":"gpt-5.5","status":"in_progress","output":[]}}`,
+		"",
+		"event: response.failed",
+		`data: {"type":"response.failed","response":{"id":"resp_failed","object":"response","model":"gpt-5.5","status":"failed","output":[],"error":{"code":"upstream_error","message":"input exceeds the context window"}}}`,
+		"",
+	}, "\n")
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}, "x-request-id": []string{"rid_chat_failed_stream"}},
+		Body:       io.NopCloser(strings.NewReader(upstreamSSE)),
+	}}
+
+	svc := &OpenAIGatewayService{
+		cfg:          &config.Config{},
+		httpUpstream: upstream,
+	}
+	account := &Account{
+		ID:          1,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Credentials: map[string]any{"api_key": "sk-test", "base_url": "https://api.openai.com"},
+	}
+
+	body := []byte(`{"model":"gpt-5.5","stream":true,"messages":[{"role":"user","content":"` + strings.Repeat("large prompt ", 6000) + `"}]}`)
+	result, err := svc.ForwardAsChatCompletions(context.Background(), c, account, body, "", "")
+	require.Error(t, err)
+	require.Nil(t, result)
+	var failoverErr *UpstreamFailoverError
+	require.ErrorAs(t, err, &failoverErr)
+	require.Equal(t, http.StatusBadGateway, failoverErr.StatusCode)
+	require.Contains(t, string(failoverErr.ResponseBody), "input exceeds the context window")
+	require.False(t, c.Writer.Written())
+}
+
 func TestForwardAsChatCompletions_StreamsUsageWithoutClientStreamOptions(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 

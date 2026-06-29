@@ -48,6 +48,28 @@ func TestClaudeCodeValidator_MessagesWithoutProbeStillNeedStrictValidation(t *te
 	require.False(t, ok)
 }
 
+func TestClaudeCodeValidator_CountTokensPathUAOnly(t *testing.T) {
+	validator := NewClaudeCodeValidator()
+	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/messages/count_tokens", nil)
+	req.Header.Set("User-Agent", "claude-cli/2.1.156 (Claude Code)")
+
+	ok := validator.Validate(req, map[string]any{
+		"model": "claude-opus-4-8",
+	})
+	require.True(t, ok)
+}
+
+func TestClaudeCodeValidator_CountTokensPathRequiresUA(t *testing.T) {
+	validator := NewClaudeCodeValidator()
+	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/messages/count_tokens", nil)
+	req.Header.Set("User-Agent", "curl/8.0.0")
+
+	ok := validator.Validate(req, map[string]any{
+		"model": "claude-opus-4-8",
+	})
+	require.False(t, ok)
+}
+
 func TestClaudeCodeValidator_NonMessagesPathUAOnly(t *testing.T) {
 	validator := NewClaudeCodeValidator()
 	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/models", nil)
