@@ -137,6 +137,80 @@ func TestGenerateSessionHash_DifferentMessagesProduceDifferentHash(t *testing.T)
 	require.NotEqual(t, h1, h2, "same system but different messages should produce different hashes")
 }
 
+func TestGenerateSessionHash_ResponsesDifferentInputProducesDifferentHash(t *testing.T) {
+	svc := &GatewayService{}
+	ctx := &SessionContext{ClientIP: "1.2.3.4", UserAgent: "codex_cli_rs/0.1.0", APIKeyID: 1}
+
+	first, err := ParseGatewayRequest([]byte(`{"input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"help me with Go"}]}]}`), "responses")
+	require.NoError(t, err)
+	first.SessionContext = ctx
+	second, err := ParseGatewayRequest([]byte(`{"input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"help me with Python"}]}]}`), "responses")
+	require.NoError(t, err)
+	second.SessionContext = ctx
+
+	h1 := svc.GenerateSessionHash(first)
+	h2 := svc.GenerateSessionHash(second)
+	require.NotEmpty(t, h1)
+	require.NotEmpty(t, h2)
+	require.NotEqual(t, h1, h2, "different Responses input should produce different hashes for the same client")
+}
+
+func TestGenerateSessionHash_ResponsesGrowingInputKeepsStableHash(t *testing.T) {
+	svc := &GatewayService{}
+	ctx := &SessionContext{ClientIP: "1.2.3.4", UserAgent: "codex_cli_rs/0.1.0", APIKeyID: 1}
+
+	round1, err := ParseGatewayRequest([]byte(`{"input":[{"type":"message","role":"developer","content":[{"type":"input_text","text":"Be concise."}]},{"type":"message","role":"user","content":[{"type":"input_text","text":"help me with Go"}]}]}`), "responses")
+	require.NoError(t, err)
+	round1.SessionContext = ctx
+	round2, err := ParseGatewayRequest([]byte(`{"input":[{"type":"message","role":"developer","content":[{"type":"input_text","text":"Be concise."}]},{"type":"message","role":"user","content":[{"type":"input_text","text":"help me with Go"}]},{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Sure."}]},{"type":"message","role":"user","content":[{"type":"input_text","text":"add tests"}]}]}`), "responses")
+	require.NoError(t, err)
+	round2.SessionContext = ctx
+
+	h1 := svc.GenerateSessionHash(round1)
+	h2 := svc.GenerateSessionHash(round2)
+	require.NotEmpty(t, h1)
+	require.Equal(t, h1, h2, "Responses input growth should preserve the hash when the conversation prefix is stable")
+}
+
+func TestGenerateSessionHash_MessagesPathIgnoresResponsesInput(t *testing.T) {
+	svc := &GatewayService{}
+	ctx := &SessionContext{ClientIP: "1.2.3.4", UserAgent: "test", APIKeyID: 1}
+
+	first, err := ParseGatewayRequest([]byte(`{"messages":[{"role":"user","content":"hello"}],"input":"first"}`), "responses")
+	require.NoError(t, err)
+	first.SessionContext = ctx
+	second, err := ParseGatewayRequest([]byte(`{"messages":[{"role":"user","content":"hello"}],"input":"second"}`), "responses")
+	require.NoError(t, err)
+	second.SessionContext = ctx
+
+	require.Equal(t, svc.GenerateSessionHash(first), svc.GenerateSessionHash(second),
+		"existing messages fallback should remain authoritative when messages contain text")
+}
+
+func TestGenerateSessionHash_ResponsesInputDoesNotOverrideHigherPrioritySources(t *testing.T) {
+	svc := &GatewayService{}
+	ctx := &SessionContext{ClientIP: "1.2.3.4", UserAgent: "test", APIKeyID: 1}
+
+	t.Run("metadata user id", func(t *testing.T) {
+		metadata := "user_a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2_account__session_123e4567-e89b-12d3-a456-426614174000"
+		parsed, err := ParseGatewayRequest([]byte(`{"metadata":{"user_id":"`+metadata+`"},"input":"hello"}`), "responses")
+		require.NoError(t, err)
+		parsed.SessionContext = ctx
+		require.Equal(t, "123e4567-e89b-12d3-a456-426614174000", svc.GenerateSessionHash(parsed))
+	})
+
+	t.Run("cache control", func(t *testing.T) {
+		body := []byte(`{"system":[{"type":"text","text":"stable cache anchor","cache_control":{"type":"ephemeral"}}],"input":"hello"}`)
+		first, err := ParseGatewayRequest(body, "responses")
+		require.NoError(t, err)
+		first.SessionContext = ctx
+		second, err := ParseGatewayRequest(body, "responses")
+		require.NoError(t, err)
+		second.SessionContext = &SessionContext{ClientIP: "9.8.7.6", UserAgent: "other", APIKeyID: 2}
+		require.Equal(t, svc.GenerateSessionHash(first), svc.GenerateSessionHash(second))
+	})
+}
+
 // ============ SessionContext 核心测试 ============
 
 func TestGenerateSessionHash_DifferentSessionContextProducesDifferentHash(t *testing.T) {

@@ -795,6 +795,7 @@ func (s *GatewayService) GenerateSessionHash(parsed *ParsedRequest) string {
 			_, _ = combined.WriteString(systemText)
 		}
 	}
+	contentStart := combined.Len()
 	for _, msg := range parsed.Messages {
 		if m, ok := msg.(map[string]any); ok {
 			if content, exists := m["content"]; exists {
@@ -814,6 +815,11 @@ func (s *GatewayService) GenerateSessionHash(parsed *ParsedRequest) string {
 			}
 		}
 	}
+	if combined.Len() == contentStart {
+		if inputText := s.extractResponsesSessionAnchor(parsed.Input); inputText != "" {
+			_, _ = combined.WriteString(inputText)
+		}
+	}
 	if combined.Len() > 0 {
 		hash := s.hashContent(combined.String())
 		slog.Info("sticky.hash_source",
@@ -825,6 +831,70 @@ func (s *GatewayService) GenerateSessionHash(parsed *ParsedRequest) string {
 	}
 
 	return ""
+}
+
+func (s *GatewayService) extractResponsesSessionAnchor(input any) string {
+	switch v := input.(type) {
+	case string:
+		return v
+	case []any:
+		var builder strings.Builder
+		for _, item := range v {
+			switch typed := item.(type) {
+			case string:
+				return typed
+			case map[string]any:
+				role, _ := typed["role"].(string)
+				switch role {
+				case "system", "developer":
+					if text := s.extractResponsesContentText(typed["content"]); text != "" {
+						_, _ = builder.WriteString(text)
+					}
+				case "user":
+					if text := s.extractResponsesContentText(typed["content"]); text != "" {
+						_, _ = builder.WriteString(text)
+					}
+					return builder.String()
+				default:
+					if itemType, _ := typed["type"].(string); itemType == "input_text" {
+						if text, _ := typed["text"].(string); text != "" {
+							_, _ = builder.WriteString(text)
+						}
+						return builder.String()
+					}
+				}
+			}
+		}
+		return builder.String()
+	case map[string]any:
+		return s.extractResponsesContentText(v["content"])
+	default:
+		return ""
+	}
+}
+
+func (s *GatewayService) extractResponsesContentText(content any) string {
+	switch v := content.(type) {
+	case string:
+		return v
+	case []any:
+		var builder strings.Builder
+		for _, part := range v {
+			partMap, ok := part.(map[string]any)
+			if !ok {
+				continue
+			}
+			switch partMap["type"] {
+			case "input_text", "text":
+				if text, ok := partMap["text"].(string); ok {
+					_, _ = builder.WriteString(text)
+				}
+			}
+		}
+		return builder.String()
+	default:
+		return ""
+	}
 }
 
 // BindStickySession sets session -> account binding with standard TTL.

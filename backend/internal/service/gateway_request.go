@@ -71,6 +71,7 @@ type ParsedRequest struct {
 	MetadataUserID  string          // metadata.user_id（用于会话亲和）
 	System          any             // system 字段内容
 	Messages        []any           // messages 数组
+	Input           any             // Responses API input 字段内容
 	HasSystem       bool            // 是否包含 system 字段（包含 null 也视为显式传入）
 	ThinkingEnabled bool            // 是否开启 thinking（部分平台会影响最终模型名）
 	OutputEffort    string          // output_config.effort（Claude API 的推理强度控制）
@@ -238,6 +239,21 @@ func ParseGatewayRequest(body []byte, protocol string) (*ParsedRequest, error) {
 				return nil, err
 			}
 			parsed.Messages = messages
+		}
+
+		if protocol == "responses" {
+			if input := gjson.Get(jsonStr, "input"); input.Exists() {
+				switch input.Type {
+				case gjson.String:
+					parsed.Input = input.String()
+				default:
+					var parsedInput any
+					if err := json.Unmarshal(sliceRawFromBody(body, input), &parsedInput); err != nil {
+						return nil, err
+					}
+					parsed.Input = parsedInput
+				}
+			}
 		}
 	}
 

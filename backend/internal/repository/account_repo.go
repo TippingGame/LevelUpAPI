@@ -2768,7 +2768,10 @@ func mergeGroupIDs(a []int64, b []int64) []int64 {
 	return out
 }
 
-func buildSchedulerGroupPayload(groupIDs []int64) map[string]any {
+// buildSchedulerGroupPayload must return an untyped nil for empty groups.
+// enqueueSchedulerOutbox checks payload as an interface; a typed nil map would
+// marshal as "null" and produce a different dedup key from literal nil.
+func buildSchedulerGroupPayload(groupIDs []int64) any {
 	if len(groupIDs) == 0 {
 		return nil
 	}
