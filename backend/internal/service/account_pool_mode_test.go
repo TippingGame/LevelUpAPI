@@ -115,3 +115,135 @@ func TestGetPoolModeRetryCount(t *testing.T) {
 		})
 	}
 }
+
+func TestGetPoolModeRetryStatusCodes(t *testing.T) {
+	tests := []struct {
+		name     string
+		account  *Account
+		expected []int
+	}{
+		{
+			name:     "nil_account_returns_nil",
+			account:  nil,
+			expected: nil,
+		},
+		{
+			name: "missing_key_returns_nil",
+			account: &Account{
+				Type:        AccountTypeAPIKey,
+				Platform:    PlatformOpenAI,
+				Credentials: map[string]any{"pool_mode": true},
+			},
+			expected: nil,
+		},
+		{
+			name: "empty_slice_is_preserved",
+			account: &Account{
+				Credentials: map[string]any{
+					"pool_mode_retry_status_codes": []any{},
+				},
+			},
+			expected: []int{},
+		},
+		{
+			name: "normalizes_mixed_values",
+			account: &Account{
+				Credentials: map[string]any{
+					"pool_mode_retry_status_codes": []any{
+						float64(503),
+						"502",
+						json.Number("529"),
+						int64(503),
+						99,
+						600,
+						"bad",
+					},
+				},
+			},
+			expected: []int{502, 503, 529},
+		},
+		{
+			name: "non_array_returns_nil",
+			account: &Account{
+				Credentials: map[string]any{
+					"pool_mode_retry_status_codes": "502,503",
+				},
+			},
+			expected: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.expected, tt.account.GetPoolModeRetryStatusCodes())
+		})
+	}
+}
+
+func TestIsPoolModeRetryableStatus_Account(t *testing.T) {
+	tests := []struct {
+		name       string
+		account    *Account
+		statusCode int
+		expected   bool
+	}{
+		{
+			name:       "nil_account_uses_default_429",
+			account:    nil,
+			statusCode: 429,
+			expected:   true,
+		},
+		{
+			name: "unconfigured_uses_default_403",
+			account: &Account{
+				Credentials: map[string]any{"pool_mode": true},
+			},
+			statusCode: 403,
+			expected:   true,
+		},
+		{
+			name: "unconfigured_rejects_502",
+			account: &Account{
+				Credentials: map[string]any{"pool_mode": true},
+			},
+			statusCode: 502,
+			expected:   false,
+		},
+		{
+			name: "configured_list_overrides_default",
+			account: &Account{
+				Credentials: map[string]any{
+					"pool_mode_retry_status_codes": []any{float64(502), float64(503)},
+				},
+			},
+			statusCode: 401,
+			expected:   false,
+		},
+		{
+			name: "configured_list_adds_502",
+			account: &Account{
+				Credentials: map[string]any{
+					"pool_mode_retry_status_codes": []any{float64(502), float64(503)},
+				},
+			},
+			statusCode: 502,
+			expected:   true,
+		},
+		{
+			name: "empty_list_disables_default_codes",
+			account: &Account{
+				Credentials: map[string]any{
+					"pool_mode_retry_status_codes": []any{},
+				},
+			},
+			statusCode: 429,
+			expected:   false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.expected, tt.account.IsPoolModeRetryableStatus(tt.statusCode))
+		})
+	}
+}

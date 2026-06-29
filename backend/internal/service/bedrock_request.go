@@ -188,6 +188,8 @@ func PrepareBedrockRequestBody(body []byte, modelID string, betaHeader string) (
 func PrepareBedrockRequestBodyWithTokens(body []byte, modelID string, betaTokens []string) ([]byte, error) {
 	var err error
 
+	body = sanitizeBedrockFieldsForBetaTokens(body, betaTokens)
+
 	// 注入 anthropic_version（Bedrock 要求）
 	body, err = sjson.SetBytes(body, "anthropic_version", "bedrock-2023-05-31")
 	if err != nil {
@@ -450,12 +452,14 @@ var bedrockSupportedBetaTokens = map[string]bool{
 	"computer-use-2025-01-24":         true,
 	"computer-use-2025-11-24":         true,
 	"context-1m-2025-08-07":           true,
-	"context-management-2025-06-27":   true,
+	bedrockContextManagementBetaToken: true,
 	"compact-2026-01-12":              true,
 	"interleaved-thinking-2025-05-14": true,
 	"tool-search-tool-2025-10-19":     true,
 	"tool-examples-2025-10-29":        true,
 }
+
+const bedrockContextManagementBetaToken = "context-management-2025-06-27"
 
 // bedrockBetaTokenTransforms 定义 Bedrock Invoke 特有的 beta 头转换规则
 // Anthropic 直接 API 使用通用头，Bedrock Invoke 需要特定的替代头
@@ -604,4 +608,20 @@ func filterBedrockBetaTokens(tokens []string) []string {
 	}
 
 	return result
+}
+
+func sanitizeBedrockFieldsForBetaTokens(body []byte, betaTokens []string) []byte {
+	if !containsBedrockBetaToken(betaTokens, bedrockContextManagementBetaToken) && gjson.GetBytes(body, "context_management").Exists() {
+		body, _ = sjson.DeleteBytes(body, "context_management")
+	}
+	return body
+}
+
+func containsBedrockBetaToken(tokens []string, target string) bool {
+	for _, token := range tokens {
+		if token == target {
+			return true
+		}
+	}
+	return false
 }
