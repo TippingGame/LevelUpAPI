@@ -22,12 +22,15 @@ func AnthropicToResponses(req *AnthropicRequest) (*ResponsesRequest, error) {
 	}
 
 	out := &ResponsesRequest{
-		Model:       req.Model,
-		Input:       inputJSON,
-		Temperature: req.Temperature,
-		TopP:        req.TopP,
-		Stream:      req.Stream,
-		Include:     []string{"reasoning.encrypted_content"},
+		Model:   req.Model,
+		Input:   inputJSON,
+		Stream:  req.Stream,
+		Include: []string{"reasoning.encrypted_content"},
+	}
+
+	if !isReasoningModel(req.Model) {
+		out.Temperature = req.Temperature
+		out.TopP = req.TopP
 	}
 
 	storeFalse := false
@@ -415,6 +418,10 @@ func convertAnthropicToolsToResponses(tools []AnthropicTool) []ResponsesTool {
 		})
 	}
 	return out
+}
+
+func isReasoningModel(model string) bool {
+	return strings.HasPrefix(strings.TrimSpace(model), "gpt-5")
 }
 
 // normalizeToolParameters ensures the tool parameter schema is valid for

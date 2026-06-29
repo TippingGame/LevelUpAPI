@@ -1449,3 +1449,46 @@ func TestAnthropicToResponses_ToolWithNilSchema(t *testing.T) {
 	assert.JSONEq(t, `"object"`, string(params["type"]))
 	assert.JSONEq(t, `{}`, string(params["properties"]))
 }
+
+func TestAnthropicToResponses_TemperatureStrippedForReasoningModel(t *testing.T) {
+	temp := 0.7
+	req := &AnthropicRequest{
+		Model:       "gpt-5.2",
+		MaxTokens:   1024,
+		Messages:    []AnthropicMessage{{Role: "user", Content: json.RawMessage(`"Hello"`)}},
+		Temperature: &temp,
+		TopP:        &temp,
+	}
+
+	resp, err := AnthropicToResponses(req)
+	require.NoError(t, err)
+	require.Nil(t, resp.Temperature)
+	require.Nil(t, resp.TopP)
+
+	body, err := json.Marshal(resp)
+	require.NoError(t, err)
+	assert.NotContains(t, string(body), `"temperature"`)
+	assert.NotContains(t, string(body), `"top_p"`)
+}
+
+func TestAnthropicToResponses_TemperatureStrippedForAllGpt5Variants(t *testing.T) {
+	temp := 1.0
+	models := []string{"gpt-5.2", "gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex", "gpt-5.5"}
+
+	for _, model := range models {
+		t.Run(model, func(t *testing.T) {
+			req := &AnthropicRequest{
+				Model:       model,
+				MaxTokens:   1024,
+				Messages:    []AnthropicMessage{{Role: "user", Content: json.RawMessage(`"Hello"`)}},
+				Temperature: &temp,
+				TopP:        &temp,
+			}
+
+			resp, err := AnthropicToResponses(req)
+			require.NoError(t, err)
+			require.Nil(t, resp.Temperature)
+			require.Nil(t, resp.TopP)
+		})
+	}
+}
