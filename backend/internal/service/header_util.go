@@ -109,6 +109,17 @@ func addHeaderRaw(h http.Header, key, value string) {
 	h[key] = append(h[key], value)
 }
 
+func deleteHeaderAllForms(h http.Header, key string) {
+	if h == nil || key == "" {
+		return
+	}
+	h.Del(key)
+	delete(h, key)
+	if wk := resolveWireCasing(key); wk != key {
+		delete(h, wk)
+	}
+}
+
 // getHeaderRaw reads a header value, trying multiple key forms to handle the mismatch
 // between Go canonical keys, wire casing keys, and raw keys:
 //  1. exact key as provided

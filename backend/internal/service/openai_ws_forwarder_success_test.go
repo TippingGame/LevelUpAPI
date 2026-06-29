@@ -22,6 +22,36 @@ import (
 	"github.com/tidwall/gjson"
 )
 
+func TestOpenAIWSEventShouldParseUsageTerminalEvents(t *testing.T) {
+	for _, eventType := range []string{
+		"response.completed",
+		"response.done",
+		"response.failed",
+		"response.incomplete",
+		"response.cancelled",
+		"response.canceled",
+		"  response.done  ",
+	} {
+		require.True(t, openAIWSEventShouldParseUsage(eventType), eventType)
+	}
+	require.False(t, openAIWSEventShouldParseUsage("response.output_text.delta"))
+}
+
+func TestIsOpenAIWSTokenEventDisjointWithTerminal(t *testing.T) {
+	for _, eventType := range []string{
+		"response.completed",
+		"response.done",
+		"response.failed",
+		"response.incomplete",
+		"response.cancelled",
+		"response.canceled",
+	} {
+		require.True(t, isOpenAIWSTerminalEvent(eventType), eventType)
+		require.False(t, isOpenAIWSTokenEvent(eventType), eventType)
+	}
+	require.True(t, isOpenAIWSTokenEvent("response.output_text.delta"))
+}
+
 func TestOpenAIGatewayService_Forward_WSv2_SuccessAndBindSticky(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 

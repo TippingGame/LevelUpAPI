@@ -703,3 +703,94 @@ func TestParseGeminiRateLimitResetTime(t *testing.T) {
 		})
 	}
 }
+
+func TestGeminiMessagesHandleStreamingResponse_ClosesToolBlockBeforeText(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	upstreamBody := `data: {"candidates":[{"content":{"parts":[{"functionCall":{"name":"get_weather","args":{"city":"SF"}}}]}}]}` + "\n\n" +
+		`data: {"candidates":[{"content":{"parts":[{"text":"All done."}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":5,"candidatesTokenCount":3}}` + "\n\n" +
+		"data: [DONE]\n\n"
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body:       io.NopCloser(strings.NewReader(upstreamBody)),
+	}
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+
+	result, err := (&GeminiMessagesCompatService{}).handleStreamingResponse(c, resp, time.Now(), "claude-3-5-sonnet")
+	require.NoError(t, err)
+	require.NotNil(t, result)
+
+	events := parseAnthropicContentBlockEvents(t, rec.Body.String())
+	open := -1
+	blockTypes := map[int]string{}
+	textStarted := false
+	toolClosed := false
+	toolClosedBeforeText := false
+	for _, ev := range events {
+		switch ev.event {
+		case "content_block_start":
+			require.Equalf(t, -1, open,
+				"content block %d opened while block %d was still open", ev.index, open)
+			open = ev.index
+			blockTypes[ev.index] = ev.blockType
+			if ev.blockType == "text" {
+				textStarted = true
+				if toolClosed {
+					toolClosedBeforeText = true
+				}
+			}
+		case "content_block_stop":
+			require.Equalf(t, open, ev.index,
+				"content_block_stop index %d does not match the open block %d", ev.index, open)
+			if blockTypes[ev.index] == "tool_use" {
+				toolClosed = true
+			}
+			open = -1
+		}
+	}
+
+	require.True(t, textStarted, "expected text after the tool call")
+	require.True(t, toolClosedBeforeText, "tool_use block must close before text starts")
+	require.Equal(t, -1, open, "stream ended with an open content block")
+}
+
+type anthropicContentBlockEvent struct {
+	event     string
+	index     int
+	blockType string
+}
+
+func parseAnthropicContentBlockEvents(t *testing.T, raw string) []anthropicContentBlockEvent {
+	t.Helper()
+	var events []anthropicContentBlockEvent
+	for _, chunk := range strings.Split(raw, "\n\n") {
+		var eventName, dataLine string
+		for _, line := range strings.Split(chunk, "\n") {
+			switch {
+			case strings.HasPrefix(line, "event:"):
+				eventName = strings.TrimSpace(strings.TrimPrefix(line, "event:"))
+			case strings.HasPrefix(line, "data:"):
+				dataLine = strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+			}
+		}
+		if eventName != "content_block_start" && eventName != "content_block_stop" {
+			continue
+		}
+		var payload struct {
+			Index        int `json:"index"`
+			ContentBlock struct {
+				Type string `json:"type"`
+			} `json:"content_block"`
+		}
+		require.NoError(t, json.Unmarshal([]byte(dataLine), &payload))
+		events = append(events, anthropicContentBlockEvent{
+			event:     eventName,
+			index:     payload.Index,
+			blockType: payload.ContentBlock.Type,
+		})
+	}
+	return events
+}

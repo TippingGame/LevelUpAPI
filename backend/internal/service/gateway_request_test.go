@@ -10,6 +10,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/domain"
 	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
 )
 
 func TestParseGatewayRequest(t *testing.T) {
@@ -802,6 +803,18 @@ func TestFilterSignatureSensitiveBlocksForRetry_NoThinkingField_ContextManagemen
 	edits, ok := cm["edits"].([]any)
 	require.True(t, ok)
 	require.Len(t, edits, 1, "无顶层 thinking 时 context_management 不应被修改")
+}
+
+func TestSanitizeAnthropicBodyForBetaTokens(t *testing.T) {
+	body := []byte(`{"model":"claude-haiku-4-5","context_management":{"edits":[{"type":"clear_thinking_20251015"}]},"messages":[]}`)
+
+	stripped, changed := sanitizeAnthropicBodyForBetaTokens(body, "oauth-2025-04-20,interleaved-thinking-2025-05-14")
+	require.True(t, changed)
+	require.False(t, gjson.GetBytes(stripped, "context_management").Exists())
+
+	kept, changed := sanitizeAnthropicBodyForBetaTokens(body, "interleaved-thinking-2025-05-14,context-management-2025-06-27")
+	require.False(t, changed)
+	require.True(t, gjson.GetBytes(kept, "context_management").Exists())
 }
 
 // ============ Group 7: ParseGatewayRequest 补充单元测试 ============

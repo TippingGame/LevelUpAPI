@@ -12,6 +12,8 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/domain"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/antigravity"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 )
@@ -663,6 +665,36 @@ func removeThinkingDependentContextStrategies(body []byte) []byte {
 		return b
 	}
 	return body
+}
+
+func sanitizeAnthropicBodyForBetaTokens(body []byte, anthropicBetaHeader string) ([]byte, bool) {
+	if len(body) == 0 {
+		return body, false
+	}
+	if !gjson.GetBytes(body, "context_management").Exists() {
+		return body, false
+	}
+	if anthropicBetaTokensContains(anthropicBetaHeader, claude.BetaContextManagement) {
+		return body, false
+	}
+	if b, err := sjson.DeleteBytes(body, "context_management"); err == nil {
+		return b, true
+	} else {
+		logger.LegacyPrintf("service.gateway", "[CtxMgmtSanitize] failed to strip context_management: %v (body len=%d)", err, len(body))
+	}
+	return body, false
+}
+
+func anthropicBetaTokensContains(header, token string) bool {
+	if header == "" || token == "" {
+		return false
+	}
+	for _, part := range strings.Split(header, ",") {
+		if strings.TrimSpace(part) == token {
+			return true
+		}
+	}
+	return false
 }
 
 // FilterSignatureSensitiveBlocksForRetry is a stronger retry filter for cases where upstream errors indicate

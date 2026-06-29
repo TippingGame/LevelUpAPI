@@ -384,6 +384,23 @@ func TestIsTokenEventCoverageBranches(t *testing.T) {
 	require.True(t, isTokenEvent("response.done"))
 }
 
+func TestShouldParseUsageTerminalEvents(t *testing.T) {
+	t.Parallel()
+
+	for _, eventType := range []string{
+		"response.completed",
+		"response.done",
+		"response.failed",
+		"response.incomplete",
+		"response.cancelled",
+		"response.canceled",
+	} {
+		require.True(t, shouldParseUsage(eventType), eventType)
+	}
+	require.False(t, shouldParseUsage("response.output_text.delta"))
+	require.False(t, shouldParseUsage(""))
+}
+
 func TestRelayTurnTimingHelpersCoverage(t *testing.T) {
 	t.Parallel()
 
