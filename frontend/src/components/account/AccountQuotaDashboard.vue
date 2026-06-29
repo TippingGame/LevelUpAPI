@@ -415,7 +415,7 @@ const isEmpty = computed(() => {
 
 const orderedGroupSummaries = computed(() => {
   return [...visibleGroupSummaries.value].sort((a, b) => {
-    const healthRank = groupHealthRank(groupHealth(b)) - groupHealthRank(groupHealth(a))
+    const healthRank = groupHealthRank(groupHealth(a)) - groupHealthRank(groupHealth(b))
     if (healthRank !== 0) return healthRank
     if (a.platform !== b.platform) return String(a.platform).localeCompare(String(b.platform))
     return groupName(a).localeCompare(groupName(b))
