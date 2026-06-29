@@ -48,6 +48,7 @@ type APIKeyAuthUserSnapshot struct {
 	PointsBalance       float64 `json:"points_balance"`
 	PreferPointsBilling bool    `json:"prefer_points_billing"`
 	Concurrency         int     `json:"concurrency"`
+	AllowedGroups       []int64 `json:"allowed_groups,omitempty"`
 
 	// Balance notification fields (required for CheckBalanceAfterDeduction)
 	Email                      string             `json:"email"`
@@ -72,6 +73,7 @@ type APIKeyAuthGroupSnapshot struct {
 	Name                            string   `json:"name"`
 	Platform                        string   `json:"platform"`
 	Status                          string   `json:"status"`
+	IsExclusive                     bool     `json:"is_exclusive"`
 	OwnerUserID                     *int64   `json:"owner_user_id,omitempty"`
 	Scope                           string   `json:"scope,omitempty"`
 	SubscriptionType                string   `json:"subscription_type"`

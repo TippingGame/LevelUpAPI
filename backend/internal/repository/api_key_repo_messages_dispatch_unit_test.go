@@ -72,3 +72,34 @@ func TestAPIKeyRepository_GetByKeyForAuth_PreservesMessagesDispatchModelConfig_S
 	require.NotNil(t, got.Group)
 	require.Equal(t, group.MessagesDispatchModelConfig, got.Group.MessagesDispatchModelConfig)
 }
+
+func TestAPIKeyRepository_GetByKeyForAuth_LoadsExclusiveGroupAccessFields_SQLite(t *testing.T) {
+	repo, client := newAPIKeyRepoSQLite(t)
+	ctx := context.Background()
+	user := mustCreateAPIKeyRepoUser(t, ctx, client, "getbykey-auth-exclusive-unit@test.com")
+
+	group, err := client.Group.Create().
+		SetName("g-auth-exclusive-unit").
+		SetStatus(service.StatusActive).
+		SetSubscriptionType(service.SubscriptionTypeStandard).
+		SetIsExclusive(true).
+		Save(ctx)
+	require.NoError(t, err)
+	require.NoError(t, client.User.UpdateOneID(user.ID).AddAllowedGroupIDs(group.ID).Exec(ctx))
+
+	key := &service.APIKey{
+		UserID:  user.ID,
+		Key:     "sk-getbykey-auth-exclusive-unit",
+		Name:    "Exclusive Key Unit",
+		GroupID: &group.ID,
+		Status:  service.StatusActive,
+	}
+	require.NoError(t, repo.Create(ctx, key))
+
+	got, err := repo.GetByKeyForAuth(ctx, key.Key)
+	require.NoError(t, err)
+	require.NotNil(t, got.User)
+	require.Contains(t, got.User.AllowedGroups, group.ID)
+	require.NotNil(t, got.Group)
+	require.True(t, got.Group.IsExclusive)
+}

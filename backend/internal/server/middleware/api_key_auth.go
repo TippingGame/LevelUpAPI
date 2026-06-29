@@ -114,6 +114,9 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
 		if abortIfAPIKeyGroupUnavailable(c, apiKey) {
 			return
 		}
+		if abortIfAPIKeyGroupNotAllowed(c, apiKey) {
+			return
+		}
 
 		// ── 4. SimpleMode → early return ─────────────────────────────
 
@@ -277,6 +280,25 @@ func abortIfAPIKeyGroupUnavailable(c *gin.Context, apiKey *service.APIKey) bool 
 	}
 	AbortWithError(c, 403, code, message)
 	return true
+}
+
+func abortIfAPIKeyGroupNotAllowed(c *gin.Context, apiKey *service.APIKey) bool {
+	if validateAPIKeyGroupAllowed(apiKey) {
+		return false
+	}
+	AbortWithError(c, 403, "GROUP_NOT_ALLOWED", "API Key 所属专属分组不再允许当前用户使用")
+	return true
+}
+
+func validateAPIKeyGroupAllowed(apiKey *service.APIKey) bool {
+	if apiKey == nil || apiKey.GroupID == nil || apiKey.User == nil || apiKey.Group == nil {
+		return true
+	}
+	group := apiKey.Group
+	if group.IsSubscriptionType() {
+		return true
+	}
+	return apiKey.User.CanBindGroup(group.ID, group.IsExclusive)
 }
 
 func validateAPIKeyGroupAvailable(apiKey *service.APIKey) (string, string, bool) {

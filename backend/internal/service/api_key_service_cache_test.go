@@ -241,17 +241,19 @@ func TestAPIKeyService_SnapshotRoundTrip_PreservesMessagesDispatchModelConfig(t 
 		Key:     "k-roundtrip",
 		Status:  StatusActive,
 		User: &User{
-			ID:          2,
-			Status:      StatusActive,
-			Role:        RoleUser,
-			Balance:     10,
-			Concurrency: 3,
+			ID:            2,
+			Status:        StatusActive,
+			Role:          RoleUser,
+			Balance:       10,
+			Concurrency:   3,
+			AllowedGroups: []int64{groupID},
 		},
 		Group: &Group{
 			ID:                    groupID,
 			Name:                  "openai",
 			Platform:              PlatformOpenAI,
 			Status:                StatusActive,
+			IsExclusive:           true,
 			OwnerUserID:           &ownerUserID,
 			Scope:                 GroupScopeUserPrivate,
 			SubscriptionType:      SubscriptionTypeStandard,
@@ -276,6 +278,8 @@ func TestAPIKeyService_SnapshotRoundTrip_PreservesMessagesDispatchModelConfig(t 
 	require.NotNil(t, roundTrip.Group)
 	require.Equal(t, apiKey.Group.MessagesDispatchModelConfig, roundTrip.Group.MessagesDispatchModelConfig)
 	require.Equal(t, apiKey.Group.Scope, roundTrip.Group.Scope)
+	require.True(t, roundTrip.Group.IsExclusive)
+	require.Equal(t, []int64{groupID}, roundTrip.User.AllowedGroups)
 	require.NotNil(t, roundTrip.Group.OwnerUserID)
 	require.Equal(t, *apiKey.Group.OwnerUserID, *roundTrip.Group.OwnerUserID)
 }

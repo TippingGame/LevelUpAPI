@@ -2118,8 +2118,10 @@ func (r *accountRepository) ClearModelRateLimits(ctx context.Context, id int64) 
 
 func (r *accountRepository) UpdateSessionWindow(ctx context.Context, id int64, start, end *time.Time, status string) error {
 	builder := r.client.Account.Update().
-		Where(dbaccount.IDEQ(id)).
-		SetSessionWindowStatus(status)
+		Where(dbaccount.IDEQ(id))
+	if status != "" {
+		builder.SetSessionWindowStatus(status)
+	}
 	if start != nil {
 		builder.SetSessionWindowStart(*start)
 	}

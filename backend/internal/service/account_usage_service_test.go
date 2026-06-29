@@ -11,6 +11,14 @@ type accountUsageCodexProbeRepo struct {
 	stubOpenAIAccountRepo
 	updateExtraCh chan map[string]any
 	rateLimitCh   chan time.Time
+	windowCh      chan accountUsageSessionWindowUpdate
+}
+
+type accountUsageSessionWindowUpdate struct {
+	accountID int64
+	start     *time.Time
+	end       *time.Time
+	status    string
 }
 
 func (r *accountUsageCodexProbeRepo) UpdateExtra(_ context.Context, _ int64, updates map[string]any) error {
@@ -20,6 +28,18 @@ func (r *accountUsageCodexProbeRepo) UpdateExtra(_ context.Context, _ int64, upd
 			copied[k] = v
 		}
 		r.updateExtraCh <- copied
+	}
+	return nil
+}
+
+func (r *accountUsageCodexProbeRepo) UpdateSessionWindow(_ context.Context, id int64, start, end *time.Time, status string) error {
+	if r.windowCh != nil {
+		r.windowCh <- accountUsageSessionWindowUpdate{
+			accountID: id,
+			start:     start,
+			end:       end,
+			status:    status,
+		}
 	}
 	return nil
 }
@@ -154,6 +174,79 @@ func TestAccountUsageService_GetOpenAIUsage_DoesNotPromoteCodexExtraToRateLimit(
 	case got := <-repo.rateLimitCh:
 		t.Fatalf("不应将已耗尽的 codex extra 持久化为运行时限流状态: %v", got)
 	case <-time.After(200 * time.Millisecond):
+	}
+}
+
+func TestAccountUsageService_SyncActiveToPassiveSyncsFiveHourReset(t *testing.T) {
+	t.Parallel()
+
+	resetAt := time.Now().Add(2 * time.Hour).UTC().Truncate(time.Second)
+	repo := &accountUsageCodexProbeRepo{
+		updateExtraCh: make(chan map[string]any, 1),
+		windowCh:      make(chan accountUsageSessionWindowUpdate, 1),
+	}
+	svc := &AccountUsageService{accountRepo: repo}
+
+	svc.syncActiveToPassive(context.Background(), 321, &UsageInfo{
+		FiveHour: &UsageProgress{
+			Utilization: 42,
+			ResetsAt:    &resetAt,
+		},
+	})
+
+	select {
+	case updates := <-repo.updateExtraCh:
+		if got := updates["session_window_utilization"]; got != 0.42 {
+			t.Fatalf("session_window_utilization = %v, want 0.42", got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("等待 usage extra 回写超时")
+	}
+
+	select {
+	case update := <-repo.windowCh:
+		if update.accountID != 321 {
+			t.Fatalf("accountID = %d, want 321", update.accountID)
+		}
+		if update.start != nil {
+			t.Fatalf("expected nil start, got %v", update.start)
+		}
+		if update.end == nil || !update.end.Equal(resetAt) {
+			t.Fatalf("end = %v, want %v", update.end, resetAt)
+		}
+		if update.status != "" {
+			t.Fatalf("status = %q, want empty status-only-noop", update.status)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("等待 session window 回写超时")
+	}
+}
+
+func TestEstimateSetupTokenUsage_ZerosExpiredFiveHourWindow(t *testing.T) {
+	t.Parallel()
+
+	expiredEnd := time.Now().Add(-time.Hour)
+	account := &Account{
+		Type:                AccountTypeSetupToken,
+		SessionWindowEnd:    &expiredEnd,
+		SessionWindowStatus: "allowed_warning",
+		Extra: map[string]any{
+			"session_window_utilization": 0.75,
+		},
+	}
+
+	usage := (&AccountUsageService{}).estimateSetupTokenUsage(account)
+	if usage == nil || usage.FiveHour == nil {
+		t.Fatal("expected five hour usage")
+	}
+	if usage.FiveHour.Utilization != 0 {
+		t.Fatalf("Utilization = %v, want 0", usage.FiveHour.Utilization)
+	}
+	if usage.FiveHour.ResetsAt != nil {
+		t.Fatalf("ResetsAt = %v, want nil", usage.FiveHour.ResetsAt)
+	}
+	if usage.FiveHour.RemainingSeconds != 0 {
+		t.Fatalf("RemainingSeconds = %d, want 0", usage.FiveHour.RemainingSeconds)
 	}
 }
 

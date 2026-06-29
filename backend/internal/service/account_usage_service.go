@@ -491,6 +491,14 @@ func (s *AccountUsageService) syncActiveToPassive(ctx context.Context, accountID
 			slog.Warn("sync_active_to_passive_failed", "account_id", accountID, "error", err)
 		}
 	}
+
+	// Keep the dedicated session-window column in sync with active 5h data.
+	// Passive views use SessionWindowEnd as their reset anchor, not only Extra.
+	if usage.FiveHour != nil && usage.FiveHour.ResetsAt != nil {
+		if err := s.accountRepo.UpdateSessionWindow(ctx, accountID, nil, usage.FiveHour.ResetsAt, ""); err != nil {
+			slog.Warn("sync_active_to_passive_session_window_end_failed", "account_id", accountID, "error", err)
+		}
+	}
 }
 
 func (s *AccountUsageService) getOpenAIUsage(ctx context.Context, account *Account) (*UsageInfo, error) {
@@ -1293,6 +1301,11 @@ func (s *AccountUsageService) estimateSetupTokenUsage(account *Account) *UsageIn
 			Utilization:      utilization,
 			ResetsAt:         account.SessionWindowEnd,
 			RemainingSeconds: remaining,
+		}
+		if info.FiveHour.ResetsAt != nil && !time.Now().Before(*info.FiveHour.ResetsAt) {
+			info.FiveHour.Utilization = 0
+			info.FiveHour.ResetsAt = nil
+			info.FiveHour.RemainingSeconds = 0
 		}
 	} else {
 		// 没有窗口信息，返回空数据
