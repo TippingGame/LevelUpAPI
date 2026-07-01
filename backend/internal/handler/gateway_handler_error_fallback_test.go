@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -66,6 +67,41 @@ func TestGatewayEnsureForwardErrorResponse_ResponsesRouteAfterWrittenEmitsRespon
 	assert.Contains(t, body, ":\n\n")
 	assert.Contains(t, body, "event: response.failed\n")
 	assert.Contains(t, body, `"type":"response.failed"`)
+}
+
+func TestGatewayChatCompletionsFailoverExhausted_AppendsSSEWhenStreamStarted(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodPost, EndpointChatCompletions, nil)
+	c.Header("Content-Type", "text/event-stream")
+	_, _ = c.Writer.WriteString("data: {\"choices\":[]}\n\n")
+
+	h := &GatewayHandler{}
+	h.handleCCFailoverExhausted(c, &service.UpstreamFailoverError{StatusCode: http.StatusServiceUnavailable}, true)
+
+	body := w.Body.String()
+	assert.Contains(t, body, "data: {\"choices\":[]}\n\n")
+	assert.Contains(t, body, `data: {"type":"error"`)
+	assert.Contains(t, body, "All available accounts exhausted")
+}
+
+func TestGatewayResponsesFailoverExhausted_AppendsFailedEventWhenStreamStarted(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodPost, EndpointResponses, nil)
+	c.Header("Content-Type", "text/event-stream")
+	_, _ = c.Writer.WriteString(":\n\n")
+
+	h := &GatewayHandler{}
+	h.handleResponsesFailoverExhausted(c, &service.UpstreamFailoverError{StatusCode: http.StatusServiceUnavailable}, true)
+
+	body := w.Body.String()
+	assert.Contains(t, body, ":\n\n")
+	assert.Contains(t, body, "event: response.failed\n")
+	assert.Contains(t, body, `"type":"response.failed"`)
+	assert.Contains(t, body, "All available accounts exhausted")
 }
 
 func TestGatewayForwardErrorAlreadyCommunicated(t *testing.T) {

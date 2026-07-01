@@ -317,16 +317,21 @@ func (h *GatewayHandler) responsesErrorResponse(c *gin.Context, status int, code
 
 // handleResponsesFailoverExhausted writes a failover-exhausted error in Responses format.
 func (h *GatewayHandler) handleResponsesFailoverExhausted(c *gin.Context, lastErr *service.UpstreamFailoverError, streamStarted bool) {
-	if streamStarted {
-		return // Can't write error after stream started
-	}
 	statusCode := http.StatusBadGateway
 	if lastErr != nil && lastErr.StatusCode > 0 {
 		statusCode = lastErr.StatusCode
 	}
 	if lastErr != nil && service.IsOpenAISilentRefusalErrorBody(lastErr.ResponseBody) {
 		service.SetOpsUpstreamError(c, statusCode, service.OpenAISilentRefusalClientMessage(), "")
+		if streamStarted {
+			h.handleStreamingAwareError(c, http.StatusBadGateway, "upstream_error", service.OpenAISilentRefusalClientMessage(), true)
+			return
+		}
 		h.responsesErrorResponse(c, http.StatusBadGateway, "upstream_error", service.OpenAISilentRefusalClientMessage())
+		return
+	}
+	if streamStarted {
+		h.handleStreamingAwareError(c, statusCode, "server_error", "All available accounts exhausted", true)
 		return
 	}
 	h.responsesErrorResponse(c, statusCode, "server_error", "All available accounts exhausted")
