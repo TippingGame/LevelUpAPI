@@ -61,6 +61,7 @@ type AdminService interface {
 
 	// API Key management (admin)
 	AdminUpdateAPIKeyGroupID(ctx context.Context, keyID int64, groupID *int64) (*AdminUpdateAPIKeyGroupIDResult, error)
+	AdminUpdateAPIKeyGroupRoutes(ctx context.Context, keyID int64, groupID *int64, routes []APIKeyGroupRoute) (*AdminUpdateAPIKeyGroupIDResult, error)
 	AdminResetAPIKeyRateLimitUsage(ctx context.Context, keyID int64) (*APIKey, error)
 
 	// ReplaceUserGroup 替换用户的专属分组：授予新分组权限、迁移 Key、移除旧分组权限
@@ -2492,6 +2493,122 @@ func (s *adminServiceImpl) AdminUpdateAPIKeyGroupID(ctx context.Context, keyID i
 		s.authCacheInvalidator.InvalidateAuthCacheByKey(ctx, apiKey.Key)
 	}
 
+	result.APIKey = apiKey
+	return result, nil
+}
+
+// AdminUpdateAPIKeyGroupRoutes 管理员修改 API Key 多分组路由绑定。
+// routes 为空时解绑；非空时校验分组状态、平台一致性和订阅权限，并自动授予专属标准分组权限。
+func (s *adminServiceImpl) AdminUpdateAPIKeyGroupRoutes(ctx context.Context, keyID int64, groupID *int64, routes []APIKeyGroupRoute) (*AdminUpdateAPIKeyGroupIDResult, error) {
+	apiKey, err := s.apiKeyRepo.GetByID(ctx, keyID)
+	if err != nil {
+		return nil, err
+	}
+
+	groupRoutes, err := normalizeAPIKeyGroupRoutes(routes)
+	if err != nil {
+		return nil, err
+	}
+	if len(groupRoutes) == 0 {
+		groupRoutes = defaultAPIKeyGroupRoute(groupID)
+	}
+
+	result := &AdminUpdateAPIKeyGroupIDResult{APIKey: apiKey}
+	if len(groupRoutes) == 0 {
+		apiKey.GroupID = nil
+		apiKey.Group = nil
+		apiKey.GroupRoutes = nil
+		if err := s.apiKeyRepo.Update(ctx, apiKey); err != nil {
+			return nil, fmt.Errorf("update api key: %w", err)
+		}
+		if s.authCacheInvalidator != nil {
+			s.authCacheInvalidator.InvalidateAuthCacheByKey(ctx, apiKey.Key)
+		}
+		return result, nil
+	}
+
+	platform := ""
+	exclusiveStandardGroupIDs := make([]int64, 0)
+	for i := range groupRoutes {
+		group, err := s.groupRepo.GetByID(ctx, groupRoutes[i].GroupID)
+		if err != nil {
+			return nil, err
+		}
+		if group.Status != StatusActive {
+			return nil, infraerrors.BadRequest("GROUP_NOT_ACTIVE", "target group is not active")
+		}
+		if i == 0 {
+			platform = strings.TrimSpace(group.Platform)
+		} else if !strings.EqualFold(platform, strings.TrimSpace(group.Platform)) {
+			return nil, infraerrors.BadRequest("API_KEY_GROUP_ROUTE_INVALID", "all groups must use the same platform")
+		}
+		if group.IsSubscriptionType() {
+			if s.userSubRepo == nil {
+				return nil, infraerrors.InternalServer("SUBSCRIPTION_REPOSITORY_UNAVAILABLE", "subscription repository is not configured")
+			}
+			if _, err := s.userSubRepo.GetActiveByUserIDAndGroupID(ctx, apiKey.UserID, group.ID); err != nil {
+				if errors.Is(err, ErrSubscriptionNotFound) {
+					return nil, infraerrors.BadRequest("SUBSCRIPTION_REQUIRED", "user does not have an active subscription for this group")
+				}
+				return nil, err
+			}
+		}
+		if group.IsExclusive && !group.IsSubscriptionType() {
+			exclusiveStandardGroupIDs = append(exclusiveStandardGroupIDs, group.ID)
+			if result.GrantedGroupID == nil {
+				gid := group.ID
+				result.AutoGrantedGroupAccess = true
+				result.GrantedGroupID = &gid
+				result.GrantedGroupName = group.Name
+			}
+		}
+		groupRoutes[i].Group = group
+	}
+
+	normalizeAPIKeyGroupRoutePriority(groupRoutes)
+	primaryGroupID := primaryGroupIDFromRoutes(groupRoutes)
+	if primaryGroupID == nil {
+		return nil, infraerrors.BadRequest("API_KEY_GROUP_ROUTE_INVALID", "at least one enabled group route is required")
+	}
+	apiKey.GroupID = primaryGroupID
+	apiKey.Group = nil
+	for i := range groupRoutes {
+		if groupRoutes[i].GroupID == *primaryGroupID {
+			apiKey.Group = groupRoutes[i].Group
+			break
+		}
+	}
+	apiKey.GroupRoutes = groupRoutes
+
+	opCtx := ctx
+	var tx *dbent.Tx
+	if len(exclusiveStandardGroupIDs) > 0 && s.entClient != nil {
+		var txErr error
+		tx, txErr = s.entClient.Tx(ctx)
+		if txErr != nil {
+			return nil, fmt.Errorf("begin transaction: %w", txErr)
+		}
+		defer func() { _ = tx.Rollback() }()
+		opCtx = dbent.NewTxContext(ctx, tx)
+	}
+
+	for _, gid := range exclusiveStandardGroupIDs {
+		if err := s.userRepo.AddGroupToAllowedGroups(opCtx, apiKey.UserID, gid); err != nil {
+			return nil, fmt.Errorf("add group to user allowed groups: %w", err)
+		}
+	}
+	if err := s.apiKeyRepo.Update(opCtx, apiKey); err != nil {
+		return nil, fmt.Errorf("update api key: %w", err)
+	}
+	if tx != nil {
+		if err := tx.Commit(); err != nil {
+			return nil, fmt.Errorf("commit transaction: %w", err)
+		}
+	}
+
+	if s.authCacheInvalidator != nil {
+		s.authCacheInvalidator.InvalidateAuthCacheByKey(ctx, apiKey.Key)
+	}
 	result.APIKey = apiKey
 	return result, nil
 }

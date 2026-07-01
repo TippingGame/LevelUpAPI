@@ -598,6 +598,28 @@ func (s *stubAdminService) AdminUpdateAPIKeyGroupID(ctx context.Context, keyID i
 	return nil, service.ErrAPIKeyNotFound
 }
 
+func (s *stubAdminService) AdminUpdateAPIKeyGroupRoutes(ctx context.Context, keyID int64, groupID *int64, routes []service.APIKeyGroupRoute) (*service.AdminUpdateAPIKeyGroupIDResult, error) {
+	for i := range s.apiKeys {
+		if s.apiKeys[i].ID == keyID {
+			k := s.apiKeys[i]
+			k.GroupRoutes = routes
+			if len(routes) > 0 {
+				gid := routes[0].GroupID
+				k.GroupID = &gid
+			} else if groupID != nil && *groupID > 0 {
+				gid := *groupID
+				k.GroupID = &gid
+				k.GroupRoutes = []service.APIKeyGroupRoute{{GroupID: gid, Priority: 100, Weight: 1, Enabled: true, CooldownSeconds: 30}}
+			} else {
+				k.GroupID = nil
+				k.GroupRoutes = nil
+			}
+			return &service.AdminUpdateAPIKeyGroupIDResult{APIKey: &k}, nil
+		}
+	}
+	return nil, service.ErrAPIKeyNotFound
+}
+
 func (s *stubAdminService) AdminResetAPIKeyRateLimitUsage(ctx context.Context, keyID int64) (*service.APIKey, error) {
 	for i := range s.apiKeys {
 		if s.apiKeys[i].ID == keyID {

@@ -93,6 +93,35 @@ func TestAdminAPIKeyHandler_UpdateGroup_BindGroup(t *testing.T) {
 	require.Equal(t, int64(2), *data.APIKey.GroupID)
 }
 
+func TestAdminAPIKeyHandler_UpdateGroup_MultipleGroupRoutes(t *testing.T) {
+	router := setupAPIKeyHandler(newStubAdminService())
+	body := `{"group_id": 2, "group_routes": [{"group_id": 2, "priority": 100, "weight": 1, "enabled": true, "cooldown_seconds": 30}, {"group_id": 3, "priority": 200, "weight": 1, "enabled": true, "cooldown_seconds": 30}]}`
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/api-keys/10", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	var resp struct {
+		Data struct {
+			APIKey struct {
+				GroupID     *int64 `json:"group_id"`
+				GroupRoutes []struct {
+					GroupID int64 `json:"group_id"`
+				} `json:"group_routes"`
+			} `json:"api_key"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	require.NotNil(t, resp.Data.APIKey.GroupID)
+	require.Equal(t, int64(2), *resp.Data.APIKey.GroupID)
+	require.Len(t, resp.Data.APIKey.GroupRoutes, 2)
+	require.Equal(t, int64(2), resp.Data.APIKey.GroupRoutes[0].GroupID)
+	require.Equal(t, int64(3), resp.Data.APIKey.GroupRoutes[1].GroupID)
+}
+
 func TestAdminAPIKeyHandler_UpdateGroup_Unbind(t *testing.T) {
 	svc := newStubAdminService()
 	gid := int64(2)
@@ -238,5 +267,9 @@ type failingUpdateGroupService struct {
 }
 
 func (f *failingUpdateGroupService) AdminUpdateAPIKeyGroupID(_ context.Context, _ int64, _ *int64) (*service.AdminUpdateAPIKeyGroupIDResult, error) {
+	return nil, f.err
+}
+
+func (f *failingUpdateGroupService) AdminUpdateAPIKeyGroupRoutes(_ context.Context, _ int64, _ *int64, _ []service.APIKeyGroupRoute) (*service.AdminUpdateAPIKeyGroupIDResult, error) {
 	return nil, f.err
 }

@@ -24,8 +24,38 @@ func NewAdminAPIKeyHandler(adminService service.AdminService) *AdminAPIKeyHandle
 
 // AdminUpdateAPIKeyGroupRequest represents the request to update an API key.
 type AdminUpdateAPIKeyGroupRequest struct {
-	GroupID             *int64 `json:"group_id"`               // nil=不修改, 0=解绑, >0=绑定到目标分组
-	ResetRateLimitUsage *bool  `json:"reset_rate_limit_usage"` // true=重置 5h/1d/7d 限速用量
+	GroupID             *int64                          `json:"group_id"`               // nil=不修改, 0=解绑, >0=绑定到目标分组
+	GroupRoutes         *[]AdminAPIKeyGroupRouteRequest `json:"group_routes"`           // nil=不修改, []=解绑, 非空=多分组路由
+	ResetRateLimitUsage *bool                           `json:"reset_rate_limit_usage"` // true=重置 5h/1d/7d 限速用量
+}
+
+type AdminAPIKeyGroupRouteRequest struct {
+	GroupID         int64 `json:"group_id"`
+	Priority        int   `json:"priority"`
+	Weight          int   `json:"weight"`
+	Enabled         *bool `json:"enabled"`
+	CooldownSeconds int   `json:"cooldown_seconds"`
+}
+
+func adminAPIKeyGroupRouteRequestsToService(routes []AdminAPIKeyGroupRouteRequest) []service.APIKeyGroupRoute {
+	if len(routes) == 0 {
+		return nil
+	}
+	out := make([]service.APIKeyGroupRoute, 0, len(routes))
+	for _, route := range routes {
+		enabled := true
+		if route.Enabled != nil {
+			enabled = *route.Enabled
+		}
+		out = append(out, service.APIKeyGroupRoute{
+			GroupID:         route.GroupID,
+			Priority:        route.Priority,
+			Weight:          route.Weight,
+			Enabled:         enabled,
+			CooldownSeconds: route.CooldownSeconds,
+		})
+	}
+	return out
 }
 
 // UpdateGroup handles updating an API key's admin-managed fields.
@@ -52,12 +82,18 @@ func (h *AdminAPIKeyHandler) UpdateGroup(c *gin.Context) {
 		}
 	}
 
-	result, err := h.adminService.AdminUpdateAPIKeyGroupID(c.Request.Context(), keyID, req.GroupID)
+	var result *service.AdminUpdateAPIKeyGroupIDResult
+	if req.GroupRoutes != nil {
+		routes := adminAPIKeyGroupRouteRequestsToService(*req.GroupRoutes)
+		result, err = h.adminService.AdminUpdateAPIKeyGroupRoutes(c.Request.Context(), keyID, req.GroupID, routes)
+	} else {
+		result, err = h.adminService.AdminUpdateAPIKeyGroupID(c.Request.Context(), keyID, req.GroupID)
+	}
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
 	}
-	if resetKey != nil && req.GroupID == nil {
+	if resetKey != nil && req.GroupID == nil && req.GroupRoutes == nil {
 		result.APIKey = resetKey
 	}
 

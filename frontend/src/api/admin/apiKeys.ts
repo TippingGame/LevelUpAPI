@@ -4,7 +4,7 @@
  */
 
 import { apiClient } from '../client'
-import type { ApiKey } from '@/types'
+import type { ApiKey, ApiKeyGroupRoute } from '@/types'
 
 export interface UpdateApiKeyGroupResult {
   api_key: ApiKey
@@ -26,8 +26,27 @@ export async function updateApiKeyGroup(id: number, groupId: number | null): Pro
   return data
 }
 
+/**
+ * Update an API key's multi-group route bindings.
+ * @param id - API Key ID
+ * @param groupId - Primary group ID (0/null to unbind)
+ * @param groupRoutes - Route list ([] to unbind)
+ */
+export async function updateApiKeyGroupRoutes(
+  id: number,
+  groupId: number | null,
+  groupRoutes: ApiKeyGroupRoute[]
+): Promise<UpdateApiKeyGroupResult> {
+  const { data } = await apiClient.put<UpdateApiKeyGroupResult>(`/admin/api-keys/${id}`, {
+    group_id: groupId === null ? 0 : groupId,
+    group_routes: groupRoutes
+  })
+  return data
+}
+
 export const apiKeysAPI = {
-  updateApiKeyGroup
+  updateApiKeyGroup,
+  updateApiKeyGroupRoutes
 }
 
 export default apiKeysAPI
