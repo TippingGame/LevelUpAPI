@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
 	"github.com/tidwall/gjson"
 )
 
@@ -189,10 +190,14 @@ var providerAdapters = map[string]providerAdapter{
 			})
 		},
 		buildHeaders: func(apiKey string) map[string]string {
-			return map[string]string{
-				"x-api-key":         apiKey,
-				"anthropic-version": monitorAnthropicAPIVersion,
+			headers := make(map[string]string, len(claude.DefaultHeaders)+3)
+			for k, v := range claude.DefaultHeaders {
+				headers[k] = v
 			}
+			headers["x-api-key"] = apiKey
+			headers["anthropic-version"] = monitorAnthropicAPIVersion
+			headers["anthropic-beta"] = claude.APIKeyBetaHeader
+			return headers
 		},
 		textPath: "content.0.text",
 	},

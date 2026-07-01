@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
 )
 
 // swapMonitorHTTPClient 临时替换 monitorHTTPClient 为不带 SSRF 校验的普通 client，
@@ -72,6 +74,22 @@ func TestRunCheckForModel_OffMode_PreservesDefaultBody(t *testing.T) {
 	}
 	if h.lastHeaders.Get("x-api-key") != "sk-fake" {
 		t.Errorf("expected adapter's x-api-key header, got %q", h.lastHeaders.Get("x-api-key"))
+	}
+	if h.lastHeaders.Get("User-Agent") != claude.DefaultHeaders["User-Agent"] {
+		t.Errorf("expected Claude Code User-Agent, got %q", h.lastHeaders.Get("User-Agent"))
+	}
+	if h.lastHeaders.Get("X-Stainless-Package-Version") != claude.DefaultHeaders["X-Stainless-Package-Version"] {
+		t.Errorf("expected stainless package version %q, got %q",
+			claude.DefaultHeaders["X-Stainless-Package-Version"],
+			h.lastHeaders.Get("X-Stainless-Package-Version"))
+	}
+	if h.lastHeaders.Get("X-Stainless-Runtime-Version") != claude.DefaultHeaders["X-Stainless-Runtime-Version"] {
+		t.Errorf("expected stainless runtime version %q, got %q",
+			claude.DefaultHeaders["X-Stainless-Runtime-Version"],
+			h.lastHeaders.Get("X-Stainless-Runtime-Version"))
+	}
+	if h.lastHeaders.Get("anthropic-beta") != claude.APIKeyBetaHeader {
+		t.Errorf("expected API-key beta header %q, got %q", claude.APIKeyBetaHeader, h.lastHeaders.Get("anthropic-beta"))
 	}
 }
 
