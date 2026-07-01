@@ -352,6 +352,7 @@
               :today-stats-loading="todayStatsLoading"
               :usage-loader="accountsAPI.getUsage"
               usage-cache-scope="user"
+              account-scope="user"
               :manual-refresh-token="usageManualRefreshToken"
             />
           </template>

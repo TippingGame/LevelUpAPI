@@ -110,6 +110,7 @@ func ProvideUserAccountHandler(
 	settingService *service.SettingService,
 	oauthService *service.OAuthService,
 	openaiOAuthService *service.OpenAIOAuthService,
+	openaiQuotaService *service.OpenAIQuotaService,
 	geminiOAuthService *service.GeminiOAuthService,
 	antigravityOAuthService *service.AntigravityOAuthService,
 	userAttributeService *service.UserAttributeService,
@@ -133,6 +134,7 @@ func ProvideUserAccountHandler(
 	)
 	h.SetUserAttributeService(userAttributeService)
 	h.SetUserService(userService)
+	h.SetOpenAIQuotaService(openaiQuotaService)
 	h.SetRuntimeCapacityProviders(concurrencyService, sessionLimitCache, rpmCache)
 	return h
 }

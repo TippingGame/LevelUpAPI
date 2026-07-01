@@ -128,7 +128,7 @@
           :limit-percent="openAICodex7dLimitPercent"
           color="emerald"
         />
-        <OpenAIQuotaResetCell :account="account" />
+        <OpenAIQuotaResetCell :account="account" :account-scope="accountScope" />
       </div>
       <div v-else-if="loading" class="space-y-1.5">
         <div class="flex items-center gap-1">
@@ -144,7 +144,7 @@
       </div>
       <div v-else>
         <div class="text-xs text-gray-400">-</div>
-        <OpenAIQuotaResetCell :account="account" class="mt-1" />
+        <OpenAIQuotaResetCell :account="account" :account-scope="accountScope" class="mt-1" />
       </div>
     </template>
 
@@ -502,12 +502,14 @@ const props = withDefaults(
     manualRefreshToken?: number
     usageLoader?: UsageLoader
     usageCacheScope?: string
+    accountScope?: 'admin' | 'user'
   }>(),
   {
     todayStats: null,
     todayStatsLoading: false,
     manualRefreshToken: 0,
-    usageCacheScope: 'admin'
+    usageCacheScope: 'admin',
+    accountScope: 'admin'
   }
 )
 

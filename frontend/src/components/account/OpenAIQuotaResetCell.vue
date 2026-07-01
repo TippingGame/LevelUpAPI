@@ -74,6 +74,7 @@
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { Account } from '@/types'
+import { accountsAPI } from '@/api/accounts'
 import {
   queryOpenAIQuota,
   resetOpenAIQuota,
@@ -84,6 +85,7 @@ import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 
 const props = defineProps<{
   account: Account
+  accountScope?: 'admin' | 'user'
 }>()
 
 const { t } = useI18n()
@@ -98,6 +100,16 @@ const showResetConfirm = ref(false)
 
 const availableResetCount = computed(() => data.value?.rate_limit_reset_credits?.available_count ?? 0)
 const canReset = computed(() => availableResetCount.value > 0)
+const quotaAPI = computed(() => props.accountScope === 'user'
+  ? {
+      queryOpenAIQuota: accountsAPI.queryOpenAIQuota,
+      resetOpenAIQuota: accountsAPI.resetOpenAIQuota
+    }
+  : {
+      queryOpenAIQuota,
+      resetOpenAIQuota
+    }
+)
 
 const countButtonTitle = computed(() => (
   data.value
@@ -131,7 +143,7 @@ async function handleQuery() {
   error.value = null
   resetMessage.value = null
   try {
-    data.value = await queryOpenAIQuota(props.account.id)
+    data.value = await quotaAPI.value.queryOpenAIQuota(props.account.id)
   } catch (e) {
     error.value = extractErrorMessage(e)
   } finally {
@@ -159,7 +171,7 @@ async function confirmReset() {
   error.value = null
   resetMessage.value = null
   try {
-    const result: OpenAIQuotaResetResult = await resetOpenAIQuota(props.account.id)
+    const result: OpenAIQuotaResetResult = await quotaAPI.value.resetOpenAIQuota(props.account.id)
     await handleQuery()
     resetMessage.value = t('admin.accounts.openaiQuotaReset.resetSuccess', { windows: result.windows_reset })
   } catch (e) {

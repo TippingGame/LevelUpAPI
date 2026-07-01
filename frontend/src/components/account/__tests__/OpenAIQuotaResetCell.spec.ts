@@ -3,14 +3,23 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import OpenAIQuotaResetCell from '../OpenAIQuotaResetCell.vue'
 import type { Account } from '@/types'
 
-const { queryOpenAIQuota, resetOpenAIQuota } = vi.hoisted(() => ({
+const { queryOpenAIQuota, resetOpenAIQuota, userQueryOpenAIQuota, userResetOpenAIQuota } = vi.hoisted(() => ({
   queryOpenAIQuota: vi.fn(),
-  resetOpenAIQuota: vi.fn()
+  resetOpenAIQuota: vi.fn(),
+  userQueryOpenAIQuota: vi.fn(),
+  userResetOpenAIQuota: vi.fn()
 }))
 
 vi.mock('@/api/admin/accounts', () => ({
   queryOpenAIQuota,
   resetOpenAIQuota
+}))
+
+vi.mock('@/api/accounts', () => ({
+  accountsAPI: {
+    queryOpenAIQuota: userQueryOpenAIQuota,
+    resetOpenAIQuota: userResetOpenAIQuota
+  }
 }))
 
 vi.mock('vue-i18n', async () => {
@@ -54,10 +63,11 @@ function makeAccount(): Account {
   }
 }
 
-function mountCell() {
+function mountCell(props: Partial<{ account: Account; accountScope: 'admin' | 'user' }> = {}) {
   return mount(OpenAIQuotaResetCell, {
     props: {
-      account: makeAccount()
+      account: makeAccount(),
+      ...props
     },
     global: {
       stubs: {
@@ -81,6 +91,8 @@ describe('OpenAIQuotaResetCell', () => {
   beforeEach(() => {
     queryOpenAIQuota.mockReset()
     resetOpenAIQuota.mockReset()
+    userQueryOpenAIQuota.mockReset()
+    userResetOpenAIQuota.mockReset()
   })
 
   it('requires confirmation before consuming a reset credit', async () => {
@@ -110,5 +122,29 @@ describe('OpenAIQuotaResetCell', () => {
     expect(resetOpenAIQuota).toHaveBeenCalledTimes(1)
     expect(resetOpenAIQuota).toHaveBeenCalledWith(10)
     expect(queryOpenAIQuota).toHaveBeenCalledTimes(2)
+  })
+
+  it('uses user-scoped quota APIs when account scope is user', async () => {
+    userQueryOpenAIQuota.mockResolvedValue({
+      rate_limit_reset_credits: {
+        available_count: 1
+      }
+    })
+    userResetOpenAIQuota.mockResolvedValue({
+      code: 'ok',
+      windows_reset: 1
+    })
+
+    const wrapper = mountCell({ accountScope: 'user' })
+    await wrapper.findAll('button')[0].trigger('click')
+    await flushPromises()
+    await wrapper.findAll('button')[1].trigger('click')
+    await wrapper.find('.confirm-reset').trigger('click')
+    await flushPromises()
+
+    expect(queryOpenAIQuota).not.toHaveBeenCalled()
+    expect(resetOpenAIQuota).not.toHaveBeenCalled()
+    expect(userQueryOpenAIQuota).toHaveBeenCalledTimes(2)
+    expect(userResetOpenAIQuota).toHaveBeenCalledWith(10)
   })
 })

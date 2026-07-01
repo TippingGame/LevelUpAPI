@@ -35,6 +35,7 @@ type UserAccountHandler struct {
 	concurrencyService      *service.ConcurrencyService
 	oauthService            *service.OAuthService
 	openaiOAuthService      *service.OpenAIOAuthService
+	openaiQuotaService      *service.OpenAIQuotaService
 	geminiOAuthService      *service.GeminiOAuthService
 	antigravityOAuthService *service.AntigravityOAuthService
 	sessionLimitCache       service.SessionLimitCache
@@ -90,6 +91,13 @@ func (h *UserAccountHandler) SetUserService(userService *service.UserService) {
 		return
 	}
 	h.userService = userService
+}
+
+func (h *UserAccountHandler) SetOpenAIQuotaService(quotaService *service.OpenAIQuotaService) {
+	if h == nil {
+		return
+	}
+	h.openaiQuotaService = quotaService
 }
 
 func (h *UserAccountHandler) SetRuntimeCapacityProviders(
@@ -1002,6 +1010,60 @@ func (h *UserAccountHandler) GetUsage(c *gin.Context) {
 		return
 	}
 	response.Success(c, usage)
+}
+
+func (h *UserAccountHandler) QueryOpenAIQuota(c *gin.Context) {
+	subject, ok := middleware2.GetAuthSubjectFromContext(c)
+	if !ok {
+		response.Unauthorized(c, "User not authenticated")
+		return
+	}
+	accountID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "Invalid account ID")
+		return
+	}
+	if h.openaiQuotaService == nil {
+		response.BadRequest(c, "openai quota service is not enabled")
+		return
+	}
+	if _, err := h.accountService.GetOwnedByID(c.Request.Context(), subject.UserID, accountID); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	usage, err := h.openaiQuotaService.QueryUsage(c.Request.Context(), accountID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, usage)
+}
+
+func (h *UserAccountHandler) ResetOpenAIQuota(c *gin.Context) {
+	subject, ok := middleware2.GetAuthSubjectFromContext(c)
+	if !ok {
+		response.Unauthorized(c, "User not authenticated")
+		return
+	}
+	accountID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "Invalid account ID")
+		return
+	}
+	if h.openaiQuotaService == nil {
+		response.BadRequest(c, "openai quota service is not enabled")
+		return
+	}
+	if _, err := h.accountService.GetOwnedByID(c.Request.Context(), subject.UserID, accountID); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	result, err := h.openaiQuotaService.ResetCredit(c.Request.Context(), accountID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, result)
 }
 
 func (h *UserAccountHandler) GetStats(c *gin.Context) {

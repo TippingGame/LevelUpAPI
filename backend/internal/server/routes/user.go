@@ -115,6 +115,8 @@ func RegisterUserRoutes(
 			accounts.GET("/data", h.UserAccount.ExportData)
 			accounts.POST("/today-stats/batch", h.UserAccount.GetBatchTodayStats)
 			accounts.GET("/:id/usage", h.UserAccount.GetUsage)
+			accounts.GET("/:id/openai-quota", h.UserAccount.QueryOpenAIQuota)
+			accounts.POST("/:id/openai-quota/reset", h.UserAccount.ResetOpenAIQuota)
 			accounts.GET("/:id/stats", h.UserAccount.GetStats)
 			accounts.GET("/:id/today-stats", h.UserAccount.GetTodayStats)
 			accounts.GET("/:id", h.UserAccount.GetByID)

@@ -5,6 +5,7 @@
 
 import { apiClient } from './client'
 import type { Account, AccountUsageInfo, AccountUsageStatsResponse, AdminDataPayload, CreateAccountRequest, PaginatedResponse, UpdateAccountRequest, UserAccountQuotaPoolDashboard, WindowStats } from '@/types'
+import type { OpenAIQuotaResetResult, OpenAIQuotaUsage } from './admin/accounts'
 
 const USER_ACCOUNT_BULK_OPERATION_TIMEOUT_MS = 120000
 const USER_ACCOUNT_LEVEL_VERIFY_TIMEOUT_MS = 90000
@@ -254,6 +255,16 @@ export async function getUsage(id: number, source?: 'passive' | 'active'): Promi
   const { data } = await apiClient.get<AccountUsageInfo>(`/accounts/${id}/usage`, {
     params: source ? { source } : undefined
   })
+  return data
+}
+
+export async function queryOpenAIQuota(id: number): Promise<OpenAIQuotaUsage> {
+  const { data } = await apiClient.get<OpenAIQuotaUsage>(`/accounts/${id}/openai-quota`)
+  return data
+}
+
+export async function resetOpenAIQuota(id: number): Promise<OpenAIQuotaResetResult> {
+  const { data } = await apiClient.post<OpenAIQuotaResetResult>(`/accounts/${id}/openai-quota/reset`)
   return data
 }
 
@@ -551,6 +562,8 @@ export const accountsAPI = {
   createBatchRevalidatePublicShareTask,
   getBatchTask,
   getUsage,
+  queryOpenAIQuota,
+  resetOpenAIQuota,
   getStats,
   getTodayStats,
   getBatchTodayStats,
