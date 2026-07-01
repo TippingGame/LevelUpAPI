@@ -139,7 +139,7 @@ func createTestPayload(modelID string) (map[string]any, error) {
 		return nil, err
 	}
 
-	return map[string]any{
+	payload := map[string]any{
 		"model": modelID,
 		"messages": []map[string]any{
 			{
@@ -155,22 +155,32 @@ func createTestPayload(modelID string) (map[string]any, error) {
 				},
 			},
 		},
-		"system": []map[string]any{
-			{
-				"type": "text",
-				"text": claudeCodeSystemPrompt,
-				"cache_control": map[string]string{
-					"type": "ephemeral",
-				},
-			},
-		},
 		"metadata": map[string]string{
 			"user_id": sessionID,
 		},
 		"max_tokens":  1024,
 		"temperature": 1,
 		"stream":      true,
-	}, nil
+	}
+
+	payloadBytes, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+	systemBlocks, err := buildClaudeOAuthSystemPromptBlocksJSON(payloadBytes, "", "")
+	if err != nil {
+		return nil, err
+	}
+	var system []map[string]any
+	for _, raw := range systemBlocks {
+		var block map[string]any
+		if err := json.Unmarshal(raw, &block); err != nil {
+			return nil, err
+		}
+		system = append(system, block)
+	}
+	payload["system"] = system
+	return payload, nil
 }
 
 // TestAccountConnection tests an account's connection by sending a test request
