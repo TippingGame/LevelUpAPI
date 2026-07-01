@@ -28,6 +28,7 @@ type apiKeyRepoStub struct {
 	getByIDErr     error   // GetKeyAndOwnerID 的错误返回值
 	deleteErr      error   // Delete 的错误返回值
 	deletedIDs     []int64 // 记录已删除的 API Key ID 列表
+	updatedKeys    []APIKey
 	updateLastUsed func(ctx context.Context, id int64, usedAt time.Time) error
 	touchedIDs     []int64
 	touchedUsedAts []time.Time
@@ -69,7 +70,10 @@ func (s *apiKeyRepoStub) GetByKeyForAuth(ctx context.Context, key string) (*APIK
 }
 
 func (s *apiKeyRepoStub) Update(ctx context.Context, key *APIKey) error {
-	panic("unexpected Update call")
+	if key != nil {
+		s.updatedKeys = append(s.updatedKeys, *key)
+	}
+	return nil
 }
 
 // Delete 记录被删除的 API Key ID 并返回预设的错误。
@@ -291,4 +295,28 @@ func TestApiKeyService_Delete_DeleteFails(t *testing.T) {
 	require.Equal(t, []int64{3}, repo.deletedIDs)   // 验证删除操作被调用
 	require.Equal(t, []int64{3}, cache.invalidated) // 验证缓存已被清除（即使删除失败）
 	require.Equal(t, []string{svc.authCacheKey("k")}, cache.deleteAuthKeys)
+}
+
+func TestAPIKeyService_Update_ReactivatesQuotaExhaustedWhenQuotaUnlimited(t *testing.T) {
+	repo := &apiKeyRepoStub{
+		apiKey: &APIKey{
+			ID:        10,
+			UserID:    7,
+			Key:       "sk-test-unlimited",
+			Status:    StatusAPIKeyQuotaExhausted,
+			Quota:     10,
+			QuotaUsed: 12,
+		},
+	}
+	svc := &APIKeyService{apiKeyRepo: repo}
+	quota := 0.0
+
+	updated, err := svc.Update(context.Background(), 10, 7, UpdateAPIKeyRequest{Quota: &quota})
+
+	require.NoError(t, err)
+	require.Equal(t, StatusActive, updated.Status)
+	require.Equal(t, 0.0, updated.Quota)
+	require.Len(t, repo.updatedKeys, 1)
+	require.Equal(t, StatusActive, repo.updatedKeys[0].Status)
+	require.Equal(t, 0.0, repo.updatedKeys[0].Quota)
 }

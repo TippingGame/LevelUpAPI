@@ -584,6 +584,22 @@ func TestEnsureOpenAIResponsesImageGenerationTool_PreservesExistingImageTool(t *
 	require.Equal(t, "webp", tool["output_format"])
 }
 
+func TestEnsureOpenAIResponsesImageGenerationToolChoiceAuto(t *testing.T) {
+	reqBody := map[string]any{
+		"model": "gpt-5.4",
+		"tools": []any{
+			map[string]any{"type": "image_generation", "output_format": "png"},
+		},
+	}
+
+	modified := ensureOpenAIResponsesImageGenerationToolChoiceAuto(reqBody)
+	require.True(t, modified)
+	require.Equal(t, "auto", reqBody["tool_choice"])
+
+	modified = ensureOpenAIResponsesImageGenerationToolChoiceAuto(reqBody)
+	require.False(t, modified)
+}
+
 func TestApplyCodexImageGenerationBridgeInstructions_AppendsBridgeOnce(t *testing.T) {
 	reqBody := map[string]any{
 		"model":        "gpt-5.4",
@@ -857,6 +873,8 @@ func TestNormalizeCodexModel_Gpt53(t *testing.T) {
 	cases := map[string]string{
 		"gpt-5.4":                   "gpt-5.4",
 		"gpt5.5":                    "gpt-5.5",
+		"gpt-5.5-pro":               "gpt-5.5-pro",
+		"openai/gpt-5.5-pro":        "gpt-5.5-pro",
 		"openai/gpt5.5":             "gpt-5.5",
 		"gpt5.4":                    "gpt-5.4",
 		"gpt-5.4-high":              "gpt-5.4",
@@ -884,6 +902,66 @@ func TestNormalizeCodexModel_Gpt53(t *testing.T) {
 	for input, expected := range cases {
 		require.Equal(t, expected, normalizeCodexModel(input))
 	}
+}
+
+func TestApplyCodexOAuthTransformPreservesSystemInputAsDeveloper(t *testing.T) {
+	reqBody := map[string]any{
+		"model": "gpt-5.5",
+		"input": []any{
+			map[string]any{
+				"type":    "message",
+				"role":    "system",
+				"content": "follow the json schema",
+			},
+			map[string]any{
+				"type":    "message",
+				"role":    "user",
+				"content": "hello",
+			},
+		},
+	}
+
+	applyCodexOAuthTransform(reqBody, true, false)
+
+	require.Equal(t, "follow the json schema", reqBody["instructions"])
+	input, ok := reqBody["input"].([]any)
+	require.True(t, ok)
+	require.Len(t, input, 2)
+	first, ok := input[0].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "developer", first["role"])
+}
+
+func TestApplyCodexOAuthTransformPreservesEncryptedReasoning(t *testing.T) {
+	reqBody := map[string]any{
+		"model": "gpt-5.5",
+		"reasoning": map[string]any{
+			"effort": "medium",
+		},
+		"input": []any{
+			map[string]any{
+				"type":              "reasoning",
+				"id":                "rs_123",
+				"encrypted_content": "encrypted",
+			},
+		},
+	}
+
+	applyCodexOAuthTransform(reqBody, true, false)
+
+	include, ok := reqBody["include"].([]any)
+	require.True(t, ok)
+	require.Contains(t, include, "reasoning.encrypted_content")
+
+	input, ok := reqBody["input"].([]any)
+	require.True(t, ok)
+	require.Len(t, input, 1)
+	reasoning, ok := input[0].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "reasoning", reasoning["type"])
+	require.Equal(t, "encrypted", reasoning["encrypted_content"])
+	require.NotContains(t, reasoning, "id")
+	require.Equal(t, []any{}, reasoning["summary"])
 }
 
 func TestExtractTextFromContentSupportsInputAndOutputText(t *testing.T) {
@@ -1218,10 +1296,10 @@ func TestApplyCodexOAuthTransform_ExtractsSystemMessages(t *testing.T) {
 
 	input, ok := reqBody["input"].([]any)
 	require.True(t, ok)
-	require.Len(t, input, 1)
+	require.Len(t, input, 2)
 	msg, ok := input[0].(map[string]any)
 	require.True(t, ok)
-	require.Equal(t, "user", msg["role"])
+	require.Equal(t, "developer", msg["role"])
 
 	instructions, ok := reqBody["instructions"].(string)
 	require.True(t, ok)
@@ -1248,13 +1326,13 @@ func TestApplyCodexOAuthTransform_ExtractsDeveloperInputTextMessages(t *testing.
 	result := applyCodexOAuthTransform(reqBody, false, false)
 
 	require.True(t, result.Modified)
-	require.Equal(t, "You are a coding assistant.", reqBody["instructions"])
+	require.Equal(t, "You are a helpful coding assistant.", reqBody["instructions"])
 	input, ok := reqBody["input"].([]any)
 	require.True(t, ok)
-	require.Len(t, input, 1)
+	require.Len(t, input, 2)
 	msg, ok := input[0].(map[string]any)
 	require.True(t, ok)
-	require.Equal(t, "user", msg["role"])
+	require.Equal(t, "developer", msg["role"])
 }
 
 func TestIsInstructionsEmpty(t *testing.T) {

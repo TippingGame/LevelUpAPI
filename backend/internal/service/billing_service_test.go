@@ -156,6 +156,18 @@ func TestGetModelPricing_OpenAIGPT55Fallback(t *testing.T) {
 	require.InDelta(t, 125e-6, pricing.CacheCreationPricePerToken, 1e-12)
 }
 
+func TestGetModelPricing_OpenAIGPT55ProFallback(t *testing.T) {
+	svc := newTestBillingService()
+
+	pricing, err := svc.GetModelPricing("openai/gpt-5.5-pro")
+	require.NoError(t, err)
+	require.NotNil(t, pricing)
+	require.InDelta(t, 125e-6, pricing.InputPricePerToken, 1e-12)
+	require.InDelta(t, 312.5e-6, pricing.InputPricePerTokenPriority, 1e-12)
+	require.InDelta(t, 750e-6, pricing.OutputPricePerToken, 1e-12)
+	require.InDelta(t, 1875e-6, pricing.OutputPricePerTokenPriority, 1e-12)
+}
+
 func TestGetModelPricing_OpenAIGPT54MiniFallback(t *testing.T) {
 	svc := newTestBillingService()
 
@@ -237,6 +249,7 @@ func TestGetFallbackPricing_FamilyMatching(t *testing.T) {
 		{name: "gemini explicit fallback", model: "gemini-3-1-pro", expectedInput: 2e-6},
 		{name: "gemini unknown no fallback", model: "gemini-2.0-pro", expectNilPricing: true},
 		{name: "openai gpt5.5", model: "gpt-5.5", expectedInput: 125e-6},
+		{name: "openai gpt5.5 pro", model: "openai/gpt-5.5-pro", expectedInput: 125e-6},
 		{name: "openai gpt5.4", model: "gpt-5.4", expectedInput: 62.5e-6},
 		{name: "openai gpt5.4 mini", model: "gpt-5.4-mini", expectedInput: 7.5e-7},
 		{name: "openai gpt5.3 codex", model: "gpt-5.3-codex", expectedInput: 1.5e-6},

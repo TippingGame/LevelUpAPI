@@ -2612,6 +2612,24 @@ func stripCodexSparkImageGenerationToolFromRawPayload(payload []byte, model stri
 	return rebuilt, true, nil
 }
 
+func ensureCodexImageGenerationToolChoiceAutoInRawPayload(payload []byte, model string) ([]byte, bool, error) {
+	if isCodexSparkModel(model) || !bytes.Contains(payload, []byte(`"image_generation"`)) {
+		return payload, false, nil
+	}
+	payloadMap := make(map[string]any)
+	if err := json.Unmarshal(payload, &payloadMap); err != nil {
+		return payload, false, err
+	}
+	if !ensureOpenAIResponsesImageGenerationToolChoiceAuto(payloadMap) {
+		return payload, false, nil
+	}
+	rebuilt, err := json.Marshal(payloadMap)
+	if err != nil {
+		return payload, false, err
+	}
+	return rebuilt, true, nil
+}
+
 // ProxyResponsesWebSocketFromClient 处理客户端入站 WebSocket（OpenAI Responses WS Mode）并转发到上游。
 // 当前实现按“单请求 -> 终止事件 -> 下一请求”的顺序代理，适配 Codex CLI 的 turn 模式。
 func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
@@ -2811,6 +2829,12 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		} else if changed {
 			normalized = stripped
 			logOpenAIWSModeInfo("ingress_ws_codex_spark_image_tool_stripped account_id=%d", account.ID)
+		}
+		if updated, changed, updateErr := ensureCodexImageGenerationToolChoiceAutoInRawPayload(normalized, upstreamModel); updateErr != nil {
+			return openAIWSClientPayload{}, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "invalid websocket request payload", updateErr)
+		} else if changed {
+			normalized = updated
+			logOpenAIWSModeInfo("ingress_ws_codex_image_tool_choice_auto account_id=%d", account.ID)
 		}
 
 		// Apply OpenAI Fast Policy on the response.create frame using the same
