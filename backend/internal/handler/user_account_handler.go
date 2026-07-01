@@ -169,6 +169,7 @@ type importUserAccountCredentialsRequest struct {
 	Platform           string   `json:"platform" binding:"required,oneof=anthropic openai gemini antigravity"`
 	AccountLevel       string   `json:"account_level" binding:"omitempty,oneof=unknown free plus pro team"`
 	ShareMode          string   `json:"share_mode" binding:"omitempty,oneof=private public"`
+	ProxyID            *int64   `json:"proxy_id"`
 	Concurrency        int      `json:"concurrency"`
 	LoadFactor         *int     `json:"load_factor"`
 	Priority           int      `json:"priority"`
@@ -457,7 +458,7 @@ func validateOpenAIImportTargetLevel(defaults importUserAccountCredentialsReques
 	if !service.IsUserSelectableOpenAIAccountLevel(targetLevel) {
 		return "", service.ErrOwnedOpenAIAccountLevelRequired
 	}
-	if service.RequiresUserOpenAIProxyLogin(targetLevel) {
+	if service.RequiresUserOpenAIProxyLogin(targetLevel) && (defaults.ProxyID == nil || *defaults.ProxyID <= 0) {
 		return "", service.ErrOwnedOpenAIAccountProxyRequired
 	}
 	return targetLevel, nil
@@ -1288,6 +1289,20 @@ func (h *UserAccountHandler) ImportCredentials(c *gin.Context) {
 		response.BadRequest(c, fmt.Sprintf("Too many import items; maximum is %d", importLimit))
 		return
 	}
+	if req.Platform == service.PlatformOpenAI && service.RequiresUserOpenAIProxyLogin(req.AccountLevel) {
+		if req.ProxyID == nil || *req.ProxyID <= 0 {
+			response.ErrorFrom(c, service.ErrOwnedOpenAIAccountProxyRequired)
+			return
+		}
+		if h.openaiOAuthService == nil {
+			response.ErrorFrom(c, service.ErrServiceUnavailable)
+			return
+		}
+		if err := h.openaiOAuthService.EnsureProxyVisibleToUser(c.Request.Context(), subject.UserID, req.ProxyID); err != nil {
+			response.ErrorFrom(c, err)
+			return
+		}
+	}
 
 	result := service.AccountCredentialImportResult{
 		Total:  len(sources) + len(parseErrors),
@@ -1334,12 +1349,23 @@ func (h *UserAccountHandler) createOwnedAccountFromCredentialImportSource(
 	}
 
 	openAIAccountLevel := service.AccountLevelUnknown
+	openAIProxyURL := ""
 	if credentialImportSourceIsOpenAI(source) {
 		targetLevel, err := validateOpenAIImportTargetLevel(defaults)
 		if err != nil {
 			return nil, err
 		}
 		openAIAccountLevel = targetLevel
+		if service.RequiresUserOpenAIProxyLogin(targetLevel) {
+			if h.openaiOAuthService == nil {
+				return nil, service.ErrServiceUnavailable
+			}
+			proxyURL, err := h.openaiOAuthService.VisibleProxyURLForUser(ctx, ownerUserID, defaults.ProxyID)
+			if err != nil {
+				return nil, err
+			}
+			openAIProxyURL = proxyURL
+		}
 	}
 
 	req := service.CreateAccountRequest{
@@ -1369,7 +1395,10 @@ func (h *UserAccountHandler) createOwnedAccountFromCredentialImportSource(
 			req.Name = service.DeriveAccountCredentialImportName(req.Platform, req.Credentials, req.Extra, sequence)
 		}
 	case service.AccountCredentialImportKindOpenAIRefreshToken:
-		tokenInfo, err := h.openaiOAuthService.RefreshTokenWithClientID(ctx, source.Token, "", source.ClientID)
+		if h.openaiOAuthService == nil {
+			return nil, service.ErrServiceUnavailable
+		}
+		tokenInfo, err := h.openaiOAuthService.RefreshTokenWithClientID(ctx, source.Token, openAIProxyURL, source.ClientID)
 		if err != nil {
 			return nil, infraerrors.BadRequest("OWNED_ACCOUNT_IMPORT_OPENAI_REFRESH_FAILED", "OpenAI Refresh Token 校验失败，请检查账号凭证后重试")
 		}
@@ -1412,6 +1441,9 @@ func (h *UserAccountHandler) createOwnedAccountFromCredentialImportSource(
 
 	if req.Platform == service.PlatformOpenAI {
 		req.AccountLevel = openAIAccountLevel
+		if service.RequiresUserOpenAIProxyLogin(openAIAccountLevel) {
+			req.ProxyID = defaults.ProxyID
+		}
 	}
 	if strings.TrimSpace(req.Name) == "" {
 		return nil, fmt.Errorf("account name is required")

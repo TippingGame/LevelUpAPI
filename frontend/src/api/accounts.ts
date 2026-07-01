@@ -79,6 +79,7 @@ export interface ImportCredentialContentsRequest {
   platform?: Account['platform']
   account_level?: Account['account_level']
   share_mode?: 'private' | 'public'
+  proxy_id?: number | null
   concurrency?: number
   load_factor?: number | null
   priority?: number

@@ -22,8 +22,62 @@
         :selected-level="selectedAccountLevel"
         @select="selectAccountLevel"
       />
+      <ImportMethodSelector
+        v-if="selectedPlatform === 'openai' && selectedAccountLevel === 'pro'"
+        :selected-method="selectedImportMethod"
+        @select="selectImportMethod"
+      />
+      <div v-if="selectedPlatform === 'openai' && selectedAccountLevel === 'pro'">
+        <div class="mb-2 flex items-center justify-between gap-3">
+          <label class="input-label mb-0">{{ t('userAccounts.importProxy') }}</label>
+          <div class="flex flex-wrap items-center justify-end gap-2">
+            <button
+              type="button"
+              class="text-xs font-medium text-primary-600 hover:text-primary-700 disabled:cursor-not-allowed disabled:opacity-60 dark:text-primary-400"
+              :disabled="proxyLoading"
+              @click="loadProxies(true)"
+            >
+              {{ proxyLoading ? t('common.loading') : t('common.refresh') }}
+            </button>
+            <button
+              type="button"
+              class="inline-flex items-center gap-1 rounded-md border border-gray-200 bg-white px-2.5 py-1.5 text-xs font-medium text-gray-700 hover:border-sky-300 hover:bg-sky-50 dark:border-dark-700 dark:bg-dark-800 dark:text-dark-200 dark:hover:border-sky-500/70 dark:hover:bg-sky-900/20"
+              @click="openProxyPurchase()"
+            >
+              <Icon name="externalLink" size="xs" />
+              {{ t('userAccounts.proxyActionBuyTitle') }}
+            </button>
+            <button
+              type="button"
+              class="inline-flex items-center gap-1 rounded-md border border-primary-200 bg-primary-50 px-2.5 py-1.5 text-xs font-medium text-primary-700 hover:border-primary-300 hover:bg-primary-100 dark:border-primary-500/30 dark:bg-primary-500/10 dark:text-primary-300 dark:hover:bg-primary-500/20"
+              :aria-expanded="showProxyDialog"
+              data-testid="import-open-user-proxy-panel"
+              @click="openAddProxyDialog()"
+            >
+              <Icon name="plus" size="xs" />
+              {{ t('userAccounts.proxyActionAddTitle') }}
+            </button>
+          </div>
+        </div>
+        <ProxySelector
+          v-model="selectedProxyId"
+          :proxies="proxies"
+          :allow-empty="false"
+          :can-test="false"
+          hide-endpoint
+        />
+        <p class="input-hint">
+          {{ proxyHelperText }}
+        </p>
+        <UserProxyQuickCreatePanel
+          v-if="showProxyDialog"
+          class="mt-4"
+          @created="handleProxyCreated"
+          @cancel="closeProxyDialog"
+        />
+      </div>
       <div
-        v-else-if="selectedPlatform"
+        v-if="selectedPlatform && selectedPlatform !== 'openai'"
         class="rounded-lg border border-gray-200 bg-gray-50 p-3 text-xs text-gray-600 dark:border-dark-700 dark:bg-dark-800 dark:text-dark-300"
       >
         {{ selectedPlatformHint }}
@@ -53,6 +107,11 @@
         v-if="selectedPlatform === 'openai'"
         :selected-level="selectedAccountLevel"
         @select="selectAccountLevel"
+      />
+      <ImportMethodSelector
+        v-if="selectedPlatform === 'openai' && selectedAccountLevel === 'pro'"
+        :selected-method="selectedImportMethod"
+        @select="selectImportMethod"
       />
       <ShareModeSelector
         v-if="selectedPlatform"
@@ -188,6 +247,7 @@ import type { AccountLevel, AccountPlatform, AccountShareMode, Proxy } from '@/t
 
 type SelectableOpenAILevel = Exclude<AccountLevel, 'unknown'>
 type ImportPlatform = AccountPlatform
+type ProImportMethod = 'credentials' | 'oauth'
 
 interface Props {
   show: boolean
@@ -210,6 +270,7 @@ const PROXY_PURCHASE_URL = 'https://www.seekproxy.com/user/reg?invite_id=105978'
 const selectedPlatform = ref<ImportPlatform | ''>('')
 const selectedAccountLevel = ref<SelectableOpenAILevel | ''>('')
 const selectedShareMode = ref<AccountShareMode>('private')
+const selectedImportMethod = ref<ProImportMethod>('credentials')
 const selectedProxyId = ref<number | null>(null)
 const proxies = ref<Proxy[]>([])
 const proxyLoading = ref(false)
@@ -226,12 +287,20 @@ const importLimit = computed(() => {
     : PERSONAL_ACCOUNT_IMPORT_LIMIT
 })
 
-const requiresOAuthLogin = computed(() => selectedPlatform.value === 'openai' && selectedAccountLevel.value === 'pro')
+const requiresOAuthLogin = computed(() =>
+  selectedPlatform.value === 'openai' &&
+  selectedAccountLevel.value === 'pro' &&
+  selectedImportMethod.value === 'oauth'
+)
 
 const canSubmitCredentialImport = computed(() => {
   if (!selectedPlatform.value) return false
   if (selectedPlatform.value === 'openai') {
-    return Boolean(selectedAccountLevel.value && selectedAccountLevel.value !== 'pro')
+    if (!selectedAccountLevel.value) return false
+    if (selectedAccountLevel.value === 'pro') {
+      return Boolean(selectedProxyId.value)
+    }
+    return true
   }
   return true
 })
@@ -395,6 +464,48 @@ const AccountLevelSelector = defineComponent({
   }
 })
 
+const ImportMethodSelector = defineComponent({
+  name: 'UserImportMethodSelector',
+  props: {
+    selectedMethod: {
+      type: String,
+      default: 'credentials'
+    }
+  },
+  emits: ['select'],
+  setup(props, { emit }) {
+    const options: Array<{ value: ProImportMethod; label: string; desc: string; icon: 'document' | 'login' }> = [
+      { value: 'credentials', label: t('userAccounts.importMethodCredentials'), desc: t('userAccounts.importMethodCredentialsHint'), icon: 'document' },
+      { value: 'oauth', label: t('userAccounts.importMethodOAuth'), desc: t('userAccounts.importMethodOAuthHint'), icon: 'login' }
+    ]
+    return () => h('div', { class: 'space-y-2' }, [
+      h('label', { class: 'input-label' }, t('userAccounts.importMethod')),
+      h('div', { class: 'grid gap-2 sm:grid-cols-2' }, options.map(option =>
+        h(
+          'button',
+          {
+            type: 'button',
+            class: [
+              'flex min-h-[64px] items-center rounded-lg border px-3 py-2 text-left transition-colors',
+              props.selectedMethod === option.value
+                ? 'border-primary-400 bg-primary-50 text-primary-700 dark:border-primary-500 dark:bg-primary-900/30 dark:text-primary-300'
+                : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50 dark:border-dark-700 dark:bg-dark-800 dark:text-dark-200 dark:hover:bg-dark-700'
+            ],
+            onClick: () => emit('select', option.value)
+          },
+          [
+            h(Icon, { name: option.icon, size: 'sm', class: 'mr-3 shrink-0' }),
+            h('span', { class: 'min-w-0' }, [
+              h('span', { class: 'block text-sm font-semibold' }, option.label),
+              h('span', { class: 'mt-1 block text-xs text-gray-500 dark:text-dark-400' }, option.desc)
+            ])
+          ]
+        )
+      ))
+    ])
+  }
+})
+
 const ShareModeSelector = defineComponent({
   name: 'UserImportShareModeSelector',
   props: {
@@ -441,6 +552,7 @@ watch(
     if (platform !== 'openai') {
       selectedAccountLevel.value = ''
     }
+    selectedImportMethod.value = 'credentials'
     selectedProxyId.value = null
     oauthAccountName.value = ''
     proxyLoadMessage.value = ''
@@ -459,12 +571,22 @@ watch(
     openaiOAuth.resetState()
     oauthFlowRef.value?.reset()
     if (selectedPlatform.value === 'openai' && level === 'pro') {
+      selectedImportMethod.value = 'credentials'
       loadProxies()
     } else {
       selectedProxyId.value = null
       oauthAccountName.value = ''
       showProxyDialog.value = false
     }
+  }
+)
+
+watch(
+  () => selectedImportMethod.value,
+  () => {
+    openaiOAuth.error.value = ''
+    openaiOAuth.resetState()
+    oauthFlowRef.value?.reset()
   }
 )
 
@@ -501,6 +623,10 @@ function selectAccountLevel(level: SelectableOpenAILevel | ''): void {
   selectedAccountLevel.value = level
 }
 
+function selectImportMethod(method: ProImportMethod): void {
+  selectedImportMethod.value = method
+}
+
 function selectShareMode(mode: AccountShareMode): void {
   selectedShareMode.value = mode
 }
@@ -509,6 +635,7 @@ function resetOAuthImportState(): void {
   selectedPlatform.value = ''
   selectedAccountLevel.value = ''
   selectedShareMode.value = 'private'
+  selectedImportMethod.value = 'credentials'
   selectedProxyId.value = null
   oauthAccountName.value = ''
   proxyLoadMessage.value = ''
@@ -547,6 +674,13 @@ function importPersonalCredentials(contents: string[]): Promise<ImportCredential
       return Promise.reject(new Error(t('userAccounts.importAccountLevelRequired')))
     }
     request.account_level = accountLevel
+    if (accountLevel === 'pro') {
+      if (!selectedProxyId.value) {
+        appStore.showError(t('userAccounts.importProxyRequired'))
+        return Promise.reject(new Error(t('userAccounts.importProxyRequired')))
+      }
+      request.proxy_id = selectedProxyId.value
+    }
   }
   return accountsAPI.importCredentialContents(request)
 }

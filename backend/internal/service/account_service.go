@@ -32,7 +32,7 @@ var (
 	ErrOwnedAccountLoadFactorCreditsInsufficient = infraerrors.BadRequest("OWNED_ACCOUNT_LOAD_FACTOR_CREDITS_INSUFFICIENT", "load factor credits are insufficient")
 	ErrOwnedAccountLevelNotAllowed               = infraerrors.BadRequest("OWNED_ACCOUNT_LEVEL_NOT_ALLOWED", "user accounts cannot manually change account level")
 	ErrOwnedOpenAIAccountLevelRequired           = infraerrors.BadRequest("OWNED_OPENAI_ACCOUNT_LEVEL_REQUIRED", "OpenAI user accounts must select an account level before import")
-	ErrOwnedOpenAIAccountProxyRequired           = infraerrors.BadRequest("OWNED_OPENAI_ACCOUNT_PROXY_REQUIRED", "Pro OpenAI user accounts must use account login with a selected proxy IP")
+	ErrOwnedOpenAIAccountProxyRequired           = infraerrors.BadRequest("OWNED_OPENAI_ACCOUNT_PROXY_REQUIRED", "Pro OpenAI user accounts must select a proxy IP")
 	ErrOwnedAccountGroupPlatformMismatch         = infraerrors.BadRequest("OWNED_ACCOUNT_GROUP_PLATFORM_MISMATCH", "account group platform does not match account platform")
 	ErrOwnedAccountGroupValidationUnavailable    = infraerrors.InternalServer("OWNED_ACCOUNT_GROUP_VALIDATION_UNAVAILABLE", "owned account group validation is unavailable")
 	ErrOwnedAccountPublicPoolUnavailable         = infraerrors.BadRequest("OWNED_ACCOUNT_PUBLIC_POOL_UNAVAILABLE", "public shared account pool group is not configured for this account platform")
