@@ -87,6 +87,17 @@
         :selected-mode="selectedShareMode"
         @select="selectShareMode"
       />
+      <div v-if="selectedPlatform" class="space-y-2">
+        <label class="input-label">{{ t('admin.accounts.privatePriority') }}</label>
+        <input
+          v-model.number="selectedPrivatePriority"
+          type="number"
+          min="1"
+          step="1"
+          class="input"
+        />
+        <p class="input-hint">{{ t('admin.accounts.privatePriorityHint') }}</p>
+      </div>
     </template>
   </CredentialImportModal>
 
@@ -118,6 +129,17 @@
         :selected-mode="selectedShareMode"
         @select="selectShareMode"
       />
+      <div v-if="selectedPlatform" class="space-y-2">
+        <label class="input-label">{{ t('admin.accounts.privatePriority') }}</label>
+        <input
+          v-model.number="selectedPrivatePriority"
+          type="number"
+          min="1"
+          step="1"
+          class="input"
+        />
+        <p class="input-hint">{{ t('admin.accounts.privatePriorityHint') }}</p>
+      </div>
 
       <div class="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-300">
         {{ t('userAccounts.importOAuthOnlyHint') }}
@@ -271,6 +293,7 @@ const selectedPlatform = ref<ImportPlatform | ''>('')
 const selectedAccountLevel = ref<SelectableOpenAILevel | ''>('')
 const selectedShareMode = ref<AccountShareMode>('private')
 const selectedImportMethod = ref<ProImportMethod>('credentials')
+const selectedPrivatePriority = ref(PERSONAL_ACCOUNT_DEFAULT_PRIORITY)
 const selectedProxyId = ref<number | null>(null)
 const proxies = ref<Proxy[]>([])
 const proxyLoading = ref(false)
@@ -353,6 +376,14 @@ const proxyHelperText = computed(() => {
   if (proxyLoadMessage.value) return proxyLoadMessage.value
   if (proxies.value.length > 0) return t('userAccounts.importProxyHint')
   return t('userAccounts.importProxyEmpty')
+})
+
+const normalizedPrivatePriority = computed(() => {
+  const value = Number(selectedPrivatePriority.value)
+  if (!Number.isFinite(value) || value <= 0) {
+    return PERSONAL_ACCOUNT_DEFAULT_PRIORITY
+  }
+  return Math.trunc(value)
 })
 
 const canSubmitOAuthImport = computed(() => {
@@ -636,6 +667,7 @@ function resetOAuthImportState(): void {
   selectedAccountLevel.value = ''
   selectedShareMode.value = 'private'
   selectedImportMethod.value = 'credentials'
+  selectedPrivatePriority.value = PERSONAL_ACCOUNT_DEFAULT_PRIORITY
   selectedProxyId.value = null
   oauthAccountName.value = ''
   proxyLoadMessage.value = ''
@@ -663,7 +695,7 @@ function importPersonalCredentials(contents: string[]): Promise<ImportCredential
     platform: selectedPlatform.value,
     share_mode: selectedShareMode.value,
     concurrency: PERSONAL_ACCOUNT_DEFAULT_CONCURRENCY,
-    priority: PERSONAL_ACCOUNT_DEFAULT_PRIORITY,
+    private_priority: normalizedPrivatePriority.value,
     group_ids: [],
     auto_pause_on_expired: PERSONAL_ACCOUNT_DEFAULT_AUTO_PAUSE_ON_EXPIRED
   }
@@ -794,7 +826,7 @@ async function submitOAuthImport(): Promise<void> {
       proxy_id: selectedProxyId.value,
       share_mode: selectedShareMode.value,
       concurrency: PERSONAL_ACCOUNT_DEFAULT_CONCURRENCY,
-      priority: PERSONAL_ACCOUNT_DEFAULT_PRIORITY,
+      private_priority: normalizedPrivatePriority.value,
       group_ids: [],
       auto_pause_on_expired: PERSONAL_ACCOUNT_DEFAULT_AUTO_PAUSE_ON_EXPIRED
     })

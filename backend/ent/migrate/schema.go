@@ -161,7 +161,7 @@ var (
 		{Name: "concurrency", Type: field.TypeInt, Default: 3},
 		{Name: "load_factor", Type: field.TypeInt, Nullable: true},
 		{Name: "load_factor_paid_ceiling", Type: field.TypeInt, Default: 10},
-		{Name: "priority", Type: field.TypeInt, Default: 50},
+		{Name: "priority", Type: field.TypeInt, Default: 1},
 		{Name: "private_priority", Type: field.TypeInt, Nullable: true},
 		{Name: "rate_multiplier", Type: field.TypeFloat64, Default: 1, SchemaType: map[string]string{"postgres": "decimal(10,4)"}},
 		{Name: "status", Type: field.TypeString, Size: 20, Default: "active"},

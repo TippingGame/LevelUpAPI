@@ -133,7 +133,7 @@ func (h *AccountHandler) ImportCredentials(c *gin.Context) {
 		return
 	}
 	if req.Priority <= 0 {
-		req.Priority = 50
+		req.Priority = 1
 	}
 
 	sources, parseErrors := service.ParseAccountCredentialImportContents(req.Contents)

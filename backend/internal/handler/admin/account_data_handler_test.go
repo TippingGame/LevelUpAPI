@@ -203,7 +203,7 @@ func TestExportDataIncludesSecrets(t *testing.T) {
 			Extra:       map[string]any{"note": "x"},
 			ProxyID:     &proxyID,
 			Concurrency: 3,
-			Priority:    50,
+			Priority:    1,
 			Status:      service.StatusDisabled,
 		},
 	}
@@ -249,7 +249,7 @@ func TestExportDataWithoutProxies(t *testing.T) {
 			Credentials: map[string]any{"token": "secret"},
 			ProxyID:     &proxyID,
 			Concurrency: 3,
-			Priority:    50,
+			Priority:    1,
 			Status:      service.StatusDisabled,
 		},
 	}
@@ -354,7 +354,7 @@ func TestImportDataReusesProxyAndSkipsDefaultGroup(t *testing.T) {
 					"credentials": map[string]any{"token": "x"},
 					"proxy_key":   "socks5|1.2.3.4|1080|u|p",
 					"concurrency": 3,
-					"priority":    50,
+					"priority":    1,
 				},
 			},
 		},

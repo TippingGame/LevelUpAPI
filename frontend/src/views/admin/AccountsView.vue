@@ -1486,7 +1486,7 @@ const handleBulkUpdated = () => {
 function importAdminCredentials(contents: string[]): Promise<ImportCredentialContentsResponse> {
   return adminAPI.accounts.importCredentialContents({
     contents,
-    priority: 50,
+    priority: 1,
     group_ids: [],
     auto_pause_on_expired: true
   })

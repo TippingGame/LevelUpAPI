@@ -198,7 +198,7 @@ const normalizeDataPayload = (value: unknown): AdminDataPayload | null => {
 const importAsCredentialContents = async (contents: string): Promise<ImportResult> => {
   const credentialResult = await adminAPI.accounts.importCredentialContents({
     contents: [contents],
-    priority: 50,
+    priority: 1,
     group_ids: [],
     auto_pause_on_expired: true,
     skip_default_group_bind: true

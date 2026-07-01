@@ -913,6 +913,37 @@ func TestAccountServiceCreateOwnedKeepsAllowedPersonalConcurrency(t *testing.T) 
 	require.Equal(t, ownedPersonalMaxConcurrency, repo.createdAccounts[0].Concurrency)
 }
 
+func TestAccountServiceCreateOwnedKeepsGlobalPriorityDefaultAndPrivatePriority(t *testing.T) {
+	ownerID := int64(101)
+	privatePriority := 7
+	repo := &ownedAccountDuplicateRepoStub{}
+	svc := &AccountService{
+		accountRepo: repo,
+		privateGroupProvisioner: &ownedPrivateGroupProvisionerStub{
+			group: &Group{ID: 99, Platform: PlatformAnthropic, Status: StatusActive, Scope: GroupScopeUserPrivate},
+		},
+	}
+
+	account, err := svc.CreateOwned(context.Background(), ownerID, CreateAccountRequest{
+		Name:            "personal-priority",
+		Platform:        PlatformAnthropic,
+		Type:            AccountTypeOAuth,
+		Credentials:     map[string]any{"access_token": "token"},
+		Concurrency:     ownedPersonalDefaultConcurrency,
+		PrivatePriority: &privatePriority,
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, account)
+	require.Equal(t, accountDefaultPriority, account.Priority)
+	require.NotNil(t, account.PrivatePriority)
+	require.Equal(t, privatePriority, *account.PrivatePriority)
+	require.Len(t, repo.createdAccounts, 1)
+	require.Equal(t, accountDefaultPriority, repo.createdAccounts[0].Priority)
+	require.NotNil(t, repo.createdAccounts[0].PrivatePriority)
+	require.Equal(t, privatePriority, *repo.createdAccounts[0].PrivatePriority)
+}
+
 func TestValidateOwnedAccountSourceAllowsOAuthMetadataURLs(t *testing.T) {
 	err := validateOwnedAccountSource(AccountTypeOAuth, map[string]any{
 		"access_token": "oauth-access-token",
