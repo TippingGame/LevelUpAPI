@@ -39,6 +39,8 @@ var gatewayCompatibilityMetricsLogCounter atomic.Uint64
 
 var apiKeyGroupRouteBreaker = newAPIKeyGroupRouteCircuitBreaker()
 
+const maxAPIKeyGroupRouteCyclesPerRequest = 2
+
 // GatewayHandler handles API gateway requests
 type GatewayHandler struct {
 	gatewayService            *service.GatewayService
@@ -1149,9 +1151,11 @@ type apiKeyGroupRouteCandidate struct {
 }
 
 type apiKeyGroupRouteCursor struct {
-	candidates []apiKeyGroupRouteCandidate
-	index      int
-	available  bool
+	candidates  []apiKeyGroupRouteCandidate
+	index       int
+	available   bool
+	attempts    int
+	maxAttempts int
 }
 
 type apiKeyGroupRouteCircuitBreaker struct {
@@ -1221,7 +1225,18 @@ func newAPIKeyGroupRouteCursor(apiKey *service.APIKey) *apiKeyGroupRouteCursor {
 }
 
 func newAPIKeyGroupRouteCursorFromCandidates(candidates []apiKeyGroupRouteCandidate, available bool) *apiKeyGroupRouteCursor {
-	return &apiKeyGroupRouteCursor{candidates: candidates, available: available}
+	attempts := 0
+	maxAttempts := 0
+	if available && len(candidates) > 0 {
+		attempts = 1
+		maxAttempts = len(candidates) * maxAPIKeyGroupRouteCyclesPerRequest
+	}
+	return &apiKeyGroupRouteCursor{
+		candidates:  candidates,
+		available:   available,
+		attempts:    attempts,
+		maxAttempts: maxAttempts,
+	}
 }
 
 func (c *apiKeyGroupRouteCursor) current() (apiKeyGroupRouteCandidate, bool) {
@@ -1236,16 +1251,45 @@ func (c *apiKeyGroupRouteCursor) hasNext() bool {
 	return c != nil && c.available && c.index+1 < len(c.candidates)
 }
 
+func (c *apiKeyGroupRouteCursor) canSwitchAfterFailure() bool {
+	return c != nil && c.available && len(c.candidates) > 0 && c.attempts < c.maxAttempts
+}
+
 func (c *apiKeyGroupRouteCursor) switchToNext(apiKeyID int64, reason string, reqLog *zap.Logger, fields ...zap.Field) bool {
-	if c == nil || !c.hasNext() {
-		return false
-	}
 	current, ok := c.current()
 	if !ok {
 		return false
 	}
 	apiKeyGroupRouteBreaker.recordFailure(apiKeyID, current.Route.GroupID, current.Route.CooldownSeconds)
-	c.index++
+	if !c.canSwitchAfterFailure() {
+		if reqLog != nil {
+			logFields := []zap.Field{
+				zap.String("reason", reason),
+				zap.Int64("group_id", current.Route.GroupID),
+				zap.Int("attempts", c.attempts),
+				zap.Int("max_attempts", c.maxAttempts),
+			}
+			logFields = append(logFields, fields...)
+			reqLog.Warn("api_key_group_route.exhausted", logFields...)
+		}
+		return false
+	}
+	nextIndex, ok := c.nextIndex()
+	if !ok {
+		if reqLog != nil {
+			logFields := []zap.Field{
+				zap.String("reason", reason),
+				zap.Int64("group_id", current.Route.GroupID),
+				zap.Int("attempts", c.attempts),
+				zap.Int("max_attempts", c.maxAttempts),
+			}
+			logFields = append(logFields, fields...)
+			reqLog.Warn("api_key_group_route.exhausted", logFields...)
+		}
+		return false
+	}
+	c.index = nextIndex
+	c.attempts++
 	next, _ := c.current()
 	if reqLog != nil {
 		logFields := []zap.Field{
@@ -1254,11 +1298,28 @@ func (c *apiKeyGroupRouteCursor) switchToNext(apiKeyID int64, reason string, req
 			zap.Int("from_priority", current.Route.Priority),
 			zap.Int64("to_group_id", next.Route.GroupID),
 			zap.Int("to_priority", next.Route.Priority),
+			zap.Int("attempts", c.attempts),
+			zap.Int("max_attempts", c.maxAttempts),
 		}
 		logFields = append(logFields, fields...)
 		reqLog.Warn("api_key_group_route.switching", logFields...)
 	}
 	return true
+}
+
+func (c *apiKeyGroupRouteCursor) nextIndex() (int, bool) {
+	if c == nil || len(c.candidates) == 0 {
+		return 0, false
+	}
+	for step := 1; step <= len(c.candidates); step++ {
+		idx := (c.index + step) % len(c.candidates)
+		candidate := c.candidates[idx]
+		if candidate.APIKey == nil || candidate.Route.GroupID <= 0 {
+			continue
+		}
+		return idx, true
+	}
+	return 0, false
 }
 
 func (c *apiKeyGroupRouteCursor) skipToNext(reason string, reqLog *zap.Logger, fields ...zap.Field) bool {
@@ -1294,7 +1355,7 @@ func (c *apiKeyGroupRouteCursor) recordSuccess(apiKeyID int64) {
 }
 
 func canSwitchAPIKeyGroupRouteAfterForward(c *gin.Context, cursor *apiKeyGroupRouteCursor, failoverErr *service.UpstreamFailoverError, streamStarted bool, writerSizeBeforeForward int) bool {
-	if cursor == nil || !cursor.hasNext() || !shouldSwitchAPIKeyGroupRoute(failoverErr) || streamStarted {
+	if cursor == nil || !cursor.canSwitchAfterFailure() || !shouldSwitchAPIKeyGroupRoute(failoverErr) || streamStarted {
 		return false
 	}
 	if c != nil && c.Writer != nil && c.Writer.Size() != writerSizeBeforeForward {
