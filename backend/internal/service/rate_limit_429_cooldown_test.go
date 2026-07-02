@@ -112,3 +112,28 @@ func TestHandle429_FallbackUsesDefaultSecondsWhenSettingServiceMissing(t *testin
 	require.False(t, accountRepo.lastRateLimitReset.Before(before.Add(5*time.Second)))
 	require.False(t, accountRepo.lastRateLimitReset.After(after.Add(5*time.Second)))
 }
+
+func TestHandle429_AnthropicOAuthNoResetUsesFallbackCooldown(t *testing.T) {
+	accountRepo := &rateLimit429AccountRepoStub{}
+	svc := NewRateLimitService(accountRepo, nil, &config.Config{}, nil, nil)
+
+	account := &Account{ID: 45, Platform: PlatformAnthropic, Type: AccountTypeOAuth}
+	before := time.Now()
+	svc.handle429(context.Background(), account, http.Header{}, []byte(`{"error":{"type":"rate_limit_error","message":"slow down"}}`))
+	after := time.Now()
+
+	require.Equal(t, 1, accountRepo.rateLimitCalls)
+	require.Equal(t, int64(45), accountRepo.lastRateLimitID)
+	require.False(t, accountRepo.lastRateLimitReset.Before(before.Add(5*time.Second)))
+	require.False(t, accountRepo.lastRateLimitReset.After(after.Add(5*time.Second)))
+}
+
+func TestHandle429_AnthropicAPIKeyNoResetStillSkipsFallback(t *testing.T) {
+	accountRepo := &rateLimit429AccountRepoStub{}
+	svc := NewRateLimitService(accountRepo, nil, &config.Config{}, nil, nil)
+
+	account := &Account{ID: 46, Platform: PlatformAnthropic, Type: AccountTypeAPIKey}
+	svc.handle429(context.Background(), account, http.Header{}, []byte(`{"error":{"message":"Extra usage required"}}`))
+
+	require.Zero(t, accountRepo.rateLimitCalls)
+}
