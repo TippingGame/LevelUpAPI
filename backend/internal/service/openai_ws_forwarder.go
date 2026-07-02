@@ -4450,7 +4450,31 @@ func (s *OpenAIGatewayService) persistOpenAIWSRateLimitSignal(ctx context.Contex
 	if !isOpenAIWSRateLimitError(codeRaw, errTypeRaw, msgRaw) {
 		return
 	}
+	s.tempUnscheduleOpenAIWSPoolRateLimit(ctx, account, responseBody, msgRaw)
 	s.rateLimitService.HandleUpstreamError(ctx, account, http.StatusTooManyRequests, headers, responseBody)
+}
+
+func (s *OpenAIGatewayService) tempUnscheduleOpenAIWSPoolRateLimit(ctx context.Context, account *Account, responseBody []byte, msgRaw string) {
+	if s == nil || account == nil || !account.IsPoolMode() || !account.IsPoolModeRetryableStatus(http.StatusTooManyRequests) {
+		return
+	}
+	body := responseBody
+	if len(body) == 0 {
+		msg := sanitizeUpstreamErrorMessage(strings.TrimSpace(msgRaw))
+		if msg != "" {
+			body, _ = json.Marshal(gin.H{
+				"error": gin.H{
+					"type":    "rate_limit_error",
+					"message": msg,
+				},
+			})
+		}
+	}
+	s.TempUnscheduleRetryableError(ctx, account.ID, &UpstreamFailoverError{
+		StatusCode:             http.StatusTooManyRequests,
+		ResponseBody:           body,
+		RetryableOnSameAccount: true,
+	})
 }
 
 func classifyOpenAIWSErrorEventFromRaw(codeRaw, errTypeRaw, msgRaw string) (string, bool) {

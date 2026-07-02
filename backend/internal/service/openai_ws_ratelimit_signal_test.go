@@ -270,6 +270,34 @@ func TestOpenAIGatewayService_WSv2ErrorEventCapacityPersistsTempUnsched(t *testi
 	require.Contains(t, repo.tempReasons[0], "openai_model_capacity")
 }
 
+func TestOpenAIGatewayService_WSv2PoolModeRateLimitTempUnschedules(t *testing.T) {
+	repo := &openAIWSRateLimitSignalRepo{}
+	rateSvc := &RateLimitService{accountRepo: repo}
+	svc := &OpenAIGatewayService{
+		accountRepo:      repo,
+		rateLimitService: rateSvc,
+	}
+	account := &Account{
+		ID:          506,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Status:      StatusActive,
+		Schedulable: true,
+		Credentials: map[string]any{
+			"pool_mode": true,
+		},
+	}
+	body := []byte(`{"type":"error","error":{"code":"rate_limit_exceeded","type":"usage_limit_reached","message":"The usage limit has been reached"}}`)
+
+	start := time.Now()
+	svc.persistOpenAIWSRateLimitSignal(context.Background(), account, http.Header{}, body, "rate_limit_exceeded", "usage_limit_reached", "The usage limit has been reached")
+
+	require.Empty(t, repo.rateLimitCalls)
+	require.Len(t, repo.tempCalls, 1)
+	require.WithinDuration(t, start.Add(retryableErrorExhaustedCooldown), repo.tempCalls[0], 5*time.Second)
+	require.Contains(t, repo.tempReasons[0], "retryable upstream status 429 exhausted")
+}
+
 func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_ErrorEventUsageLimitPersistsRateLimit(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
