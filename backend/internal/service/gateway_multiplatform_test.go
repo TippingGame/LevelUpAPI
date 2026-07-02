@@ -203,6 +203,7 @@ type mockGatewayCacheForPlatform struct {
 	sessionBindings map[string]int64
 	deletedSessions map[string]int
 	stringBindings  map[string]string
+	stringTTLs      map[string]time.Duration
 }
 
 func (m *mockGatewayCacheForPlatform) GetSessionAccountID(ctx context.Context, groupID int64, sessionHash string) (int64, error) {
@@ -250,6 +251,10 @@ func (m *mockGatewayCacheForPlatform) SetSessionString(ctx context.Context, grou
 		m.stringBindings = make(map[string]string)
 	}
 	m.stringBindings[sessionHash] = value
+	if m.stringTTLs == nil {
+		m.stringTTLs = make(map[string]time.Duration)
+	}
+	m.stringTTLs[sessionHash] = ttl
 	return nil
 }
 
@@ -408,6 +413,7 @@ func TestGatewayService_SelectAccountForModel_BindsProxyExitIP(t *testing.T) {
 	require.NotNil(t, acc)
 	require.Equal(t, int64(1), acc.ID)
 	require.Equal(t, "203.0.113.7", cache.stringBindings[accountProxyExitIPKey(1)])
+	require.Equal(t, accountProxyExitIPTTL, cache.stringTTLs[accountProxyExitIPKey(1)])
 }
 
 // TestGatewayService_SelectAccountForModelWithPlatform_Antigravity 测试 antigravity 单平台选择
@@ -2555,6 +2561,8 @@ func TestGatewayService_SelectAccountWithLoadAwareness(t *testing.T) {
 		require.Equal(t, int64(1), result.Account.ID)
 		require.Equal(t, int64(1), cache.sessionBindings["new-session"])
 		require.Equal(t, "1", cache.stringBindings[affinityKey])
+		require.Equal(t, clientAffinityTTL, cache.stringTTLs[affinityKey])
+		require.Equal(t, accountUserAffinityTTL, cache.stringTTLs[accountUserAffinityKey(1)])
 	})
 
 	t.Run("客户端亲和-缓存账号被排除时刷新到新账号", func(t *testing.T) {
@@ -2601,6 +2609,8 @@ func TestGatewayService_SelectAccountWithLoadAwareness(t *testing.T) {
 		require.Equal(t, int64(2), result.Account.ID)
 		require.Equal(t, int64(2), cache.sessionBindings["new-session-2"])
 		require.Equal(t, "2", cache.stringBindings[affinityKey])
+		require.Equal(t, clientAffinityTTL, cache.stringTTLs[affinityKey])
+		require.Equal(t, accountUserAffinityTTL, cache.stringTTLs[accountUserAffinityKey(2)])
 	})
 
 	t.Run("账号用户亲和-同用户允许继续使用绑定账号", func(t *testing.T) {
@@ -2638,6 +2648,7 @@ func TestGatewayService_SelectAccountWithLoadAwareness(t *testing.T) {
 		require.NotNil(t, result.Account)
 		require.Equal(t, int64(1), result.Account.ID)
 		require.Equal(t, "42", cache.stringBindings[accountUserAffinityKey(1)])
+		require.Equal(t, accountUserAffinityTTL, cache.stringTTLs[accountUserAffinityKey(1)])
 	})
 
 	t.Run("账号用户亲和-不同用户跳过绑定账号并刷新新绑定", func(t *testing.T) {
@@ -2677,6 +2688,7 @@ func TestGatewayService_SelectAccountWithLoadAwareness(t *testing.T) {
 		require.Equal(t, "99", cache.stringBindings[accountUserAffinityKey(1)])
 		require.Equal(t, "42", cache.stringBindings[accountUserAffinityKey(2)])
 		require.Equal(t, int64(2), cache.sessionBindings["other-user-session"])
+		require.Equal(t, accountUserAffinityTTL, cache.stringTTLs[accountUserAffinityKey(2)])
 	})
 
 	t.Run("代理健康-坏代理的Anthropic OAuth账号被跳过", func(t *testing.T) {
@@ -2787,6 +2799,7 @@ func TestGatewayService_SelectAccountWithLoadAwareness(t *testing.T) {
 		require.Equal(t, int64(2), result.Account.ID)
 		require.Equal(t, "198.51.100.7", cache.stringBindings[accountProxyExitIPKey(1)])
 		require.Equal(t, "203.0.113.8", cache.stringBindings[accountProxyExitIPKey(2)])
+		require.Equal(t, accountProxyExitIPTTL, cache.stringTTLs[accountProxyExitIPKey(2)])
 	})
 
 	t.Run("代理出口IP-无观测数据时不误伤已有绑定", func(t *testing.T) {
