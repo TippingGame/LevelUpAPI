@@ -48,6 +48,7 @@ const (
 	stickySessionTTL        = time.Hour // 粘性会话TTL
 	clientAffinityTTL       = 24 * time.Hour
 	accountUserAffinityTTL  = 24 * time.Hour
+	accountProxyExitIPTTL   = 24 * time.Hour
 	defaultMaxLineSize      = 500 * 1024 * 1024
 	// Canonical Claude Code banner. Keep it EXACT (no trailing whitespace/newlines)
 	// to match real Claude CLI traffic as closely as possible. When we need a visual
@@ -79,6 +80,7 @@ const (
 const (
 	clientAffinityKeyPrefix      = "client_affinity:"
 	accountUserAffinityKeyPrefix = "account_user_affinity:"
+	accountProxyExitIPKeyPrefix  = "account_proxy_exit_ip:"
 )
 
 const (
@@ -1035,6 +1037,94 @@ func (s *GatewayService) bindAccountUserAffinity(ctx context.Context, groupID *i
 	_ = s.cache.SetSessionString(ctx, derefGroupID(groupID), key, strconv.FormatInt(sub2apiUserID, 10), accountUserAffinityTTL)
 }
 
+func accountProxyExitIPKey(accountID int64) string {
+	if accountID <= 0 {
+		return ""
+	}
+	return accountProxyExitIPKeyPrefix + strconv.FormatInt(accountID, 10)
+}
+
+func normalizeProxyExitIP(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	if idx := strings.IndexByte(raw, ','); idx >= 0 {
+		raw = strings.TrimSpace(raw[:idx])
+	}
+	if ip := net.ParseIP(strings.Trim(raw, "[]")); ip != nil {
+		return ip.String()
+	}
+	return raw
+}
+
+func (s *GatewayService) observedProxyExitIP(ctx context.Context, account *Account) string {
+	if s == nil || account == nil || !account.IsAnthropicOAuthOrSetupToken() || account.ProxyID == nil || *account.ProxyID <= 0 {
+		return ""
+	}
+	proxyID := *account.ProxyID
+	if info, ok := proxyHealthFromPrefetchContext(ctx, proxyID); ok && info != nil {
+		return normalizeProxyExitIP(info.IPAddress)
+	}
+	if s.proxyLatencyCache == nil {
+		return ""
+	}
+	latencies, err := s.proxyLatencyCache.GetProxyLatencies(ctx, []int64{proxyID})
+	if err != nil {
+		return ""
+	}
+	if info := latencies[proxyID]; info != nil {
+		return normalizeProxyExitIP(info.IPAddress)
+	}
+	return ""
+}
+
+func (s *GatewayService) boundAccountProxyExitIP(ctx context.Context, accountID int64) string {
+	if s == nil || s.cache == nil || accountID <= 0 {
+		return ""
+	}
+	key := accountProxyExitIPKey(accountID)
+	if key == "" {
+		return ""
+	}
+	raw, err := s.cache.GetSessionString(ctx, 0, key)
+	if err != nil {
+		return ""
+	}
+	normalized := normalizeProxyExitIP(raw)
+	if normalized == "" {
+		_ = s.cache.DeleteSessionString(ctx, 0, key)
+	}
+	return normalized
+}
+
+func (s *GatewayService) isAccountProxyExitIPStable(ctx context.Context, account *Account) bool {
+	if s == nil || account == nil || !account.IsAnthropicOAuthOrSetupToken() || s.cache == nil {
+		return true
+	}
+	observed := s.observedProxyExitIP(ctx, account)
+	if observed == "" {
+		return true
+	}
+	bound := s.boundAccountProxyExitIP(ctx, account.ID)
+	return bound == "" || bound == observed
+}
+
+func (s *GatewayService) bindAccountProxyExitIP(ctx context.Context, account *Account) {
+	if s == nil || s.cache == nil || account == nil || !account.IsAnthropicOAuthOrSetupToken() {
+		return
+	}
+	observed := s.observedProxyExitIP(ctx, account)
+	if observed == "" {
+		return
+	}
+	key := accountProxyExitIPKey(account.ID)
+	if key == "" {
+		return
+	}
+	_ = s.cache.SetSessionString(ctx, 0, key, observed, accountProxyExitIPTTL)
+}
+
 // FindGeminiSession 查找 Gemini 会话（基于内容摘要链的 Fallback 匹配）
 // 返回最长匹配的会话信息（uuid, accountID）
 func (s *GatewayService) FindGeminiSession(_ context.Context, groupID int64, prefixHash, digestChain string) (uuid string, accountID int64, matchedChain string, found bool) {
@@ -1675,7 +1765,12 @@ func (s *GatewayService) SelectAccountForModelWithExclusions(ctx context.Context
 		if err != nil {
 			return nil, err
 		}
-		return s.hydrateSelectedAccount(ctx, account)
+		hydrated, err := s.hydrateSelectedAccount(ctx, account)
+		if err != nil {
+			return nil, err
+		}
+		s.bindAccountProxyExitIP(ctx, hydrated)
+		return hydrated, nil
 	}
 
 	// antigravity 分组、强制平台模式或无分组使用单平台选择
@@ -1684,7 +1779,12 @@ func (s *GatewayService) SelectAccountForModelWithExclusions(ctx context.Context
 	if err != nil {
 		return nil, err
 	}
-	return s.hydrateSelectedAccount(ctx, account)
+	hydrated, err := s.hydrateSelectedAccount(ctx, account)
+	if err != nil {
+		return nil, err
+	}
+	s.bindAccountProxyExitIP(ctx, hydrated)
+	return hydrated, nil
 }
 
 // SelectAccountWithLoadAwareness selects account with load-awareness and wait plan.
@@ -1751,6 +1851,7 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 		if acquired {
 			s.bindClientAffinityAccount(ctx, groupID, clientAffinityKey, account)
 			s.bindAccountUserAffinity(ctx, groupID, account, sub2apiUserID)
+			s.bindAccountProxyExitIP(ctx, account)
 		}
 		return s.newSelectionResult(ctx, account, acquired, release, waitPlan)
 	}
@@ -2385,6 +2486,7 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 			if result.Acquired {
 				s.bindClientAffinityAccount(ctx, groupID, clientAffinityKey, result.Account)
 				s.bindAccountUserAffinity(ctx, groupID, result.Account, sub2apiUserID)
+				s.bindAccountProxyExitIP(ctx, result.Account)
 			}
 			return result, nil
 		}
@@ -2765,7 +2867,9 @@ func (s *GatewayService) isAccountSchedulableForSelection(ctx context.Context, a
 	if account == nil {
 		return false
 	}
-	return account.IsSchedulable() && s.isAccountProxyHealthSchedulable(ctx, account)
+	return account.IsSchedulable() &&
+		s.isAccountProxyHealthSchedulable(ctx, account) &&
+		s.isAccountProxyExitIPStable(ctx, account)
 }
 
 func (s *GatewayService) isAccountSchedulableForModelSelection(ctx context.Context, account *Account, requestedModel string) bool {
@@ -4208,10 +4312,12 @@ type selectionFailureStats struct {
 	Excluded            int
 	Unschedulable       int
 	ProxyHealthFiltered int
+	ProxyIPChanged      int
 	PlatformFiltered    int
 	ModelUnsupported    int
 	ModelRateLimited    int
 	SampleProxyIDs      []int64
+	SampleProxyIPIDs    []int64
 	SamplePlatformIDs   []int64
 	SampleMappingIDs    []int64
 	SampleRateLimitIDs  []string
@@ -4235,7 +4341,7 @@ func (s *GatewayService) logDetailedSelectionFailure(
 	stats := s.collectSelectionFailureStats(ctx, accounts, requestedModel, platform, excludedIDs, allowMixedScheduling)
 	logger.LegacyPrintf(
 		"service.gateway",
-		"[SelectAccountDetailed] group_id=%v model=%s platform=%s session=%s total=%d eligible=%d excluded=%d unschedulable=%d proxy_health_filtered=%d platform_filtered=%d model_unsupported=%d model_rate_limited=%d sample_proxy_health=%v sample_platform_filtered=%v sample_model_unsupported=%v sample_model_rate_limited=%v",
+		"[SelectAccountDetailed] group_id=%v model=%s platform=%s session=%s total=%d eligible=%d excluded=%d unschedulable=%d proxy_health_filtered=%d proxy_ip_changed=%d platform_filtered=%d model_unsupported=%d model_rate_limited=%d sample_proxy_health=%v sample_proxy_ip_changed=%v sample_platform_filtered=%v sample_model_unsupported=%v sample_model_rate_limited=%v",
 		derefGroupID(groupID),
 		requestedModel,
 		platform,
@@ -4245,10 +4351,12 @@ func (s *GatewayService) logDetailedSelectionFailure(
 		stats.Excluded,
 		stats.Unschedulable,
 		stats.ProxyHealthFiltered,
+		stats.ProxyIPChanged,
 		stats.PlatformFiltered,
 		stats.ModelUnsupported,
 		stats.ModelRateLimited,
 		stats.SampleProxyIDs,
+		stats.SampleProxyIPIDs,
 		stats.SamplePlatformIDs,
 		stats.SampleMappingIDs,
 		stats.SampleRateLimitIDs,
@@ -4279,6 +4387,9 @@ func (s *GatewayService) collectSelectionFailureStats(
 		case "proxy_health_filtered":
 			stats.ProxyHealthFiltered++
 			stats.SampleProxyIDs = appendSelectionFailureSampleID(stats.SampleProxyIDs, acc.ID)
+		case "proxy_ip_changed":
+			stats.ProxyIPChanged++
+			stats.SampleProxyIPIDs = appendSelectionFailureSampleID(stats.SampleProxyIPIDs, acc.ID)
 		case "platform_filtered":
 			stats.PlatformFiltered++
 			stats.SamplePlatformIDs = appendSelectionFailureSampleID(stats.SamplePlatformIDs, acc.ID)
@@ -4316,6 +4427,9 @@ func (s *GatewayService) diagnoseSelectionFailure(
 	}
 	if !s.isAccountProxyHealthSchedulable(ctx, acc) {
 		return selectionFailureDiagnosis{Category: "proxy_health_filtered"}
+	}
+	if !s.isAccountProxyExitIPStable(ctx, acc) {
+		return selectionFailureDiagnosis{Category: "proxy_ip_changed"}
 	}
 	if isPlatformFilteredForSelection(acc, platform, allowMixedScheduling) {
 		return selectionFailureDiagnosis{
@@ -4373,12 +4487,13 @@ func appendSelectionFailureRateSample(samples []string, accountID int64, remaini
 
 func summarizeSelectionFailureStats(stats selectionFailureStats) string {
 	return fmt.Sprintf(
-		"total=%d eligible=%d excluded=%d unschedulable=%d proxy_health_filtered=%d platform_filtered=%d model_unsupported=%d model_rate_limited=%d",
+		"total=%d eligible=%d excluded=%d unschedulable=%d proxy_health_filtered=%d proxy_ip_changed=%d platform_filtered=%d model_unsupported=%d model_rate_limited=%d",
 		stats.Total,
 		stats.Eligible,
 		stats.Excluded,
 		stats.Unschedulable,
 		stats.ProxyHealthFiltered,
+		stats.ProxyIPChanged,
 		stats.PlatformFiltered,
 		stats.ModelUnsupported,
 		stats.ModelRateLimited,

@@ -379,6 +379,37 @@ func TestGatewayService_SelectAccountForModelWithPlatform_Anthropic(t *testing.T
 	require.Equal(t, PlatformAnthropic, acc.Platform, "应只返回 anthropic 平台账户")
 }
 
+func TestGatewayService_SelectAccountForModel_BindsProxyExitIP(t *testing.T) {
+	ctx := context.Background()
+	now := time.Now()
+
+	repo := &mockAccountRepoForPlatform{
+		accounts: []Account{
+			{ID: 1, Platform: PlatformAnthropic, Type: AccountTypeOAuth, Priority: 1, Status: StatusActive, Schedulable: true, ProxyID: ptr(int64(7)), Proxy: &Proxy{ID: 7, Status: StatusActive}},
+		},
+		accountsByID: map[int64]*Account{},
+	}
+	for i := range repo.accounts {
+		repo.accountsByID[repo.accounts[i].ID] = &repo.accounts[i]
+	}
+
+	cache := &mockGatewayCacheForPlatform{}
+	svc := &GatewayService{
+		accountRepo: repo,
+		cache:       cache,
+		cfg:         testConfig(),
+		proxyLatencyCache: &mockProxyLatencyCacheForGateway{infos: map[int64]*ProxyLatencyInfo{
+			7: &ProxyLatencyInfo{Success: true, IPAddress: "203.0.113.7", CountryCode: "US", UpdatedAt: now},
+		}},
+	}
+
+	acc, err := svc.SelectAccountForModel(ctx, nil, "direct-select-session", "claude-3-5-sonnet-20241022")
+	require.NoError(t, err)
+	require.NotNil(t, acc)
+	require.Equal(t, int64(1), acc.ID)
+	require.Equal(t, "203.0.113.7", cache.stringBindings[accountProxyExitIPKey(1)])
+}
+
 // TestGatewayService_SelectAccountForModelWithPlatform_Antigravity 测试 antigravity 单平台选择
 func TestGatewayService_SelectAccountForModelWithPlatform_Antigravity(t *testing.T) {
 	ctx := context.Background()
@@ -2714,6 +2745,87 @@ func TestGatewayService_SelectAccountWithLoadAwareness(t *testing.T) {
 		require.NotNil(t, result)
 		require.NotNil(t, result.Account)
 		require.Equal(t, int64(2), result.Account.ID)
+	})
+
+	t.Run("代理出口IP-变化的Anthropic OAuth账号被跳过并绑定新账号", func(t *testing.T) {
+		now := time.Now()
+		repo := &mockAccountRepoForPlatform{
+			accounts: []Account{
+				{ID: 1, Platform: PlatformAnthropic, Type: AccountTypeOAuth, Priority: 1, Status: StatusActive, Schedulable: true, Concurrency: 5, ProxyID: ptr(int64(7)), Proxy: &Proxy{ID: 7, Status: StatusActive}},
+				{ID: 2, Platform: PlatformAnthropic, Type: AccountTypeOAuth, Priority: 2, Status: StatusActive, Schedulable: true, Concurrency: 5, ProxyID: ptr(int64(8)), Proxy: &Proxy{ID: 8, Status: StatusActive}},
+			},
+			accountsByID: map[int64]*Account{},
+		}
+		for i := range repo.accounts {
+			repo.accountsByID[repo.accounts[i].ID] = &repo.accounts[i]
+		}
+
+		cache := &mockGatewayCacheForPlatform{
+			stringBindings: map[string]string{
+				accountProxyExitIPKey(1): "198.51.100.7",
+			},
+		}
+
+		cfg := testConfig()
+		cfg.Gateway.Scheduling.LoadBatchEnabled = true
+
+		svc := &GatewayService{
+			accountRepo:        repo,
+			cache:              cache,
+			cfg:                cfg,
+			concurrencyService: NewConcurrencyService(&mockConcurrencyCache{}),
+			proxyLatencyCache: &mockProxyLatencyCacheForGateway{infos: map[int64]*ProxyLatencyInfo{
+				7: &ProxyLatencyInfo{Success: true, IPAddress: "203.0.113.7", CountryCode: "US", UpdatedAt: now},
+				8: &ProxyLatencyInfo{Success: true, IPAddress: "203.0.113.8", CountryCode: "US", UpdatedAt: now},
+			}},
+		}
+
+		result, err := svc.SelectAccountWithLoadAwareness(ctx, nil, "proxy-ip-changed-session", "claude-3-5-sonnet-20241022", nil, "", 42)
+		require.NoError(t, err)
+		require.NotNil(t, result)
+		require.NotNil(t, result.Account)
+		require.Equal(t, int64(2), result.Account.ID)
+		require.Equal(t, "198.51.100.7", cache.stringBindings[accountProxyExitIPKey(1)])
+		require.Equal(t, "203.0.113.8", cache.stringBindings[accountProxyExitIPKey(2)])
+	})
+
+	t.Run("代理出口IP-无观测数据时不误伤已有绑定", func(t *testing.T) {
+		now := time.Now()
+		repo := &mockAccountRepoForPlatform{
+			accounts: []Account{
+				{ID: 1, Platform: PlatformAnthropic, Type: AccountTypeOAuth, Priority: 1, Status: StatusActive, Schedulable: true, Concurrency: 5, ProxyID: ptr(int64(7)), Proxy: &Proxy{ID: 7, Status: StatusActive}},
+			},
+			accountsByID: map[int64]*Account{},
+		}
+		for i := range repo.accounts {
+			repo.accountsByID[repo.accounts[i].ID] = &repo.accounts[i]
+		}
+
+		cache := &mockGatewayCacheForPlatform{
+			stringBindings: map[string]string{
+				accountProxyExitIPKey(1): "198.51.100.7",
+			},
+		}
+
+		cfg := testConfig()
+		cfg.Gateway.Scheduling.LoadBatchEnabled = true
+
+		svc := &GatewayService{
+			accountRepo:        repo,
+			cache:              cache,
+			cfg:                cfg,
+			concurrencyService: NewConcurrencyService(&mockConcurrencyCache{}),
+			proxyLatencyCache: &mockProxyLatencyCacheForGateway{infos: map[int64]*ProxyLatencyInfo{
+				7: &ProxyLatencyInfo{Success: true, CountryCode: "US", UpdatedAt: now},
+			}},
+		}
+
+		result, err := svc.SelectAccountWithLoadAwareness(ctx, nil, "proxy-ip-missing-session", "claude-3-5-sonnet-20241022", nil, "", 42)
+		require.NoError(t, err)
+		require.NotNil(t, result)
+		require.NotNil(t, result.Account)
+		require.Equal(t, int64(1), result.Account.ID)
+		require.Equal(t, "198.51.100.7", cache.stringBindings[accountProxyExitIPKey(1)])
 	})
 
 	t.Run("代理健康-Anthropic APIKey账号不受OAuth代理健康规则影响", func(t *testing.T) {
