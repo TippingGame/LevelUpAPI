@@ -345,6 +345,27 @@ func (s *APIKeyRepoSuite) TestCountByGroupID() {
 	s.Require().Equal(int64(1), count)
 }
 
+func (s *APIKeyRepoSuite) TestListKeysByGroupID_IncludesRouteOnlyBindings() {
+	user := s.mustCreateUser("listkeys-route@test.com")
+	targetGroup := s.mustCreateGroup("g-listkeys-route-target")
+	otherGroup := s.mustCreateGroup("g-listkeys-route-other")
+
+	primaryKey := s.mustCreateApiKey(user.ID, "sk-listkeys-primary", "Primary", &targetGroup.ID)
+	routeOnlyKey := s.mustCreateApiKey(user.ID, "sk-listkeys-route", "RouteOnly", nil)
+	unrelatedKey := s.mustCreateApiKey(user.ID, "sk-listkeys-other", "Other", nil)
+
+	routeOnlyKey.GroupRoutes = []service.APIKeyGroupRoute{
+		{GroupID: targetGroup.ID, Priority: 100, Weight: 1, Enabled: true, CooldownSeconds: 30},
+		{GroupID: otherGroup.ID, Priority: 200, Weight: 1, Enabled: true, CooldownSeconds: 30},
+	}
+	s.Require().NoError(s.repo.Update(s.ctx, routeOnlyKey), "add route-only group bindings")
+
+	keys, err := s.repo.ListKeysByGroupID(s.ctx, targetGroup.ID)
+	s.Require().NoError(err)
+	s.Require().ElementsMatch([]string{primaryKey.Key, routeOnlyKey.Key}, keys)
+	s.Require().NotContains(keys, unrelatedKey.Key)
+}
+
 // --- ExistsByKey ---
 
 func (s *APIKeyRepoSuite) TestExistsByKey() {
