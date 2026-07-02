@@ -455,16 +455,26 @@ func (a *Account) isSchedulableAt(now time.Time, includeCodexQuotaProtection boo
 }
 
 func (a *Account) HasRequiredProxyForScheduling() bool {
-	if a == nil || a.OwnerUserID == nil {
-		return true
-	}
-	if !RequiresUserAccountProxy(a.Platform, a.AccountLevel) {
+	if a == nil || !a.RequiresProxyForScheduling() {
 		return true
 	}
 	if a.ProxyID == nil || *a.ProxyID <= 0 {
 		return false
 	}
 	return a.Proxy != nil && a.Proxy.IsActive()
+}
+
+func (a *Account) RequiresProxyForScheduling() bool {
+	if a == nil {
+		return false
+	}
+	if a.IsAnthropicOAuthOrSetupToken() {
+		return true
+	}
+	if a.OwnerUserID == nil {
+		return false
+	}
+	return RequiresUserAccountProxy(a.Platform, a.AccountLevel)
 }
 
 func (a *Account) IsRateLimited() bool {

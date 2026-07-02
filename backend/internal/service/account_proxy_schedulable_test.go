@@ -16,10 +16,18 @@ func TestAccountHasRequiredProxyForScheduling(t *testing.T) {
 		want bool
 	}{
 		{
-			name: "admin anthropic account without proxy is allowed",
+			name: "admin anthropic oauth account without proxy is blocked",
 			acc: &Account{
 				Platform: PlatformAnthropic,
 				Type:     AccountTypeOAuth,
+			},
+			want: false,
+		},
+		{
+			name: "admin anthropic api key account without proxy is allowed",
+			acc: &Account{
+				Platform: PlatformAnthropic,
+				Type:     AccountTypeAPIKey,
 			},
 			want: true,
 		},

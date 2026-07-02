@@ -46,6 +46,7 @@ const (
 	claudeAPIURL            = "https://api.anthropic.com/v1/messages?beta=true"
 	claudeAPICountTokensURL = "https://api.anthropic.com/v1/messages/count_tokens?beta=true"
 	stickySessionTTL        = time.Hour // 粘性会话TTL
+	clientAffinityTTL       = 24 * time.Hour
 	defaultMaxLineSize      = 500 * 1024 * 1024
 	// Canonical Claude Code banner. Keep it EXACT (no trailing whitespace/newlines)
 	// to match real Claude CLI traffic as closely as possible. When we need a visual
@@ -73,6 +74,8 @@ IMPORTANT: You must NEVER generate or guess URLs for the user unless you are con
 const (
 	claudeMimicDebugInfoKey = "claude_mimic_debug_info"
 )
+
+const clientAffinityKeyPrefix = "client_affinity:"
 
 const (
 	cacheTTLTarget5m = "5m"
@@ -925,6 +928,52 @@ func (s *GatewayService) GetCachedSessionAccountID(ctx context.Context, groupID 
 	return accountID, nil
 }
 
+func (s *GatewayService) buildClientAffinityKey(metadataUserID string, sub2apiUserID int64) string {
+	if sub2apiUserID <= 0 {
+		return ""
+	}
+
+	var parts []string
+	parts = append(parts, "user", strconv.FormatInt(sub2apiUserID, 10))
+	if uid := ParseMetadataUserID(metadataUserID); uid != nil {
+		if deviceID := strings.TrimSpace(uid.DeviceID); deviceID != "" {
+			parts = append(parts, "device", deviceID)
+		}
+		if accountUUID := strings.TrimSpace(uid.AccountUUID); accountUUID != "" {
+			parts = append(parts, "account", accountUUID)
+		}
+	}
+
+	sum := sha256.Sum256([]byte(strings.Join(parts, "|")))
+	return clientAffinityKeyPrefix + fmt.Sprintf("%x", sum[:16])
+}
+
+func (s *GatewayService) getClientAffinityAccountID(ctx context.Context, groupID *int64, key string) int64 {
+	if s == nil || s.cache == nil || key == "" {
+		return 0
+	}
+	raw, err := s.cache.GetSessionString(ctx, derefGroupID(groupID), key)
+	if err != nil {
+		return 0
+	}
+	accountID, err := strconv.ParseInt(strings.TrimSpace(raw), 10, 64)
+	if err != nil || accountID <= 0 {
+		_ = s.cache.DeleteSessionString(ctx, derefGroupID(groupID), key)
+		return 0
+	}
+	return accountID
+}
+
+func (s *GatewayService) bindClientAffinityAccount(ctx context.Context, groupID *int64, key string, account *Account) {
+	if s == nil || s.cache == nil || key == "" || account == nil || account.ID <= 0 {
+		return
+	}
+	if !account.IsAnthropicOAuthOrSetupToken() {
+		return
+	}
+	_ = s.cache.SetSessionString(ctx, derefGroupID(groupID), key, strconv.FormatInt(account.ID, 10), clientAffinityTTL)
+}
+
 // FindGeminiSession 查找 Gemini 会话（基于内容摘要链的 Fallback 匹配）
 // 返回最长匹配的会话信息（uuid, accountID）
 func (s *GatewayService) FindGeminiSession(_ context.Context, groupID int64, prefixHash, digestChain string) (uuid string, accountID int64, matchedChain string, found bool) {
@@ -1635,6 +1684,55 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 		"excluded_count", len(excludedIDs),
 	)
 
+	clientAffinityKey := s.buildClientAffinityKey(metadataUserID, sub2apiUserID)
+	clientAffinityAccountID := s.getClientAffinityAccountID(ctx, groupID, clientAffinityKey)
+	finalizeSelectionResult := func(account *Account, acquired bool, release func(), waitPlan *AccountWaitPlan) (*AccountSelectionResult, error) {
+		if acquired {
+			s.bindClientAffinityAccount(ctx, groupID, clientAffinityKey, account)
+		}
+		return s.newSelectionResult(ctx, account, acquired, release, waitPlan)
+	}
+	tryClientAffinity := func(available []accountWithLoad, layer string) (*AccountSelectionResult, bool, error) {
+		if clientAffinityAccountID <= 0 || s.concurrencyService == nil {
+			return nil, false, nil
+		}
+		for _, item := range available {
+			if item.account == nil || item.account.ID != clientAffinityAccountID {
+				continue
+			}
+			result, err := s.tryAcquireAccountSlot(ctx, item.account.ID, item.account.Concurrency)
+			if err != nil || !result.Acquired {
+				slog.Debug("client_affinity.slot_busy",
+					"layer", layer,
+					"group_id", derefGroupID(groupID),
+					"account_id", item.account.ID,
+					"session", shortSessionHash(sessionHash),
+					"error", err)
+				return nil, false, nil
+			}
+			if !s.checkAndRegisterSession(ctx, item.account, sessionHash) {
+				result.ReleaseFunc()
+				slog.Debug("client_affinity.session_limit",
+					"layer", layer,
+					"group_id", derefGroupID(groupID),
+					"account_id", item.account.ID,
+					"session", shortSessionHash(sessionHash))
+				return nil, false, nil
+			}
+			if sessionHash != "" && s.cache != nil {
+				_ = s.cache.SetSessionAccountID(ctx, derefGroupID(groupID), sessionHash, item.account.ID, stickySessionTTL)
+			}
+			slog.Debug("client_affinity.hit",
+				"layer", layer,
+				"group_id", derefGroupID(groupID),
+				"account_id", item.account.ID,
+				"session", shortSessionHash(sessionHash))
+			selection, selErr := finalizeSelectionResult(item.account, true, result.ReleaseFunc, nil)
+			return selection, true, selErr
+		}
+		return nil, false, nil
+	}
+
 	if s.debugModelRoutingEnabled() && requestedModel != "" {
 		groupPlatform := ""
 		if group != nil {
@@ -1665,7 +1763,7 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 					localExcluded[account.ID] = struct{}{} // 排除此账号
 					continue                               // 重新选择
 				}
-				return s.newSelectionResult(ctx, account, true, result.ReleaseFunc, nil)
+				return finalizeSelectionResult(account, true, result.ReleaseFunc, nil)
 			}
 
 			// 对于等待计划的情况，也需要先检查会话限制
@@ -1684,7 +1782,7 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 				waitingCount, _ := s.concurrencyService.GetAccountWaitingCount(ctx, account.ID)
 				maxWaiting := maxWaitingForStickyDecision(cfg.StickySessionMaxWaiting, stickyRuntime)
 				if waitingCount < maxWaiting {
-					return s.newSelectionResult(ctx, account, false, nil, &AccountWaitPlan{
+					return finalizeSelectionResult(account, false, nil, &AccountWaitPlan{
 						AccountID:      account.ID,
 						MaxConcurrency: account.Concurrency,
 						Timeout:        waitTimeoutForStickyDecision(cfg.StickySessionWaitTimeout, stickyRuntime),
@@ -1692,7 +1790,7 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 					})
 				}
 			}
-			return s.newSelectionResult(ctx, account, false, nil, &AccountWaitPlan{
+			return finalizeSelectionResult(account, false, nil, &AccountWaitPlan{
 				AccountID:      account.ID,
 				MaxConcurrency: account.Concurrency,
 				Timeout:        cfg.FallbackWaitTimeout,
@@ -1861,7 +1959,7 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 									if s.debugModelRoutingEnabled() {
 										logger.LegacyPrintf("service.gateway", "[ModelRoutingDebug] routed sticky hit: group_id=%v model=%s session=%s account=%d", derefGroupID(groupID), requestedModel, shortSessionHash(sessionHash), stickyAccountID)
 									}
-									return s.newSelectionResult(ctx, stickyAccount, true, result.ReleaseFunc, nil)
+									return finalizeSelectionResult(stickyAccount, true, result.ReleaseFunc, nil)
 								}
 							}
 
@@ -1874,15 +1972,12 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 										stickyCacheMissReason = "session_limit"
 										// 会话限制已满，继续到负载感知选择
 									} else {
-										return &AccountSelectionResult{
-											Account: stickyAccount,
-											WaitPlan: &AccountWaitPlan{
-												AccountID:      stickyAccountID,
-												MaxConcurrency: stickyAccount.Concurrency,
-												Timeout:        waitTimeoutForStickyDecision(cfg.StickySessionWaitTimeout, stickyRuntime),
-												MaxWaiting:     maxWaiting,
-											},
-										}, nil
+										return finalizeSelectionResult(stickyAccount, false, nil, &AccountWaitPlan{
+											AccountID:      stickyAccountID,
+											MaxConcurrency: stickyAccount.Concurrency,
+											Timeout:        waitTimeoutForStickyDecision(cfg.StickySessionWaitTimeout, stickyRuntime),
+											MaxWaiting:     maxWaiting,
+										})
 									}
 								} else {
 									stickyCacheMissReason = "wait_queue_full"
@@ -1940,6 +2035,10 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 			}
 
 			if len(routingAvailable) > 0 {
+				if selection, ok, err := tryClientAffinity(routingAvailable, "routing"); err != nil || ok {
+					return selection, err
+				}
+
 				// 排序：优先级 > 负载率 > 最后使用时间
 				sort.SliceStable(routingAvailable, func(i, j int) bool {
 					a, b := routingAvailable[i], routingAvailable[j]
@@ -1979,7 +2078,7 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 						if s.debugModelRoutingEnabled() {
 							logger.LegacyPrintf("service.gateway", "[ModelRoutingDebug] routed select: group_id=%v model=%s session=%s account=%d", derefGroupID(groupID), requestedModel, shortSessionHash(sessionHash), item.account.ID)
 						}
-						return s.newSelectionResult(ctx, item.account, true, result.ReleaseFunc, nil)
+						return finalizeSelectionResult(item.account, true, result.ReleaseFunc, nil)
 					}
 				}
 
@@ -1992,7 +2091,7 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 					if s.debugModelRoutingEnabled() {
 						logger.LegacyPrintf("service.gateway", "[ModelRoutingDebug] routed wait: group_id=%v model=%s session=%s account=%d", derefGroupID(groupID), requestedModel, shortSessionHash(sessionHash), item.account.ID)
 					}
-					return s.newSelectionResult(ctx, item.account, false, nil, &AccountWaitPlan{
+					return finalizeSelectionResult(item.account, false, nil, &AccountWaitPlan{
 						AccountID:      item.account.ID,
 						MaxConcurrency: item.account.Concurrency,
 						Timeout:        cfg.StickySessionWaitTimeout,
@@ -2072,7 +2171,7 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 							if s.cache != nil {
 								_ = s.cache.RefreshSessionTTL(ctx, derefGroupID(groupID), sessionHash, stickySessionTTL)
 							}
-							return s.newSelectionResult(ctx, account, true, result.ReleaseFunc, nil)
+							return finalizeSelectionResult(account, true, result.ReleaseFunc, nil)
 						}
 					} else {
 						slog.Debug("sticky.layer1_5_no_routing_slot_busy",
@@ -2093,7 +2192,7 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 								"session", shortSessionHash(sessionHash),
 								"result", "wait_plan",
 							)
-							return s.newSelectionResult(ctx, account, false, nil, &AccountWaitPlan{
+							return finalizeSelectionResult(account, false, nil, &AccountWaitPlan{
 								AccountID:      accountID,
 								MaxConcurrency: account.Concurrency,
 								Timeout:        waitTimeoutForStickyDecision(cfg.StickySessionWaitTimeout, stickyRuntime),
@@ -2190,6 +2289,9 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 		if result, ok, legacyErr := s.tryAcquireByLegacyOrder(ctx, candidates, groupID, sessionHash, preferOAuth); legacyErr != nil {
 			return nil, legacyErr
 		} else if ok {
+			if result.Acquired {
+				s.bindClientAffinityAccount(ctx, groupID, clientAffinityKey, result.Account)
+			}
 			return result, nil
 		}
 	} else {
@@ -2206,6 +2308,10 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 					runtimePenalty: s.accountRuntimePenalty(acc.ID),
 				})
 			}
+		}
+
+		if selection, ok, err := tryClientAffinity(available, "load_aware"); err != nil || ok {
+			return selection, err
 		}
 
 		// 分层过滤选择：优先级 → 负载率 → LRU
@@ -2229,7 +2335,7 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 					if sessionHash != "" && s.cache != nil {
 						_ = s.cache.SetSessionAccountID(ctx, derefGroupID(groupID), sessionHash, selected.account.ID, stickySessionTTL)
 					}
-					return s.newSelectionResult(ctx, selected.account, true, result.ReleaseFunc, nil)
+					return finalizeSelectionResult(selected.account, true, result.ReleaseFunc, nil)
 				}
 			}
 
@@ -2252,7 +2358,7 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 		if !s.checkAndRegisterSession(ctx, acc, sessionHash) {
 			continue // 会话限制已满，尝试下一个账号
 		}
-		return s.newSelectionResult(ctx, acc, false, nil, &AccountWaitPlan{
+		return finalizeSelectionResult(acc, false, nil, &AccountWaitPlan{
 			AccountID:      acc.ID,
 			MaxConcurrency: acc.Concurrency,
 			Timeout:        cfg.FallbackWaitTimeout,
