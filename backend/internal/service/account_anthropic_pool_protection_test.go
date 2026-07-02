@@ -34,6 +34,43 @@ func TestApplyAnthropicOAuthPoolProtectionDefaults(t *testing.T) {
 	require.Equal(t, "serialize", account.GetUserMsgQueueMode())
 }
 
+func TestAnthropicOAuthPoolProtectionRuntimeDefaultsForLegacyAccounts(t *testing.T) {
+	tests := []struct {
+		name  string
+		extra map[string]any
+	}{
+		{name: "nil extra", extra: nil},
+		{name: "empty extra", extra: map[string]any{}},
+		{name: "zero values", extra: map[string]any{
+			"max_sessions":                 0,
+			"session_idle_timeout_minutes": 0,
+			"base_rpm":                     0,
+			"rpm_strategy":                 "",
+		}},
+		{name: "invalid values", extra: map[string]any{
+			"max_sessions":                 -1,
+			"session_idle_timeout_minutes": -1,
+			"base_rpm":                     -1,
+			"rpm_strategy":                 "unknown",
+		}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			account := &Account{
+				Platform: PlatformAnthropic,
+				Type:     AccountTypeOAuth,
+				Extra:    tt.extra,
+			}
+
+			require.Equal(t, anthropicOAuthDefaultMaxSessions, account.GetMaxSessions())
+			require.Equal(t, anthropicOAuthDefaultSessionIdleTimeoutMinutes, account.GetSessionIdleTimeoutMinutes())
+			require.Equal(t, anthropicOAuthDefaultBaseRPM, account.GetBaseRPM())
+			require.Equal(t, anthropicOAuthDefaultRPMStrategy, account.GetRPMStrategy())
+		})
+	}
+}
+
 func TestApplyAnthropicOAuthPoolProtectionDefaultsPreservesOverrides(t *testing.T) {
 	customRules := []any{
 		map[string]any{
@@ -89,4 +126,17 @@ func TestApplyAnthropicOAuthPoolProtectionDefaultsSkipsAPIKey(t *testing.T) {
 	require.Equal(t, extra, gotExtra)
 	require.Len(t, gotCredentials, 1)
 	require.Len(t, gotExtra, 1)
+}
+
+func TestAnthropicPoolProtectionRuntimeDefaultsSkipAPIKey(t *testing.T) {
+	account := &Account{
+		Platform: PlatformAnthropic,
+		Type:     AccountTypeAPIKey,
+		Extra:    nil,
+	}
+
+	require.Equal(t, 0, account.GetMaxSessions())
+	require.Equal(t, 5, account.GetSessionIdleTimeoutMinutes())
+	require.Equal(t, 0, account.GetBaseRPM())
+	require.Equal(t, "tiered", account.GetRPMStrategy())
 }

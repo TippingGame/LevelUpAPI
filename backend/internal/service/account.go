@@ -2658,6 +2658,16 @@ func (a *Account) GetWindowCostStickyReserve() float64 {
 // GetMaxSessions 获取最大并发会话数
 // 返回 0 表示未启用
 func (a *Account) GetMaxSessions() int {
+	if a.IsAnthropicOAuthOrSetupToken() {
+		if a.Extra != nil {
+			if v, ok := a.Extra["max_sessions"]; ok {
+				if val := parseExtraInt(v); val > 0 {
+					return val
+				}
+			}
+		}
+		return anthropicOAuthDefaultMaxSessions
+	}
 	if a.Extra == nil {
 		return 0
 	}
@@ -2670,6 +2680,17 @@ func (a *Account) GetMaxSessions() int {
 // GetSessionIdleTimeoutMinutes 获取会话空闲超时分钟数
 // 默认值为 5 分钟
 func (a *Account) GetSessionIdleTimeoutMinutes() int {
+	if a.IsAnthropicOAuthOrSetupToken() {
+		if a.Extra != nil {
+			if v, ok := a.Extra["session_idle_timeout_minutes"]; ok {
+				val := parseExtraInt(v)
+				if val > 0 {
+					return val
+				}
+			}
+		}
+		return anthropicOAuthDefaultSessionIdleTimeoutMinutes
+	}
 	if a.Extra == nil {
 		return 5
 	}
@@ -2685,6 +2706,16 @@ func (a *Account) GetSessionIdleTimeoutMinutes() int {
 // GetBaseRPM 获取基础 RPM 限制
 // 返回 0 表示未启用（负数视为无效配置，按 0 处理）
 func (a *Account) GetBaseRPM() int {
+	if a.IsAnthropicOAuthOrSetupToken() {
+		if a.Extra != nil {
+			if v, ok := a.Extra["base_rpm"]; ok {
+				if val := parseExtraInt(v); val > 0 {
+					return val
+				}
+			}
+		}
+		return anthropicOAuthDefaultBaseRPM
+	}
 	if a.Extra == nil {
 		return 0
 	}
@@ -2700,15 +2731,21 @@ func (a *Account) GetBaseRPM() int {
 // GetRPMStrategy 获取 RPM 策略
 // "tiered" = 三区模型（默认）, "sticky_exempt" = 粘性豁免
 func (a *Account) GetRPMStrategy() string {
+	defaultStrategy := "tiered"
+	if a.IsAnthropicOAuthOrSetupToken() {
+		defaultStrategy = anthropicOAuthDefaultRPMStrategy
+	}
 	if a.Extra == nil {
-		return "tiered"
+		return defaultStrategy
 	}
 	if v, ok := a.Extra["rpm_strategy"]; ok {
 		if s, ok := v.(string); ok && s == "sticky_exempt" {
 			return "sticky_exempt"
+		} else if ok && s == "tiered" {
+			return "tiered"
 		}
 	}
-	return "tiered"
+	return defaultStrategy
 }
 
 // GetRPMStickyBuffer 获取 RPM 粘性缓冲数量
