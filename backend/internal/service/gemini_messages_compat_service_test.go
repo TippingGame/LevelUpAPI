@@ -15,6 +15,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/tlsfingerprint"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
 )
 
 type geminiCompatHTTPUpstreamStub struct {
@@ -801,6 +802,62 @@ func TestGeminiMessagesHandleStreamingResponse_ClosesToolBlockBeforeText(t *test
 	require.Equal(t, -1, open, "stream ended with an open content block")
 }
 
+func TestGeminiMessagesHandleNonStreamingResponse_MapsSafetyFinishReasonToRefusal(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	body := []byte(`{"candidates":[{"finishReason":"SAFETY"}],"usageMetadata":{"promptTokenCount":7,"candidatesTokenCount":0}}`)
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Body:       io.NopCloser(strings.NewReader(string(body))),
+	}
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+
+	usage, err := (&GeminiMessagesCompatService{}).handleNonStreamingResponse(c, resp, "claude-3-5-sonnet")
+
+	require.NoError(t, err)
+	require.NotNil(t, usage)
+	require.Equal(t, "refusal", gjson.Get(rec.Body.String(), "stop_reason").String())
+	require.Equal(t, int64(7), gjson.Get(rec.Body.String(), "usage.input_tokens").Int())
+}
+
+func TestGeminiMessagesHandleNonStreamingResponse_MapsPromptFeedbackBlockReasonToRefusal(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	body := []byte(`{"promptFeedback":{"blockReason":"PROHIBITED_CONTENT"},"usageMetadata":{"promptTokenCount":3}}`)
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Body:       io.NopCloser(strings.NewReader(string(body))),
+	}
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+
+	_, err := (&GeminiMessagesCompatService{}).handleNonStreamingResponse(c, resp, "claude-3-5-sonnet")
+
+	require.NoError(t, err)
+	require.Equal(t, "refusal", gjson.Get(rec.Body.String(), "stop_reason").String())
+}
+
+func TestGeminiMessagesHandleStreamingResponse_MapsSafetyFinishReasonToRefusal(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	upstreamBody := `data: {"candidates":[{"finishReason":"PROHIBITED_CONTENT"}],"usageMetadata":{"promptTokenCount":5,"candidatesTokenCount":0}}` + "\n\n" +
+		"data: [DONE]\n\n"
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body:       io.NopCloser(strings.NewReader(upstreamBody)),
+	}
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+
+	result, err := (&GeminiMessagesCompatService{}).handleStreamingResponse(c, resp, time.Now(), "claude-3-5-sonnet")
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, "refusal", extractAnthropicMessageDeltaStopReason(t, rec.Body.String()))
+}
+
 type anthropicContentBlockEvent struct {
 	event     string
 	index     int
@@ -837,4 +894,25 @@ func parseAnthropicContentBlockEvents(t *testing.T, raw string) []anthropicConte
 		})
 	}
 	return events
+}
+
+func extractAnthropicMessageDeltaStopReason(t *testing.T, raw string) string {
+	t.Helper()
+	for _, chunk := range strings.Split(raw, "\n\n") {
+		var eventName, dataLine string
+		for _, line := range strings.Split(chunk, "\n") {
+			switch {
+			case strings.HasPrefix(line, "event:"):
+				eventName = strings.TrimSpace(strings.TrimPrefix(line, "event:"))
+			case strings.HasPrefix(line, "data:"):
+				dataLine = strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+			}
+		}
+		if eventName != "message_delta" || dataLine == "" {
+			continue
+		}
+		return gjson.Get(dataLine, "delta.stop_reason").String()
+	}
+	t.Fatalf("message_delta event not found in stream: %s", raw)
+	return ""
 }

@@ -3037,6 +3037,11 @@ func extractGeminiFinishReason(geminiResp map[string]any) string {
 			}
 		}
 	}
+	if feedback, ok := geminiResp["promptFeedback"].(map[string]any); ok && feedback != nil {
+		if reason, ok := feedback["blockReason"].(string); ok {
+			return reason
+		}
+	}
 	return ""
 }
 
@@ -3085,6 +3090,8 @@ func mapGeminiFinishReasonToClaudeStopReason(finishReason string) string {
 		return "max_tokens"
 	case "STOP":
 		return "end_turn"
+	case "SAFETY", "PROHIBITED_CONTENT", "BLOCKLIST", "SPII", "RECITATION":
+		return "refusal"
 	default:
 		return "end_turn"
 	}
