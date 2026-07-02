@@ -72,6 +72,7 @@ const (
 	oAuth401CooldownMinutesDefault  = 10
 	overloadCooldownMinutesDefault  = 10
 	runtimeAccountErrorEvictionTTL  = 24 * time.Hour
+	rateLimitStateUpdateTimeout     = 3 * time.Second
 )
 
 var cloudflareChallengeCooldownSteps = []time.Duration{
@@ -79,6 +80,13 @@ var cloudflareChallengeCooldownSteps = []time.Duration{
 	time.Minute,
 	2 * time.Minute,
 	5 * time.Minute,
+}
+
+func rateLimitStateContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithTimeout(context.WithoutCancel(ctx), rateLimitStateUpdateTimeout)
 }
 
 // NewRateLimitService 创建RateLimitService实例
@@ -149,6 +157,76 @@ func (s *RateLimitService) CheckErrorPolicy(ctx context.Context, account *Accoun
 		return ErrorPolicyTempUnscheduled
 	}
 	return ErrorPolicyNone
+}
+
+func (s *RateLimitService) persistAccountError(ctx context.Context, account *Account, errorMsg string, source string) error {
+	if account == nil {
+		return nil
+	}
+	if s == nil || s.accountRepo == nil {
+		return fmt.Errorf("account repository is nil")
+	}
+	writeCtx, cancel := rateLimitStateContext(ctx)
+	defer cancel()
+	if err := s.accountRepo.SetError(writeCtx, account.ID, errorMsg); err != nil {
+		return err
+	}
+	markAccountErrorRuntimeEvicted(writeCtx, s.tempUnschedCache, account, errorMsg, source)
+	return nil
+}
+
+func (s *RateLimitService) persistTempUnschedulableState(ctx context.Context, account *Account, until time.Time, reason string, state *TempUnschedState, source string) error {
+	if account == nil {
+		return nil
+	}
+	if s == nil || s.accountRepo == nil {
+		return fmt.Errorf("account repository is nil")
+	}
+	writeCtx, cancel := rateLimitStateContext(ctx)
+	defer cancel()
+	if err := s.accountRepo.SetTempUnschedulable(writeCtx, account.ID, until, reason); err != nil {
+		return err
+	}
+	account.TempUnschedulableUntil = &until
+	account.TempUnschedulableReason = reason
+	if state != nil {
+		setTempUnschedCacheBestEffort(writeCtx, s.tempUnschedCache, account.ID, state, source)
+	}
+	return nil
+}
+
+func (s *RateLimitService) persistRateLimitedState(ctx context.Context, account *Account, resetAt time.Time) error {
+	if account == nil {
+		return nil
+	}
+	if s == nil || s.accountRepo == nil {
+		return fmt.Errorf("account repository is nil")
+	}
+	writeCtx, cancel := rateLimitStateContext(ctx)
+	defer cancel()
+	if err := s.accountRepo.SetRateLimited(writeCtx, account.ID, resetAt); err != nil {
+		return err
+	}
+	now := time.Now()
+	account.RateLimitedAt = &now
+	account.RateLimitResetAt = &resetAt
+	return nil
+}
+
+func (s *RateLimitService) persistOverloadedState(ctx context.Context, account *Account, until time.Time) error {
+	if account == nil {
+		return nil
+	}
+	if s == nil || s.accountRepo == nil {
+		return fmt.Errorf("account repository is nil")
+	}
+	writeCtx, cancel := rateLimitStateContext(ctx)
+	defer cancel()
+	if err := s.accountRepo.SetOverloaded(writeCtx, account.ID, until); err != nil {
+		return err
+	}
+	account.OverloadUntil = &until
+	return nil
 }
 
 // HandlePermanentAccountError marks non-pool API key accounts as errored when
@@ -311,13 +389,9 @@ func (s *RateLimitService) HandleUpstreamError(ctx context.Context, account *Acc
 			}
 			cooldownMinutes := s.oAuth401CooldownMinutes()
 			until := time.Now().Add(time.Duration(cooldownMinutes) * time.Minute)
-			if err := s.accountRepo.SetTempUnschedulable(ctx, account.ID, until, msg); err != nil {
+			state := newTempUnschedState(until, http.StatusUnauthorized, "oauth_401", msg)
+			if err := s.persistTempUnschedulableState(ctx, account, until, msg, state, "oauth_401"); err != nil {
 				slog.Warn("oauth_401_set_temp_unschedulable_failed", "account_id", account.ID, "error", err)
-			} else {
-				account.TempUnschedulableUntil = &until
-				account.TempUnschedulableReason = msg
-				state := newTempUnschedState(until, http.StatusUnauthorized, "oauth_401", msg)
-				setTempUnschedCacheBestEffort(ctx, s.tempUnschedCache, account.ID, state, "oauth_401")
 			}
 			shouldDisable = true
 		} else {
@@ -475,14 +549,9 @@ func (s *RateLimitService) handleOpenAIModelCapacityError(ctx context.Context, a
 		reason = "OpenAI model capacity temporarily unavailable"
 	}
 
-	if err := s.accountRepo.SetTempUnschedulable(ctx, account.ID, until, reason); err != nil {
+	if err := s.persistTempUnschedulableState(ctx, account, until, reason, state, "openai_model_capacity"); err != nil {
 		slog.Warn("openai_model_capacity_temp_unsched_failed", "account_id", account.ID, "status_code", statusCode, "error", err)
 		return false
-	}
-	if s.tempUnschedCache != nil {
-		if err := s.tempUnschedCache.SetTempUnsched(ctx, account.ID, state); err != nil {
-			slog.Warn("openai_model_capacity_temp_unsched_cache_failed", "account_id", account.ID, "error", err)
-		}
 	}
 
 	slog.Info("openai_model_capacity_temp_unscheduled", "account_id", account.ID, "status_code", statusCode, "until", until)
@@ -864,11 +933,10 @@ func (s *RateLimitService) handleAuthError(ctx context.Context, account *Account
 	if s == nil || account == nil || s.accountRepo == nil {
 		return
 	}
-	if err := s.accountRepo.SetError(ctx, account.ID, errorMsg); err != nil {
+	if err := s.persistAccountError(ctx, account, errorMsg, "account_error"); err != nil {
 		slog.Warn("account_set_error_failed", "account_id", account.ID, "error", err)
 		return
 	}
-	markAccountErrorRuntimeEvicted(ctx, s.tempUnschedCache, account, errorMsg, "account_error")
 	slog.Warn("account_disabled_auth_error", "account_id", account.ID, "error", errorMsg)
 }
 
@@ -900,18 +968,10 @@ func (s *RateLimitService) handleCloudflareChallenge(ctx context.Context, accoun
 		reason = string(raw)
 	}
 
-	if err := s.accountRepo.SetTempUnschedulable(ctx, account.ID, until, reason); err != nil {
+	if err := s.persistTempUnschedulableState(ctx, account, until, reason, state, "cloudflare_challenge"); err != nil {
 		slog.Warn("cloudflare_challenge_temp_unschedulable_failed", "account_id", account.ID, "status_code", statusCode, "error", err)
 		s.handleAuthError(ctx, account, msg)
 		return true
-	}
-	account.TempUnschedulableUntil = &until
-	account.TempUnschedulableReason = reason
-
-	if s.tempUnschedCache != nil {
-		if err := s.tempUnschedCache.SetTempUnsched(ctx, account.ID, state); err != nil {
-			slog.Warn("cloudflare_challenge_temp_unsched_cache_failed", "account_id", account.ID, "error", err)
-		}
 	}
 
 	slog.Warn("cloudflare_challenge_temp_unschedulable", "account_id", account.ID, "status_code", statusCode, "until", until, "consecutive_count", consecutiveCount)
@@ -1132,18 +1192,10 @@ func (s *RateLimitService) handleAnthropicOAuth403(ctx context.Context, account 
 		reason = string(raw)
 	}
 
-	if err := s.accountRepo.SetTempUnschedulable(ctx, account.ID, until, reason); err != nil {
+	if err := s.persistTempUnschedulableState(ctx, account, until, reason, state, "anthropic_oauth_403"); err != nil {
 		slog.Warn("anthropic_oauth_403_set_temp_unschedulable_failed", "account_id", account.ID, "error", err)
 		s.handleAuthError(ctx, account, msg)
 		return true
-	}
-	account.TempUnschedulableUntil = &until
-	account.TempUnschedulableReason = reason
-
-	if s.tempUnschedCache != nil {
-		if err := s.tempUnschedCache.SetTempUnsched(ctx, account.ID, state); err != nil {
-			slog.Warn("anthropic_oauth_403_temp_unsched_cache_failed", "account_id", account.ID, "error", err)
-		}
 	}
 
 	slog.Warn("anthropic_oauth_403_temp_unschedulable", "account_id", account.ID, "until", until)
@@ -1217,17 +1269,9 @@ func (s *RateLimitService) setOpenAI403TempUnschedulable(ctx context.Context, ac
 	if raw, err := json.Marshal(state); err == nil {
 		reason = string(raw)
 	}
-	if err := s.accountRepo.SetTempUnschedulable(ctx, account.ID, until, reason); err != nil {
+	if err := s.persistTempUnschedulableState(ctx, account, until, reason, state, "openai_403"); err != nil {
 		slog.Warn("openai_403_set_temp_unschedulable_failed", "account_id", account.ID, "error", err)
 		return false
-	}
-	account.TempUnschedulableUntil = &until
-	account.TempUnschedulableReason = reason
-
-	if s.tempUnschedCache != nil {
-		if err := s.tempUnschedCache.SetTempUnsched(ctx, account.ID, state); err != nil {
-			slog.Warn("openai_403_temp_unsched_cache_failed", "account_id", account.ID, "error", err)
-		}
 	}
 
 	slog.Warn(
@@ -1290,11 +1334,10 @@ func (s *RateLimitService) handleAntigravity403(ctx context.Context, account *Ac
 // handleCustomErrorCode 处理自定义错误码，停止账号调度
 func (s *RateLimitService) handleCustomErrorCode(ctx context.Context, account *Account, statusCode int, errorMsg string) {
 	msg := "Custom error code " + strconv.Itoa(statusCode) + ": " + errorMsg
-	if err := s.accountRepo.SetError(ctx, account.ID, msg); err != nil {
+	if err := s.persistAccountError(ctx, account, msg, "custom_error_code"); err != nil {
 		slog.Warn("account_set_error_failed", "account_id", account.ID, "status_code", statusCode, "error", err)
 		return
 	}
-	markAccountErrorRuntimeEvicted(ctx, s.tempUnschedCache, account, msg, "custom_error_code")
 	slog.Warn("account_disabled_custom_error", "account_id", account.ID, "status_code", statusCode, "error", errorMsg)
 }
 
@@ -1306,7 +1349,7 @@ func (s *RateLimitService) handle429(ctx context.Context, account *Account, head
 		persistOpenAI429PlanType(ctx, s.accountRepo, account, responseBody)
 		s.persistOpenAICodexSnapshot(ctx, account, headers)
 		if resetAt := s.calculateOpenAI429ResetTime(headers); resetAt != nil {
-			if err := s.accountRepo.SetRateLimited(ctx, account.ID, *resetAt); err != nil {
+			if err := s.persistRateLimitedState(ctx, account, *resetAt); err != nil {
 				slog.Warn("rate_limit_set_failed", "account_id", account.ID, "error", err)
 				return
 			}
@@ -1317,7 +1360,7 @@ func (s *RateLimitService) handle429(ctx context.Context, account *Account, head
 
 	// 2. Anthropic 平台：尝试解析 per-window 头（5h / 7d），选择实际触发的窗口
 	if result := calculateAnthropic429ResetTime(headers); result != nil {
-		if err := s.accountRepo.SetRateLimited(ctx, account.ID, result.resetAt); err != nil {
+		if err := s.persistRateLimitedState(ctx, account, result.resetAt); err != nil {
 			slog.Warn("rate_limit_set_failed", "account_id", account.ID, "error", err)
 			return
 		}
@@ -1346,7 +1389,7 @@ func (s *RateLimitService) handle429(ctx context.Context, account *Account, head
 			// 尝试解析 OpenAI 的 usage_limit_reached 错误
 			if resetAt := parseOpenAIRateLimitResetTime(responseBody); resetAt != nil {
 				resetTime := time.Unix(*resetAt, 0)
-				if err := s.accountRepo.SetRateLimited(ctx, account.ID, resetTime); err != nil {
+				if err := s.persistRateLimitedState(ctx, account, resetTime); err != nil {
 					slog.Warn("rate_limit_set_failed", "account_id", account.ID, "error", err)
 					return
 				}
@@ -1357,7 +1400,7 @@ func (s *RateLimitService) handle429(ctx context.Context, account *Account, head
 			// 尝试解析 Gemini 格式（用于其他平台）
 			if resetAt := ParseGeminiRateLimitResetTime(responseBody); resetAt != nil {
 				resetTime := time.Unix(*resetAt, 0)
-				if err := s.accountRepo.SetRateLimited(ctx, account.ID, resetTime); err != nil {
+				if err := s.persistRateLimitedState(ctx, account, resetTime); err != nil {
 					slog.Warn("rate_limit_set_failed", "account_id", account.ID, "error", err)
 					return
 				}
@@ -1397,7 +1440,7 @@ func (s *RateLimitService) handle429(ctx context.Context, account *Account, head
 	resetAt := time.Unix(ts, 0)
 
 	// 标记限流状态
-	if err := s.accountRepo.SetRateLimited(ctx, account.ID, resetAt); err != nil {
+	if err := s.persistRateLimitedState(ctx, account, resetAt); err != nil {
 		slog.Warn("rate_limit_set_failed", "account_id", account.ID, "error", err)
 		return
 	}
@@ -1421,7 +1464,7 @@ func (s *RateLimitService) apply429FallbackRateLimit(ctx context.Context, accoun
 
 	resetAt := time.Now().Add(cooldown)
 	slog.Warn("rate_limit_429_fallback_used", "account_id", account.ID, "platform", account.Platform, "reason", reason, "using_default", cooldown.String())
-	if err := s.accountRepo.SetRateLimited(ctx, account.ID, resetAt); err != nil {
+	if err := s.persistRateLimitedState(ctx, account, resetAt); err != nil {
 		slog.Warn("rate_limit_set_failed", "account_id", account.ID, "error", err)
 	}
 }
@@ -1645,7 +1688,7 @@ func (s *RateLimitService) persistAnthropicExhaustedWindowLimit(ctx context.Cont
 		return true
 	}
 
-	if err := s.accountRepo.SetRateLimited(ctx, account.ID, limit.resetAt); err != nil {
+	if err := s.persistRateLimitedState(ctx, account, limit.resetAt); err != nil {
 		slog.Warn("anthropic_window_rate_limit_set_failed",
 			"account_id", account.ID,
 			"window", limit.window,
@@ -1861,7 +1904,7 @@ func (s *RateLimitService) handle529(ctx context.Context, account *Account) {
 	}
 
 	until := time.Now().Add(time.Duration(cooldownMinutes) * time.Minute)
-	if err := s.accountRepo.SetOverloaded(ctx, account.ID, until); err != nil {
+	if err := s.persistOverloadedState(ctx, account, until); err != nil {
 		slog.Warn("overload_set_failed", "account_id", account.ID, "error", err)
 		return
 	}
@@ -2097,22 +2140,12 @@ func (s *RateLimitService) SetTempUnschedulable(ctx context.Context, account *Ac
 		return nil
 	}
 
-	if err := s.accountRepo.SetTempUnschedulable(ctx, account.ID, until, reason); err != nil {
-		return err
+	state := &TempUnschedState{
+		UntilUnix:       until.Unix(),
+		TriggeredAtUnix: time.Now().Unix(),
+		ErrorMessage:    reason,
 	}
-
-	if s.tempUnschedCache != nil {
-		state := &TempUnschedState{
-			UntilUnix:       until.Unix(),
-			TriggeredAtUnix: time.Now().Unix(),
-			ErrorMessage:    reason,
-		}
-		if err := s.tempUnschedCache.SetTempUnsched(ctx, account.ID, state); err != nil {
-			slog.Warn("temp_unsched_cache_set_failed", "account_id", account.ID, "error", err)
-		}
-	}
-
-	return nil
+	return s.persistTempUnschedulableState(ctx, account, until, reason, state, "manual_temp_unsched")
 }
 
 func hasRecoverableRuntimeState(account *Account) bool {
@@ -2346,15 +2379,9 @@ func (s *RateLimitService) triggerTempUnschedulable(ctx context.Context, account
 		reason = strings.TrimSpace(state.ErrorMessage)
 	}
 
-	if err := s.accountRepo.SetTempUnschedulable(ctx, account.ID, until, reason); err != nil {
+	if err := s.persistTempUnschedulableState(ctx, account, until, reason, state, "temp_unsched_rule"); err != nil {
 		slog.Warn("temp_unsched_set_failed", "account_id", account.ID, "error", err)
 		return false
-	}
-
-	if s.tempUnschedCache != nil {
-		if err := s.tempUnschedCache.SetTempUnsched(ctx, account.ID, state); err != nil {
-			slog.Warn("temp_unsched_cache_set_failed", "account_id", account.ID, "error", err)
-		}
 	}
 
 	slog.Info("account_temp_unschedulable", "account_id", account.ID, "until", until, "rule_index", ruleIndex, "status_code", statusCode)
@@ -2450,15 +2477,9 @@ func (s *RateLimitService) triggerStreamTimeoutTempUnsched(ctx context.Context, 
 		reason = state.ErrorMessage
 	}
 
-	if err := s.accountRepo.SetTempUnschedulable(ctx, account.ID, until, reason); err != nil {
+	if err := s.persistTempUnschedulableState(ctx, account, until, reason, state, "stream_timeout_temp_unsched"); err != nil {
 		slog.Warn("stream_timeout_set_temp_unsched_failed", "account_id", account.ID, "error", err)
 		return false
-	}
-
-	if s.tempUnschedCache != nil {
-		if err := s.tempUnschedCache.SetTempUnsched(ctx, account.ID, state); err != nil {
-			slog.Warn("stream_timeout_set_temp_unsched_cache_failed", "account_id", account.ID, "error", err)
-		}
 	}
 
 	// 重置超时计数
@@ -2476,11 +2497,10 @@ func (s *RateLimitService) triggerStreamTimeoutTempUnsched(ctx context.Context, 
 func (s *RateLimitService) triggerStreamTimeoutError(ctx context.Context, account *Account, model string) bool {
 	errorMsg := "Stream data interval timeout (repeated failures) for model: " + model
 
-	if err := s.accountRepo.SetError(ctx, account.ID, errorMsg); err != nil {
+	if err := s.persistAccountError(ctx, account, errorMsg, "stream_timeout_account_error"); err != nil {
 		slog.Warn("stream_timeout_set_error_failed", "account_id", account.ID, "error", err)
 		return false
 	}
-	markAccountErrorRuntimeEvicted(ctx, s.tempUnschedCache, account, errorMsg, "stream_timeout_account_error")
 
 	// 重置超时计数
 	if s.timeoutCounterCache != nil {

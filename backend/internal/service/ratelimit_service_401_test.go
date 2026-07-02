@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strconv"
 	"testing"
 	"time"
 
@@ -17,12 +18,15 @@ type rateLimitAccountRepoStub struct {
 	mockAccountRepoForGemini
 	setErrorCalls          int
 	tempCalls              int
+	rateLimitCalls         int
 	updateCredentialsCalls int
 	modelRateLimitCalls    []modelRateLimitCall
 	lastCredentials        map[string]any
 	lastErrorMsg           string
 	lastTempReason         string
 	lastTempUntil          time.Time
+	lastTempCtxErr         error
+	lastRateLimitCtxErr    error
 }
 
 func (r *rateLimitAccountRepoStub) SetError(ctx context.Context, id int64, errorMsg string) error {
@@ -35,6 +39,13 @@ func (r *rateLimitAccountRepoStub) SetTempUnschedulable(ctx context.Context, id 
 	r.tempCalls++
 	r.lastTempUntil = until
 	r.lastTempReason = reason
+	r.lastTempCtxErr = ctx.Err()
+	return nil
+}
+
+func (r *rateLimitAccountRepoStub) SetRateLimited(ctx context.Context, id int64, resetAt time.Time) error {
+	r.rateLimitCalls++
+	r.lastRateLimitCtxErr = ctx.Err()
 	return nil
 }
 
@@ -138,6 +149,50 @@ func TestRateLimitService_HandleUpstreamError_OAuth401SetsTempUnschedulable(t *t
 		require.Equal(t, 1, repo.setErrorCalls)
 		require.Equal(t, 0, repo.tempCalls)
 		require.Empty(t, invalidator.accounts)
+	})
+}
+
+func TestRateLimitService_StateWritesSurviveCanceledRequestContext(t *testing.T) {
+	t.Run("oauth_401_temp_unsched", func(t *testing.T) {
+		repo := &rateLimitAccountRepoStub{}
+		tempCache := &runtimeTempUnschedCacheStub{}
+		service := NewRateLimitService(repo, nil, &config.Config{}, nil, tempCache)
+		account := &Account{
+			ID:       110,
+			Platform: PlatformGemini,
+			Type:     AccountTypeOAuth,
+			Status:   StatusActive,
+		}
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+
+		disable := service.HandleUpstreamError(ctx, account, http.StatusUnauthorized, http.Header{}, []byte(`{"error":"expired"}`))
+
+		require.True(t, disable)
+		require.Equal(t, 1, repo.tempCalls)
+		require.NoError(t, repo.lastTempCtxErr)
+		require.True(t, service.IsTempUnschedulableCached(context.Background(), account.ID))
+	})
+
+	t.Run("openai_429_rate_limit", func(t *testing.T) {
+		repo := &rateLimitAccountRepoStub{}
+		service := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+		account := &Account{
+			ID:       111,
+			Platform: PlatformOpenAI,
+			Type:     AccountTypeAPIKey,
+			Status:   StatusActive,
+		}
+		resetAt := time.Now().Add(time.Hour).Unix()
+		body := []byte(`{"error":{"type":"usage_limit_reached","message":"limit reached","resets_at":` + strconv.FormatInt(resetAt, 10) + `}}`)
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+
+		disable := service.HandleUpstreamError(ctx, account, http.StatusTooManyRequests, http.Header{}, body)
+
+		require.False(t, disable)
+		require.Equal(t, 1, repo.rateLimitCalls)
+		require.NoError(t, repo.lastRateLimitCtxErr)
 	})
 }
 
