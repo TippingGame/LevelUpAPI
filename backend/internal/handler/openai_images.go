@@ -282,6 +282,7 @@ routeLoop:
 					}
 					h.gatewayService.RecordOpenAIAccountSwitch()
 					failedAccountIDs[account.ID] = struct{}{}
+					h.clearStickySessionIfBoundTo(c.Request.Context(), currentAPIKey.GroupID, sessionHash, account.ID, reqLog, "upstream_failover")
 					lastFailoverErr = failoverErr
 					if switchCount >= maxAccountSwitches {
 						if canSwitchAPIKeyGroupRouteAfterForward(c, routeCursor, failoverErr, streamStarted, writerSizeBeforeForward) &&

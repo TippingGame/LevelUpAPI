@@ -475,6 +475,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 				}
 				h.gatewayService.RecordOpenAIAccountSwitch()
 				failedAccountIDs[account.ID] = struct{}{}
+				h.clearStickySessionIfBoundTo(c.Request.Context(), currentAPIKey.GroupID, sessionHash, account.ID, reqLog, "upstream_failover")
 				lastFailoverErr = failoverErr
 				if switchCount >= maxAccountSwitches {
 					if canSwitchAPIKeyGroupRouteAfterForward(c, routeCursor, failoverErr, streamStarted, writerSizeBeforeForward) &&
@@ -937,6 +938,7 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 				}
 				h.gatewayService.RecordOpenAIAccountSwitch()
 				failedAccountIDs[account.ID] = struct{}{}
+				h.clearStickySessionIfBoundTo(c.Request.Context(), currentAPIKey.GroupID, sessionHash, account.ID, reqLog, "upstream_failover")
 				lastFailoverErr = failoverErr
 				if switchCount >= maxAccountSwitches {
 					if canSwitchAPIKeyGroupRouteAfterForward(c, routeCursor, failoverErr, streamStarted, writerSizeBeforeForward) &&

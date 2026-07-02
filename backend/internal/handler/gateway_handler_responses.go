@@ -164,7 +164,12 @@ routeLoop:
 			h.responsesErrorResponse(c, contentModerationStatus(decision), cyberPreflightErrorCode(decision), decision.Message)
 			return
 		}
-		fs := NewFailoverState(h.maxAccountSwitches, false)
+		currentSessionBoundAccountID := int64(0)
+		if sessionHash != "" {
+			currentSessionBoundAccountID, _ = h.gatewayService.GetCachedSessionAccountID(c.Request.Context(), currentAPIKey.GroupID, sessionHash)
+		}
+		currentHasBoundSession := currentSessionBoundAccountID > 0
+		fs := NewFailoverState(h.maxAccountSwitches, currentHasBoundSession)
 
 		for {
 			selection, err := h.gatewayService.SelectAccountWithLoadAwareness(c.Request.Context(), currentAPIKey.GroupID, sessionHash, reqModel, fs.FailedAccountIDs, "", int64(0))
@@ -250,6 +255,12 @@ routeLoop:
 						return
 					}
 					action := fs.HandleFailoverError(c.Request.Context(), h.gatewayService, account.ID, account.Platform, failoverErr)
+					if _, failed := fs.FailedAccountIDs[account.ID]; failed {
+						if h.clearStickySessionIfBoundTo(c.Request.Context(), currentAPIKey.GroupID, sessionHash, account.ID, reqLog, "upstream_failover") {
+							currentSessionBoundAccountID = 0
+							currentHasBoundSession = false
+						}
+					}
 					switch action {
 					case FailoverContinue:
 						continue

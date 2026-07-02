@@ -446,6 +446,12 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 						return
 					}
 					action := fs.HandleFailoverError(c.Request.Context(), h.gatewayService, account.ID, account.Platform, failoverErr)
+					if _, failed := fs.FailedAccountIDs[account.ID]; failed {
+						if h.clearStickySessionIfBoundTo(c.Request.Context(), apiKey.GroupID, sessionKey, account.ID, reqLog, "upstream_failover") {
+							sessionBoundAccountID = 0
+							hasBoundSession = false
+						}
+					}
 					switch action {
 					case FailoverContinue:
 						continue
@@ -1005,6 +1011,12 @@ routeLoop:
 						return
 					}
 					action := fs.HandleFailoverError(c.Request.Context(), h.gatewayService, account.ID, account.Platform, failoverErr)
+					if _, failed := fs.FailedAccountIDs[account.ID]; failed {
+						if h.clearStickySessionIfBoundTo(c.Request.Context(), currentAPIKey.GroupID, sessionKey, account.ID, reqLog, "upstream_failover") {
+							currentSessionBoundAccountID = 0
+							currentHasBoundSession = false
+						}
+					}
 					switch action {
 					case FailoverContinue:
 						continue

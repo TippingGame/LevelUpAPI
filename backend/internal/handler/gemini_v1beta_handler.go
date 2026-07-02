@@ -457,6 +457,12 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 			var failoverErr *service.UpstreamFailoverError
 			if errors.As(err, &failoverErr) {
 				failoverAction := fs.HandleFailoverError(c.Request.Context(), h.gatewayService, account.ID, account.Platform, failoverErr)
+				if _, failed := fs.FailedAccountIDs[account.ID]; failed {
+					if h.clearStickySessionIfBoundTo(c.Request.Context(), apiKey.GroupID, sessionKey, account.ID, reqLog, "upstream_failover") {
+						sessionBoundAccountID = 0
+						hasBoundSession = false
+					}
+				}
 				switch failoverAction {
 				case FailoverContinue:
 					continue

@@ -923,6 +923,23 @@ func (s *GatewayService) BindStickySession(ctx context.Context, groupID *int64, 
 	return s.cache.SetSessionAccountID(ctx, derefGroupID(groupID), sessionHash, accountID, stickySessionTTL)
 }
 
+// ClearStickySessionIfBoundTo removes a sticky binding only when it still points
+// at the failed account. This keeps a failover from erasing a newer binding made
+// by another request.
+func (s *GatewayService) ClearStickySessionIfBoundTo(ctx context.Context, groupID *int64, sessionHash string, accountID int64) (bool, error) {
+	if sessionHash == "" || accountID <= 0 || s.cache == nil {
+		return false, nil
+	}
+	currentAccountID, err := s.cache.GetSessionAccountID(ctx, derefGroupID(groupID), sessionHash)
+	if err != nil || currentAccountID != accountID {
+		return false, nil
+	}
+	if err := s.cache.DeleteSessionAccountID(ctx, derefGroupID(groupID), sessionHash); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 func (s *GatewayService) ReportAccountForwardResult(accountID int64, result *ForwardResult, err error) {
 	if s == nil || s.accountRuntimeStats == nil || accountID <= 0 {
 		return

@@ -2943,3 +2943,47 @@ func TestHandleSSEToJSON_ResponseFailedCapacityReturnsFailover(t *testing.T) {
 	require.False(t, c.Writer.Written(), "capacity terminal event should return failover for account switching instead of writing to the client")
 	require.Contains(t, string(failoverErr.ResponseBody), "Selected model is at capacity")
 }
+
+func TestGatewayServiceClearStickySessionIfBoundTo(t *testing.T) {
+	cache := &stubGatewayCache{sessionBindings: map[string]int64{"sticky": 7}}
+	svc := &GatewayService{cache: cache}
+
+	cleared, err := svc.ClearStickySessionIfBoundTo(context.Background(), nil, "sticky", 7)
+	require.NoError(t, err)
+	require.True(t, cleared)
+	require.NotContains(t, cache.sessionBindings, "sticky")
+	require.Equal(t, 1, cache.deletedSessions["sticky"])
+}
+
+func TestGatewayServiceClearStickySessionIfBoundToSkipsDifferentAccount(t *testing.T) {
+	cache := &stubGatewayCache{sessionBindings: map[string]int64{"sticky": 8}}
+	svc := &GatewayService{cache: cache}
+
+	cleared, err := svc.ClearStickySessionIfBoundTo(context.Background(), nil, "sticky", 7)
+	require.NoError(t, err)
+	require.False(t, cleared)
+	require.Equal(t, int64(8), cache.sessionBindings["sticky"])
+	require.Empty(t, cache.deletedSessions)
+}
+
+func TestOpenAIGatewayServiceClearStickySessionIfBoundTo(t *testing.T) {
+	cache := &stubGatewayCache{sessionBindings: map[string]int64{"openai:sticky": 7}}
+	svc := &OpenAIGatewayService{cache: cache}
+
+	cleared, err := svc.ClearStickySessionIfBoundTo(context.Background(), nil, "sticky", 7)
+	require.NoError(t, err)
+	require.True(t, cleared)
+	require.NotContains(t, cache.sessionBindings, "openai:sticky")
+	require.Equal(t, 1, cache.deletedSessions["openai:sticky"])
+}
+
+func TestOpenAIGatewayServiceClearStickySessionIfBoundToSkipsDifferentAccount(t *testing.T) {
+	cache := &stubGatewayCache{sessionBindings: map[string]int64{"openai:sticky": 8}}
+	svc := &OpenAIGatewayService{cache: cache}
+
+	cleared, err := svc.ClearStickySessionIfBoundTo(context.Background(), nil, "sticky", 7)
+	require.NoError(t, err)
+	require.False(t, cleared)
+	require.Equal(t, int64(8), cache.sessionBindings["openai:sticky"])
+	require.Empty(t, cache.deletedSessions)
+}
