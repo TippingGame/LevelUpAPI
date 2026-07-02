@@ -75,6 +75,29 @@ func TestBuildAPIKeyGroupRouteCandidates_SkipsCoolingDownRoutesForNewRequest(t *
 	require.Equal(t, int64(2), candidates[0].Route.GroupID)
 }
 
+func TestBuildAPIKeyGroupRouteCandidates_FallsBackWhenAllRoutesCoolingDown(t *testing.T) {
+	resetAPIKeyGroupRouteBreakerForTest(t)
+	group1 := &service.Group{ID: 1, Status: service.StatusActive, Platform: service.PlatformAnthropic, Hydrated: true}
+	group2 := &service.Group{ID: 2, Status: service.StatusActive, Platform: service.PlatformAnthropic, Hydrated: true}
+	apiKey := &service.APIKey{
+		ID:   10,
+		User: &service.User{ID: 7, Status: service.StatusActive},
+		GroupRoutes: []service.APIKeyGroupRoute{
+			{GroupID: 1, Priority: 1, Weight: 1, Enabled: true, CooldownSeconds: 30, Group: group1},
+			{GroupID: 2, Priority: 2, Weight: 1, Enabled: true, CooldownSeconds: 30, Group: group2},
+		},
+	}
+	apiKeyGroupRouteBreaker.recordFailure(apiKey.ID, 1, 30)
+	apiKeyGroupRouteBreaker.recordFailure(apiKey.ID, 2, 30)
+
+	candidates, available := buildAPIKeyGroupRouteCandidates(apiKey)
+
+	require.True(t, available)
+	require.Len(t, candidates, 2)
+	require.Equal(t, int64(1), candidates[0].Route.GroupID)
+	require.Equal(t, int64(2), candidates[1].Route.GroupID)
+}
+
 func TestBuildAPIKeyGroupRouteCandidates_SkipsUnavailableRoutes(t *testing.T) {
 	resetAPIKeyGroupRouteBreakerForTest(t)
 	group1 := &service.Group{ID: 1, Status: service.StatusDisabled, Platform: service.PlatformAnthropic, Hydrated: true}

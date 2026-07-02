@@ -1389,17 +1389,23 @@ func buildAPIKeyGroupRouteCandidates(apiKey *service.APIKey) ([]apiKeyGroupRoute
 	service.SortAPIKeyGroupRoutes(routes)
 	now := time.Now()
 	candidates := make([]apiKeyGroupRouteCandidate, 0, len(routes))
+	coolingDownCandidates := make([]apiKeyGroupRouteCandidate, 0, len(routes))
 	for _, route := range routes {
 		if !service.IsAPIKeyGroupRouteSelectable(apiKey, route) {
 			continue
 		}
-		if !apiKeyGroupRouteBreaker.available(apiKey.ID, route.GroupID, now) {
-			continue
-		}
-		candidates = append(candidates, apiKeyGroupRouteCandidate{
+		candidate := apiKeyGroupRouteCandidate{
 			APIKey: cloneAPIKeyWithGroup(apiKey, route.Group),
 			Route:  route,
-		})
+		}
+		if !apiKeyGroupRouteBreaker.available(apiKey.ID, route.GroupID, now) {
+			coolingDownCandidates = append(coolingDownCandidates, candidate)
+			continue
+		}
+		candidates = append(candidates, candidate)
+	}
+	if len(candidates) == 0 && len(coolingDownCandidates) > 0 {
+		candidates = append(candidates, coolingDownCandidates...)
 	}
 	if len(candidates) == 0 && apiKey.GroupID != nil && apiKey.Group != nil {
 		if hasConfiguredRoutes {
