@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -296,6 +297,90 @@ func TestOpenAIGatewayService_WSv2PoolModeRateLimitTempUnschedules(t *testing.T)
 	require.Len(t, repo.tempCalls, 1)
 	require.WithinDuration(t, start.Add(retryableErrorExhaustedCooldown), repo.tempCalls[0], 5*time.Second)
 	require.Contains(t, repo.tempReasons[0], "retryable upstream status 429 exhausted")
+}
+
+func TestOpenAIGatewayService_WSv2PoolModeAuthErrorEventTempUnschedules(t *testing.T) {
+	repo := &openAIWSRateLimitSignalRepo{}
+	rateSvc := &RateLimitService{accountRepo: repo}
+	svc := &OpenAIGatewayService{
+		accountRepo:      repo,
+		rateLimitService: rateSvc,
+	}
+	account := &Account{
+		ID:          507,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Status:      StatusActive,
+		Schedulable: true,
+		Credentials: map[string]any{
+			"pool_mode": true,
+		},
+	}
+	body := []byte(`{"type":"error","error":{"code":"forbidden","type":"permission_error","message":"forbidden"}}`)
+
+	start := time.Now()
+	svc.persistOpenAIWSErrorEventSignal(context.Background(), account, http.Header{}, body, "forbidden", "permission_error", "forbidden")
+
+	require.Empty(t, repo.rateLimitCalls)
+	require.Len(t, repo.tempCalls, 1)
+	require.WithinDuration(t, start.Add(retryableErrorExhaustedCooldown), repo.tempCalls[0], 5*time.Second)
+	require.Contains(t, repo.tempReasons[0], "retryable upstream status 403 exhausted")
+}
+
+func TestOpenAIGatewayService_WSv2PoolModeAuthDialTempUnschedules(t *testing.T) {
+	repo := &openAIWSRateLimitSignalRepo{}
+	rateSvc := &RateLimitService{accountRepo: repo}
+	svc := &OpenAIGatewayService{
+		accountRepo:      repo,
+		rateLimitService: rateSvc,
+	}
+	account := &Account{
+		ID:          508,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Status:      StatusActive,
+		Schedulable: true,
+		Credentials: map[string]any{
+			"pool_mode": true,
+		},
+	}
+
+	start := time.Now()
+	svc.persistOpenAIWSDialErrorSignal(context.Background(), account, &openAIWSDialError{
+		StatusCode: http.StatusUnauthorized,
+		Err:        errors.New("upstream websocket authentication failed"),
+	}, "upstream websocket authentication failed")
+
+	require.Empty(t, repo.rateLimitCalls)
+	require.Len(t, repo.tempCalls, 1)
+	require.WithinDuration(t, start.Add(retryableErrorExhaustedCooldown), repo.tempCalls[0], 5*time.Second)
+	require.Contains(t, repo.tempReasons[0], "retryable upstream status 401 exhausted")
+}
+
+func TestOpenAIGatewayService_WSv2PoolModeAuthEventHonorsRetryStatusCodes(t *testing.T) {
+	repo := &openAIWSRateLimitSignalRepo{}
+	rateSvc := &RateLimitService{accountRepo: repo}
+	svc := &OpenAIGatewayService{
+		accountRepo:      repo,
+		rateLimitService: rateSvc,
+	}
+	account := &Account{
+		ID:          509,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Status:      StatusActive,
+		Schedulable: true,
+		Credentials: map[string]any{
+			"pool_mode":                    true,
+			"pool_mode_retry_status_codes": []any{float64(http.StatusTooManyRequests)},
+		},
+	}
+	body := []byte(`{"type":"error","error":{"code":"forbidden","type":"permission_error","message":"forbidden"}}`)
+
+	svc.persistOpenAIWSErrorEventSignal(context.Background(), account, http.Header{}, body, "forbidden", "permission_error", "forbidden")
+
+	require.Empty(t, repo.rateLimitCalls)
+	require.Empty(t, repo.tempCalls)
 }
 
 func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_ErrorEventUsageLimitPersistsRateLimit(t *testing.T) {
