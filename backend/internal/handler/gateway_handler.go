@@ -8,6 +8,7 @@ import (
 	"fmt"
 	mathrand "math/rand/v2"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -1154,17 +1155,33 @@ func (h *GatewayHandler) Models(c *gin.Context) {
 
 	var groupID *int64
 	var platform string
+	var forcedPlatform string
 
 	if apiKey != nil && apiKey.Group != nil {
 		groupID = &apiKey.Group.ID
 		platform = apiKey.Group.Platform
 	}
-	if forcedPlatform, ok := middleware2.GetForcePlatformFromContext(c); ok && strings.TrimSpace(forcedPlatform) != "" {
+	if value, ok := middleware2.GetForcePlatformFromContext(c); ok && strings.TrimSpace(value) != "" {
+		forcedPlatform = strings.TrimSpace(value)
 		platform = forcedPlatform
 	}
 
 	// Get available models from account configurations.
-	availableModels := h.gatewayService.GetAvailableModels(c.Request.Context(), groupID, platform)
+	var availableModels []string
+	if apiKey != nil && len(apiKey.GroupRoutes) > 0 {
+		candidates, available := buildAPIKeyGroupRouteCandidates(apiKey)
+		if !available {
+			h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "No available API key group routes")
+			return
+		}
+		sort.SliceStable(candidates, func(i, j int) bool {
+			return service.APIKeyGroupRouteLess(candidates[i].Route, candidates[j].Route)
+		})
+		platform = modelListPlatformForRouteCandidates(candidates, forcedPlatform)
+		availableModels = h.availableModelsForRouteCandidates(c.Request.Context(), candidates, forcedPlatform)
+	} else {
+		availableModels = h.gatewayService.GetAvailableModels(c.Request.Context(), groupID, platform)
+	}
 
 	if len(availableModels) > 0 {
 		// Build model list from whitelist
@@ -1204,6 +1221,47 @@ func (h *GatewayHandler) Models(c *gin.Context) {
 		"object": "list",
 		"data":   claude.DefaultModels,
 	})
+}
+
+func (h *GatewayHandler) availableModelsForRouteCandidates(ctx context.Context, candidates []apiKeyGroupRouteCandidate, forcedPlatform string) []string {
+	modelSet := make(map[string]struct{})
+	for _, candidate := range candidates {
+		if candidate.Route.GroupID <= 0 || candidate.Route.Group == nil {
+			continue
+		}
+		groupID := candidate.Route.GroupID
+		platform := strings.TrimSpace(forcedPlatform)
+		if platform == "" {
+			platform = candidate.Route.Group.Platform
+		}
+		for _, modelID := range h.gatewayService.GetAvailableModels(ctx, &groupID, platform) {
+			if strings.TrimSpace(modelID) == "" {
+				continue
+			}
+			modelSet[modelID] = struct{}{}
+		}
+	}
+	if len(modelSet) == 0 {
+		return nil
+	}
+	models := make([]string, 0, len(modelSet))
+	for modelID := range modelSet {
+		models = append(models, modelID)
+	}
+	sort.Strings(models)
+	return models
+}
+
+func modelListPlatformForRouteCandidates(candidates []apiKeyGroupRouteCandidate, forcedPlatform string) string {
+	if strings.TrimSpace(forcedPlatform) != "" {
+		return strings.TrimSpace(forcedPlatform)
+	}
+	for _, candidate := range candidates {
+		if candidate.Route.Group != nil && strings.TrimSpace(candidate.Route.Group.Platform) != "" {
+			return candidate.Route.Group.Platform
+		}
+	}
+	return ""
 }
 
 // AntigravityModels 返回 Antigravity 支持的全部模型
