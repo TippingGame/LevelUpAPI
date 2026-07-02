@@ -43,6 +43,7 @@ func TestRateLimitServiceHandleUpstreamErrorAPIKeyPermanentKeywordsDisable(t *te
 	tests := []struct {
 		name       string
 		platform   string
+		accountTyp string
 		statusCode int
 		body       []byte
 		want       string
@@ -76,11 +77,47 @@ func TestRateLimitServiceHandleUpstreamErrorAPIKeyPermanentKeywordsDisable(t *te
 			want:       "API key has been disabled",
 		},
 		{
+			name:       "openai api key revoked",
+			platform:   PlatformOpenAI,
+			statusCode: http.StatusUnauthorized,
+			body:       []byte(`{"error":{"message":"The API key has been revoked."}}`),
+			want:       "API key has been revoked",
+		},
+		{
+			name:       "anthropic api key expired",
+			platform:   PlatformAnthropic,
+			statusCode: http.StatusUnauthorized,
+			body:       []byte(`{"error":{"message":"API key expired"}}`),
+			want:       "API key expired",
+		},
+		{
 			name:       "openai billing hard limit",
 			platform:   PlatformOpenAI,
 			statusCode: http.StatusTooManyRequests,
 			body:       []byte(`{"error":{"message":"Billing hard limit has been reached"}}`),
 			want:       "Billing hard limit",
+		},
+		{
+			name:       "gemini billing not enabled",
+			platform:   PlatformGemini,
+			statusCode: http.StatusForbidden,
+			body:       []byte(`{"error":{"message":"Cloud Billing is not enabled for this project."}}`),
+			want:       "Billing is not enabled",
+		},
+		{
+			name:       "gemini project disabled",
+			platform:   PlatformGemini,
+			statusCode: http.StatusForbidden,
+			body:       []byte(`{"error":{"message":"The project has been disabled."}}`),
+			want:       "project has been disabled",
+		},
+		{
+			name:       "service disabled",
+			platform:   PlatformAnthropic,
+			accountTyp: AccountTypeBedrock,
+			statusCode: http.StatusForbidden,
+			body:       []byte(`{"message":"The service has been disabled for this account."}`),
+			want:       "service has been disabled",
 		},
 		{
 			name:       "anthropic credit balance",
@@ -106,6 +143,9 @@ func TestRateLimitServiceHandleUpstreamErrorAPIKeyPermanentKeywordsDisable(t *te
 				ID:       207,
 				Platform: tt.platform,
 				Type:     AccountTypeAPIKey,
+			}
+			if tt.accountTyp != "" {
+				account.Type = tt.accountTyp
 			}
 
 			shouldDisable := svc.HandleUpstreamError(
