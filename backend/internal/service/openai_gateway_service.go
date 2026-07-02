@@ -3966,9 +3966,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 					forceFlushFailedEvent = true
 					sawFailedEvent = true
 				} else {
-					if openAIStreamClientOutputStarted(c, clientOutputStarted) {
-						s.handleOpenAIModelCapacitySignal(ctx, account, http.StatusBadGateway, resp.Header, dataBytes, failedMessage)
-					}
+					s.handleOpenAIResponsesStreamErrorSideEffect(ctx, account, resp.Header, dataBytes, failedMessage, openAIStreamClientOutputStarted(c, clientOutputStarted))
 					if !openAIStreamClientOutputStarted(c, clientOutputStarted) && openAIStreamFailedEventShouldFailover(dataBytes, failedMessage) {
 						return resultWithUsage(),
 							s.newOpenAIStreamFailoverError(c, account, true, upstreamRequestID, dataBytes, failedMessage)
@@ -4167,6 +4165,7 @@ func (s *OpenAIGatewayService) handlePassthroughSSEToJSON(ctx context.Context, r
 			if msg == "" {
 				msg = "Upstream compact response failed"
 			}
+			s.handleOpenAIResponsesStreamErrorSideEffect(ctx, account, resp.Header, terminalPayload, msg, false)
 			if isOpenAIModelCapacityError(http.StatusBadGateway, msg, terminalPayload) {
 				return nil, s.newOpenAIStreamFailoverError(c, account, true, strings.TrimSpace(resp.Header.Get("x-request-id")), terminalPayload, msg)
 			}
@@ -4846,9 +4845,7 @@ func (s *OpenAIGatewayService) handleStreamingResponse(ctx context.Context, resp
 						UpstreamOutTok: usage.OutputTokens,
 					})
 				} else {
-					if openAIStreamClientOutputStarted(c, clientOutputStarted) {
-						s.handleOpenAIModelCapacitySignal(ctx, account, http.StatusBadGateway, resp.Header, dataBytes, failedMessage)
-					}
+					s.handleOpenAIResponsesStreamErrorSideEffect(ctx, account, resp.Header, dataBytes, failedMessage, openAIStreamClientOutputStarted(c, clientOutputStarted))
 					if !openAIStreamClientOutputStarted(c, clientOutputStarted) && openAIStreamFailedEventShouldFailover(dataBytes, failedMessage) {
 						sawFailedEvent = true
 						streamFailoverErr = s.newOpenAIStreamFailoverError(c, account, false, upstreamRequestID, dataBytes, failedMessage)
@@ -5542,6 +5539,7 @@ func (s *OpenAIGatewayService) handleSSEToJSON(ctx context.Context, resp *http.R
 			if msg == "" {
 				msg = "Upstream compact response failed"
 			}
+			s.handleOpenAIResponsesStreamErrorSideEffect(ctx, account, resp.Header, terminalPayload, msg, false)
 			if isOpenAIModelCapacityError(http.StatusBadGateway, msg, terminalPayload) {
 				return nil, s.newOpenAIStreamFailoverError(c, account, false, strings.TrimSpace(resp.Header.Get("x-request-id")), terminalPayload, msg)
 			}

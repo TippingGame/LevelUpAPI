@@ -478,7 +478,9 @@ func (s *OpenAIGatewayService) handleChatBufferedStreamingResponse(
 	}
 	if strings.EqualFold(strings.TrimSpace(finalResponse.Status), "failed") {
 		payload, _ := json.Marshal(gin.H{"type": "response.failed", "response": finalResponse})
-		return nil, s.newOpenAIStreamFailoverError(c, account, false, requestID, payload, openAICompatFailedResponseMessage(finalResponse))
+		message := openAICompatFailedResponseMessage(finalResponse)
+		s.handleOpenAIResponsesStreamErrorSideEffect(c.Request.Context(), account, resp.Header, payload, message, false)
+		return nil, s.newOpenAIStreamFailoverError(c, account, false, requestID, payload, message)
 	}
 
 	// When the terminal event has an empty output array, reconstruct from
@@ -621,6 +623,7 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 			}
 			payloadBytes := []byte(payload)
 			message := extractOpenAISSEErrorMessage(payloadBytes)
+			s.handleOpenAIResponsesStreamErrorSideEffect(c.Request.Context(), account, resp.Header, payloadBytes, message, false)
 			streamFailoverErr = s.newOpenAIStreamFailoverError(c, account, false, requestID, payloadBytes, message)
 			return true
 		}
