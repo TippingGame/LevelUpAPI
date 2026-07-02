@@ -625,11 +625,15 @@ func (s *GatewayService) TempUnscheduleRetryableError(ctx context.Context, accou
 		return
 	}
 	// 根据状态码选择封禁策略
+	var tempUnschedCache TempUnschedCache
+	if s.rateLimitService != nil {
+		tempUnschedCache = s.rateLimitService.tempUnschedCache
+	}
 	switch failoverErr.StatusCode {
 	case http.StatusBadRequest:
-		tempUnscheduleGoogleConfigError(ctx, s.accountRepo, accountID, "[handler]")
+		tempUnscheduleGoogleConfigError(ctx, s.accountRepo, tempUnschedCache, accountID, "[handler]")
 	case http.StatusBadGateway:
-		tempUnscheduleEmptyResponse(ctx, s.accountRepo, accountID, "[handler]")
+		tempUnscheduleEmptyResponse(ctx, s.accountRepo, tempUnschedCache, accountID, "[handler]")
 	}
 }
 
@@ -2917,8 +2921,16 @@ func (s *GatewayService) isAccountSchedulableForSelection(ctx context.Context, a
 		return false
 	}
 	return account.IsSchedulable() &&
+		!s.isAccountTempUnschedulableCached(ctx, account) &&
 		s.isAccountProxyHealthSchedulable(ctx, account) &&
 		s.isAccountProxyExitIPStable(ctx, account)
+}
+
+func (s *GatewayService) isAccountTempUnschedulableCached(ctx context.Context, account *Account) bool {
+	if s == nil || s.rateLimitService == nil || account == nil {
+		return false
+	}
+	return s.rateLimitService.IsTempUnschedulableCached(ctx, account.ID)
 }
 
 func (s *GatewayService) isAccountSchedulableForModelSelection(ctx context.Context, account *Account, requestedModel string) bool {

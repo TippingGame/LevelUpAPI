@@ -5,6 +5,7 @@ package service
 import (
 	"context"
 	"errors"
+	"net/http"
 	"testing"
 	"time"
 
@@ -382,6 +383,58 @@ func TestGatewayService_SelectAccountForModelWithPlatform_Anthropic(t *testing.T
 	require.NotNil(t, acc)
 	require.Equal(t, int64(1), acc.ID, "应选择优先级最高的 anthropic 账户")
 	require.Equal(t, PlatformAnthropic, acc.Platform, "应只返回 anthropic 平台账户")
+}
+
+func TestGatewayService_SelectAccountForModel_SkipsTempUnschedCache(t *testing.T) {
+	ctx := context.Background()
+
+	repo := &mockAccountRepoForPlatform{
+		accounts: []Account{
+			{ID: 1, Name: "cooling", Platform: PlatformAnthropic, Type: AccountTypeAPIKey, Priority: 1, Status: StatusActive, Schedulable: true},
+			{ID: 2, Name: "healthy", Platform: PlatformAnthropic, Type: AccountTypeAPIKey, Priority: 2, Status: StatusActive, Schedulable: true},
+		},
+		accountsByID: map[int64]*Account{},
+	}
+	for i := range repo.accounts {
+		repo.accountsByID[repo.accounts[i].ID] = &repo.accounts[i]
+	}
+
+	cache := &runtimeTempUnschedCacheStub{states: map[int64]*TempUnschedState{
+		1: {UntilUnix: time.Now().Add(time.Minute).Unix()},
+	}}
+	svc := &GatewayService{
+		accountRepo: repo,
+		cfg:         testConfig(),
+		rateLimitService: &RateLimitService{
+			tempUnschedCache: cache,
+		},
+	}
+
+	acc, err := svc.SelectAccountForModelWithExclusions(ctx, nil, "", "", nil)
+	require.NoError(t, err)
+	require.NotNil(t, acc)
+	require.Equal(t, int64(2), acc.ID)
+}
+
+func TestGatewayServiceTempUnscheduleRetryableErrorWritesTempCache(t *testing.T) {
+	cache := &runtimeTempUnschedCacheStub{}
+	svc := &GatewayService{
+		accountRepo: &mockAccountRepoForPlatform{},
+		rateLimitService: &RateLimitService{
+			tempUnschedCache: cache,
+		},
+	}
+
+	svc.TempUnscheduleRetryableError(context.Background(), 42, &UpstreamFailoverError{
+		StatusCode:             http.StatusBadRequest,
+		RetryableOnSameAccount: true,
+	})
+
+	state := cache.states[42]
+	require.NotNil(t, state)
+	require.Equal(t, http.StatusBadRequest, state.StatusCode)
+	require.Greater(t, state.UntilUnix, time.Now().Unix())
+	require.Contains(t, state.MatchedKeyword, "invalid project")
 }
 
 func TestGatewayService_SelectAccountForModel_BindsProxyExitIP(t *testing.T) {

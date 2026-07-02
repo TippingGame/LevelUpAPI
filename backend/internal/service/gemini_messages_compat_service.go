@@ -249,6 +249,9 @@ func (s *GeminiMessagesCompatService) isAccountUsableForRequestWithPrecheck(
 	useMixedScheduling bool,
 	precheckResult map[int64]bool,
 ) bool {
+	if account == nil || s.isAccountTempUnschedulableCached(ctx, account) {
+		return false
+	}
 	// 检查模型调度能力
 	// Check model scheduling capability
 	if !account.IsSchedulableForModelWithContext(ctx, requestedModel) {
@@ -327,6 +330,9 @@ func (s *GeminiMessagesCompatService) selectBestGeminiAccount(
 
 	for i := range accounts {
 		acc := &accounts[i]
+		if s.isAccountTempUnschedulableCached(ctx, acc) {
+			continue
+		}
 
 		// 跳过被排除的账号
 		if _, excluded := excludedIDs[acc.ID]; excluded {
@@ -438,7 +444,7 @@ func (s *GeminiMessagesCompatService) hydrateSelectedAccount(ctx context.Context
 		if !IsAccountVisibleToRequestUser(ctx, account) {
 			return nil, ErrAccountNotFound
 		}
-		if !account.IsSchedulable() {
+		if !account.IsSchedulable() || s.isAccountTempUnschedulableCached(ctx, account) {
 			return nil, ErrNoAvailableAccounts
 		}
 		return account, nil
@@ -453,7 +459,7 @@ func (s *GeminiMessagesCompatService) hydrateSelectedAccount(ctx context.Context
 	if !IsAccountVisibleToRequestUser(ctx, hydrated) {
 		return nil, ErrAccountNotFound
 	}
-	if !hydrated.IsSchedulable() {
+	if !hydrated.IsSchedulable() || s.isAccountTempUnschedulableCached(ctx, hydrated) {
 		return nil, ErrNoAvailableAccounts
 	}
 	return hydrated, nil
@@ -465,7 +471,7 @@ func (s *GeminiMessagesCompatService) listSchedulableAccountsOnce(ctx context.Co
 		if err != nil {
 			return nil, err
 		}
-		return FilterAccountsVisibleToRequestUser(ctx, accounts), nil
+		return s.filterTempUnschedulableCachedAccounts(ctx, FilterAccountsVisibleToRequestUser(ctx, accounts)), nil
 	}
 
 	useMixedScheduling := platform == PlatformGemini && !hasForcePlatform
@@ -479,7 +485,7 @@ func (s *GeminiMessagesCompatService) listSchedulableAccountsOnce(ctx context.Co
 		if err != nil {
 			return nil, err
 		}
-		return FilterAccountsVisibleToRequestUser(ctx, accounts), nil
+		return s.filterTempUnschedulableCachedAccounts(ctx, FilterAccountsVisibleToRequestUser(ctx, accounts)), nil
 	}
 	var accounts []Account
 	var err error
@@ -491,7 +497,28 @@ func (s *GeminiMessagesCompatService) listSchedulableAccountsOnce(ctx context.Co
 	if err != nil {
 		return nil, err
 	}
-	return FilterAccountsVisibleToRequestUser(ctx, accounts), nil
+	return s.filterTempUnschedulableCachedAccounts(ctx, FilterAccountsVisibleToRequestUser(ctx, accounts)), nil
+}
+
+func (s *GeminiMessagesCompatService) filterTempUnschedulableCachedAccounts(ctx context.Context, accounts []Account) []Account {
+	if len(accounts) == 0 || s == nil || s.rateLimitService == nil {
+		return accounts
+	}
+	filtered := accounts[:0]
+	for i := range accounts {
+		if s.isAccountTempUnschedulableCached(ctx, &accounts[i]) {
+			continue
+		}
+		filtered = append(filtered, accounts[i])
+	}
+	return filtered
+}
+
+func (s *GeminiMessagesCompatService) isAccountTempUnschedulableCached(ctx context.Context, account *Account) bool {
+	if s == nil || s.rateLimitService == nil || account == nil {
+		return false
+	}
+	return s.rateLimitService.IsTempUnschedulableCached(ctx, account.ID)
 }
 
 func (s *GeminiMessagesCompatService) validateUpstreamBaseURL(raw string) (string, error) {

@@ -2154,6 +2154,9 @@ func (s *OpenAIGatewayService) resolveAccountShareModeBoundAccount(ctx context.C
 	if account == nil || account.ID != accountID {
 		return nil, true, ErrNoAvailableAccounts
 	}
+	if s.isAccountTempUnschedulableCached(ctx, account) {
+		return nil, true, noAvailableOpenAISelectionError(requestedModel, false)
+	}
 	if excludedIDs != nil {
 		if _, excluded := excludedIDs[account.ID]; excluded {
 			return nil, true, noAvailableOpenAISelectionError(requestedModel, false)
@@ -2182,6 +2185,9 @@ func (s *OpenAIGatewayService) resolveFreshSchedulableOpenAIAccount(ctx context.
 	if account == nil {
 		return nil
 	}
+	if s.isAccountTempUnschedulableCached(ctx, account) {
+		return nil
+	}
 
 	fresh := account
 	if s.schedulerSnapshot != nil {
@@ -2192,6 +2198,9 @@ func (s *OpenAIGatewayService) resolveFreshSchedulableOpenAIAccount(ctx context.
 		fresh = current
 	}
 
+	if s.isAccountTempUnschedulableCached(ctx, fresh) {
+		return nil
+	}
 	if !isOpenAIAccountEligibleForRequest(fresh, requestedModel, requireCompact, requiredCapability) {
 		return nil
 	}
@@ -2231,6 +2240,9 @@ func (s *OpenAIGatewayService) recheckSelectedOpenAIAccountFromDB(ctx context.Co
 	if account == nil {
 		return nil
 	}
+	if s.isAccountTempUnschedulableCached(ctx, account) {
+		return nil
+	}
 	if s.schedulerSnapshot == nil || s.accountRepo == nil {
 		if !isOpenAIAccountEligibleForRequest(account, requestedModel, requireCompact, requiredCapability) {
 			return nil
@@ -2246,6 +2258,9 @@ func (s *OpenAIGatewayService) recheckSelectedOpenAIAccountFromDB(ctx context.Co
 
 	latest, err := s.accountRepo.GetByID(ctx, account.ID)
 	if err != nil || latest == nil {
+		return nil
+	}
+	if s.isAccountTempUnschedulableCached(ctx, latest) {
 		return nil
 	}
 	if !isOpenAIAccountEligibleForRequest(latest, requestedModel, requireCompact, requiredCapability) {
@@ -2286,6 +2301,9 @@ func (s *OpenAIGatewayService) hydrateSelectedAccount(ctx context.Context, accou
 	if account == nil {
 		return account, nil
 	}
+	if s.isAccountTempUnschedulableCached(ctx, account) {
+		return nil, ErrNoAvailableAccounts
+	}
 	if s.schedulerSnapshot == nil {
 		if !IsAccountVisibleToRequestUser(ctx, account) {
 			return nil, ErrAccountNotFound
@@ -2305,10 +2323,20 @@ func (s *OpenAIGatewayService) hydrateSelectedAccount(ctx context.Context, accou
 	if !IsAccountVisibleToRequestUser(ctx, hydrated) {
 		return nil, ErrAccountNotFound
 	}
+	if s.isAccountTempUnschedulableCached(ctx, hydrated) {
+		return nil, ErrNoAvailableAccounts
+	}
 	if !s.isOpenAIAccountProxyHealthSchedulable(ctx, hydrated) || !hydrated.IsSchedulable() || !hydrated.IsOpenAI() {
 		return nil, ErrNoAvailableAccounts
 	}
 	return hydrated, nil
+}
+
+func (s *OpenAIGatewayService) isAccountTempUnschedulableCached(ctx context.Context, account *Account) bool {
+	if s == nil || s.rateLimitService == nil || account == nil {
+		return false
+	}
+	return s.rateLimitService.IsTempUnschedulableCached(ctx, account.ID)
 }
 
 func (s *OpenAIGatewayService) newSelectionResult(ctx context.Context, account *Account, acquired bool, release func(), waitPlan *AccountWaitPlan) (*AccountSelectionResult, error) {

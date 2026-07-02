@@ -2165,6 +2165,30 @@ func (s *RateLimitService) GetTempUnschedStatus(ctx context.Context, accountID i
 	return state, nil
 }
 
+func (s *RateLimitService) IsTempUnschedulableCached(ctx context.Context, accountID int64) bool {
+	if s == nil || s.tempUnschedCache == nil || accountID <= 0 {
+		return false
+	}
+	state, err := s.tempUnschedCache.GetTempUnsched(ctx, accountID)
+	if err != nil {
+		slog.Warn("temp_unsched_cache_get_failed", "account_id", accountID, "error", err)
+		return false
+	}
+	if state == nil {
+		return false
+	}
+	now := time.Now().Unix()
+	if state.UntilUnix > now {
+		return true
+	}
+	if state.UntilUnix > 0 {
+		if err := s.tempUnschedCache.DeleteTempUnsched(ctx, accountID); err != nil {
+			slog.Warn("temp_unsched_cache_delete_expired_failed", "account_id", accountID, "error", err)
+		}
+	}
+	return false
+}
+
 func (s *RateLimitService) HandleTempUnschedulable(ctx context.Context, account *Account, statusCode int, responseBody []byte) bool {
 	if account == nil {
 		return false

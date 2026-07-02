@@ -2513,12 +2513,13 @@ const googleConfigErrorCooldown = 1 * time.Minute
 
 // tempUnscheduleGoogleConfigError 对服务端配置类 400 错误触发临时封禁，
 // 避免短时间内反复调度到同一个有问题的账号。
-func tempUnscheduleGoogleConfigError(ctx context.Context, repo AccountRepository, accountID int64, logPrefix string) {
+func tempUnscheduleGoogleConfigError(ctx context.Context, repo AccountRepository, cache TempUnschedCache, accountID int64, logPrefix string) {
 	until := time.Now().Add(googleConfigErrorCooldown)
 	reason := "400: invalid project resource name (auto temp-unschedule 1m)"
 	if err := repo.SetTempUnschedulable(ctx, accountID, until, reason); err != nil {
 		log.Printf("%s temp_unschedule_failed account=%d error=%v", logPrefix, accountID, err)
 	} else {
+		cacheTempUnschedState(ctx, cache, accountID, until, http.StatusBadRequest, "invalid project resource name", reason)
 		log.Printf("%s temp_unscheduled account=%d until=%v reason=%q", logPrefix, accountID, until.Format("15:04:05"), reason)
 	}
 }
@@ -2528,13 +2529,30 @@ const emptyResponseCooldown = 1 * time.Minute
 
 // tempUnscheduleEmptyResponse 对空流式响应触发临时封禁，
 // 避免短时间内反复调度到同一个返回空响应的账号。
-func tempUnscheduleEmptyResponse(ctx context.Context, repo AccountRepository, accountID int64, logPrefix string) {
+func tempUnscheduleEmptyResponse(ctx context.Context, repo AccountRepository, cache TempUnschedCache, accountID int64, logPrefix string) {
 	until := time.Now().Add(emptyResponseCooldown)
 	reason := "empty stream response (auto temp-unschedule 1m)"
 	if err := repo.SetTempUnschedulable(ctx, accountID, until, reason); err != nil {
 		log.Printf("%s temp_unschedule_failed account=%d error=%v", logPrefix, accountID, err)
 	} else {
+		cacheTempUnschedState(ctx, cache, accountID, until, http.StatusBadGateway, "empty stream response", reason)
 		log.Printf("%s temp_unscheduled account=%d until=%v reason=%q", logPrefix, accountID, until.Format("15:04:05"), reason)
+	}
+}
+
+func cacheTempUnschedState(ctx context.Context, cache TempUnschedCache, accountID int64, until time.Time, statusCode int, matchedKeyword string, message string) {
+	if cache == nil || accountID <= 0 || until.IsZero() {
+		return
+	}
+	state := &TempUnschedState{
+		UntilUnix:       until.Unix(),
+		TriggeredAtUnix: time.Now().Unix(),
+		StatusCode:      statusCode,
+		MatchedKeyword:  matchedKeyword,
+		ErrorMessage:    strings.TrimSpace(message),
+	}
+	if err := cache.SetTempUnsched(ctx, accountID, state); err != nil {
+		slog.Warn("temp_unsched_cache_set_failed", "account_id", accountID, "error", err)
 	}
 }
 

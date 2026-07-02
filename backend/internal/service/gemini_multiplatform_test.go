@@ -346,6 +346,37 @@ func TestGeminiMessagesCompatService_SelectAccountForModelWithExclusions_GeminiP
 	require.Equal(t, PlatformGemini, acc.Platform, "无分组时应只返回 gemini 平台账户")
 }
 
+func TestGeminiMessagesCompatService_SelectAccountForModelSkipsTempUnschedCache(t *testing.T) {
+	ctx := context.Background()
+	repo := &mockAccountRepoForGemini{
+		accounts: []Account{
+			{ID: 1, Platform: PlatformGemini, Type: AccountTypeOAuth, Priority: 1, Status: StatusActive, Schedulable: true},
+			{ID: 2, Platform: PlatformGemini, Type: AccountTypeOAuth, Priority: 2, Status: StatusActive, Schedulable: true},
+		},
+		accountsByID: map[int64]*Account{},
+	}
+	for i := range repo.accounts {
+		repo.accountsByID[repo.accounts[i].ID] = &repo.accounts[i]
+	}
+	cache := &runtimeTempUnschedCacheStub{states: map[int64]*TempUnschedState{
+		1: {UntilUnix: time.Now().Add(time.Minute).Unix()},
+	}}
+	svc := &GeminiMessagesCompatService{
+		accountRepo: repo,
+		groupRepo:   &mockGroupRepoForGemini{groups: map[int64]*Group{}},
+		cache:       &mockGatewayCacheForGemini{},
+		rateLimitService: &RateLimitService{
+			tempUnschedCache: cache,
+		},
+	}
+
+	acc, err := svc.SelectAccountForModelWithExclusions(ctx, nil, "", "gemini-2.5-flash", nil)
+
+	require.NoError(t, err)
+	require.NotNil(t, acc)
+	require.Equal(t, int64(2), acc.ID)
+}
+
 func TestGeminiMessagesCompatService_SelectAccountForModelFiltersInvisibleOwnedAccounts(t *testing.T) {
 	ownerID := int64(101)
 	ctx := context.WithValue(context.Background(), ctxkey.AuthenticatedUserID, int64(999))
