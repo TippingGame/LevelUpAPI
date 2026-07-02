@@ -84,6 +84,7 @@ type OpenAITokenProvider struct {
 	refreshAPI         *OAuthRefreshAPI
 	executor           OAuthRefreshExecutor
 	refreshPolicy      ProviderRefreshPolicy
+	tempUnschedCache   TempUnschedCache
 }
 
 func NewOpenAITokenProvider(
@@ -109,6 +110,10 @@ func (p *OpenAITokenProvider) SetRefreshAPI(api *OAuthRefreshAPI, executor OAuth
 // SetRefreshPolicy injects caller-side refresh policy.
 func (p *OpenAITokenProvider) SetRefreshPolicy(policy ProviderRefreshPolicy) {
 	p.refreshPolicy = policy
+}
+
+func (p *OpenAITokenProvider) SetTempUnschedCache(cache TempUnschedCache) {
+	p.tempUnschedCache = cache
 }
 
 func (p *OpenAITokenProvider) SnapshotRuntimeMetrics() OpenAITokenRuntimeMetrics {
@@ -275,6 +280,7 @@ func (p *OpenAITokenProvider) disableAccountMissingRefreshToken(account *Account
 		)
 		return
 	}
+	markAccountErrorRuntimeEvicted(bgCtx, p.tempUnschedCache, account, reason, "openai_token_provider_missing_refresh_token")
 	if p.tokenCache != nil {
 		cacheKey := OpenAITokenCacheKey(account)
 		if err := p.tokenCache.DeleteAccessToken(bgCtx, cacheKey); err != nil {

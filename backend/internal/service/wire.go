@@ -90,11 +90,13 @@ func ProvideOpenAITokenProvider(
 	tokenCache GeminiTokenCache,
 	openaiOAuthService *OpenAIOAuthService,
 	refreshAPI *OAuthRefreshAPI,
+	tempUnschedCache TempUnschedCache,
 ) *OpenAITokenProvider {
 	p := NewOpenAITokenProvider(accountRepo, tokenCache, openaiOAuthService)
 	executor := NewOpenAITokenRefresher(openaiOAuthService, accountRepo)
 	p.SetRefreshAPI(refreshAPI, executor)
 	p.SetRefreshPolicy(OpenAIProviderRefreshPolicy())
+	p.SetTempUnschedCache(tempUnschedCache)
 	return p
 }
 
