@@ -892,6 +892,34 @@ func (s *AccountRepoSuite) TestBulkUpdate_SyncSchedulerSnapshotOnDisabled() {
 	s.Require().Contains(ids, account2.ID)
 }
 
+func (s *AccountRepoSuite) TestBulkUpdate_SyncSchedulerSnapshotOnEnableRecovery() {
+	account1 := mustCreateAccount(s.T(), s.client, &service.Account{Name: "bulk-enable-1", Status: service.StatusDisabled, Schedulable: false})
+	account2 := mustCreateAccount(s.T(), s.client, &service.Account{Name: "bulk-enable-2", Status: service.StatusDisabled, Schedulable: false})
+	cacheRecorder := &schedulerCacheRecorder{}
+	s.repo.schedulerCache = cacheRecorder
+
+	active := service.StatusActive
+	schedulable := true
+	rows, err := s.repo.BulkUpdate(s.ctx, []int64{account1.ID, account2.ID}, service.AccountBulkUpdate{
+		Status:      &active,
+		Schedulable: &schedulable,
+	})
+	s.Require().NoError(err)
+	s.Require().Equal(int64(2), rows)
+
+	s.Require().Len(cacheRecorder.setAccounts, 2)
+	seen := map[int64]*service.Account{}
+	for _, acc := range cacheRecorder.setAccounts {
+		seen[acc.ID] = acc
+	}
+	s.Require().Contains(seen, account1.ID)
+	s.Require().Contains(seen, account2.ID)
+	s.Require().Equal(service.StatusActive, seen[account1.ID].Status)
+	s.Require().True(seen[account1.ID].Schedulable)
+	s.Require().Equal(service.StatusActive, seen[account2.ID].Status)
+	s.Require().True(seen[account2.ID].Schedulable)
+}
+
 // --- SetOverloaded / SetRateLimited / ClearRateLimit ---
 
 func (s *AccountRepoSuite) TestSetOverloaded() {
