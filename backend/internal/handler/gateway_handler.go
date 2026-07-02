@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -1132,6 +1131,13 @@ func cloneAPIKeyWithGroup(apiKey *service.APIKey, group *service.Group) *service
 		return apiKey
 	}
 	cloned := *apiKey
+	if cloned.GroupID == nil || *cloned.GroupID != group.ID {
+		if cloned.User != nil && cloned.User.UserGroupRPMOverride != nil {
+			user := *cloned.User
+			user.UserGroupRPMOverride = nil
+			cloned.User = &user
+		}
+	}
 	groupID := group.ID
 	cloned.GroupID = &groupID
 	cloned.Group = group
@@ -1380,19 +1386,11 @@ func buildAPIKeyGroupRouteCandidates(apiKey *service.APIKey) ([]apiKeyGroupRoute
 			Group:           apiKey.Group,
 		}}
 	}
-	sort.SliceStable(routes, func(i, j int) bool {
-		if routes[i].Priority != routes[j].Priority {
-			return routes[i].Priority < routes[j].Priority
-		}
-		if routes[i].Weight != routes[j].Weight {
-			return routes[i].Weight > routes[j].Weight
-		}
-		return routes[i].GroupID < routes[j].GroupID
-	})
+	service.SortAPIKeyGroupRoutes(routes)
 	now := time.Now()
 	candidates := make([]apiKeyGroupRouteCandidate, 0, len(routes))
 	for _, route := range routes {
-		if !route.Enabled || route.Group == nil || route.GroupID <= 0 {
+		if !service.IsAPIKeyGroupRouteSelectable(apiKey, route) {
 			continue
 		}
 		if !apiKeyGroupRouteBreaker.available(apiKey.ID, route.GroupID, now) {
@@ -1407,17 +1405,20 @@ func buildAPIKeyGroupRouteCandidates(apiKey *service.APIKey) ([]apiKeyGroupRoute
 		if hasConfiguredRoutes {
 			return nil, false
 		}
-		candidates = append(candidates, apiKeyGroupRouteCandidate{
-			APIKey: cloneAPIKeyWithGroup(apiKey, apiKey.Group),
-			Route: service.APIKeyGroupRoute{
-				GroupID:         *apiKey.GroupID,
-				Priority:        100,
-				Weight:          1,
-				Enabled:         true,
-				CooldownSeconds: 30,
-				Group:           apiKey.Group,
-			},
-		})
+		route := service.APIKeyGroupRoute{
+			GroupID:         *apiKey.GroupID,
+			Priority:        100,
+			Weight:          1,
+			Enabled:         true,
+			CooldownSeconds: 30,
+			Group:           apiKey.Group,
+		}
+		if service.IsAPIKeyGroupRouteSelectable(apiKey, route) {
+			candidates = append(candidates, apiKeyGroupRouteCandidate{
+				APIKey: cloneAPIKeyWithGroup(apiKey, apiKey.Group),
+				Route:  route,
+			})
+		}
 	}
 	if len(candidates) == 0 && apiKey.GroupID == nil {
 		candidates = append(candidates, apiKeyGroupRouteCandidate{

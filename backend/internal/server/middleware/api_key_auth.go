@@ -111,6 +111,7 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
 			AbortWithError(c, 401, "USER_INACTIVE", "User account is not active")
 			return
 		}
+		selectAPIKeyGroupForRequest(apiKey)
 		if abortIfAPIKeyGroupUnavailable(c, apiKey) {
 			return
 		}
@@ -294,11 +295,7 @@ func validateAPIKeyGroupAllowed(apiKey *service.APIKey) bool {
 	if apiKey == nil || apiKey.GroupID == nil || apiKey.User == nil || apiKey.Group == nil {
 		return true
 	}
-	group := apiKey.Group
-	if group.IsSubscriptionType() {
-		return true
-	}
-	return apiKey.User.CanBindGroup(group.ID, group.IsExclusive)
+	return service.CanAPIKeyUserUseGroup(apiKey.User, apiKey.Group)
 }
 
 func validateAPIKeyGroupAvailable(apiKey *service.APIKey) (string, string, bool) {
@@ -309,8 +306,30 @@ func validateAPIKeyGroupAvailable(apiKey *service.APIKey) (string, string, bool)
 	if group == nil || strings.EqualFold(group.Status, "deleted") {
 		return "GROUP_DELETED", "API Key 所属分组已删除", false
 	}
-	if !group.IsActive() {
+	if !service.IsAPIKeyGroupAvailable(group) {
 		return "GROUP_DISABLED", "API Key 所属分组已停用", false
 	}
 	return "", "", true
+}
+
+func selectAPIKeyGroupForRequest(apiKey *service.APIKey) {
+	route, ok := service.FirstSelectableAPIKeyGroupRoute(apiKey)
+	if !ok {
+		return
+	}
+	if apiKey.GroupID == nil || *apiKey.GroupID != route.GroupID {
+		clearAPIKeyUserGroupRPMOverride(apiKey)
+	}
+	groupID := route.GroupID
+	apiKey.GroupID = &groupID
+	apiKey.Group = route.Group
+}
+
+func clearAPIKeyUserGroupRPMOverride(apiKey *service.APIKey) {
+	if apiKey == nil || apiKey.User == nil || apiKey.User.UserGroupRPMOverride == nil {
+		return
+	}
+	user := *apiKey.User
+	user.UserGroupRPMOverride = nil
+	apiKey.User = &user
 }

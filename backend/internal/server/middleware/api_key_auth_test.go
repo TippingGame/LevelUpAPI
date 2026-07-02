@@ -449,6 +449,79 @@ func TestAPIKeyAuthRejectsUnavailableGroup(t *testing.T) {
 	}
 }
 
+func TestAPIKeyAuthSelectsAvailableRouteWhenPrimaryGroupDisabled(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	disabledGroup := &service.Group{
+		ID:       101,
+		Name:     "disabled",
+		Status:   service.StatusDisabled,
+		Platform: service.PlatformAnthropic,
+		Hydrated: true,
+	}
+	activeGroup := &service.Group{
+		ID:       102,
+		Name:     "active",
+		Status:   service.StatusActive,
+		Platform: service.PlatformAnthropic,
+		Hydrated: true,
+	}
+	user := &service.User{
+		ID:          7,
+		Role:        service.RoleUser,
+		Status:      service.StatusActive,
+		Balance:     10,
+		Concurrency: 3,
+	}
+	apiKey := &service.APIKey{
+		ID:      100,
+		UserID:  user.ID,
+		GroupID: &disabledGroup.ID,
+		Key:     "test-key",
+		Status:  service.StatusActive,
+		User:    user,
+		Group:   disabledGroup,
+		GroupRoutes: []service.APIKeyGroupRoute{
+			{GroupID: disabledGroup.ID, Priority: 100, Weight: 1, Enabled: true, CooldownSeconds: 30, Group: disabledGroup},
+			{GroupID: activeGroup.ID, Priority: 200, Weight: 1, Enabled: true, CooldownSeconds: 30, Group: activeGroup},
+		},
+	}
+	apiKeyRepo := &stubApiKeyRepo{
+		getByKey: func(ctx context.Context, key string) (*service.APIKey, error) {
+			if key != apiKey.Key {
+				return nil, service.ErrAPIKeyNotFound
+			}
+			clone := *apiKey
+			return &clone, nil
+		},
+	}
+
+	cfg := &config.Config{RunMode: config.RunModeSimple}
+	apiKeyService := service.NewAPIKeyService(apiKeyRepo, nil, nil, nil, nil, nil, cfg)
+	router := gin.New()
+	router.Use(gin.HandlerFunc(NewAPIKeyAuthMiddleware(apiKeyService, nil, cfg)))
+	router.GET("/t", func(c *gin.Context) {
+		current, ok := GetAPIKeyFromContext(c)
+		if !ok || current.GroupID == nil || *current.GroupID != activeGroup.ID || current.Group == nil || current.Group.ID != activeGroup.ID {
+			c.JSON(http.StatusInternalServerError, gin.H{"ok": false})
+			return
+		}
+		groupFromCtx, ok := c.Request.Context().Value(ctxkey.Group).(*service.Group)
+		if !ok || groupFromCtx == nil || groupFromCtx.ID != activeGroup.ID {
+			c.JSON(http.StatusInternalServerError, gin.H{"ok": false})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"ok": true})
+	})
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/t", nil)
+	req.Header.Set("x-api-key", apiKey.Key)
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+}
+
 func TestAPIKeyAuthIPRestrictionDoesNotTrustSpoofedForwardHeaders(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
