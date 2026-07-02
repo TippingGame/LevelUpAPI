@@ -75,3 +75,41 @@ func TestBuildSchedulerMetadataAccount_KeepsSlimGroupMembership(t *testing.T) {
 	require.Equal(t, int64(11), got.AccountGroups[1].GroupID)
 	require.Nil(t, got.Groups)
 }
+
+func TestBuildSchedulerMetadataAccount_KeepsProxySchedulingState(t *testing.T) {
+	ownerID := int64(101)
+	proxyID := int64(7)
+	account := service.Account{
+		ID:           42,
+		Platform:     service.PlatformAnthropic,
+		AccountLevel: service.AccountLevelUnknown,
+		Type:         service.AccountTypeOAuth,
+		OwnerUserID:  &ownerID,
+		ProxyID:      &proxyID,
+		Proxy: &service.Proxy{
+			ID:       proxyID,
+			Status:   service.StatusActive,
+			Host:     "127.0.0.1",
+			Port:     1080,
+			Username: "secret-user",
+			Password: "secret-pass",
+		},
+		Status:      service.StatusActive,
+		Schedulable: true,
+	}
+
+	got := buildSchedulerMetadataAccount(account)
+
+	require.Equal(t, account.AccountLevel, got.AccountLevel)
+	require.NotNil(t, got.OwnerUserID)
+	require.Equal(t, ownerID, *got.OwnerUserID)
+	require.NotNil(t, got.ProxyID)
+	require.Equal(t, proxyID, *got.ProxyID)
+	require.NotNil(t, got.Proxy)
+	require.Equal(t, proxyID, got.Proxy.ID)
+	require.Equal(t, service.StatusActive, got.Proxy.Status)
+	require.Empty(t, got.Proxy.Host)
+	require.Empty(t, got.Proxy.Username)
+	require.Empty(t, got.Proxy.Password)
+	require.True(t, got.IsSchedulable())
+}

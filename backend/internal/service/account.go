@@ -430,6 +430,9 @@ func (a *Account) isSchedulableAt(now time.Time, includeCodexQuotaProtection boo
 	if !a.IsActive() || !a.Schedulable {
 		return false
 	}
+	if !a.HasRequiredProxyForScheduling() {
+		return false
+	}
 	if a.AutoPauseOnExpired && a.ExpiresAt != nil && !now.Before(*a.ExpiresAt) {
 		return false
 	}
@@ -449,6 +452,19 @@ func (a *Account) isSchedulableAt(now time.Time, includeCodexQuotaProtection boo
 		return false
 	}
 	return true
+}
+
+func (a *Account) HasRequiredProxyForScheduling() bool {
+	if a == nil || a.OwnerUserID == nil {
+		return true
+	}
+	if !RequiresUserAccountProxy(a.Platform, a.AccountLevel) {
+		return true
+	}
+	if a.ProxyID == nil || *a.ProxyID <= 0 {
+		return false
+	}
+	return a.Proxy != nil && a.Proxy.IsActive()
 }
 
 func (a *Account) IsRateLimited() bool {

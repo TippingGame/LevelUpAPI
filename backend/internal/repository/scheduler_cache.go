@@ -876,7 +876,10 @@ func buildSchedulerMetadataAccount(account service.Account) service.Account {
 		ID:                      account.ID,
 		Name:                    account.Name,
 		Platform:                account.Platform,
+		AccountLevel:            account.AccountLevel,
 		Type:                    account.Type,
+		OwnerUserID:             account.OwnerUserID,
+		ProxyID:                 account.ProxyID,
 		Concurrency:             account.Concurrency,
 		LoadFactor:              account.LoadFactor,
 		Priority:                account.Priority,
@@ -899,6 +902,17 @@ func buildSchedulerMetadataAccount(account service.Account) service.Account {
 		GroupIDs:                filterSchedulerGroupIDs(account.GroupIDs, account.AccountGroups),
 		Credentials:             filterSchedulerCredentials(account.Credentials),
 		Extra:                   filterSchedulerExtra(account.Extra),
+		Proxy:                   filterSchedulerProxy(account.Proxy),
+	}
+}
+
+func filterSchedulerProxy(proxy *service.Proxy) *service.Proxy {
+	if proxy == nil {
+		return nil
+	}
+	return &service.Proxy{
+		ID:     proxy.ID,
+		Status: proxy.Status,
 	}
 }
 
