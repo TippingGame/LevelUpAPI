@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"testing"
 
@@ -17,6 +18,11 @@ import (
 )
 
 func newProxyEntRepo(t *testing.T) (*proxyRepository, *dbent.Client) {
+	repo, client, _ := newProxyEntRepoWithDB(t)
+	return repo, client
+}
+
+func newProxyEntRepoWithDB(t *testing.T) (*proxyRepository, *dbent.Client, *sql.DB) {
 	t.Helper()
 
 	db, err := sql.Open("sqlite", fmt.Sprintf("file:%s?mode=memory&cache=shared&_fk=1", t.Name()))
@@ -31,7 +37,7 @@ func newProxyEntRepo(t *testing.T) (*proxyRepository, *dbent.Client) {
 	client := enttest.NewClient(t, enttest.WithOptions(dbent.Driver(drv)))
 	t.Cleanup(func() { _ = client.Close() })
 
-	return newProxyRepositoryWithSQL(client, db), client
+	return newProxyRepositoryWithSQL(client, db), client, db
 }
 
 func TestProxyRepositoryVisibleScopeOnlyIncludesPlatformAndOwnProxies(t *testing.T) {
@@ -121,6 +127,49 @@ func TestProxyRepositoryFindVisibleActiveByEndpointPrefersOwnProxyOverPlatformDu
 	require.Equal(t, ownerID, *got.OwnerUserID)
 }
 
+func TestProxyRepositoryDeleteEnqueuesSchedulerRefreshForBoundAccounts(t *testing.T) {
+	repo, client, db := newProxyEntRepoWithDB(t)
+	ctx := context.Background()
+	createSchedulerOutboxTable(t, db)
+
+	proxy := createProxyForVisibilityTest(t, ctx, repo, &service.Proxy{
+		Name:     "delete-refresh",
+		Protocol: "http",
+		Host:     "127.0.0.1",
+		Port:     8080,
+		Status:   service.StatusActive,
+	})
+	otherProxy := createProxyForVisibilityTest(t, ctx, repo, &service.Proxy{
+		Name:     "other",
+		Protocol: "http",
+		Host:     "127.0.0.1",
+		Port:     8081,
+		Status:   service.StatusActive,
+	})
+	accountID1 := createProxyBoundAccount(t, ctx, client, "delete-refresh-1", proxy.ID)
+	accountID2 := createProxyBoundAccount(t, ctx, client, "delete-refresh-2", proxy.ID)
+	otherAccountID := createProxyBoundAccount(t, ctx, client, "delete-refresh-other", otherProxy.ID)
+
+	require.NoError(t, repo.Delete(ctx, proxy.ID))
+
+	var rawPayload []byte
+	err := db.QueryRowContext(ctx, `
+		SELECT payload
+		FROM scheduler_outbox
+		WHERE event_type = ?
+		ORDER BY id DESC
+		LIMIT 1
+	`, service.SchedulerOutboxEventAccountBulkChanged).Scan(&rawPayload)
+	require.NoError(t, err)
+
+	var payload struct {
+		AccountIDs []int64 `json:"account_ids"`
+	}
+	require.NoError(t, json.Unmarshal(rawPayload, &payload))
+	require.ElementsMatch(t, []int64{accountID1, accountID2}, payload.AccountIDs)
+	require.NotContains(t, payload.AccountIDs, otherAccountID)
+}
+
 func createProxyOwner(t *testing.T, ctx context.Context, client *dbent.Client, email string) int64 {
 	t.Helper()
 	user, err := client.User.Create().
@@ -135,4 +184,32 @@ func createProxyForVisibilityTest(t *testing.T, ctx context.Context, repo *proxy
 	t.Helper()
 	require.NoError(t, repo.Create(ctx, proxy))
 	return proxy
+}
+
+func createSchedulerOutboxTable(t *testing.T, db *sql.DB) {
+	t.Helper()
+	_, err := db.Exec(`
+		CREATE TABLE scheduler_outbox (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			event_type TEXT NOT NULL,
+			account_id INTEGER NULL,
+			group_id INTEGER NULL,
+			payload BLOB NULL,
+			dedup_key TEXT NULL,
+			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+		)
+	`)
+	require.NoError(t, err)
+}
+
+func createProxyBoundAccount(t *testing.T, ctx context.Context, client *dbent.Client, name string, proxyID int64) int64 {
+	t.Helper()
+	account, err := client.Account.Create().
+		SetName(name).
+		SetPlatform(service.PlatformAnthropic).
+		SetType(service.AccountTypeOAuth).
+		SetProxyID(proxyID).
+		Save(ctx)
+	require.NoError(t, err)
+	return account.ID
 }

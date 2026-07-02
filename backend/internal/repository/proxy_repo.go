@@ -134,6 +134,13 @@ func (r *proxyRepository) enqueueSchedulerOutboxForBoundAccounts(ctx context.Con
 	if len(ids) == 0 {
 		return
 	}
+	r.enqueueSchedulerOutboxForAccountIDs(ctx, proxyID, ids)
+}
+
+func (r *proxyRepository) enqueueSchedulerOutboxForAccountIDs(ctx context.Context, proxyID int64, ids []int64) {
+	if r == nil || r.sql == nil || len(ids) == 0 {
+		return
+	}
 	payload := map[string]any{"account_ids": ids}
 	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventAccountBulkChanged, nil, nil, payload); err != nil {
 		encoded, _ := json.Marshal(payload)
@@ -169,7 +176,18 @@ func (r *proxyRepository) accountIDsByProxyID(ctx context.Context, proxyID int64
 }
 
 func (r *proxyRepository) Delete(ctx context.Context, id int64) error {
+	var ids []int64
+	var listErr error
+	if r != nil && r.sql != nil && id > 0 {
+		ids, listErr = r.accountIDsByProxyID(ctx, id)
+		if listErr != nil {
+			logger.LegacyPrintf("repository.proxy", "[SchedulerOutbox] list proxy accounts before delete failed: proxy=%d err=%v", id, listErr)
+		}
+	}
 	_, err := r.client.Proxy.Delete().Where(proxy.IDEQ(id)).Exec(ctx)
+	if err == nil && listErr == nil {
+		r.enqueueSchedulerOutboxForAccountIDs(ctx, id, ids)
+	}
 	return err
 }
 
