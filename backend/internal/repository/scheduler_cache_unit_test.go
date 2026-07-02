@@ -4,6 +4,7 @@ package repository
 
 import (
 	"testing"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/stretchr/testify/require"
@@ -33,6 +34,67 @@ func TestBuildSchedulerMetadataAccount_KeepsOpenAIWSFlags(t *testing.T) {
 	require.Equal(t, "force_chat_completions", got.Extra["openai_responses_mode"])
 	require.Equal(t, false, got.Extra["openai_responses_supported"])
 	require.Equal(t, true, got.Extra["mixed_scheduling"])
+	require.Nil(t, got.Extra["unused_large_field"])
+}
+
+func TestBuildSchedulerMetadataAccount_KeepsSchedulingProtectionExtra(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	resetAt := now.Add(30 * time.Minute).Format(time.RFC3339)
+	account := service.Account{
+		ID:          42,
+		Platform:    service.PlatformOpenAI,
+		Type:        service.AccountTypeAPIKey,
+		Status:      service.StatusActive,
+		Schedulable: true,
+		Extra: map[string]any{
+			"privacy_mode":               service.PrivacyModeTrainingOff,
+			"model_rate_limits":          map[string]any{"gpt-4o": map[string]any{"rate_limit_reset_at": resetAt}},
+			"quota_limit":                100.0,
+			"quota_used":                 100.0,
+			"quota_daily_limit":          10.0,
+			"quota_daily_used":           9.0,
+			"quota_daily_start":          now.Add(-1 * time.Hour).Format(time.RFC3339),
+			"quota_weekly_limit":         50.0,
+			"quota_weekly_used":          20.0,
+			"quota_weekly_start":         now.Add(-24 * time.Hour).Format(time.RFC3339),
+			"base_rpm":                   5,
+			"rpm_strategy":               "sticky_exempt",
+			"rpm_sticky_buffer":          3,
+			"user_msg_queue_mode":        "throttle",
+			"anthropic_passthrough":      true,
+			"openai_passthrough":         true,
+			"openai_compact_mode":        service.OpenAICompactModeForceOn,
+			"openai_compact_supported":   false,
+			"enable_tls_fingerprint":     true,
+			"tls_fingerprint_profile_id": 11,
+			"session_id_masking_enabled": true,
+			"custom_base_url_enabled":    true,
+			"custom_base_url":            "https://relay.example.com",
+			"cache_ttl_override_enabled": true,
+			"cache_ttl_override_target":  "1h",
+			"unused_large_field":         "drop-me",
+		},
+	}
+
+	got := buildSchedulerMetadataAccount(account)
+
+	require.True(t, got.IsPrivacySet())
+	require.True(t, got.IsQuotaExceededAt(now))
+	require.Greater(t, got.GetModelRateLimitRemainingTime("gpt-4o"), time.Duration(0))
+	require.Equal(t, 5, got.GetBaseRPM())
+	require.Equal(t, service.WindowCostStickyOnly, got.CheckRPMSchedulability(5))
+	require.Equal(t, "throttle", got.GetUserMsgQueueMode())
+	require.Equal(t, true, got.Extra["anthropic_passthrough"])
+	require.True(t, got.IsOpenAIPassthroughEnabled())
+	require.Equal(t, service.OpenAICompactModeForceOn, got.GetOpenAICompactMode())
+	require.Equal(t, false, got.Extra["openai_compact_supported"])
+	require.Equal(t, true, got.Extra["enable_tls_fingerprint"])
+	require.Equal(t, 11, got.Extra["tls_fingerprint_profile_id"])
+	require.Equal(t, true, got.Extra["session_id_masking_enabled"])
+	require.Equal(t, true, got.Extra["custom_base_url_enabled"])
+	require.Equal(t, "https://relay.example.com", got.Extra["custom_base_url"])
+	require.Equal(t, true, got.Extra["cache_ttl_override_enabled"])
+	require.Equal(t, "1h", got.Extra["cache_ttl_override_target"])
 	require.Nil(t, got.Extra["unused_large_field"])
 }
 

@@ -1013,6 +1013,29 @@ func (s *AccountRepoSuite) TestClearModelRateLimits_SyncSchedulerSnapshotOnRecov
 	s.Require().Equal(time.Duration(0), cached.GetModelRateLimitRemainingTime("claude-sonnet-4-5"))
 }
 
+func (s *AccountRepoSuite) TestClearAntigravityQuotaScopes_SyncSchedulerSnapshotOnRecovery() {
+	account := mustCreateAccount(s.T(), s.client, &service.Account{
+		Name:        "acc-clear-quota-scopes",
+		Status:      service.StatusActive,
+		Schedulable: true,
+		Extra: map[string]any{
+			"antigravity_quota_scopes": map[string]any{"gemini": true},
+		},
+	})
+	cacheRecorder := &schedulerCacheRecorder{}
+	s.repo.schedulerCache = cacheRecorder
+
+	s.Require().NoError(s.repo.ClearAntigravityQuotaScopes(s.ctx, account.ID))
+
+	got, err := s.repo.GetByID(s.ctx, account.ID)
+	s.Require().NoError(err)
+	s.Require().NotContains(got.Extra, "antigravity_quota_scopes")
+	s.Require().Len(cacheRecorder.setAccounts, 1)
+	cached := cacheRecorder.setAccounts[0]
+	s.Require().Equal(account.ID, cached.ID)
+	s.Require().NotContains(cached.Extra, "antigravity_quota_scopes")
+}
+
 func (s *AccountRepoSuite) TestTempUnschedulableFieldsLoadedByGetByIDAndGetByIDs() {
 	acc1 := mustCreateAccount(s.T(), s.client, &service.Account{Name: "acc-temp-1"})
 	acc2 := mustCreateAccount(s.T(), s.client, &service.Account{Name: "acc-temp-2"})
@@ -1129,6 +1152,25 @@ func (s *AccountRepoSuite) TestUpdateSessionWindow() {
 	s.Require().NotNil(got.SessionWindowStart)
 	s.Require().NotNil(got.SessionWindowEnd)
 	s.Require().Equal("active", got.SessionWindowStatus)
+}
+
+func (s *AccountRepoSuite) TestUpdateSessionWindow_SyncSchedulerSnapshot() {
+	account := mustCreateAccount(s.T(), s.client, &service.Account{Name: "acc-win-sync"})
+	cacheRecorder := &schedulerCacheRecorder{}
+	s.repo.schedulerCache = cacheRecorder
+	start := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
+	end := time.Date(2025, 6, 15, 15, 0, 0, 0, time.UTC)
+
+	s.Require().NoError(s.repo.UpdateSessionWindow(s.ctx, account.ID, &start, &end, "active"))
+
+	s.Require().Len(cacheRecorder.setAccounts, 1)
+	cached := cacheRecorder.setAccounts[0]
+	s.Require().Equal(account.ID, cached.ID)
+	s.Require().NotNil(cached.SessionWindowStart)
+	s.Require().NotNil(cached.SessionWindowEnd)
+	s.Require().WithinDuration(start, *cached.SessionWindowStart, time.Second)
+	s.Require().WithinDuration(end, *cached.SessionWindowEnd, time.Second)
+	s.Require().Equal("active", cached.SessionWindowStatus)
 }
 
 // --- UpdateExtra ---

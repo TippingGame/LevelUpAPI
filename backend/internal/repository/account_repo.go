@@ -2120,6 +2120,7 @@ func (r *accountRepository) ClearAntigravityQuotaScopes(ctx context.Context, id 
 	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventAccountChanged, &id, nil, nil); err != nil {
 		logger.LegacyPrintf("repository.account", "[SchedulerOutbox] enqueue clear quota scopes failed: account=%d err=%v", id, err)
 	}
+	r.syncSchedulerAccountSnapshot(ctx, id)
 	return nil
 }
 
@@ -2164,11 +2165,13 @@ func (r *accountRepository) UpdateSessionWindow(ctx context.Context, id int64, s
 	if err != nil {
 		return err
 	}
-	// 触发调度器缓存更新（仅当窗口时间有变化时）
-	if start != nil || end != nil {
+	// 触发调度器缓存更新。窗口时间和状态都会进入调度 metadata，
+	// 需要立即刷新单账号快照，避免缓存路径继续按旧窗口限速。
+	if start != nil || end != nil || status != "" {
 		if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventAccountChanged, &id, nil, nil); err != nil {
 			logger.LegacyPrintf("repository.account", "[SchedulerOutbox] enqueue session window update failed: account=%d err=%v", id, err)
 		}
+		r.syncSchedulerAccountSnapshot(ctx, id)
 	}
 	return nil
 }
