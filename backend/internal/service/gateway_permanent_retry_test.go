@@ -31,6 +31,20 @@ func TestGatewayServiceShouldStopRetryForPermanentAccountError(t *testing.T) {
 	require.Contains(t, repo.lastErrorMsg, "API key has been disabled")
 }
 
+func TestGatewayServiceShouldStopRetryForPermanentAccountErrorIsIdempotent(t *testing.T) {
+	repo := &permanentKeywordAccountRepoStub{}
+	svc := &GatewayService{rateLimitService: &RateLimitService{accountRepo: repo}}
+	account := &Account{ID: 304, Platform: PlatformAnthropic, Type: AccountTypeAPIKey, Status: StatusActive}
+	body := []byte(`{"error":{"message":"This API key has been disabled"}}`)
+
+	require.True(t, svc.shouldStopRetryForPermanentAccountError(context.Background(), account, http.StatusForbidden, body))
+	require.True(t, svc.shouldStopRetryForPermanentAccountError(context.Background(), account, http.StatusForbidden, body))
+
+	require.Equal(t, 1, repo.setErrorCalls)
+	require.Equal(t, StatusError, account.Status)
+	require.False(t, account.Schedulable)
+}
+
 func TestGatewayServiceShouldStopRetryForPermanentAccountErrorSkipsPoolMode(t *testing.T) {
 	repo := &permanentKeywordAccountRepoStub{}
 	svc := &GatewayService{rateLimitService: &RateLimitService{accountRepo: repo}}

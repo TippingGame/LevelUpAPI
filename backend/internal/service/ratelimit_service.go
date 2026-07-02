@@ -160,11 +160,17 @@ func (s *RateLimitService) HandlePermanentAccountError(ctx context.Context, acco
 	if !ok {
 		return false
 	}
+	if account.Status == StatusError {
+		return true
+	}
 	if s.accountRepo != nil {
 		s.handleAuthError(ctx, account, msg)
 	} else {
 		slog.Warn("permanent_account_error_without_repo", "account_id", account.ID, "status_code", statusCode)
 	}
+	account.Status = StatusError
+	account.ErrorMessage = msg
+	account.Schedulable = false
 	return true
 }
 

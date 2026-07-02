@@ -210,6 +210,26 @@ func TestRateLimitServiceHandleUpstreamErrorPermanentKeywordBypassesCustomErrorC
 	require.Contains(t, repo.lastErrorMsg, "API key has been disabled")
 }
 
+func TestRateLimitServiceHandlePermanentAccountErrorIsIdempotentInRequest(t *testing.T) {
+	repo := &permanentKeywordAccountRepoStub{}
+	svc := &RateLimitService{accountRepo: repo}
+	account := &Account{
+		ID:       211,
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeAPIKey,
+		Status:   StatusActive,
+	}
+	body := []byte(`{"error":{"message":"This API key has been disabled"}}`)
+
+	require.True(t, svc.HandlePermanentAccountError(context.Background(), account, http.StatusForbidden, body))
+	require.True(t, svc.HandlePermanentAccountError(context.Background(), account, http.StatusForbidden, body))
+
+	require.Equal(t, 1, repo.setErrorCalls)
+	require.Equal(t, StatusError, account.Status)
+	require.False(t, account.Schedulable)
+	require.Contains(t, account.ErrorMessage, "API key has been disabled")
+}
+
 func TestRateLimitServiceHandleUpstreamErrorNilAccountDoesNotPanic(t *testing.T) {
 	svc := &RateLimitService{}
 
