@@ -87,3 +87,25 @@ func TestOpenAIResponsesStreamErrorSideEffect_AccessDeniedTempUnschedulable(t *t
 	require.Contains(t, repo.tempReasons[0], "openai_403_counter_unavailable")
 	require.Empty(t, repo.rateLimitCalls)
 }
+
+func TestOpenAIResponsesStreamErrorSideEffect_RequestPolicyDoesNotTouchAccount(t *testing.T) {
+	repo := &openAIPassthroughFailoverRepo{}
+	svc := &OpenAIGatewayService{
+		rateLimitService: &RateLimitService{
+			accountRepo: repo,
+			cfg:         &config.Config{},
+		},
+	}
+	account := &Account{
+		ID:       70703,
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeOAuth,
+	}
+	payload := []byte(`{"type":"response.failed","response":{"status":"failed","error":{"type":"invalid_request_error","code":"content_policy_violation","message":"access denied by content policy"}}}`)
+
+	handled := svc.handleOpenAIResponsesStreamErrorSideEffect(context.Background(), account, http.Header{}, payload, "", false)
+
+	require.False(t, handled)
+	require.Empty(t, repo.tempCalls)
+	require.Empty(t, repo.rateLimitCalls)
+}

@@ -91,4 +91,25 @@ func TestAuthPaymentPermissionStatusesFailoverWithoutSameAccountRetry(t *testing
 		"This request has been blocked",
 		[]byte(`{"error":{"code":"cyber_policy","message":"This request has been blocked"}}`),
 	))
+	require.False(t, (&OpenAIGatewayService{}).shouldFailoverOpenAIUpstreamResponse(
+		http.StatusForbidden,
+		"This request has been blocked",
+		[]byte(`{"error":{"code":"cyber_policy","message":"This request has been blocked"}}`),
+	))
+	require.False(t, (&OpenAIGatewayService{}).shouldFailoverOpenAIUpstreamResponse(
+		http.StatusForbidden,
+		"This request violates the content policy",
+		[]byte(`{"error":{"code":"content_policy_violation","type":"invalid_request_error","message":"This request violates the content policy"}}`),
+	))
+	require.False(t, shouldFailoverOpenAIPassthroughResponse(
+		customRetryAccount,
+		http.StatusForbidden,
+		"This request has been flagged for potentially high-risk cyber activity.",
+		[]byte(`{"error":{"type":"safety_error","message":"This request has been flagged for potentially high-risk cyber activity."}}`),
+	))
+	require.True(t, (&OpenAIGatewayService{}).shouldFailoverOpenAIUpstreamResponse(
+		http.StatusForbidden,
+		"This account has been disabled after policy review.",
+		[]byte(`{"error":{"code":"content_policy_violation","message":"This account has been disabled after policy review."}}`),
+	))
 }

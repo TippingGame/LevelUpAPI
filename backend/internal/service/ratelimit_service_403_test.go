@@ -65,6 +65,58 @@ func TestRateLimitService_HandleUpstreamError_OpenAI403ThresholdDisables(t *test
 	require.Contains(t, repo.lastErrorMsg, "consecutive_403=3/3")
 }
 
+func TestRateLimitService_HandleUpstreamError_OpenAI403RequestPolicyDoesNotTouchAccount(t *testing.T) {
+	tests := []struct {
+		name string
+		body []byte
+	}{
+		{
+			name: "cyber policy",
+			body: []byte(`{"error":{"code":"cyber_policy","message":"This request has been blocked"}}`),
+		},
+		{
+			name: "safety error",
+			body: []byte(`{"error":{"type":"safety_error","message":"This request has been flagged for potentially high-risk cyber activity."}}`),
+		},
+		{
+			name: "content policy violation",
+			body: []byte(`{"error":{"code":"content_policy_violation","type":"invalid_request_error","message":"This request violates the content policy"}}`),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := &rateLimitAccountRepoStub{}
+			counter := &openAI403CounterCacheStub{counts: []int64{3}}
+			service := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+			service.SetOpenAI403CounterCache(counter)
+			account := &Account{
+				ID:       3030,
+				Platform: PlatformOpenAI,
+				Type:     AccountTypeAPIKey,
+				Status:   StatusActive,
+				Credentials: map[string]any{
+					"custom_error_codes_enabled": true,
+					"custom_error_codes":         []any{float64(http.StatusForbidden)},
+				},
+			}
+
+			shouldDisable := service.HandleUpstreamError(
+				context.Background(),
+				account,
+				http.StatusForbidden,
+				http.Header{},
+				tt.body,
+			)
+
+			require.False(t, shouldDisable)
+			require.Equal(t, 0, repo.setErrorCalls)
+			require.Equal(t, 0, repo.tempCalls)
+			require.Equal(t, StatusActive, account.Status)
+		})
+	}
+}
+
 func TestRateLimitService_HandleUpstreamError_AnthropicOAuth403FirstHitTempUnschedulable(t *testing.T) {
 	repo := &rateLimitAccountRepoStub{}
 	service := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)

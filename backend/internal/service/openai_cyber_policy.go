@@ -1,6 +1,7 @@
 package service
 
 import (
+	"net/http"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -65,4 +66,70 @@ func detectOpenAICyberPolicy(payload []byte) (bool, string, string) {
 		msg = gjson.GetBytes(payload, "response.error.message").String()
 	}
 	return true, "cyber_policy", strings.TrimSpace(msg)
+}
+
+func isOpenAIRequestPolicyError(payload []byte, upstreamMsg string) bool {
+	if _, permanent := permanentAccountKeywordErrorMessage(
+		&Account{Platform: PlatformOpenAI, Type: AccountTypeAPIKey},
+		http.StatusForbidden,
+		upstreamMsg,
+		payload,
+	); permanent {
+		return false
+	}
+	if hit, _, _ := detectOpenAICyberPolicy(payload); hit {
+		return true
+	}
+
+	code, errType, msg := openAIErrorPolicyFields(payload)
+	normalizedCode := normalizeOpenAIPolicyToken(code)
+	normalizedType := normalizeOpenAIPolicyToken(errType)
+	switch normalizedCode {
+	case "content_filter", "content_policy", "content_policy_violation", "policy_violation", "safety_violation":
+		return true
+	}
+	switch normalizedType {
+	case "content_filter", "content_policy", "content_policy_error", "policy_violation", "safety_error", "safety_violation":
+		return true
+	}
+
+	combinedMsg := strings.ToLower(strings.TrimSpace(msg + " " + upstreamMsg))
+	combinedMsg = strings.Join(strings.Fields(strings.NewReplacer("_", " ", "-", " ").Replace(combinedMsg)), " ")
+	for _, marker := range []string{
+		"content policy",
+		"high risk cyber",
+		"high-risk cyber",
+		"safety policy",
+		"safety system",
+	} {
+		if strings.Contains(combinedMsg, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func openAIErrorPolicyFields(payload []byte) (code string, errType string, msg string) {
+	if len(payload) == 0 {
+		return "", "", ""
+	}
+	code = firstNonEmptyTrimmed(
+		gjson.GetBytes(payload, "error.code").String(),
+		gjson.GetBytes(payload, "response.error.code").String(),
+	)
+	errType = firstNonEmptyTrimmed(
+		gjson.GetBytes(payload, "error.type").String(),
+		gjson.GetBytes(payload, "response.error.type").String(),
+	)
+	msg = firstNonEmptyTrimmed(
+		gjson.GetBytes(payload, "error.message").String(),
+		gjson.GetBytes(payload, "response.error.message").String(),
+	)
+	return code, errType, msg
+}
+
+func normalizeOpenAIPolicyToken(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	value = strings.NewReplacer("-", "_", " ", "_").Replace(value)
+	return strings.Trim(value, "_")
 }

@@ -128,6 +128,9 @@ func (s *RateLimitService) CheckErrorPolicy(ctx context.Context, account *Accoun
 	if s == nil || account == nil {
 		return ErrorPolicyNone
 	}
+	if account.Platform == PlatformOpenAI && isOpenAIRequestPolicyError(responseBody, "") {
+		return ErrorPolicyNone
+	}
 	if s.HandlePermanentAccountError(ctx, account, statusCode, responseBody) {
 		return ErrorPolicyMatched
 	}
@@ -154,6 +157,9 @@ func (s *RateLimitService) CheckErrorPolicy(ctx context.Context, account *Accoun
 // passthrough or retry behavior.
 func (s *RateLimitService) HandlePermanentAccountError(ctx context.Context, account *Account, statusCode int, responseBody []byte) bool {
 	if s == nil || account == nil {
+		return false
+	}
+	if account.Platform == PlatformOpenAI && isOpenAIRequestPolicyError(responseBody, "") {
 		return false
 	}
 	msg, ok := permanentAccountKeywordErrorMessageFromBody(account, statusCode, responseBody)
@@ -198,6 +204,11 @@ func (s *RateLimitService) HandleUpstreamError(ctx context.Context, account *Acc
 	upstreamMsg = sanitizeUpstreamErrorMessage(upstreamMsg)
 	if upstreamMsg != "" {
 		upstreamMsg = truncateForLog([]byte(upstreamMsg), 512)
+	}
+
+	if account.Platform == PlatformOpenAI && isOpenAIRequestPolicyError(responseBody, upstreamMsg) {
+		slog.Info("openai_request_policy_error_skipped", "account_id", account.ID, "status_code", statusCode)
+		return false
 	}
 
 	if msg, ok := permanentAccountKeywordErrorMessage(account, statusCode, upstreamMsg, responseBody); ok {

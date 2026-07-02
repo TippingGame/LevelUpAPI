@@ -248,6 +248,31 @@ func TestCheckErrorPolicy_PermanentKeywordBypassesCustomErrorCodeFilter(t *testi
 	require.Contains(t, repo.lastErrorMsg, "API key has been disabled")
 }
 
+func TestCheckErrorPolicy_OpenAIRequestPolicyBypassesCustomErrorCodeFilter(t *testing.T) {
+	repo := &errorPolicyRepoStub{}
+	svc := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+	account := &Account{
+		ID:       17,
+		Type:     AccountTypeAPIKey,
+		Platform: PlatformOpenAI,
+		Credentials: map[string]any{
+			"custom_error_codes_enabled": true,
+			"custom_error_codes":         []any{float64(http.StatusForbidden)},
+		},
+	}
+
+	result := svc.CheckErrorPolicy(
+		context.Background(),
+		account,
+		http.StatusForbidden,
+		[]byte(`{"error":{"code":"content_policy_violation","message":"This request violates the content policy"}}`),
+	)
+
+	require.Equal(t, ErrorPolicyNone, result)
+	require.Equal(t, 0, repo.setErrCalls)
+	require.Equal(t, 0, repo.tempCalls)
+}
+
 func TestCheckErrorPolicy_NilAccountReturnsNone(t *testing.T) {
 	svc := NewRateLimitService(&errorPolicyRepoStub{}, nil, &config.Config{}, nil, nil)
 

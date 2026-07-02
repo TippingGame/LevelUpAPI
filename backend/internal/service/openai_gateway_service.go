@@ -2395,6 +2395,9 @@ func (s *OpenAIGatewayService) shouldFailoverOpenAIUpstreamResponse(statusCode i
 	if IsUpstreamReplayUnsafeTimeoutStatus(statusCode) {
 		return false
 	}
+	if isOpenAIRequestPolicyError(upstreamBody, upstreamMsg) {
+		return false
+	}
 	if s.shouldFailoverUpstreamError(statusCode) {
 		return true
 	}
@@ -3583,7 +3586,7 @@ func shouldFailoverOpenAIPassthroughResponse(account *Account, statusCode int, u
 	case http.StatusUnauthorized, http.StatusPaymentRequired, http.StatusTooManyRequests, 529:
 		return true
 	case http.StatusForbidden:
-		if cyberHit, _, _ := detectOpenAICyberPolicy(upstreamBody); cyberHit {
+		if isOpenAIRequestPolicyError(upstreamBody, upstreamMsg) {
 			return false
 		}
 		_, permanent := permanentAccountKeywordErrorMessage(account, statusCode, upstreamMsg, upstreamBody)

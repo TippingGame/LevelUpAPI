@@ -270,6 +270,55 @@ func TestRateLimitServiceHandlePermanentAccountErrorIsIdempotentInRequest(t *tes
 	require.Contains(t, account.ErrorMessage, "API key has been disabled")
 }
 
+func TestRateLimitServiceHandlePermanentAccountErrorSkipsOpenAIRequestPolicy(t *testing.T) {
+	repo := &permanentKeywordAccountRepoStub{}
+	svc := &RateLimitService{accountRepo: repo}
+	account := &Account{
+		ID:          212,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Status:      StatusActive,
+		Schedulable: true,
+	}
+
+	handled := svc.HandlePermanentAccountError(
+		context.Background(),
+		account,
+		http.StatusForbidden,
+		[]byte(`{"error":{"type":"safety_error","message":"This request has been flagged for potentially high-risk cyber activity."}}`),
+	)
+
+	require.False(t, handled)
+	require.Equal(t, 0, repo.setErrorCalls)
+	require.Equal(t, StatusActive, account.Status)
+	require.True(t, account.Schedulable)
+}
+
+func TestRateLimitServiceHandlePermanentAccountErrorAccountFailureBeatsOpenAIRequestPolicyCode(t *testing.T) {
+	repo := &permanentKeywordAccountRepoStub{}
+	svc := &RateLimitService{accountRepo: repo}
+	account := &Account{
+		ID:          213,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Status:      StatusActive,
+		Schedulable: true,
+	}
+
+	handled := svc.HandlePermanentAccountError(
+		context.Background(),
+		account,
+		http.StatusForbidden,
+		[]byte(`{"error":{"code":"content_policy_violation","message":"This account has been disabled after policy review."}}`),
+	)
+
+	require.True(t, handled)
+	require.Equal(t, 1, repo.setErrorCalls)
+	require.Equal(t, StatusError, account.Status)
+	require.False(t, account.Schedulable)
+	require.Contains(t, repo.lastErrorMsg, "account has been disabled")
+}
+
 func TestRateLimitServiceHandleUpstreamErrorNilAccountDoesNotPanic(t *testing.T) {
 	svc := &RateLimitService{}
 
