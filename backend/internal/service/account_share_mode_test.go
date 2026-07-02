@@ -347,6 +347,71 @@ func TestAccountShareModeExchangeRejectsFullProxyBeforeOAuth(t *testing.T) {
 	}
 }
 
+func TestAccountShareModeExchangeTreatsLegacyUserProxyCapacityAsSingle(t *testing.T) {
+	ownerUserID := int64(10)
+	proxyRepo := &accountShareModeProxyRepoStub{
+		proxy: &Proxy{
+			ID:          7,
+			Name:        "legacy-user-proxy",
+			Protocol:    "socks5",
+			Host:        "127.0.0.1",
+			Port:        1080,
+			OwnerUserID: &ownerUserID,
+			Status:      StatusActive,
+			MaxAccounts: 0,
+		},
+		accountCount: 1,
+	}
+	svc := &AccountShareModeService{repo: &accountShareModeRepoStub{}, proxyRepo: proxyRepo}
+
+	_, err := svc.ExchangeOpenAICodeAndCreateListing(context.Background(), ownerUserID, &OpenAIExchangeCodeInput{
+		SessionID: "session",
+		Code:      "code",
+		State:     "state",
+		ProxyID:   accountShareModeInt64Ptr(7),
+	}, CreateAccountShareListingInput{
+		Name:                "OpenAI共享账号",
+		ProxyID:             7,
+		Concurrency:         AccountShareModeDefaultAccountConcurrency,
+		SeatLimit:           AccountShareModeMinSeats,
+		RateMultiplier:      1,
+		AllowedModels:       []string{"gpt-5"},
+		PerUserConcurrency:  AccountShareModeDefaultPerUserConcurrency,
+		HourlyRate:          0.2,
+		Codex5hLimitPercent: AccountShareModeDefaultCodexLimitPercent,
+		Codex7dLimitPercent: AccountShareModeDefaultCodexLimitPercent,
+	})
+	if infraerrors.Reason(err) != "PROXY_ACCOUNT_LIMIT_EXCEEDED" {
+		t.Fatalf("expected proxy capacity error before OAuth exchange, got %v", err)
+	}
+	if proxyRepo.countCalls != 1 {
+		t.Fatalf("expected one proxy account count check, got %d", proxyRepo.countCalls)
+	}
+}
+
+func TestAccountShareModeEnsureProxyAvailableKeepsPlatformProxyUnlimited(t *testing.T) {
+	proxyRepo := &accountShareModeProxyRepoStub{
+		proxy: &Proxy{
+			ID:          7,
+			Name:        "platform-proxy",
+			Protocol:    "socks5",
+			Host:        "127.0.0.1",
+			Port:        1080,
+			Status:      StatusActive,
+			MaxAccounts: 0,
+		},
+		accountCount: 99,
+	}
+	svc := &AccountShareModeService{proxyRepo: proxyRepo}
+
+	if err := svc.ensureProxyAvailableForNewAccount(context.Background(), 10, 7); err != nil {
+		t.Fatalf("expected platform proxy to stay unlimited, got %v", err)
+	}
+	if proxyRepo.countCalls != 0 {
+		t.Fatalf("expected unlimited proxy to skip account count, got %d calls", proxyRepo.countCalls)
+	}
+}
+
 func TestAccountShareModeCreateUserProxyAssignsCurrentOwner(t *testing.T) {
 	proxyRepo := &accountShareModeProxyRepoStub{}
 	svc := &AccountShareModeService{proxyRepo: proxyRepo}

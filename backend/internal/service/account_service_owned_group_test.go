@@ -946,6 +946,73 @@ func TestAccountServiceCreateOwnedRejectsProxyCapacityExceeded(t *testing.T) {
 	require.Empty(t, repo.createdAccounts)
 }
 
+func TestAccountServiceCreateOwnedTreatsLegacyUserProxyCapacityAsSingle(t *testing.T) {
+	ownerID := int64(101)
+	proxyID := int64(7)
+	repo := &ownedAccountDuplicateRepoStub{}
+	svc := &AccountService{
+		accountRepo: repo,
+		proxyRepo: &ownedAccountProxyRepoStub{
+			proxies: map[int64]*Proxy{
+				proxyID: {ID: proxyID, OwnerUserID: &ownerID, Status: StatusActive, MaxAccounts: 0},
+			},
+			accountCounts: map[int64]int64{proxyID: 1},
+		},
+		privateGroupProvisioner: &ownedPrivateGroupProvisionerStub{
+			group: &Group{ID: 99, Platform: PlatformAnthropic, Status: StatusActive, Scope: GroupScopeUserPrivate},
+		},
+	}
+
+	account, err := svc.CreateOwned(context.Background(), ownerID, CreateAccountRequest{
+		Name:        "claude-legacy-user-proxy-full",
+		Platform:    PlatformAnthropic,
+		Type:        AccountTypeOAuth,
+		Credentials: map[string]any{"access_token": "token"},
+		ProxyID:     &proxyID,
+		Concurrency: ownedPersonalDefaultConcurrency,
+		Priority:    1,
+	})
+
+	require.Nil(t, account)
+	require.Error(t, err)
+	require.Equal(t, "PROXY_ACCOUNT_LIMIT_EXCEEDED", infraerrors.Reason(err))
+	require.Empty(t, repo.createdAccounts)
+}
+
+func TestAccountServiceCreateOwnedAllowsUnlimitedPlatformProxy(t *testing.T) {
+	ownerID := int64(101)
+	proxyID := int64(7)
+	repo := &ownedAccountDuplicateRepoStub{}
+	svc := &AccountService{
+		accountRepo: repo,
+		proxyRepo: &ownedAccountProxyRepoStub{
+			proxies: map[int64]*Proxy{
+				proxyID: {ID: proxyID, Status: StatusActive, MaxAccounts: 0},
+			},
+			accountCounts: map[int64]int64{proxyID: 99},
+		},
+		privateGroupProvisioner: &ownedPrivateGroupProvisionerStub{
+			group: &Group{ID: 99, Platform: PlatformAnthropic, Status: StatusActive, Scope: GroupScopeUserPrivate},
+		},
+	}
+
+	account, err := svc.CreateOwned(context.Background(), ownerID, CreateAccountRequest{
+		Name:        "claude-platform-proxy",
+		Platform:    PlatformAnthropic,
+		Type:        AccountTypeOAuth,
+		Credentials: map[string]any{"access_token": "token"},
+		ProxyID:     &proxyID,
+		Concurrency: ownedPersonalDefaultConcurrency,
+		Priority:    1,
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, account)
+	require.Len(t, repo.createdAccounts, 1)
+	require.NotNil(t, repo.createdAccounts[0].ProxyID)
+	require.Equal(t, proxyID, *repo.createdAccounts[0].ProxyID)
+}
+
 func TestAccountServiceCreateOwnedAllowsProxyCapacityAvailable(t *testing.T) {
 	ownerID := int64(101)
 	proxyID := int64(7)

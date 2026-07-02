@@ -567,15 +567,16 @@ func (s *AccountService) ensureOwnedProxyCapacityForCreate(ctx context.Context, 
 	if err != nil {
 		return err
 	}
-	if proxy == nil || proxy.MaxAccounts <= 0 {
+	limit := effectiveProxyMaxAccounts(proxy)
+	if proxy == nil || limit <= 0 {
 		return nil
 	}
 	current, err := s.proxyRepo.CountAccountsByProxyID(ctx, proxy.ID)
 	if err != nil {
 		return fmt.Errorf("count proxy accounts: %w", err)
 	}
-	if current+1 > int64(proxy.MaxAccounts) {
-		return ProxyAccountLimitExceededError(proxy.ID, current, int64(proxy.MaxAccounts), 1)
+	if current+1 > int64(limit) {
+		return ProxyAccountLimitExceededError(proxy.ID, current, int64(limit), 1)
 	}
 	return nil
 }

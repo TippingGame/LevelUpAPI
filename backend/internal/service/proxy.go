@@ -21,10 +21,26 @@ type Proxy struct {
 	// OwnerUserID is nil for platform-managed proxies and set for user-owned proxies.
 	OwnerUserID *int64
 	Status      string
-	// MaxAccounts controls how many accounts may bind to this proxy. 0 means unlimited.
+	// MaxAccounts controls how many accounts may bind to this proxy. 0 means unlimited
+	// for platform-managed proxies; legacy user-owned proxies default to one account.
 	MaxAccounts int
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
+}
+
+const userOwnedProxyDefaultMaxAccounts = 1
+
+func effectiveProxyMaxAccounts(proxy *Proxy) int {
+	if proxy == nil {
+		return 0
+	}
+	if proxy.MaxAccounts > 0 {
+		return proxy.MaxAccounts
+	}
+	if proxy.OwnerUserID != nil {
+		return userOwnedProxyDefaultMaxAccounts
+	}
+	return 0
 }
 
 func (p *Proxy) IsActive() bool {

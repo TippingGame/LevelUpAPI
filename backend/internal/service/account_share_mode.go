@@ -47,7 +47,7 @@ const (
 	AccountShareModeMaxIdleTimeoutMinutes       = 10080
 	AccountShareModeLastRequestTouchInterval    = 30 * time.Second
 	AccountShareModeEditSessionTTL              = 10 * time.Minute
-	accountShareModeUserProxyDefaultMaxAccounts = 1
+	accountShareModeUserProxyDefaultMaxAccounts = userOwnedProxyDefaultMaxAccounts
 	AccountShareModeListingTabUsing             = "using"
 	AccountShareModeListingTabHistory           = "history"
 	AccountShareModeListingTabAll               = "all"
@@ -1920,16 +1920,16 @@ func (s *AccountShareModeService) ensureProxyAvailableForNewAccount(ctx context.
 	if err != nil {
 		return err
 	}
-	if proxy.MaxAccounts <= 0 {
+	limit := effectiveProxyMaxAccounts(proxy)
+	if limit <= 0 {
 		return nil
 	}
 	current, err := s.proxyRepo.CountAccountsByProxyID(ctx, proxy.ID)
 	if err != nil {
 		return fmt.Errorf("count proxy accounts: %w", err)
 	}
-	limit := int64(proxy.MaxAccounts)
-	if current+1 > limit {
-		return ProxyAccountLimitExceededError(proxy.ID, current, limit, 1)
+	if current+1 > int64(limit) {
+		return ProxyAccountLimitExceededError(proxy.ID, current, int64(limit), 1)
 	}
 	return nil
 }
