@@ -144,7 +144,12 @@ func (s *RateLimitService) CheckErrorPolicy(ctx context.Context, account *Accoun
 // HandleUpstreamError 处理上游错误响应，标记账号状态
 // 返回是否应该停止该账号的调度
 func (s *RateLimitService) HandleUpstreamError(ctx context.Context, account *Account, statusCode int, headers http.Header, responseBody []byte) (shouldDisable bool) {
-	if account != nil && account.Platform == PlatformOpenAI && isOpenAIModelCapacityError(statusCode, "", responseBody) {
+	if account == nil {
+		slog.Warn("upstream_error_without_account", "status_code", statusCode)
+		return false
+	}
+
+	if account.Platform == PlatformOpenAI && isOpenAIModelCapacityError(statusCode, "", responseBody) {
 		return s.handleOpenAIModelCapacityError(ctx, account, statusCode, responseBody)
 	}
 
@@ -953,6 +958,25 @@ func permanentAccountKeywordErrorMessage(account *Account, statusCode int, upstr
 		"credit balance",
 		"this organization has been disabled",
 		"organization has been disabled",
+		"organization disabled",
+		"this account has been disabled",
+		"account has been disabled",
+		"account disabled",
+		"this account has been suspended",
+		"account has been suspended",
+		"account suspended",
+		"this account has been deactivated",
+		"account has been deactivated",
+		"account deactivated",
+		"workspace has been deactivated",
+		"billing hard limit has been reached",
+		"billing account is not active",
+		"billing account has been disabled",
+		"api key has been disabled",
+		"api key is disabled",
+		"api key disabled",
+		"api key not valid",
+		"invalid api key",
 		"you exceeded your current quota",
 		"exceeded your current quota",
 		"insufficient quota",

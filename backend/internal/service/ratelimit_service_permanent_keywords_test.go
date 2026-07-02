@@ -62,6 +62,27 @@ func TestRateLimitServiceHandleUpstreamErrorAPIKeyPermanentKeywordsDisable(t *te
 			want:       "You exceeded your current quota",
 		},
 		{
+			name:       "openai account suspended",
+			platform:   PlatformOpenAI,
+			statusCode: http.StatusForbidden,
+			body:       []byte(`{"error":{"message":"Your account has been suspended. Please contact support."}}`),
+			want:       "account has been suspended",
+		},
+		{
+			name:       "openai api key disabled",
+			platform:   PlatformOpenAI,
+			statusCode: http.StatusForbidden,
+			body:       []byte(`{"error":{"message":"This API key has been disabled"}}`),
+			want:       "API key has been disabled",
+		},
+		{
+			name:       "openai billing hard limit",
+			platform:   PlatformOpenAI,
+			statusCode: http.StatusTooManyRequests,
+			body:       []byte(`{"error":{"message":"Billing hard limit has been reached"}}`),
+			want:       "Billing hard limit",
+		},
+		{
 			name:       "anthropic credit balance",
 			platform:   PlatformAnthropic,
 			statusCode: http.StatusBadRequest,
@@ -127,4 +148,19 @@ func TestRateLimitServiceHandleUpstreamErrorOpenAIOAuthPermanentKeywordStillUses
 	require.Equal(t, 1, repo.tempCalls)
 	require.Contains(t, repo.lastTempReason, "Permission denied")
 	require.Contains(t, repo.lastTempReason, "(1/3)")
+}
+
+func TestRateLimitServiceHandleUpstreamErrorNilAccountDoesNotPanic(t *testing.T) {
+	svc := &RateLimitService{}
+
+	require.NotPanics(t, func() {
+		shouldDisable := svc.HandleUpstreamError(
+			context.Background(),
+			nil,
+			http.StatusInternalServerError,
+			http.Header{},
+			[]byte(`{"error":{"message":"upstream failed"}}`),
+		)
+		require.False(t, shouldDisable)
+	})
 }
