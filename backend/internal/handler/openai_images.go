@@ -195,6 +195,9 @@ routeLoop:
 				return
 			}
 			if selection == nil || selection.Account == nil {
+				if routeCursor.switchToNext(apiKey.ID, "account_selection_empty", reqLog, zap.Int64p("group_id", currentAPIKey.GroupID)) {
+					continue routeLoop
+				}
 				h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "api_error", "No available compatible accounts", streamStarted)
 				return
 			}

@@ -391,6 +391,13 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 			return
 		}
 		if selection == nil || selection.Account == nil {
+			if routeCursor.switchToNext(apiKey.ID, "account_selection_empty", reqLog, zap.Int64p("group_id", currentAPIKey.GroupID)) {
+				failedAccountIDs = make(map[int64]struct{})
+				sameAccountRetryCount = make(map[int64]int)
+				switchCount = 0
+				lastFailoverErr = nil
+				continue
+			}
 			h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "api_error", "No available accounts", streamStarted)
 			return
 		}
@@ -855,6 +862,13 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 			}
 		}
 		if selection == nil || selection.Account == nil {
+			if routeCursor.switchToNext(apiKey.ID, "account_selection_empty", reqLog, zap.Int64p("group_id", currentAPIKey.GroupID)) {
+				failedAccountIDs = make(map[int64]struct{})
+				sameAccountRetryCount = make(map[int64]int)
+				switchCount = 0
+				lastFailoverErr = nil
+				continue
+			}
 			h.anthropicStreamingAwareError(c, http.StatusServiceUnavailable, "api_error", "No available accounts", streamStarted)
 			return
 		}

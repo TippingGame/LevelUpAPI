@@ -335,6 +335,15 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 					return
 				}
 			}
+			if selection == nil || selection.Account == nil {
+				reqLog.Warn("gateway.select_account_empty",
+					zap.String("model", reqModel),
+					zap.Int64p("group_id", apiKey.GroupID),
+					zap.String("platform", platform),
+				)
+				h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "api_error", "No available accounts", streamStarted)
+				return
+			}
 			account := selection.Account
 			setOpsSelectedAccount(c, account.ID, account.Platform)
 
@@ -681,6 +690,19 @@ routeLoop:
 					}
 					return
 				}
+			}
+			if selection == nil || selection.Account == nil {
+				reqLog.Warn("gateway.select_account_empty",
+					zap.String("model", reqModel),
+					zap.Int64p("group_id", currentAPIKey.GroupID),
+					zap.String("platform", platform),
+					zap.Bool("fallback_used", fallbackUsed),
+				)
+				if routeBackedRequest && routeCursor.switchToNext(apiKey.ID, "account_selection_empty", reqLog, zap.Int64p("group_id", currentAPIKey.GroupID)) {
+					continue routeLoop
+				}
+				h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "api_error", "No available accounts", streamStarted)
+				return
 			}
 			account := selection.Account
 			setOpsSelectedAccount(c, account.ID, account.Platform)
