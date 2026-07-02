@@ -744,7 +744,7 @@ urlFallbackLoop:
 					break urlFallbackLoop
 				}
 
-				// 其他可重试错误（500/502/504/529，不包括 429 和 503）
+				// 其他可重试错误（500/502/529，不包括 429、503 和重放不安全的网关超时）
 				if shouldRetryAntigravityError(resp.StatusCode) {
 					if attempt < antigravityMaxRetries {
 						upstreamMsg := strings.TrimSpace(extractAntigravityErrorMessage(respBody))
@@ -806,8 +806,11 @@ urlFallbackLoop:
 
 // shouldRetryAntigravityError 判断是否应该重试
 func shouldRetryAntigravityError(statusCode int) bool {
+	if IsUpstreamReplayUnsafeTimeoutStatus(statusCode) {
+		return false
+	}
 	switch statusCode {
-	case 429, 500, 502, 503, 504, 529:
+	case 429, 500, 502, 503, 529:
 		return true
 	default:
 		return false
@@ -2473,6 +2476,9 @@ handleSuccess:
 }
 
 func (s *AntigravityGatewayService) shouldFailoverUpstreamError(statusCode int) bool {
+	if IsUpstreamReplayUnsafeTimeoutStatus(statusCode) {
+		return false
+	}
 	switch statusCode {
 	case 401, 403, 429, 529:
 		return true

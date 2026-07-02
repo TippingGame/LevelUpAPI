@@ -1466,8 +1466,11 @@ func shouldSwitchAPIKeyGroupRoute(failoverErr *service.UpstreamFailoverError) bo
 	if failoverErr == nil {
 		return false
 	}
+	if service.IsUpstreamReplayUnsafeTimeoutStatus(failoverErr.StatusCode) {
+		return false
+	}
 	switch failoverErr.StatusCode {
-	case http.StatusTooManyRequests, http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout, 529:
+	case http.StatusTooManyRequests, http.StatusBadGateway, http.StatusServiceUnavailable, 529:
 		return true
 	default:
 		return failoverErr.StatusCode >= 500

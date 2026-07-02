@@ -1678,8 +1678,11 @@ func (s *GeminiMessagesCompatService) checkErrorPolicyInLoop(
 }
 
 func (s *GeminiMessagesCompatService) shouldRetryGeminiUpstreamError(account *Account, statusCode int) bool {
+	if IsUpstreamReplayUnsafeTimeoutStatus(statusCode) {
+		return false
+	}
 	switch statusCode {
-	case 429, 500, 502, 503, 504, 529:
+	case 429, 500, 502, 503, 529:
 		return true
 	case 403:
 		// GeminiCli OAuth occasionally returns 403 transiently (activation/quota propagation); allow retry.
@@ -1698,6 +1701,9 @@ func (s *GeminiMessagesCompatService) shouldRetryGeminiUpstreamError(account *Ac
 }
 
 func (s *GeminiMessagesCompatService) shouldFailoverGeminiUpstreamError(statusCode int) bool {
+	if IsUpstreamReplayUnsafeTimeoutStatus(statusCode) {
+		return false
+	}
 	switch statusCode {
 	case 401, 403, 429, 529:
 		return true

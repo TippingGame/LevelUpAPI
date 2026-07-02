@@ -2299,6 +2299,9 @@ func (s *OpenAIGatewayService) GetAccessToken(ctx context.Context, account *Acco
 }
 
 func (s *OpenAIGatewayService) shouldFailoverUpstreamError(statusCode int) bool {
+	if IsUpstreamReplayUnsafeTimeoutStatus(statusCode) {
+		return false
+	}
 	switch statusCode {
 	case 401, 402, 403, 429, 529:
 		return true
@@ -2308,6 +2311,9 @@ func (s *OpenAIGatewayService) shouldFailoverUpstreamError(statusCode int) bool 
 }
 
 func (s *OpenAIGatewayService) shouldFailoverOpenAIUpstreamResponse(statusCode int, upstreamMsg string, upstreamBody []byte) bool {
+	if IsUpstreamReplayUnsafeTimeoutStatus(statusCode) {
+		return false
+	}
 	if s.shouldFailoverUpstreamError(statusCode) {
 		return true
 	}
@@ -3489,6 +3495,9 @@ func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIPassthrough(
 }
 
 func shouldFailoverOpenAIPassthroughResponse(statusCode int, upstreamMsg string, upstreamBody []byte) bool {
+	if IsUpstreamReplayUnsafeTimeoutStatus(statusCode) {
+		return false
+	}
 	switch statusCode {
 	case http.StatusTooManyRequests, 529:
 		return true

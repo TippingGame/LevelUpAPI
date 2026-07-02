@@ -4633,6 +4633,9 @@ func (s *GatewayService) shouldRetryUpstreamError(account *Account, statusCode i
 
 // shouldFailoverUpstreamError determines whether an upstream error should trigger account failover.
 func (s *GatewayService) shouldFailoverUpstreamError(statusCode int) bool {
+	if IsUpstreamReplayUnsafeTimeoutStatus(statusCode) {
+		return false
+	}
 	switch statusCode {
 	case 401, 403, 429, 529:
 		return true

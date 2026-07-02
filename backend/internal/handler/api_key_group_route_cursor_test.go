@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"net/http"
 	"testing"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -119,4 +120,14 @@ func TestBuildAPIKeyGroupRouteCandidates_SkipsUnavailableRoutes(t *testing.T) {
 	require.Len(t, candidates, 1)
 	require.Equal(t, int64(2), candidates[0].Route.GroupID)
 	require.Equal(t, group2, candidates[0].APIKey.Group)
+}
+
+func TestShouldSwitchAPIKeyGroupRoute_SkipsReplayUnsafeTimeouts(t *testing.T) {
+	require.False(t, shouldSwitchAPIKeyGroupRoute(&service.UpstreamFailoverError{StatusCode: http.StatusGatewayTimeout}))
+	require.False(t, shouldSwitchAPIKeyGroupRoute(&service.UpstreamFailoverError{StatusCode: 524}))
+
+	require.True(t, shouldSwitchAPIKeyGroupRoute(&service.UpstreamFailoverError{StatusCode: http.StatusBadGateway}))
+	require.True(t, shouldSwitchAPIKeyGroupRoute(&service.UpstreamFailoverError{StatusCode: http.StatusServiceUnavailable}))
+	require.True(t, shouldSwitchAPIKeyGroupRoute(&service.UpstreamFailoverError{StatusCode: http.StatusTooManyRequests}))
+	require.True(t, shouldSwitchAPIKeyGroupRoute(&service.UpstreamFailoverError{StatusCode: 529}))
 }
