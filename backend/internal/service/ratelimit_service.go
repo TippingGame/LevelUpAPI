@@ -187,6 +187,11 @@ func (s *RateLimitService) HandleUpstreamError(ctx context.Context, account *Acc
 		upstreamMsg = truncateForLog([]byte(upstreamMsg), 512)
 	}
 
+	if msg, ok := permanentAccountKeywordErrorMessage(account, statusCode, upstreamMsg, responseBody); ok {
+		s.handleAuthError(ctx, account, msg)
+		return true
+	}
+
 	switch statusCode {
 	case 400:
 		// "organization has been disabled" → 永久禁用
@@ -905,6 +910,71 @@ func buildForbiddenErrorMessage(prefix string, upstreamMsg string, responseBody 
 	}
 
 	return prefix + fallback
+}
+
+func permanentAccountKeywordErrorMessage(account *Account, statusCode int, upstreamMsg string, responseBody []byte) (string, bool) {
+	if account == nil || account.IsPoolMode() || account.IsOAuth() {
+		return "", false
+	}
+	if statusCode >= http.StatusInternalServerError {
+		return "", false
+	}
+
+	parts := make([]string, 0, 8)
+	if upstreamMsg != "" {
+		parts = append(parts, upstreamMsg)
+	}
+	if len(responseBody) > 0 {
+		for _, path := range []string{
+			"error.message",
+			"error.code",
+			"error.type",
+			"detail",
+			"detail.message",
+			"detail.code",
+			"message",
+			"code",
+			"type",
+		} {
+			if value := strings.TrimSpace(gjson.GetBytes(responseBody, path).String()); value != "" {
+				parts = append(parts, value)
+			}
+		}
+		parts = append(parts, string(responseBody))
+	}
+	normalized := strings.ToLower(strings.Join(parts, " "))
+	normalized = strings.Join(strings.Fields(strings.NewReplacer("_", " ", "-", " ").Replace(normalized)), " ")
+	if normalized == "" {
+		return "", false
+	}
+
+	keywords := []string{
+		"your credit balance is too low",
+		"credit balance is too low",
+		"credit balance",
+		"this organization has been disabled",
+		"organization has been disabled",
+		"you exceeded your current quota",
+		"exceeded your current quota",
+		"insufficient quota",
+		"permission denied",
+		"the security token included in the request is invalid",
+		"operation not allowed",
+		"your account is not authorized",
+		"account is not authorized",
+		"identity verification is required",
+		"deactivated workspace",
+	}
+	for _, keyword := range keywords {
+		if strings.Contains(normalized, keyword) {
+			msg := strings.TrimSpace(upstreamMsg)
+			if msg == "" {
+				msg = keyword
+			}
+			return fmt.Sprintf("Permanent account error (%d): %s", statusCode, msg), true
+		}
+	}
+	return "", false
 }
 
 // handle403 处理 403 Forbidden 错误
