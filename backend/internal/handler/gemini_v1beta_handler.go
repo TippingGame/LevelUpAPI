@@ -562,7 +562,7 @@ geminiRouteLoop:
 			if err != nil {
 				var failoverErr *service.UpstreamFailoverError
 				if errors.As(err, &failoverErr) {
-					failoverAction := fs.HandleFailoverError(c.Request.Context(), h.gatewayService, account.ID, account.Platform, failoverErr)
+					failoverAction := fs.HandleFailoverError(c.Request.Context(), h.gatewayService, account.ID, account.Platform, failoverErr, account.GetPoolModeRetryCount())
 					if _, failed := fs.FailedAccountIDs[account.ID]; failed {
 						if h.clearStickySessionIfBoundTo(c.Request.Context(), currentAPIKey.GroupID, routeSessionKey, account.ID, reqLog, "upstream_failover") {
 							currentSessionBoundAccountID = 0

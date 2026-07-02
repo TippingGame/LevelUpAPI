@@ -504,7 +504,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 							h.handleFailoverExhausted(c, failoverErr, service.PlatformGemini, true)
 							return
 						}
-						action := fs.HandleFailoverError(c.Request.Context(), h.gatewayService, account.ID, account.Platform, failoverErr)
+						action := fs.HandleFailoverError(c.Request.Context(), h.gatewayService, account.ID, account.Platform, failoverErr, account.GetPoolModeRetryCount())
 						if _, failed := fs.FailedAccountIDs[account.ID]; failed {
 							if h.clearStickySessionIfBoundTo(c.Request.Context(), currentAPIKey.GroupID, sessionKey, account.ID, reqLog, "upstream_failover") {
 								currentSessionBoundAccountID = 0
@@ -1065,7 +1065,7 @@ routeLoop:
 						h.handleFailoverExhausted(c, failoverErr, account.Platform, true)
 						return
 					}
-					action := fs.HandleFailoverError(c.Request.Context(), h.gatewayService, account.ID, account.Platform, failoverErr)
+					action := fs.HandleFailoverError(c.Request.Context(), h.gatewayService, account.ID, account.Platform, failoverErr, account.GetPoolModeRetryCount())
 					if _, failed := fs.FailedAccountIDs[account.ID]; failed {
 						if h.clearStickySessionIfBoundTo(c.Request.Context(), currentAPIKey.GroupID, sessionKey, account.ID, reqLog, "upstream_failover") {
 							currentSessionBoundAccountID = 0

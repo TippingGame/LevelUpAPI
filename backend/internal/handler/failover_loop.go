@@ -68,8 +68,10 @@ func (s *FailoverState) HandleFailoverError(
 	accountID int64,
 	platform string,
 	failoverErr *service.UpstreamFailoverError,
+	sameAccountRetryLimits ...int,
 ) FailoverAction {
 	s.LastFailoverErr = failoverErr
+	sameAccountRetryLimit := resolveSameAccountRetryLimit(sameAccountRetryLimits...)
 
 	// 缓存计费判断
 	if needForceCacheBilling(s.hasBoundSession, failoverErr) {
@@ -77,13 +79,13 @@ func (s *FailoverState) HandleFailoverError(
 	}
 
 	// 同账号重试：对 RetryableOnSameAccount 的临时性错误，先在同一账号上重试
-	if failoverErr.RetryableOnSameAccount && s.SameAccountRetryCount[accountID] < maxSameAccountRetries {
+	if failoverErr.RetryableOnSameAccount && s.SameAccountRetryCount[accountID] < sameAccountRetryLimit {
 		s.SameAccountRetryCount[accountID]++
 		logger.FromContext(ctx).Warn("gateway.failover_same_account_retry",
 			zap.Int64("account_id", accountID),
 			zap.Int("upstream_status", failoverErr.StatusCode),
 			zap.Int("same_account_retry_count", s.SameAccountRetryCount[accountID]),
-			zap.Int("same_account_retry_max", maxSameAccountRetries),
+			zap.Int("same_account_retry_max", sameAccountRetryLimit),
 		)
 		if !sleepWithContext(ctx, sameAccountRetryDelay) {
 			return FailoverCanceled
@@ -122,6 +124,17 @@ func (s *FailoverState) HandleFailoverError(
 	}
 
 	return FailoverContinue
+}
+
+func resolveSameAccountRetryLimit(limits ...int) int {
+	if len(limits) == 0 {
+		return maxSameAccountRetries
+	}
+	limit := limits[0]
+	if limit < 0 {
+		return 0
+	}
+	return limit
 }
 
 // HandleSelectionExhausted 处理选号失败（所有候选账号都在排除列表中）时的退避重试决策。
