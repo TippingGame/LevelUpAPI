@@ -1477,7 +1477,8 @@ func shouldSwitchAPIKeyGroupRoute(failoverErr *service.UpstreamFailoverError) bo
 		return false
 	}
 	switch failoverErr.StatusCode {
-	case http.StatusTooManyRequests, http.StatusBadGateway, http.StatusServiceUnavailable, 529:
+	case http.StatusUnauthorized, http.StatusPaymentRequired, http.StatusForbidden,
+		http.StatusTooManyRequests, http.StatusBadGateway, http.StatusServiceUnavailable, 529:
 		return true
 	default:
 		return failoverErr.StatusCode >= 500

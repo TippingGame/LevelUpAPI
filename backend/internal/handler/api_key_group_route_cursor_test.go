@@ -149,7 +149,12 @@ func TestRouteSubscriptionSkipDoesNotCooldownRoute(t *testing.T) {
 func TestShouldSwitchAPIKeyGroupRoute_SkipsReplayUnsafeTimeouts(t *testing.T) {
 	require.False(t, shouldSwitchAPIKeyGroupRoute(&service.UpstreamFailoverError{StatusCode: http.StatusGatewayTimeout}))
 	require.False(t, shouldSwitchAPIKeyGroupRoute(&service.UpstreamFailoverError{StatusCode: 524}))
+	require.False(t, shouldSwitchAPIKeyGroupRoute(&service.UpstreamFailoverError{StatusCode: http.StatusBadRequest}))
+	require.False(t, shouldSwitchAPIKeyGroupRoute(&service.UpstreamFailoverError{StatusCode: http.StatusRequestTimeout}))
 
+	require.True(t, shouldSwitchAPIKeyGroupRoute(&service.UpstreamFailoverError{StatusCode: http.StatusUnauthorized}))
+	require.True(t, shouldSwitchAPIKeyGroupRoute(&service.UpstreamFailoverError{StatusCode: http.StatusPaymentRequired}))
+	require.True(t, shouldSwitchAPIKeyGroupRoute(&service.UpstreamFailoverError{StatusCode: http.StatusForbidden}))
 	require.True(t, shouldSwitchAPIKeyGroupRoute(&service.UpstreamFailoverError{StatusCode: http.StatusBadGateway}))
 	require.True(t, shouldSwitchAPIKeyGroupRoute(&service.UpstreamFailoverError{StatusCode: http.StatusServiceUnavailable}))
 	require.True(t, shouldSwitchAPIKeyGroupRoute(&service.UpstreamFailoverError{StatusCode: http.StatusTooManyRequests}))
