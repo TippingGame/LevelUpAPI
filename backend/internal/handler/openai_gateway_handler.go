@@ -1358,25 +1358,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		firstMessage,
 		openAIWSIngressFallbackSessionSeed(subject.UserID, apiKey.ID, apiKey.GroupID),
 	)
-	if previousResponseID != "" && sessionHash != "" {
-		repairedFirstMessage, repairedPreviousResponseID, repaired := h.gatewayService.RepairOpenAIWSPreviousResponseIDForSession(
-			ctx,
-			apiKeyGroupIDValue(apiKey),
-			sessionHash,
-			firstMessage,
-			true,
-		)
-		if repaired {
-			firstMessage = repairedFirstMessage
-			previousResponseID = repairedPreviousResponseID
-			previousResponseIDKind = service.ClassifyOpenAIPreviousResponseIDKind(previousResponseID)
-			reqLog = reqLog.With(
-				zap.String("previous_response_id_kind", previousResponseIDKind),
-				zap.Bool("previous_response_id_repaired", true),
-			)
-			setOpsRequestContext(c, reqModel, true, firstMessage)
-		}
-	}
+	baseFirstMessage := append([]byte(nil), firstMessage...)
 	subscription, _ := middleware2.GetSubscriptionFromContext(c)
 	routeCursor := newAPIKeyGroupRouteCursor(apiKey)
 	var currentAPIKey *service.APIKey
@@ -1393,7 +1375,21 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 			return
 		}
 		currentAPIKey = routeCandidate.APIKey
-		cyberBlockKeyWS = service.CyberSessionBlockKey(currentAPIKey.ID, c, firstMessage)
+		routeFirstMessage, routePreviousResponseID, routePreviousResponseIDKind, routePreviousResponseRepaired := repairOpenAIWSInitialPayloadForRoute(
+			ctx,
+			currentAPIKey,
+			sessionHash,
+			baseFirstMessage,
+			h.gatewayService.RepairOpenAIWSPreviousResponseIDForSession,
+		)
+		if routePreviousResponseRepaired {
+			reqLog.Info("openai.websocket_previous_response_id_repaired_for_route",
+				zap.Int64p("group_id", currentAPIKey.GroupID),
+				zap.String("previous_response_id_kind", routePreviousResponseIDKind),
+				zap.String("previous_response_id", routePreviousResponseID),
+			)
+		}
+		cyberBlockKeyWS = service.CyberSessionBlockKey(currentAPIKey.ID, c, routeFirstMessage)
 		if cyberBlockKeyWS != "" && h.gatewayService.IsCyberSessionBlocked(ctx, cyberBlockKeyWS) {
 			writeCyberSessionBlockedWSError(ctx, wsConn)
 			closeOpenAIClientWS(wsConn, coderws.StatusPolicyViolation, "session blocked by cyber-security policy")
@@ -1425,11 +1421,11 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		var selectErr error
 		selectionModel := resolveOpenAIAccountSelectionModel(reqModel, channelMappingWS)
 		selectionCtx := openAIAccountShareModeRequestContext(c, currentAPIKey)
-		if decision := h.checkCyberPreflightWithContext(selectionCtx, c, reqLog, currentAPIKey, subject, service.ContentModerationProtocolOpenAIResponses, reqModel, firstMessage); decision != nil && decision.Blocked {
+		if decision := h.checkCyberPreflightWithContext(selectionCtx, c, reqLog, currentAPIKey, subject, service.ContentModerationProtocolOpenAIResponses, reqModel, routeFirstMessage); decision != nil && decision.Blocked {
 			closeOpenAIClientWS(wsConn, coderws.StatusPolicyViolation, decision.Message)
 			return
 		}
-		if decision := h.checkContentModerationWithContext(selectionCtx, c, reqLog, currentAPIKey, subject, service.ContentModerationProtocolOpenAIResponses, reqModel, firstMessage); decision != nil && decision.Blocked {
+		if decision := h.checkContentModerationWithContext(selectionCtx, c, reqLog, currentAPIKey, subject, service.ContentModerationProtocolOpenAIResponses, reqModel, routeFirstMessage); decision != nil && decision.Blocked {
 			closeOpenAIClientWS(wsConn, coderws.StatusPolicyViolation, decision.Message)
 			return
 		}
@@ -1437,17 +1433,27 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 			selectionCtx,
 			c,
 			currentAPIKey.GroupID,
-			previousResponseID,
+			routePreviousResponseID,
 			sessionHash,
 			reqModel,
 			selectionModel,
 			nil,
 			service.OpenAIUpstreamTransportResponsesWebsocketV2,
 			false,
-			firstMessage,
+			routeFirstMessage,
 		)
 		if selectErr == nil && selection != nil && selection.Account != nil {
 			selectedAccountShareCtx = selectionCtx
+			firstMessage = routeFirstMessage
+			previousResponseID = routePreviousResponseID
+			previousResponseIDKind = routePreviousResponseIDKind
+			if routePreviousResponseRepaired {
+				reqLog = reqLog.With(
+					zap.String("previous_response_id_kind", previousResponseIDKind),
+					zap.Bool("previous_response_id_repaired", true),
+				)
+				setOpsRequestContext(c, reqModel, true, firstMessage)
+			}
 			break
 		}
 		reqLog.Warn("openai.websocket_account_select_failed",
@@ -1466,7 +1472,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 			closeOpenAIClientWS(wsConn, coderws.StatusTryAgainLater, "共享账号单用户并发已达上限")
 			return
 		}
-		if !routeCursor.switchToNext(apiKey.ID, "account_select_failed", reqLog, zap.Error(selectErr)) {
+		if !routeCursor.switchToNext(apiKey.ID, "account_select_failed", reqLog, zap.Error(selectErr), zap.Int64p("group_id", currentAPIKey.GroupID)) {
 			closeOpenAIClientWS(wsConn, coderws.StatusTryAgainLater, "no available account")
 			return
 		}
@@ -1988,6 +1994,37 @@ func ensureOpenAIPoolModeSessionHash(sessionHash string, account *service.Accoun
 	}
 	// 为当前请求生成一次性粘性会话键，确保同账号重试不会重新负载均衡到其他账号。
 	return "openai-pool-retry-" + uuid.NewString()
+}
+
+type openAIWSPreviousResponseRepairFunc func(context.Context, int64, string, []byte, bool) ([]byte, string, bool)
+
+func repairOpenAIWSInitialPayloadForRoute(
+	ctx context.Context,
+	apiKey *service.APIKey,
+	sessionHash string,
+	payload []byte,
+	repair openAIWSPreviousResponseRepairFunc,
+) ([]byte, string, string, bool) {
+	previousResponseID := strings.TrimSpace(gjson.GetBytes(payload, "previous_response_id").String())
+	previousResponseIDKind := service.ClassifyOpenAIPreviousResponseIDKind(previousResponseID)
+	if previousResponseID == "" || strings.TrimSpace(sessionHash) == "" || repair == nil {
+		return payload, previousResponseID, previousResponseIDKind, false
+	}
+	repairedPayload, repairedPreviousResponseID, repaired := repair(
+		ctx,
+		apiKeyGroupIDValue(apiKey),
+		sessionHash,
+		payload,
+		true,
+	)
+	repairedPreviousResponseID = strings.TrimSpace(repairedPreviousResponseID)
+	if !repaired {
+		return payload, previousResponseID, previousResponseIDKind, false
+	}
+	return repairedPayload,
+		repairedPreviousResponseID,
+		service.ClassifyOpenAIPreviousResponseIDKind(repairedPreviousResponseID),
+		true
 }
 
 func openAIWSIngressFallbackSessionSeed(userID, apiKeyID int64, groupID *int64) string {

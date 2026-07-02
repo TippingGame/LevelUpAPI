@@ -705,6 +705,42 @@ func TestOpenAIResponsesWebSocket_PreviousResponseIDKindLoggedBeforeAcquireFailu
 	require.Contains(t, strings.ToLower(closeErr.Reason), "failed to acquire user concurrency slot")
 }
 
+func TestRepairOpenAIWSInitialPayloadForRouteUsesCurrentRouteGroup(t *testing.T) {
+	baseGroupID := int64(10)
+	routeGroupID := int64(20)
+	apiKey := &service.APIKey{
+		GroupID: &routeGroupID,
+		Group:   &service.Group{ID: routeGroupID, Status: service.StatusActive, Platform: service.PlatformOpenAI},
+	}
+	payload := []byte(`{"type":"response.create","model":"gpt-5.1","previous_response_id":"resp_old","input":"next"}`)
+
+	var calledGroupID int64
+	repairedPayload, repairedPreviousResponseID, repairedKind, repaired := repairOpenAIWSInitialPayloadForRoute(
+		context.Background(),
+		apiKey,
+		"session_hash",
+		payload,
+		func(ctx context.Context, groupID int64, sessionHash string, gotPayload []byte, allowPreviousOwnerSession bool) ([]byte, string, bool) {
+			calledGroupID = groupID
+			require.NotEqual(t, baseGroupID, groupID)
+			require.Equal(t, routeGroupID, groupID)
+			require.Equal(t, "session_hash", sessionHash)
+			require.True(t, allowPreviousOwnerSession)
+			require.Equal(t, "resp_old", gjson.GetBytes(gotPayload, "previous_response_id").String())
+			updated, err := sjson.SetBytes(gotPayload, "previous_response_id", "resp_route_latest")
+			require.NoError(t, err)
+			return updated, "resp_route_latest", true
+		},
+	)
+
+	require.True(t, repaired)
+	require.Equal(t, routeGroupID, calledGroupID)
+	require.Equal(t, "resp_route_latest", repairedPreviousResponseID)
+	require.Equal(t, service.OpenAIPreviousResponseIDKindResponseID, repairedKind)
+	require.Equal(t, "resp_route_latest", gjson.GetBytes(repairedPayload, "previous_response_id").String())
+	require.Equal(t, "resp_old", gjson.GetBytes(payload, "previous_response_id").String(), "原始首包必须保持不变，供切换下一个 route 重新修复")
+}
+
 func TestSetOpenAIClientTransportHTTP(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
