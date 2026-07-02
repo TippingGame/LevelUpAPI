@@ -270,24 +270,21 @@ routeLoop:
 			var failoverErr *service.UpstreamFailoverError
 			if errors.As(err, &failoverErr) {
 				h.gatewayService.ReportOpenAIAccountScheduleResult(account.ID, false, nil)
-				// Pool mode: retry on the same account
-				if failoverErr.RetryableOnSameAccount {
-					retryLimit := account.GetPoolModeRetryCount()
-					if sameAccountRetryCount[account.ID] < retryLimit {
-						sameAccountRetryCount[account.ID]++
-						reqLog.Warn("openai_chat_completions.pool_mode_same_account_retry",
-							zap.Int64("account_id", account.ID),
-							zap.Int("upstream_status", failoverErr.StatusCode),
-							zap.Int("retry_limit", retryLimit),
-							zap.Int("retry_count", sameAccountRetryCount[account.ID]),
-						)
-						select {
-						case <-c.Request.Context().Done():
-							return
-						case <-time.After(sameAccountRetryDelay):
-						}
-						continue
-					}
+				switch handleOpenAISameAccountRetry(
+					c.Request.Context(),
+					h.gatewayService,
+					account.ID,
+					account.GetPoolModeRetryCount(),
+					failoverErr,
+					sameAccountRetryCount,
+					sameAccountRetryDelay,
+					reqLog,
+					"openai_chat_completions.pool_mode_same_account_retry",
+				) {
+				case openAISameAccountRetryContinue:
+					continue
+				case openAISameAccountRetryCanceled:
+					return
 				}
 				h.gatewayService.RecordOpenAIAccountSwitch()
 				failedAccountIDs[account.ID] = struct{}{}
