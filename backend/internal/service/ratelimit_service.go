@@ -128,12 +128,7 @@ func (s *RateLimitService) CheckErrorPolicy(ctx context.Context, account *Accoun
 	if s == nil || account == nil {
 		return ErrorPolicyNone
 	}
-	if msg, ok := permanentAccountKeywordErrorMessageFromBody(account, statusCode, responseBody); ok {
-		if s.accountRepo != nil {
-			s.handleAuthError(ctx, account, msg)
-		} else {
-			slog.Warn("permanent_account_error_without_repo", "account_id", account.ID, "status_code", statusCode)
-		}
+	if s.HandlePermanentAccountError(ctx, account, statusCode, responseBody) {
 		return ErrorPolicyMatched
 	}
 	if account.IsCustomErrorCodesEnabled() {
@@ -150,6 +145,27 @@ func (s *RateLimitService) CheckErrorPolicy(ctx context.Context, account *Accoun
 		return ErrorPolicyTempUnscheduled
 	}
 	return ErrorPolicyNone
+}
+
+// HandlePermanentAccountError marks non-pool API key accounts as errored when
+// upstream returns an unambiguous permanent account/key/billing failure. It is
+// intentionally narrower than HandleUpstreamError so early-return paths such as
+// error passthrough can still protect accounts without changing ordinary
+// passthrough or retry behavior.
+func (s *RateLimitService) HandlePermanentAccountError(ctx context.Context, account *Account, statusCode int, responseBody []byte) bool {
+	if s == nil || account == nil {
+		return false
+	}
+	msg, ok := permanentAccountKeywordErrorMessageFromBody(account, statusCode, responseBody)
+	if !ok {
+		return false
+	}
+	if s.accountRepo != nil {
+		s.handleAuthError(ctx, account, msg)
+	} else {
+		slog.Warn("permanent_account_error_without_repo", "account_id", account.ID, "status_code", statusCode)
+	}
+	return true
 }
 
 // HandleUpstreamError 处理上游错误响应，标记账号状态

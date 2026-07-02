@@ -3645,6 +3645,9 @@ func (s *AntigravityGatewayService) writeMappedClaudeError(c *gin.Context, accou
 		c, account.Platform, upstreamStatus, body,
 		0, "", "",
 	); matched {
+		if s.rateLimitService != nil {
+			s.rateLimitService.HandlePermanentAccountError(context.Background(), account, upstreamStatus, body)
+		}
 		c.JSON(ptStatus, gin.H{
 			"type":  "error",
 			"error": gin.H{"type": ptErrType, "message": ptErrMsg},

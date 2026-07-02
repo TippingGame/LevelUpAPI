@@ -8573,6 +8573,9 @@ func (s *GatewayService) handleRetryExhaustedError(ctx context.Context, resp *ht
 		"upstream_error",
 		"Upstream request failed after retries",
 	); matched {
+		if s.rateLimitService != nil {
+			s.rateLimitService.HandlePermanentAccountError(ctx, account, resp.StatusCode, respBody)
+		}
 		c.JSON(status, gin.H{
 			"type": "error",
 			"error": gin.H{

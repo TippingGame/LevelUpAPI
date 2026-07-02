@@ -1774,6 +1774,9 @@ func (s *GeminiMessagesCompatService) writeGeminiMappedError(c *gin.Context, acc
 		"upstream_error",
 		"Upstream request failed",
 	); matched {
+		if s.rateLimitService != nil {
+			s.rateLimitService.HandlePermanentAccountError(context.Background(), account, upstreamStatus, body)
+		}
 		c.JSON(status, gin.H{
 			"type":  "error",
 			"error": gin.H{"type": errType, "message": errMsg},

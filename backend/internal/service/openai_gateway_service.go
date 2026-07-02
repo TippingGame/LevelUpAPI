@@ -4398,6 +4398,9 @@ func (s *OpenAIGatewayService) handleErrorResponse(
 		"upstream_error",
 		"Upstream request failed",
 	); matched {
+		if s.rateLimitService != nil {
+			s.rateLimitService.HandlePermanentAccountError(ctx, account, resp.StatusCode, body)
+		}
 		c.JSON(status, gin.H{
 			"error": gin.H{
 				"type":    errType,
@@ -4415,6 +4418,9 @@ func (s *OpenAIGatewayService) handleErrorResponse(
 
 	// Check custom error codes
 	if !account.ShouldHandleErrorCode(resp.StatusCode) {
+		if s.rateLimitService != nil {
+			s.rateLimitService.HandlePermanentAccountError(ctx, account, resp.StatusCode, body)
+		}
 		appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
 			Platform:           account.Platform,
 			AccountID:          account.ID,
@@ -4555,6 +4561,9 @@ func (s *OpenAIGatewayService) handleCompatErrorResponse(
 		c, account.Platform, resp.StatusCode, body,
 		http.StatusBadGateway, "api_error", "Upstream request failed",
 	); matched {
+		if s.rateLimitService != nil {
+			s.rateLimitService.HandlePermanentAccountError(context.Background(), account, resp.StatusCode, body)
+		}
 		writeError(c, status, errType, errMsg)
 		if upstreamMsg == "" {
 			upstreamMsg = errMsg
@@ -4568,6 +4577,9 @@ func (s *OpenAIGatewayService) handleCompatErrorResponse(
 	// Check custom error codes 鈥?if the account does not handle this status,
 	// return a generic error without exposing upstream details.
 	if !account.ShouldHandleErrorCode(resp.StatusCode) {
+		if s.rateLimitService != nil {
+			s.rateLimitService.HandlePermanentAccountError(context.Background(), account, resp.StatusCode, body)
+		}
 		appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
 			Platform:           account.Platform,
 			AccountID:          account.ID,

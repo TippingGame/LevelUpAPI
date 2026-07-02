@@ -169,6 +169,62 @@ func TestOpenAIHandleErrorResponse_AppliesRuleFor422(t *testing.T) {
 	assert.Equal(t, "OpenAI上游失败", errField["message"])
 }
 
+func TestOpenAIHandleErrorResponse_PassthroughPermanentFailureSetsAccountError(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+
+	ruleSvc := &ErrorPassthroughService{}
+	ruleSvc.setLocalCache([]*model.ErrorPassthroughRule{newNonFailoverPassthroughRule(http.StatusForbidden, "api key has been disabled", http.StatusTeapot, "OpenAI key disabled")})
+	BindErrorPassthroughService(c, ruleSvc)
+
+	repo := &permanentKeywordAccountRepoStub{}
+	svc := &OpenAIGatewayService{rateLimitService: &RateLimitService{accountRepo: repo}}
+	respBody := []byte(`{"error":{"message":"This API key has been disabled"}}`)
+	resp := &http.Response{
+		StatusCode: http.StatusForbidden,
+		Body:       io.NopCloser(bytes.NewReader(respBody)),
+		Header:     http.Header{},
+	}
+	account := &Account{ID: 21, Platform: PlatformOpenAI, Type: AccountTypeAPIKey}
+
+	_, err := svc.handleErrorResponse(context.Background(), resp, c, account, nil, "")
+	require.Error(t, err)
+	assert.Equal(t, http.StatusTeapot, rec.Code)
+	require.Equal(t, 1, repo.setErrorCalls)
+	require.Contains(t, repo.lastErrorMsg, "API key has been disabled")
+}
+
+func TestOpenAIHandleErrorResponse_CustomFilterPermanentFailureSetsAccountError(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+
+	repo := &permanentKeywordAccountRepoStub{}
+	svc := &OpenAIGatewayService{rateLimitService: &RateLimitService{accountRepo: repo}}
+	respBody := []byte(`{"error":{"message":"This API key has been disabled"}}`)
+	resp := &http.Response{
+		StatusCode: http.StatusForbidden,
+		Body:       io.NopCloser(bytes.NewReader(respBody)),
+		Header:     http.Header{},
+	}
+	account := &Account{
+		ID:       22,
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeAPIKey,
+		Credentials: map[string]any{
+			"custom_error_codes_enabled": true,
+			"custom_error_codes":         []any{float64(http.StatusTooManyRequests)},
+		},
+	}
+
+	_, err := svc.handleErrorResponse(context.Background(), resp, c, account, nil, "")
+	require.Error(t, err)
+	assert.Equal(t, http.StatusInternalServerError, rec.Code)
+	require.Equal(t, 1, repo.setErrorCalls)
+	require.Contains(t, repo.lastErrorMsg, "API key has been disabled")
+}
+
 func TestGeminiWriteGeminiMappedError_AppliesRuleFor422(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
@@ -192,6 +248,48 @@ func TestGeminiWriteGeminiMappedError_AppliesRuleFor422(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, "upstream_error", errField["type"])
 	assert.Equal(t, "Gemini上游失败", errField["message"])
+}
+
+func TestGeminiWriteGeminiMappedError_PassthroughPermanentFailureSetsAccountError(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+
+	ruleSvc := &ErrorPassthroughService{}
+	ruleSvc.setLocalCache([]*model.ErrorPassthroughRule{newNonFailoverPassthroughRule(http.StatusForbidden, "api key has been disabled", http.StatusTeapot, "Gemini key disabled")})
+	BindErrorPassthroughService(c, ruleSvc)
+
+	repo := &permanentKeywordAccountRepoStub{}
+	svc := &GeminiMessagesCompatService{rateLimitService: &RateLimitService{accountRepo: repo}}
+	respBody := []byte(`{"error":{"message":"This API key has been disabled"}}`)
+	account := &Account{ID: 23, Platform: PlatformGemini, Type: AccountTypeAPIKey}
+
+	err := svc.writeGeminiMappedError(c, account, http.StatusForbidden, "req-permanent", respBody)
+	require.Error(t, err)
+	assert.Equal(t, http.StatusTeapot, rec.Code)
+	require.Equal(t, 1, repo.setErrorCalls)
+	require.Contains(t, repo.lastErrorMsg, "API key has been disabled")
+}
+
+func TestAntigravityWriteMappedClaudeError_PassthroughPermanentFailureSetsAccountError(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+
+	ruleSvc := &ErrorPassthroughService{}
+	ruleSvc.setLocalCache([]*model.ErrorPassthroughRule{newNonFailoverPassthroughRule(http.StatusForbidden, "api key has been disabled", http.StatusTeapot, "Antigravity key disabled")})
+	BindErrorPassthroughService(c, ruleSvc)
+
+	repo := &permanentKeywordAccountRepoStub{}
+	svc := &AntigravityGatewayService{rateLimitService: &RateLimitService{accountRepo: repo}}
+	respBody := []byte(`{"error":{"message":"This API key has been disabled"}}`)
+	account := &Account{ID: 24, Platform: PlatformAntigravity, Type: AccountTypeAPIKey}
+
+	err := svc.writeMappedClaudeError(c, account, http.StatusForbidden, "req-permanent", respBody)
+	require.Error(t, err)
+	assert.Equal(t, http.StatusTeapot, rec.Code)
+	require.Equal(t, 1, repo.setErrorCalls)
+	require.Contains(t, repo.lastErrorMsg, "API key has been disabled")
 }
 
 func TestApplyErrorPassthroughRule_SkipMonitoringSetsContextKey(t *testing.T) {
