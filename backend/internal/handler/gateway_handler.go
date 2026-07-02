@@ -39,6 +39,7 @@ var gatewayCompatibilityMetricsLogCounter atomic.Uint64
 var apiKeyGroupRouteBreaker = newAPIKeyGroupRouteCircuitBreaker()
 
 const maxAPIKeyGroupRouteCyclesPerRequest = 2
+const maxAPIKeyGroupRouteBreakerStates = 4096
 
 // GatewayHandler handles API gateway requests
 type GatewayHandler struct {
@@ -1237,11 +1238,14 @@ func (b *apiKeyGroupRouteCircuitBreaker) recordFailure(apiKeyID, groupID int64, 
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	now := time.Now()
+	b.pruneExpiredLocked(now)
+	b.evictOldestLocked(maxAPIKeyGroupRouteBreakerStates - 1)
 	key := apiKeyGroupRouteBreakerKey(apiKeyID, groupID)
 	state := b.states[key]
 	state.failures++
 	multiplier := 1 << min(state.failures-1, 4)
-	state.cooldownUntil = time.Now().Add(time.Duration(cooldownSeconds*multiplier) * time.Second)
+	state.cooldownUntil = now.Add(time.Duration(cooldownSeconds*multiplier) * time.Second)
 	b.states[key] = state
 }
 
@@ -1252,6 +1256,31 @@ func (b *apiKeyGroupRouteCircuitBreaker) recordSuccess(apiKeyID, groupID int64) 
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	delete(b.states, apiKeyGroupRouteBreakerKey(apiKeyID, groupID))
+}
+
+func (b *apiKeyGroupRouteCircuitBreaker) pruneExpiredLocked(now time.Time) {
+	for key, state := range b.states {
+		if state.cooldownUntil.IsZero() || !now.Before(state.cooldownUntil) {
+			delete(b.states, key)
+		}
+	}
+}
+
+func (b *apiKeyGroupRouteCircuitBreaker) evictOldestLocked(maxStates int) {
+	for len(b.states) > maxStates {
+		oldestKey := ""
+		var oldest time.Time
+		for key, state := range b.states {
+			if oldestKey == "" || state.cooldownUntil.Before(oldest) {
+				oldestKey = key
+				oldest = state.cooldownUntil
+			}
+		}
+		if oldestKey == "" {
+			return
+		}
+		delete(b.states, oldestKey)
+	}
 }
 
 func newAPIKeyGroupRouteCursor(apiKey *service.APIKey) *apiKeyGroupRouteCursor {

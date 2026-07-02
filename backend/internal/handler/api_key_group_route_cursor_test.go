@@ -100,6 +100,39 @@ func TestBuildAPIKeyGroupRouteCandidates_FallsBackWhenAllRoutesCoolingDown(t *te
 	require.Equal(t, int64(2), candidates[1].Route.GroupID)
 }
 
+func TestAPIKeyGroupRouteBreaker_RecordFailurePrunesExpiredStates(t *testing.T) {
+	breaker := newAPIKeyGroupRouteCircuitBreaker()
+	breaker.recordFailure(10, 1, 30)
+	expiredKey := apiKeyGroupRouteBreakerKey(10, 1)
+	breaker.mu.Lock()
+	state := breaker.states[expiredKey]
+	state.cooldownUntil = time.Now().Add(-time.Second)
+	breaker.states[expiredKey] = state
+	breaker.mu.Unlock()
+
+	breaker.recordFailure(10, 2, 30)
+
+	breaker.mu.Lock()
+	defer breaker.mu.Unlock()
+	_, hasExpired := breaker.states[expiredKey]
+	_, hasFresh := breaker.states[apiKeyGroupRouteBreakerKey(10, 2)]
+	require.False(t, hasExpired)
+	require.True(t, hasFresh)
+}
+
+func TestAPIKeyGroupRouteBreaker_RecordFailureCapsStateCount(t *testing.T) {
+	breaker := newAPIKeyGroupRouteCircuitBreaker()
+
+	for i := int64(1); i <= int64(maxAPIKeyGroupRouteBreakerStates+8); i++ {
+		breaker.recordFailure(10, i, 30)
+	}
+
+	breaker.mu.Lock()
+	defer breaker.mu.Unlock()
+	require.LessOrEqual(t, len(breaker.states), maxAPIKeyGroupRouteBreakerStates)
+	require.Contains(t, breaker.states, apiKeyGroupRouteBreakerKey(10, int64(maxAPIKeyGroupRouteBreakerStates+8)))
+}
+
 func TestBuildAPIKeyGroupRouteCandidates_SkipsUnavailableRoutes(t *testing.T) {
 	resetAPIKeyGroupRouteBreakerForTest(t)
 	group1 := &service.Group{ID: 1, Status: service.StatusDisabled, Platform: service.PlatformAnthropic, Hydrated: true}
