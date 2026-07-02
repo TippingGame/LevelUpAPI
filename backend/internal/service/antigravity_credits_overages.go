@@ -63,11 +63,13 @@ func (s *AntigravityGatewayService) setCreditsExhausted(ctx context.Context, acc
 		return
 	}
 	resetAt := time.Now().Add(creditsExhaustedDuration)
-	if err := s.accountRepo.SetModelRateLimit(ctx, account.ID, creditsExhaustedKey, resetAt); err != nil {
+	writeCtx, cancel := retryableErrorStateContext(ctx)
+	defer cancel()
+	if err := s.accountRepo.SetModelRateLimit(writeCtx, account.ID, creditsExhaustedKey, resetAt); err != nil {
 		logger.LegacyPrintf("service.antigravity_gateway", "set credits exhausted failed: account=%d err=%v", account.ID, err)
 		return
 	}
-	s.updateAccountModelRateLimitInCache(ctx, account, creditsExhaustedKey, resetAt)
+	s.updateAccountModelRateLimitInCache(writeCtx, account, creditsExhaustedKey, resetAt)
 	logger.LegacyPrintf("service.antigravity_gateway", "credits_exhausted_marked account=%d reset_at=%s",
 		account.ID, resetAt.UTC().Format(time.RFC3339))
 }
@@ -86,7 +88,9 @@ func (s *AntigravityGatewayService) clearCreditsExhausted(ctx context.Context, a
 	}
 	delete(rawLimits, creditsExhaustedKey)
 	account.Extra[modelRateLimitsKey] = rawLimits
-	if err := s.accountRepo.UpdateExtra(ctx, account.ID, map[string]any{
+	writeCtx, cancel := retryableErrorStateContext(ctx)
+	defer cancel()
+	if err := s.accountRepo.UpdateExtra(writeCtx, account.ID, map[string]any{
 		modelRateLimitsKey: rawLimits,
 	}); err != nil {
 		logger.LegacyPrintf("service.antigravity_gateway", "clear credits exhausted failed: account=%d err=%v", account.ID, err)

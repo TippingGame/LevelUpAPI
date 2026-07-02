@@ -69,17 +69,20 @@ func (s *stubAntigravityUpstream) DoWithTLS(req *http.Request, proxyURL string, 
 type rateLimitCall struct {
 	accountID int64
 	resetAt   time.Time
+	ctxErr    error
 }
 
 type modelRateLimitCall struct {
 	accountID int64
 	modelKey  string // 存储的 key（应该是官方模型 ID，如 "claude-sonnet-4-5"）
 	resetAt   time.Time
+	ctxErr    error
 }
 
 type extraUpdateCall struct {
 	accountID int64
 	updates   map[string]any
+	ctxErr    error
 }
 
 type stubAntigravityAccountRepo struct {
@@ -90,18 +93,25 @@ type stubAntigravityAccountRepo struct {
 }
 
 func (s *stubAntigravityAccountRepo) SetRateLimited(ctx context.Context, id int64, resetAt time.Time) error {
-	s.rateCalls = append(s.rateCalls, rateLimitCall{accountID: id, resetAt: resetAt})
+	s.rateCalls = append(s.rateCalls, rateLimitCall{accountID: id, resetAt: resetAt, ctxErr: contextErr(ctx)})
 	return nil
 }
 
 func (s *stubAntigravityAccountRepo) SetModelRateLimit(ctx context.Context, id int64, modelKey string, resetAt time.Time) error {
-	s.modelRateLimitCalls = append(s.modelRateLimitCalls, modelRateLimitCall{accountID: id, modelKey: modelKey, resetAt: resetAt})
+	s.modelRateLimitCalls = append(s.modelRateLimitCalls, modelRateLimitCall{accountID: id, modelKey: modelKey, resetAt: resetAt, ctxErr: contextErr(ctx)})
 	return nil
 }
 
 func (s *stubAntigravityAccountRepo) UpdateExtra(ctx context.Context, id int64, updates map[string]any) error {
-	s.extraUpdateCalls = append(s.extraUpdateCalls, extraUpdateCall{accountID: id, updates: updates})
+	s.extraUpdateCalls = append(s.extraUpdateCalls, extraUpdateCall{accountID: id, updates: updates, ctxErr: contextErr(ctx)})
 	return nil
+}
+
+func contextErr(ctx context.Context) error {
+	if ctx == nil {
+		return nil
+	}
+	return ctx.Err()
 }
 
 func TestAntigravityRetryLoop_NoURLFallback_UsesConfiguredBaseURL(t *testing.T) {
@@ -819,6 +829,66 @@ func TestSetModelRateLimitByModelName_NotConvertToScope(t *testing.T) {
 	// 关键断言：存储的应该是 "claude-sonnet-4-5"，而不是 "claude_sonnet"
 	require.Equal(t, "claude-sonnet-4-5", call.modelKey, "should NOT convert to scope like claude_sonnet")
 	require.NotEqual(t, "claude_sonnet", call.modelKey, "should NOT be scope")
+}
+
+func TestSetModelRateLimitByModelName_SurvivesCanceledRequestContext(t *testing.T) {
+	repo := &stubAntigravityAccountRepo{}
+	resetAt := time.Now().Add(30 * time.Second)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	success := setModelRateLimitByModelName(
+		ctx,
+		repo,
+		789,
+		"claude-sonnet-4-5",
+		"[test]",
+		429,
+		resetAt,
+		false,
+	)
+
+	require.True(t, success)
+	require.Len(t, repo.modelRateLimitCalls, 1)
+	require.NoError(t, repo.modelRateLimitCalls[0].ctxErr)
+}
+
+func TestHandleUpstreamError_429_ModelRateLimit_SurvivesCanceledRequestContext(t *testing.T) {
+	repo := &stubAntigravityAccountRepo{}
+	svc := &AntigravityGatewayService{accountRepo: repo}
+	account := &Account{ID: 91, Name: "acc-91", Platform: PlatformAntigravity}
+	body := []byte(`{
+		"error": {
+			"status": "RESOURCE_EXHAUSTED",
+			"details": [
+				{"@type": "type.googleapis.com/google.rpc.ErrorInfo", "metadata": {"model": "claude-sonnet-4-5"}, "reason": "RATE_LIMIT_EXCEEDED"},
+				{"@type": "type.googleapis.com/google.rpc.RetryInfo", "retryDelay": "15s"}
+			]
+		}
+	}`)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	result := svc.handleUpstreamError(ctx, "[test]", account, http.StatusTooManyRequests, http.Header{}, body, "claude-sonnet-4-5", 0, "", false)
+
+	require.NotNil(t, result)
+	require.True(t, result.Handled)
+	require.Len(t, repo.modelRateLimitCalls, 1)
+	require.NoError(t, repo.modelRateLimitCalls[0].ctxErr)
+}
+
+func TestHandleUpstreamError_429_AccountFallback_SurvivesCanceledRequestContext(t *testing.T) {
+	repo := &stubAntigravityAccountRepo{}
+	svc := &AntigravityGatewayService{accountRepo: repo}
+	account := &Account{ID: 92, Name: "acc-92", Platform: PlatformAntigravity}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	result := svc.handleUpstreamError(ctx, "[test]", account, http.StatusTooManyRequests, http.Header{}, []byte(`{"error":{"message":"rate limited"}}`), "", 0, "", false)
+
+	require.Nil(t, result)
+	require.Len(t, repo.rateCalls, 1)
+	require.NoError(t, repo.rateCalls[0].ctxErr)
 }
 
 func TestAntigravityRetryLoop_PreCheck_SwitchesWhenRateLimited(t *testing.T) {

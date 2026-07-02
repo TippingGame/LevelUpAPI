@@ -542,3 +542,16 @@ func TestClearCreditsExhausted(t *testing.T) {
 		require.True(t, exists, "普通模型限流应保留")
 	})
 }
+
+func TestSetCreditsExhausted_SurvivesCanceledRequestContext(t *testing.T) {
+	repo := &stubAntigravityAccountRepo{}
+	svc := &AntigravityGatewayService{accountRepo: repo}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	svc.setCreditsExhausted(ctx, &Account{ID: 93, Name: "acc-93", Platform: PlatformAntigravity})
+
+	require.Len(t, repo.modelRateLimitCalls, 1)
+	require.Equal(t, creditsExhaustedKey, repo.modelRateLimitCalls[0].modelKey)
+	require.NoError(t, repo.modelRateLimitCalls[0].ctxErr)
+}
