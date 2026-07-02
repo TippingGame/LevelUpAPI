@@ -196,7 +196,7 @@ func (s *UserMessageQueueService) EnforceDelay(ctx context.Context, accountID in
 // ratio < 0.5  → MinDelay
 // 0.5 ≤ ratio < 0.8 → 线性插值 MinDelay..MaxDelay
 // ratio ≥ 0.8 → MaxDelay
-// 返回值包含 ±15% 随机抖动（anti-detection + 避免惊群效应）
+// 返回值包含 ±15% 随机抖动，用于削峰并避免同步突发。
 func (s *UserMessageQueueService) CalculateRPMAwareDelay(ctx context.Context, accountID int64, baseRPM int) time.Duration {
 	minDelay := time.Duration(s.cfg.MinDelayMs) * time.Millisecond
 	maxDelay := time.Duration(s.cfg.MaxDelayMs) * time.Millisecond

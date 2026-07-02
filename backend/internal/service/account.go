@@ -2073,6 +2073,9 @@ func (a *Account) GetTLSFingerprintProfileID() int64 {
 // "serialize" = 串行队列, "throttle" = 软性限速, "" = 未设置（使用全局配置）
 func (a *Account) GetUserMsgQueueMode() string {
 	if a.Extra == nil {
+		if a.IsAnthropicOAuthOrSetupToken() {
+			return config.UMQModeSerialize
+		}
 		return ""
 	}
 	// 优先读取新字段 user_msg_queue_mode（白名单校验，非法值视为未设置）
@@ -2080,10 +2083,12 @@ func (a *Account) GetUserMsgQueueMode() string {
 		if mode == config.UMQModeSerialize || mode == config.UMQModeThrottle {
 			return mode
 		}
-		return "" // 非法值 fallback 到全局配置
 	}
 	// 向后兼容: user_msg_queue_enabled: true → "serialize"
 	if enabled, ok := a.Extra["user_msg_queue_enabled"].(bool); ok && enabled {
+		return config.UMQModeSerialize
+	}
+	if a.IsAnthropicOAuthOrSetupToken() {
 		return config.UMQModeSerialize
 	}
 	return ""
