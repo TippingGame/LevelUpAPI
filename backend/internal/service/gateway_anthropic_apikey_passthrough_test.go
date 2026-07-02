@@ -345,6 +345,129 @@ func TestGatewayService_AnthropicForward_StreamErrorEventAfterUsageReturnsBillab
 	require.False(t, errors.As(err, &failoverErr), "error event after billable usage must not be converted to failover")
 }
 
+func TestGatewayService_AnthropicForward_StreamErrorEventRateLimitPersistsAndFailovers(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+
+	body := []byte(`{"model":"claude-opus-4-8","stream":true,"messages":[{"role":"user","content":[{"type":"text","text":"hello"}]}]}`)
+	parsed := &ParsedRequest{
+		Body:   body,
+		Model:  "claude-opus-4-8",
+		Stream: true,
+	}
+	upstreamSSE := strings.Join([]string{
+		"event: error",
+		`data: {"type":"error","error":{"type":"rate_limit_error","message":"rate limit exceeded"}}`,
+		"",
+	}, "\n")
+	upstream := &anthropicHTTPUpstreamRecorder{
+		resp: &http.Response{
+			StatusCode: http.StatusOK,
+			Header: http.Header{
+				"Content-Type": []string{"text/event-stream"},
+				"X-Request-Id": []string{"rid-stream-rate-limit"},
+			},
+			Body: io.NopCloser(strings.NewReader(upstreamSSE)),
+		},
+	}
+	repo := &openAIPassthroughFailoverRepo{}
+	svc := &GatewayService{
+		cfg: &config.Config{
+			Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize},
+		},
+		httpUpstream:     upstream,
+		rateLimitService: NewRateLimitService(repo, nil, &config.Config{}, nil, nil),
+	}
+	account := &Account{
+		ID:          302,
+		Name:        "anthropic-oauth-stream-rate-limit",
+		Platform:    PlatformAnthropic,
+		Type:        AccountTypeOAuth,
+		Concurrency: 1,
+		Credentials: map[string]any{
+			"access_token": "oauth-token",
+			"base_url":     "https://api.anthropic.com",
+		},
+		Status:      StatusActive,
+		Schedulable: true,
+	}
+
+	result, err := svc.Forward(context.Background(), c, account, parsed)
+
+	require.Error(t, err)
+	require.Nil(t, result)
+	var failoverErr *UpstreamFailoverError
+	require.True(t, errors.As(err, &failoverErr), "pre-output rate_limit_error should still trigger failover")
+	require.Equal(t, http.StatusTooManyRequests, failoverErr.StatusCode)
+	require.Contains(t, string(failoverErr.ResponseBody), "rate_limit_error")
+	require.Len(t, repo.rateLimitCalls, 1)
+	require.Empty(t, repo.tempCalls)
+}
+
+func TestGatewayService_AnthropicForward_StreamTimeoutErrorDoesNotFailover(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+
+	body := []byte(`{"model":"claude-opus-4-8","stream":true,"messages":[{"role":"user","content":[{"type":"text","text":"hello"}]}]}`)
+	parsed := &ParsedRequest{
+		Body:   body,
+		Model:  "claude-opus-4-8",
+		Stream: true,
+	}
+	upstreamSSE := strings.Join([]string{
+		"event: error",
+		`data: {"type":"error","error":{"type":"timeout_error","message":"request timed out"}}`,
+		"",
+	}, "\n")
+	upstream := &anthropicHTTPUpstreamRecorder{
+		resp: &http.Response{
+			StatusCode: http.StatusOK,
+			Header: http.Header{
+				"Content-Type": []string{"text/event-stream"},
+				"X-Request-Id": []string{"rid-stream-timeout"},
+			},
+			Body: io.NopCloser(strings.NewReader(upstreamSSE)),
+		},
+	}
+	repo := &openAIPassthroughFailoverRepo{}
+	svc := &GatewayService{
+		cfg: &config.Config{
+			Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize},
+		},
+		httpUpstream:     upstream,
+		rateLimitService: NewRateLimitService(repo, nil, &config.Config{}, nil, nil),
+	}
+	account := &Account{
+		ID:          303,
+		Name:        "anthropic-oauth-stream-timeout",
+		Platform:    PlatformAnthropic,
+		Type:        AccountTypeOAuth,
+		Concurrency: 1,
+		Credentials: map[string]any{
+			"access_token": "oauth-token",
+			"base_url":     "https://api.anthropic.com",
+		},
+		Status:      StatusActive,
+		Schedulable: true,
+	}
+
+	result, err := svc.Forward(context.Background(), c, account, parsed)
+
+	require.Error(t, err)
+	require.Nil(t, result)
+	var failoverErr *UpstreamFailoverError
+	require.False(t, errors.As(err, &failoverErr), "timeout_error must not trigger cross-account replay")
+	require.Contains(t, err.Error(), "504")
+	require.Empty(t, repo.rateLimitCalls)
+	require.Empty(t, repo.tempCalls)
+}
+
 func TestGatewayService_AnthropicAPIKeyPassthrough_ForwardCountTokensPreservesBody(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 

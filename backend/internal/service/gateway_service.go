@@ -610,7 +610,10 @@ func (e *UpstreamFailoverError) Error() string {
 // sseStreamErrorEventError 表示上游 SSE 流内出现 event:error 帧。
 // RawData 保留 data: 行原始 JSON，供 failover 与 ops 日志保留真实上游错误。
 type sseStreamErrorEventError struct {
-	RawData string
+	RawData      string
+	StatusCode   int
+	ResponseBody []byte
+	Message      string
 }
 
 func (e *sseStreamErrorEventError) Error() string { return "have error in stream" }
@@ -6135,7 +6138,14 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 		if err != nil {
 			var sseErr *sseStreamErrorEventError
 			if errors.As(err, &sseErr) {
-				body := []byte(sseErr.RawData)
+				body := sseErr.ResponseBody
+				if len(body) == 0 {
+					body = normalizeAnthropicStreamErrorBody(sseErr.RawData)
+				}
+				statusCode := sseErr.StatusCode
+				if statusCode == 0 {
+					statusCode, _ = anthropicStreamErrorStatusAndMessage(body)
+				}
 				upstreamMsg := sanitizeUpstreamErrorMessage(strings.TrimSpace(extractUpstreamErrorMessage(body)))
 				upstreamDetail := ""
 				if s.cfg != nil && s.cfg.Gateway.LogUpstreamErrorBody {
@@ -6143,13 +6153,13 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 					if maxBytes <= 0 {
 						maxBytes = 2048
 					}
-					upstreamDetail = truncateString(sseErr.RawData, maxBytes)
+					upstreamDetail = truncateString(string(body), maxBytes)
 				}
 				appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
 					Platform:           account.Platform,
 					AccountID:          account.ID,
 					AccountName:        account.Name,
-					UpstreamStatusCode: http.StatusForbidden,
+					UpstreamStatusCode: statusCode,
 					UpstreamRequestID:  resp.Header.Get("x-request-id"),
 					Kind:               "stream_error",
 					Message:            upstreamMsg,
@@ -6171,9 +6181,16 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 						ClientDisconnect: streamResult.clientDisconnect,
 					}, &BillableStreamUsageError{Err: err}
 				}
+				if IsUpstreamReplayUnsafeTimeoutStatus(statusCode) {
+					if upstreamMsg == "" {
+						return nil, fmt.Errorf("upstream stream error: %d", statusCode)
+					}
+					return nil, fmt.Errorf("upstream stream error: %d message=%s", statusCode, upstreamMsg)
+				}
 				return nil, &UpstreamFailoverError{
-					StatusCode:   http.StatusForbidden,
-					ResponseBody: body,
+					StatusCode:      statusCode,
+					ResponseBody:    body,
+					ResponseHeaders: resp.Header.Clone(),
 				}
 			}
 			if streamingResultHasBillableUsage(streamResult) {
@@ -8786,7 +8803,7 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 		}
 
 		if eventName == "error" {
-			return nil, dataLine, nil, &sseStreamErrorEventError{RawData: dataLine}
+			return nil, dataLine, nil, newSSEStreamErrorEventError(dataLine)
 		}
 
 		if dataLine == "" {
@@ -8909,6 +8926,18 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 		outputBlocks, data, usagePatch, err := processSSEEvent(pendingEventLines)
 		pendingEventLines = pendingEventLines[:0]
 		if err != nil {
+			var sseErr *sseStreamErrorEventError
+			if errors.As(err, &sseErr) && s.rateLimitService != nil && s.rateLimitService.accountRepo != nil {
+				body := sseErr.ResponseBody
+				if len(body) == 0 {
+					body = normalizeAnthropicStreamErrorBody(sseErr.RawData)
+				}
+				statusCode := sseErr.StatusCode
+				if statusCode == 0 {
+					statusCode, _ = anthropicStreamErrorStatusAndMessage(body)
+				}
+				s.rateLimitService.HandleUpstreamErrorForModel(ctx, account, originalModel, statusCode, resp.Header, body)
+			}
 			return err
 		}
 
