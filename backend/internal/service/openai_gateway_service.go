@@ -415,6 +415,7 @@ type OpenAIGatewayService struct {
 	settingService          *SettingService
 	accountService          *AccountService
 	accountShareModeService *AccountShareModeService
+	proxyLatencyCache       ProxyLatencyCache
 
 	openaiWSPoolOnce              sync.Once
 	openaiWSStateStoreOnce        sync.Once
@@ -502,6 +503,13 @@ func NewOpenAIGatewayService(
 	}
 	svc.logOpenAIWSModeBootstrap()
 	return svc
+}
+
+func (s *OpenAIGatewayService) SetProxyLatencyCache(cache ProxyLatencyCache) {
+	if s == nil {
+		return
+	}
+	s.proxyLatencyCache = cache
 }
 
 // ResolveChannelMapping resolves channel-level model mapping.
@@ -1522,6 +1530,24 @@ func isOpenAIAccountEligibleForRequest(account *Account, requestedModel string, 
 	return true
 }
 
+func (s *OpenAIGatewayService) isOpenAIAccountProxyHealthSchedulable(ctx context.Context, account *Account) bool {
+	if s == nil || s.proxyLatencyCache == nil || account == nil || !account.IsOpenAI() || !account.RequiresProxyForScheduling() {
+		return true
+	}
+	if account.ProxyID == nil || *account.ProxyID <= 0 {
+		return false
+	}
+	proxyID := *account.ProxyID
+	if info, ok := proxyHealthFromPrefetchContext(ctx, proxyID); ok {
+		return !proxyHealthBlocksProtectedProxyScheduling(info)
+	}
+	latencies, err := s.proxyLatencyCache.GetProxyLatencies(ctx, []int64{proxyID})
+	if err != nil {
+		return true
+	}
+	return !proxyHealthBlocksProtectedProxyScheduling(latencies[proxyID])
+}
+
 // prioritizeOpenAICompactAccounts re-orders a slice so that accounts with known
 // compact support are tried first, followed by unknown, then explicitly unsupported.
 // The relative order within each tier is preserved.
@@ -1643,6 +1669,9 @@ func (s *OpenAIGatewayService) tryStickySessionHit(ctx context.Context, groupID 
 
 	// 楠岃瘉璐﹀彿鏄惁鍙敤浜庡綋鍓嶈姹?	// Verify account is usable for current request
 	if !isOpenAIAccountEligibleForRequest(account, requestedModel, false, requiredCapability) {
+		return nil
+	}
+	if !s.isOpenAIAccountProxyHealthSchedulable(ctx, account) {
 		return nil
 	}
 	account = s.recheckSelectedOpenAIAccountFromDB(ctx, groupID, account, requestedModel, requireCompact, requiredCapability)
@@ -2119,6 +2148,9 @@ func (s *OpenAIGatewayService) resolveAccountShareModeBoundAccount(ctx context.C
 	if !isOpenAIAccountEligibleForRequest(account, requestedModel, requireCompact, requiredCapability) {
 		return nil, true, noAvailableOpenAISelectionError(requestedModel, requireCompact && openAICompactSupportTier(account) == 0)
 	}
+	if !s.isOpenAIAccountProxyHealthSchedulable(ctx, account) {
+		return nil, true, noAvailableOpenAISelectionError(requestedModel, false)
+	}
 	if s.needsUpstreamChannelRestrictionCheck(ctx, groupID) && s.isUpstreamModelRestrictedByChannel(ctx, *groupID, account, requestedModel, requireCompact) {
 		return nil, true, noAvailableOpenAISelectionError(requestedModel, false)
 	}
@@ -2147,6 +2179,9 @@ func (s *OpenAIGatewayService) resolveFreshSchedulableOpenAIAccount(ctx context.
 	}
 
 	if !isOpenAIAccountEligibleForRequest(fresh, requestedModel, requireCompact, requiredCapability) {
+		return nil
+	}
+	if !s.isOpenAIAccountProxyHealthSchedulable(ctx, fresh) {
 		return nil
 	}
 	if !IsAccountVisibleToRequestUser(ctx, fresh) {
@@ -2186,6 +2221,9 @@ func (s *OpenAIGatewayService) recheckSelectedOpenAIAccountFromDB(ctx context.Co
 		if !isOpenAIAccountEligibleForRequest(account, requestedModel, requireCompact, requiredCapability) {
 			return nil
 		}
+		if !s.isOpenAIAccountProxyHealthSchedulable(ctx, account) {
+			return nil
+		}
 		if !s.isOpenAIAccountInRequestGroup(account, groupID) {
 			return nil
 		}
@@ -2197,6 +2235,9 @@ func (s *OpenAIGatewayService) recheckSelectedOpenAIAccountFromDB(ctx context.Co
 		return nil
 	}
 	if !isOpenAIAccountEligibleForRequest(latest, requestedModel, requireCompact, requiredCapability) {
+		return nil
+	}
+	if !s.isOpenAIAccountProxyHealthSchedulable(ctx, latest) {
 		return nil
 	}
 	if !IsAccountVisibleToRequestUser(ctx, latest) {

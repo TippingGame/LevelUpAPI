@@ -238,6 +238,61 @@ func ProvideGatewayService(
 	return svc
 }
 
+func ProvideOpenAIGatewayService(
+	accountRepo AccountRepository,
+	accountSharePolicyRepo AccountSharePolicyRepository,
+	usageLogRepo UsageLogRepository,
+	usageBillingRepo UsageBillingRepository,
+	userRepo UserRepository,
+	userSubRepo UserSubscriptionRepository,
+	userGroupRateRepo UserGroupRateRepository,
+	cache GatewayCache,
+	cfg *config.Config,
+	schedulerSnapshot *SchedulerSnapshotService,
+	concurrencyService *ConcurrencyService,
+	billingService *BillingService,
+	rateLimitService *RateLimitService,
+	billingCacheService *BillingCacheService,
+	httpUpstream HTTPUpstream,
+	deferredService *DeferredService,
+	openAITokenProvider *OpenAITokenProvider,
+	resolver *ModelPricingResolver,
+	channelService *ChannelService,
+	balanceNotifyService *BalanceNotifyService,
+	settingService *SettingService,
+	accountService *AccountService,
+	proxyLatencyCache ProxyLatencyCache,
+	accountShareModeService *AccountShareModeService,
+) *OpenAIGatewayService {
+	svc := NewOpenAIGatewayService(
+		accountRepo,
+		accountSharePolicyRepo,
+		usageLogRepo,
+		usageBillingRepo,
+		userRepo,
+		userSubRepo,
+		userGroupRateRepo,
+		cache,
+		cfg,
+		schedulerSnapshot,
+		concurrencyService,
+		billingService,
+		rateLimitService,
+		billingCacheService,
+		httpUpstream,
+		deferredService,
+		openAITokenProvider,
+		resolver,
+		channelService,
+		balanceNotifyService,
+		settingService,
+		accountService,
+		accountShareModeService,
+	)
+	svc.SetProxyLatencyCache(proxyLatencyCache)
+	return svc
+}
+
 // ProvideSubscriptionExpiryService creates and starts SubscriptionExpiryService.
 func ProvideSubscriptionExpiryService(userSubRepo UserSubscriptionRepository) *SubscriptionExpiryService {
 	svc := NewSubscriptionExpiryService(userSubRepo, time.Minute)
@@ -701,7 +756,7 @@ var ProviderSet = wire.NewSet(
 	NewSystemNoticeService,
 	ProvideAdminService,
 	ProvideGatewayService,
-	NewOpenAIGatewayService,
+	ProvideOpenAIGatewayService,
 	NewOAuthService,
 	NewOpenAIOAuthService,
 	NewGeminiOAuthService,

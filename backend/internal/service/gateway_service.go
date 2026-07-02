@@ -2985,11 +2985,11 @@ func (s *GatewayService) withProxyHealthPrefetch(ctx context.Context, accounts [
 	return context.WithValue(ctx, proxyHealthPrefetchContextKey, latencies)
 }
 
-func proxyHealthBlocksAnthropicScheduling(info *ProxyLatencyInfo) bool {
+func proxyHealthBlocksProtectedProxyScheduling(info *ProxyLatencyInfo) bool {
 	if info == nil {
 		return false
 	}
-	if proxyCountryBlocksAnthropicScheduling(info.CountryCode) {
+	if proxyCountryBlocksProtectedProxyScheduling(info.CountryCode) {
 		return true
 	}
 	if !info.Success && (!info.UpdatedAt.IsZero() || strings.TrimSpace(info.Message) != "") {
@@ -3003,13 +3003,21 @@ func proxyHealthBlocksAnthropicScheduling(info *ProxyLatencyInfo) bool {
 	}
 }
 
-func proxyCountryBlocksAnthropicScheduling(countryCode string) bool {
+func proxyHealthBlocksAnthropicScheduling(info *ProxyLatencyInfo) bool {
+	return proxyHealthBlocksProtectedProxyScheduling(info)
+}
+
+func proxyCountryBlocksProtectedProxyScheduling(countryCode string) bool {
 	switch strings.ToUpper(strings.TrimSpace(countryCode)) {
 	case "BY", "CN", "CU", "IR", "KP", "RU", "SY":
 		return true
 	default:
 		return false
 	}
+}
+
+func proxyCountryBlocksAnthropicScheduling(countryCode string) bool {
+	return proxyCountryBlocksProtectedProxyScheduling(countryCode)
 }
 
 func (s *GatewayService) isAccountProxyHealthSchedulable(ctx context.Context, account *Account) bool {

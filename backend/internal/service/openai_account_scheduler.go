@@ -1147,6 +1147,9 @@ func (s *defaultOpenAIAccountScheduler) filterOpenAIAccountsForLoadBalance(
 		if !account.IsSchedulable() || !account.IsOpenAI() {
 			continue
 		}
+		if !s.service.isOpenAIAccountProxyHealthSchedulable(ctx, account) {
+			continue
+		}
 		// require_privacy_set: 跳过 privacy 未设置的账号并标记异常
 		if schedGroup != nil && schedGroup.RequirePrivacySet && !account.IsPrivacySet() {
 			_ = s.service.accountRepo.SetError(ctx, account.ID,
@@ -1405,6 +1408,9 @@ func (s *OpenAIGatewayService) selectAccountShareModeBoundAccount(
 		return nil, decision, true, ErrNoAvailableAccounts
 	}
 	if !isOpenAIAccountEligibleForRequest(account, requestedModel, requireCompact, requiredCapability) {
+		return nil, decision, true, ErrNoAvailableAccounts
+	}
+	if !s.isOpenAIAccountProxyHealthSchedulable(ctx, account) {
 		return nil, decision, true, ErrNoAvailableAccounts
 	}
 	if !accountSupportsOpenAICapabilities(account, requiredCapability, requiredImageCapability) {

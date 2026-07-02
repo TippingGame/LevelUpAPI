@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"github.com/stretchr/testify/require"
 )
 
@@ -126,6 +127,28 @@ func (c schedulerTestConcurrencyCache) GetAccountWaitingCount(ctx context.Contex
 		}
 	}
 	return 0, nil
+}
+
+type openAIProxyLatencyCacheStub struct {
+	infos map[int64]*ProxyLatencyInfo
+}
+
+func (m *openAIProxyLatencyCacheStub) GetProxyLatencies(ctx context.Context, proxyIDs []int64) (map[int64]*ProxyLatencyInfo, error) {
+	results := make(map[int64]*ProxyLatencyInfo)
+	for _, id := range proxyIDs {
+		if info, ok := m.infos[id]; ok {
+			results[id] = info
+		}
+	}
+	return results, nil
+}
+
+func (m *openAIProxyLatencyCacheStub) SetProxyLatency(ctx context.Context, proxyID int64, info *ProxyLatencyInfo) error {
+	if m.infos == nil {
+		m.infos = make(map[int64]*ProxyLatencyInfo)
+	}
+	m.infos[proxyID] = info
+	return nil
 }
 
 type schedulerTestGatewayCache struct {
@@ -714,6 +737,119 @@ func TestOpenAIGatewayService_SelectAccountForModelWithExclusions_SkipsFreshlyRa
 	require.NoError(t, err)
 	require.NotNil(t, account)
 	require.Equal(t, int64(32002), account.ID)
+}
+
+func TestOpenAIGatewayService_SelectAccountForModelWithExclusions_SkipsProxyFailedProAccount(t *testing.T) {
+	groupID := int64(10112)
+	ownerID := int64(42)
+	ctx := context.WithValue(context.Background(), ctxkey.AuthenticatedUserID, ownerID)
+	badProxyID := int64(701)
+	goodProxyID := int64(702)
+	bad := &Account{
+		ID:           32101,
+		Platform:     PlatformOpenAI,
+		Type:         AccountTypeOAuth,
+		AccountLevel: AccountLevelPro,
+		OwnerUserID:  &ownerID,
+		ProxyID:      &badProxyID,
+		Proxy:        &Proxy{ID: badProxyID, Status: StatusActive},
+		Status:       StatusActive,
+		Schedulable:  true,
+		Concurrency:  1,
+		Priority:     0,
+	}
+	good := &Account{
+		ID:           32102,
+		Platform:     PlatformOpenAI,
+		Type:         AccountTypeOAuth,
+		AccountLevel: AccountLevelPro,
+		OwnerUserID:  &ownerID,
+		ProxyID:      &goodProxyID,
+		Proxy:        &Proxy{ID: goodProxyID, Status: StatusActive},
+		Status:       StatusActive,
+		Schedulable:  true,
+		Concurrency:  1,
+		Priority:     5,
+	}
+	bad = openAITestAccountPtrWithGroupIfUnset(bad, groupID)
+	good = openAITestAccountPtrWithGroupIfUnset(good, groupID)
+	snapshotCache := &openAISnapshotCacheStub{
+		snapshotAccounts: []*Account{bad, good},
+		accountsByID:     map[int64]*Account{bad.ID: bad, good.ID: good},
+	}
+	svc := &OpenAIGatewayService{
+		accountRepo:       schedulerTestOpenAIAccountRepo{accounts: []Account{*bad, *good}},
+		cfg:               &config.Config{},
+		rateLimitService:  newOpenAIAdvancedSchedulerRateLimitService(""),
+		schedulerSnapshot: &SchedulerSnapshotService{cache: snapshotCache},
+		proxyLatencyCache: &openAIProxyLatencyCacheStub{infos: map[int64]*ProxyLatencyInfo{
+			badProxyID:  &ProxyLatencyInfo{Success: false, Message: "connection refused", UpdatedAt: time.Now()},
+			goodProxyID: &ProxyLatencyInfo{Success: true, CountryCode: "US", UpdatedAt: time.Now()},
+		}},
+	}
+
+	account, err := svc.SelectAccountForModelWithExclusions(ctx, &groupID, "", "", nil)
+	require.NoError(t, err)
+	require.NotNil(t, account)
+	require.Equal(t, good.ID, account.ID)
+}
+
+func TestOpenAIGatewayService_SelectAccountWithScheduler_SkipsProxyFailedProAccount(t *testing.T) {
+	groupID := int64(10113)
+	ownerID := int64(43)
+	ctx := context.WithValue(context.Background(), ctxkey.AuthenticatedUserID, ownerID)
+	badProxyID := int64(711)
+	goodProxyID := int64(712)
+	bad := &Account{
+		ID:           32201,
+		Platform:     PlatformOpenAI,
+		Type:         AccountTypeOAuth,
+		AccountLevel: AccountLevelPro,
+		OwnerUserID:  &ownerID,
+		ProxyID:      &badProxyID,
+		Proxy:        &Proxy{ID: badProxyID, Status: StatusActive},
+		Status:       StatusActive,
+		Schedulable:  true,
+		Concurrency:  1,
+		Priority:     0,
+	}
+	good := &Account{
+		ID:           32202,
+		Platform:     PlatformOpenAI,
+		Type:         AccountTypeOAuth,
+		AccountLevel: AccountLevelPro,
+		OwnerUserID:  &ownerID,
+		ProxyID:      &goodProxyID,
+		Proxy:        &Proxy{ID: goodProxyID, Status: StatusActive},
+		Status:       StatusActive,
+		Schedulable:  true,
+		Concurrency:  1,
+		Priority:     5,
+	}
+	bad = openAITestAccountPtrWithGroupIfUnset(bad, groupID)
+	good = openAITestAccountPtrWithGroupIfUnset(good, groupID)
+	snapshotCache := &openAISnapshotCacheStub{
+		snapshotAccounts: []*Account{bad, good},
+		accountsByID:     map[int64]*Account{bad.ID: bad, good.ID: good},
+	}
+	svc := &OpenAIGatewayService{
+		accountRepo:        schedulerTestOpenAIAccountRepo{accounts: []Account{*bad, *good}},
+		cfg:                &config.Config{},
+		rateLimitService:   newOpenAIAdvancedSchedulerRateLimitService("true"),
+		schedulerSnapshot:  &SchedulerSnapshotService{cache: snapshotCache},
+		concurrencyService: NewConcurrencyService(schedulerTestConcurrencyCache{}),
+		proxyLatencyCache: &openAIProxyLatencyCacheStub{infos: map[int64]*ProxyLatencyInfo{
+			badProxyID:  &ProxyLatencyInfo{Success: true, CountryCode: "CN", UpdatedAt: time.Now()},
+			goodProxyID: &ProxyLatencyInfo{Success: true, CountryCode: "US", UpdatedAt: time.Now()},
+		}},
+	}
+
+	selection, decision, err := svc.SelectAccountWithScheduler(ctx, &groupID, "", "", "", nil, OpenAIUpstreamTransportAny, false)
+	require.NoError(t, err)
+	require.NotNil(t, selection)
+	require.NotNil(t, selection.Account)
+	require.Equal(t, good.ID, selection.Account.ID)
+	require.Equal(t, openAIAccountScheduleLayerLoadBalance, decision.Layer)
 }
 
 func TestOpenAIGatewayService_SelectAccountWithScheduler_SessionStickyDBRuntimeRecheckSkipsStaleCachedAccount(t *testing.T) {
