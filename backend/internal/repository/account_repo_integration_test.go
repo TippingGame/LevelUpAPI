@@ -870,6 +870,43 @@ func (s *AccountRepoSuite) TestSetSchedulable_SyncSchedulerSnapshotOnEnableRecov
 	s.Require().True(cacheRecorder.setAccounts[0].Schedulable)
 }
 
+func (s *AccountRepoSuite) TestAutoPauseExpiredAccounts_SyncSchedulerSnapshot() {
+	now := time.Now().UTC()
+	expiredAt := now.Add(-time.Hour)
+	futureAt := now.Add(time.Hour)
+	expired := mustCreateAccount(s.T(), s.client, &service.Account{
+		Name:               "auto-pause-expired",
+		Status:             service.StatusActive,
+		Schedulable:        true,
+		AutoPauseOnExpired: true,
+		ExpiresAt:          &expiredAt,
+	})
+	active := mustCreateAccount(s.T(), s.client, &service.Account{
+		Name:               "auto-pause-active",
+		Status:             service.StatusActive,
+		Schedulable:        true,
+		AutoPauseOnExpired: true,
+		ExpiresAt:          &futureAt,
+	})
+	cacheRecorder := &schedulerCacheRecorder{}
+	s.repo.schedulerCache = cacheRecorder
+
+	rows, err := s.repo.AutoPauseExpiredAccounts(s.ctx, now)
+
+	s.Require().NoError(err)
+	s.Require().Equal(int64(1), rows)
+	s.Require().Len(cacheRecorder.setAccounts, 1)
+	s.Require().Equal(expired.ID, cacheRecorder.setAccounts[0].ID)
+	s.Require().False(cacheRecorder.setAccounts[0].Schedulable)
+
+	gotExpired, err := s.repo.GetByID(s.ctx, expired.ID)
+	s.Require().NoError(err)
+	s.Require().False(gotExpired.Schedulable)
+	gotActive, err := s.repo.GetByID(s.ctx, active.ID)
+	s.Require().NoError(err)
+	s.Require().True(gotActive.Schedulable)
+}
+
 func (s *AccountRepoSuite) TestBulkUpdate_SyncSchedulerSnapshotOnDisabled() {
 	account1 := mustCreateAccount(s.T(), s.client, &service.Account{Name: "bulk-1", Status: service.StatusActive, Schedulable: true})
 	account2 := mustCreateAccount(s.T(), s.client, &service.Account{Name: "bulk-2", Status: service.StatusActive, Schedulable: true})
