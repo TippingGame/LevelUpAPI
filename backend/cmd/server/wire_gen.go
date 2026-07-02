@@ -98,7 +98,7 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	accountRepository := repository.NewAccountRepository(client, db, schedulerCache)
 	accountSharePolicyRepository := repository.NewAccountSharePolicyRepository(client, db)
 	accountShareModeRepository := repository.NewAccountShareModeRepository(client, db)
-	accountService := service.ProvideAccountService(accountRepository, groupRepository, userRepository, userSubscriptionRepository, accountSharePolicyRepository, userPrivateGroupProvisioner, systemNoticeService)
+	accountService := service.ProvideAccountService(accountRepository, groupRepository, userRepository, userSubscriptionRepository, proxyRepository, accountSharePolicyRepository, userPrivateGroupProvisioner, systemNoticeService)
 	usageLogRepository := repository.NewUsageLogRepository(client, db)
 	httpUpstream := repository.NewHTTPUpstream(configConfig)
 	claudeUsageFetcher := repository.NewClaudeUsageFetcher(httpUpstream)

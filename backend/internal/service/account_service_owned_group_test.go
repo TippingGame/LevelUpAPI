@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 	"github.com/stretchr/testify/require"
 )
@@ -141,6 +142,67 @@ type ownedAccountDuplicateRepoStub struct {
 	loadFactorCreditsBalance   int
 	loadFactorCreditsUsedTotal int
 	loadFactorCreditCharges    []int
+}
+
+type ownedAccountProxyRepoStub struct {
+	proxies       map[int64]*Proxy
+	accountCounts map[int64]int64
+}
+
+func (s *ownedAccountProxyRepoStub) GetVisibleByID(_ context.Context, _ int64, id int64) (*Proxy, error) {
+	proxy := s.proxies[id]
+	if proxy == nil || !proxy.IsActive() {
+		return nil, ErrProxyNotFound
+	}
+	cp := *proxy
+	return &cp, nil
+}
+
+func (s *ownedAccountProxyRepoStub) CountAccountsByProxyID(_ context.Context, proxyID int64) (int64, error) {
+	return s.accountCounts[proxyID], nil
+}
+
+func (s *ownedAccountProxyRepoStub) Create(context.Context, *Proxy) error {
+	panic("unexpected Create call")
+}
+func (s *ownedAccountProxyRepoStub) GetByID(context.Context, int64) (*Proxy, error) {
+	panic("unexpected GetByID call")
+}
+func (s *ownedAccountProxyRepoStub) ListByIDs(context.Context, []int64) ([]Proxy, error) {
+	panic("unexpected ListByIDs call")
+}
+func (s *ownedAccountProxyRepoStub) Update(context.Context, *Proxy) error {
+	panic("unexpected Update call")
+}
+func (s *ownedAccountProxyRepoStub) Delete(context.Context, int64) error {
+	panic("unexpected Delete call")
+}
+func (s *ownedAccountProxyRepoStub) List(context.Context, pagination.PaginationParams) ([]Proxy, *pagination.PaginationResult, error) {
+	panic("unexpected List call")
+}
+func (s *ownedAccountProxyRepoStub) ListWithFilters(context.Context, pagination.PaginationParams, string, string, string) ([]Proxy, *pagination.PaginationResult, error) {
+	panic("unexpected ListWithFilters call")
+}
+func (s *ownedAccountProxyRepoStub) ListWithFiltersAndAccountCount(context.Context, pagination.PaginationParams, string, string, string) ([]ProxyWithAccountCount, *pagination.PaginationResult, error) {
+	panic("unexpected ListWithFiltersAndAccountCount call")
+}
+func (s *ownedAccountProxyRepoStub) ListActive(context.Context) ([]Proxy, error) {
+	panic("unexpected ListActive call")
+}
+func (s *ownedAccountProxyRepoStub) ListActiveWithAccountCount(context.Context) ([]ProxyWithAccountCount, error) {
+	panic("unexpected ListActiveWithAccountCount call")
+}
+func (s *ownedAccountProxyRepoStub) ListActiveVisibleWithAccountCount(context.Context, int64) ([]ProxyWithAccountCount, error) {
+	panic("unexpected ListActiveVisibleWithAccountCount call")
+}
+func (s *ownedAccountProxyRepoStub) FindVisibleActiveByEndpoint(context.Context, int64, string, string, int, string, string) (*Proxy, error) {
+	panic("unexpected FindVisibleActiveByEndpoint call")
+}
+func (s *ownedAccountProxyRepoStub) ExistsByHostPortAuth(context.Context, string, int, string, string) (bool, error) {
+	panic("unexpected ExistsByHostPortAuth call")
+}
+func (s *ownedAccountProxyRepoStub) ListAccountSummariesByProxyID(context.Context, int64) ([]ProxyAccountSummary, error) {
+	panic("unexpected ListAccountSummariesByProxyID call")
 }
 
 func (s *ownedAccountDuplicateRepoStub) Create(_ context.Context, account *Account) error {
@@ -849,6 +911,73 @@ func TestAccountServiceCreateOwnedRejectsAnthropicWithoutProxy(t *testing.T) {
 	require.Nil(t, account)
 	require.ErrorIs(t, err, ErrOwnedAnthropicAccountProxyRequired)
 	require.Empty(t, repo.createdAccounts)
+}
+
+func TestAccountServiceCreateOwnedRejectsProxyCapacityExceeded(t *testing.T) {
+	ownerID := int64(101)
+	proxyID := int64(7)
+	repo := &ownedAccountDuplicateRepoStub{}
+	svc := &AccountService{
+		accountRepo: repo,
+		proxyRepo: &ownedAccountProxyRepoStub{
+			proxies: map[int64]*Proxy{
+				proxyID: {ID: proxyID, Status: StatusActive, MaxAccounts: 1},
+			},
+			accountCounts: map[int64]int64{proxyID: 1},
+		},
+		privateGroupProvisioner: &ownedPrivateGroupProvisionerStub{
+			group: &Group{ID: 99, Platform: PlatformAnthropic, Status: StatusActive, Scope: GroupScopeUserPrivate},
+		},
+	}
+
+	account, err := svc.CreateOwned(context.Background(), ownerID, CreateAccountRequest{
+		Name:        "claude-capacity-full",
+		Platform:    PlatformAnthropic,
+		Type:        AccountTypeOAuth,
+		Credentials: map[string]any{"access_token": "token"},
+		ProxyID:     &proxyID,
+		Concurrency: ownedPersonalDefaultConcurrency,
+		Priority:    1,
+	})
+
+	require.Nil(t, account)
+	require.Error(t, err)
+	require.Equal(t, "PROXY_ACCOUNT_LIMIT_EXCEEDED", infraerrors.Reason(err))
+	require.Empty(t, repo.createdAccounts)
+}
+
+func TestAccountServiceCreateOwnedAllowsProxyCapacityAvailable(t *testing.T) {
+	ownerID := int64(101)
+	proxyID := int64(7)
+	repo := &ownedAccountDuplicateRepoStub{}
+	svc := &AccountService{
+		accountRepo: repo,
+		proxyRepo: &ownedAccountProxyRepoStub{
+			proxies: map[int64]*Proxy{
+				proxyID: {ID: proxyID, Status: StatusActive, MaxAccounts: 2},
+			},
+			accountCounts: map[int64]int64{proxyID: 1},
+		},
+		privateGroupProvisioner: &ownedPrivateGroupProvisionerStub{
+			group: &Group{ID: 99, Platform: PlatformAnthropic, Status: StatusActive, Scope: GroupScopeUserPrivate},
+		},
+	}
+
+	account, err := svc.CreateOwned(context.Background(), ownerID, CreateAccountRequest{
+		Name:        "claude-capacity-ok",
+		Platform:    PlatformAnthropic,
+		Type:        AccountTypeOAuth,
+		Credentials: map[string]any{"access_token": "token"},
+		ProxyID:     &proxyID,
+		Concurrency: ownedPersonalDefaultConcurrency,
+		Priority:    1,
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, account)
+	require.Len(t, repo.createdAccounts, 1)
+	require.NotNil(t, repo.createdAccounts[0].ProxyID)
+	require.Equal(t, proxyID, *repo.createdAccounts[0].ProxyID)
 }
 
 func TestAccountServiceCreateOwnedRejectsOpenAILevelMismatch(t *testing.T) {

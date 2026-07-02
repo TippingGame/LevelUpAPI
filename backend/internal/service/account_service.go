@@ -198,6 +198,7 @@ type AccountService struct {
 	groupRepo               GroupRepository
 	userRepo                accountUserRepository
 	userSubRepo             accountSubscriptionLookupRepository
+	proxyRepo               ProxyRepository
 	accountSharePolicyRepo  AccountSharePolicyRepository
 	privateGroupProvisioner UserPrivateGroupProvisioner
 	systemNoticeService     *SystemNoticeService
@@ -289,6 +290,13 @@ func (s *AccountService) SetUserPrivateGroupProvisioner(provisioner UserPrivateG
 		return
 	}
 	s.privateGroupProvisioner = provisioner
+}
+
+func (s *AccountService) SetProxyRepository(repo ProxyRepository) {
+	if s == nil {
+		return
+	}
+	s.proxyRepo = repo
 }
 
 func (s *AccountService) SetAccountSharePolicyRepository(repo AccountSharePolicyRepository) {
@@ -530,6 +538,9 @@ func (s *AccountService) createOwned(ctx context.Context, ownerUserID int64, req
 	if err := s.ensureOwnedAccountNotDuplicate(ctx, ownerUserID, account, 0); err != nil {
 		return nil, err
 	}
+	if err := s.ensureOwnedProxyCapacityForCreate(ctx, ownerUserID, account.ProxyID); err != nil {
+		return nil, err
+	}
 
 	if err := s.accountRepo.Create(ctx, account); err != nil {
 		return nil, fmt.Errorf("create account: %w", err)
@@ -542,6 +553,30 @@ func (s *AccountService) createOwned(ctx context.Context, ownerUserID int64, req
 	}
 	s.notifyAccountCreated(ctx, account)
 	return account, nil
+}
+
+func (s *AccountService) ensureOwnedProxyCapacityForCreate(ctx context.Context, ownerUserID int64, proxyID *int64) error {
+	if s == nil || proxyID == nil || *proxyID <= 0 {
+		return nil
+	}
+	if s.proxyRepo == nil {
+		return nil
+	}
+	proxy, err := s.proxyRepo.GetVisibleByID(ctx, ownerUserID, *proxyID)
+	if err != nil {
+		return err
+	}
+	if proxy == nil || proxy.MaxAccounts <= 0 {
+		return nil
+	}
+	current, err := s.proxyRepo.CountAccountsByProxyID(ctx, proxy.ID)
+	if err != nil {
+		return fmt.Errorf("count proxy accounts: %w", err)
+	}
+	if current+1 > int64(proxy.MaxAccounts) {
+		return ProxyAccountLimitExceededError(proxy.ID, current, int64(proxy.MaxAccounts), 1)
+	}
+	return nil
 }
 
 func isAllowedOwnedAccountType(accountType string) bool {

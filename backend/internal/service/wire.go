@@ -570,11 +570,13 @@ func ProvideAccountService(
 	groupRepo GroupRepository,
 	userRepo UserRepository,
 	userSubRepo UserSubscriptionRepository,
+	proxyRepo ProxyRepository,
 	accountSharePolicyRepo AccountSharePolicyRepository,
 	privateGroupProvisioner UserPrivateGroupProvisioner,
 	systemNoticeService *SystemNoticeService,
 ) *AccountService {
 	svc := NewAccountService(accountRepo, groupRepo, userRepo, userSubRepo)
+	svc.SetProxyRepository(proxyRepo)
 	svc.SetAccountSharePolicyRepository(accountSharePolicyRepo)
 	svc.SetUserPrivateGroupProvisioner(privateGroupProvisioner)
 	svc.SetSystemNoticeService(systemNoticeService)
