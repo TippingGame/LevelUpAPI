@@ -258,6 +258,60 @@ func TestOpenAICleanRelay_PreselectsCachedAccountBeforeScheduler(t *testing.T) {
 	}
 }
 
+func TestOpenAICleanRelay_ClearMappingIfBoundTo(t *testing.T) {
+	ctx := context.Background()
+	groupID := int64(202)
+	cache := &stubGatewayCache{}
+	svc := &OpenAIGatewayService{
+		cache:          cache,
+		settingService: newCleanRelaySettingService(true),
+	}
+	defer func() {
+		svc.settingService = newCleanRelaySettingService(false)
+	}()
+
+	c := newCleanRelayGinContext(101, groupID)
+	setOpenAICleanRelayGroupID(c, &groupID)
+	body := []byte(`{"model":"codex-auto-review","prompt_cache_key":"client-cache","previous_response_id":"resp_old"}`)
+	mapping := newOpenAICleanRelayMapping(303, 1, openAICleanRelayInstallationID(303))
+	encoded, err := marshalOpenAICleanRelayMapping(mapping)
+	require.NoError(t, err)
+	cacheKey := openAICleanRelayCacheKey(101, groupID, "client-installation", "client-session")
+	require.NoError(t, cache.SetSessionString(ctx, groupID, cacheKey, encoded, time.Hour))
+
+	cleared, err := svc.ClearOpenAICleanRelayMappingIfBoundTo(ctx, c, body, 303)
+	require.NoError(t, err)
+	require.True(t, cleared)
+	require.NotContains(t, cache.stringBindings, cacheKey)
+}
+
+func TestOpenAICleanRelay_ClearMappingIfBoundToSkipsDifferentAccount(t *testing.T) {
+	ctx := context.Background()
+	groupID := int64(202)
+	cache := &stubGatewayCache{}
+	svc := &OpenAIGatewayService{
+		cache:          cache,
+		settingService: newCleanRelaySettingService(true),
+	}
+	defer func() {
+		svc.settingService = newCleanRelaySettingService(false)
+	}()
+
+	c := newCleanRelayGinContext(101, groupID)
+	setOpenAICleanRelayGroupID(c, &groupID)
+	body := []byte(`{"model":"codex-auto-review","prompt_cache_key":"client-cache","previous_response_id":"resp_old"}`)
+	mapping := newOpenAICleanRelayMapping(404, 1, openAICleanRelayInstallationID(404))
+	encoded, err := marshalOpenAICleanRelayMapping(mapping)
+	require.NoError(t, err)
+	cacheKey := openAICleanRelayCacheKey(101, groupID, "client-installation", "client-session")
+	require.NoError(t, cache.SetSessionString(ctx, groupID, cacheKey, encoded, time.Hour))
+
+	cleared, err := svc.ClearOpenAICleanRelayMappingIfBoundTo(ctx, c, body, 303)
+	require.NoError(t, err)
+	require.False(t, cleared)
+	require.Equal(t, encoded, cache.stringBindings[cacheKey])
+}
+
 func TestOpenAICleanRelay_AccountShareModeUsesMembershipAccount(t *testing.T) {
 	modeGroupID := int64(61711)
 	privateGroupID := int64(61761)

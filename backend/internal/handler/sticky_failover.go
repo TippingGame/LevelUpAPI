@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 
+	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 )
 
@@ -47,6 +48,21 @@ func (h *OpenAIGatewayHandler) clearStickySessionIfBoundTo(ctx context.Context, 
 	}
 	if cleared {
 		reqLog.Info("openai.sticky_session_cleared", zap.Int64("account_id", accountID), zap.String("reason", reason))
+	}
+	return cleared
+}
+
+func (h *OpenAIGatewayHandler) clearCleanRelayMappingIfBoundTo(ctx context.Context, c *gin.Context, bodyForSession []byte, accountID int64, reqLog *zap.Logger, reason string) bool {
+	if h == nil || h.gatewayService == nil || c == nil || len(bodyForSession) == 0 || accountID <= 0 {
+		return false
+	}
+	cleared, err := h.gatewayService.ClearOpenAICleanRelayMappingIfBoundTo(ctx, c, bodyForSession, accountID)
+	if err != nil {
+		reqLog.Warn("openai.clear_clean_relay_mapping_failed", zap.Int64("account_id", accountID), zap.String("reason", reason), zap.Error(err))
+		return false
+	}
+	if cleared {
+		reqLog.Info("openai.clean_relay_mapping_cleared", zap.Int64("account_id", accountID), zap.String("reason", reason))
 	}
 	return cleared
 }

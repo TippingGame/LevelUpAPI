@@ -240,6 +240,50 @@ func (s *OpenAIGatewayService) loadOpenAICleanRelayCachedMapping(
 	return mapping, true, nil
 }
 
+// ClearOpenAICleanRelayMappingIfBoundTo removes a clean-relay account mapping
+// only when it still points at the failed account.
+func (s *OpenAIGatewayService) ClearOpenAICleanRelayMappingIfBoundTo(ctx context.Context, c *gin.Context, bodyForSession []byte, accountID int64) (bool, error) {
+	if !s.IsOpenAICleanRelayEnabled(ctx) || c == nil || len(bodyForSession) == 0 || s.cache == nil || accountID <= 0 {
+		return false, nil
+	}
+	var reqBody map[string]any
+	if err := json.Unmarshal(bodyForSession, &reqBody); err != nil {
+		return false, fmt.Errorf("openai clean relay parse request body before mapping clear: %w", err)
+	}
+	clientInstallationID := openAICleanRelayClientInstallationID(c, reqBody)
+	sessionSignal := openAICleanRelayClientSessionSignal(c, reqBody, bodyForSession)
+	if strings.TrimSpace(sessionSignal) == "" {
+		return false, nil
+	}
+	apiKeyID := getAPIKeyIDFromContext(c)
+	groupID := getOpenAICleanRelayGroupID(c)
+	cacheKey := openAICleanRelayCacheKey(apiKeyID, groupID, clientInstallationID, sessionSignal)
+	cacheCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+	defer cancel()
+
+	raw, err := s.cache.GetSessionString(cacheCtx, groupID, cacheKey)
+	if err != nil {
+		if errors.Is(err, ErrGatewaySessionStringNotFound) {
+			return false, nil
+		}
+		return false, fmt.Errorf("openai clean relay load mapping before clear: %w", err)
+	}
+	if strings.TrimSpace(raw) == "" {
+		return false, nil
+	}
+	var mapping openAICleanRelayMapping
+	if err := json.Unmarshal([]byte(raw), &mapping); err != nil {
+		return false, fmt.Errorf("openai clean relay decode mapping before clear: %w", err)
+	}
+	if mapping.AccountID != accountID {
+		return false, nil
+	}
+	if err := s.cache.DeleteSessionString(cacheCtx, groupID, cacheKey); err != nil {
+		return false, fmt.Errorf("openai clean relay delete mapping: %w", err)
+	}
+	return true, nil
+}
+
 func (s *OpenAIGatewayService) selectOpenAICleanRelayAccountByID(
 	ctx context.Context,
 	groupID *int64,

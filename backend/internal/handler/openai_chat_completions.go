@@ -287,6 +287,7 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 				h.gatewayService.RecordOpenAIAccountSwitch()
 				failedAccountIDs[account.ID] = struct{}{}
 				h.clearStickySessionIfBoundTo(c.Request.Context(), currentAPIKey.GroupID, sessionHash, account.ID, reqLog, "upstream_failover")
+				h.clearCleanRelayMappingIfBoundTo(c.Request.Context(), c, body, account.ID, reqLog, "upstream_failover")
 				lastFailoverErr = failoverErr
 				if switchCount >= maxAccountSwitches {
 					if canSwitchAPIKeyGroupRouteAfterForward(c, routeCursor, failoverErr, streamStarted, writerSizeBeforeForward) &&
