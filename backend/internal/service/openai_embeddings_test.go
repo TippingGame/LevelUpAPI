@@ -3,6 +3,7 @@ package service
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -103,6 +104,41 @@ func TestForwardEmbeddings_APIKeyPassthroughRecordsUsageAndBatchInput(t *testing
 	require.Equal(t, "world", gjson.GetBytes(upstream.lastBody, "input.1").String())
 	require.Equal(t, "float", gjson.GetBytes(upstream.lastBody, "encoding_format").String())
 	require.Equal(t, int64(256), gjson.GetBytes(upstream.lastBody, "dimensions").Int())
+}
+
+func TestForwardEmbeddings_PersistentTransportErrorTempUnschedulesAndFailovers(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	reqBody := []byte(`{"model":"text-embedding-3-small","input":"hello"}`)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/embeddings", bytes.NewReader(reqBody))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	repo := &openAIPassthroughFailoverRepo{}
+	svc := &OpenAIGatewayService{
+		cfg:          &config.Config{},
+		httpUpstream: &httpUpstreamRecorder{err: errors.New("dial tcp 127.0.0.1:9: connect: connection refused")},
+		accountRepo:  repo,
+	}
+	account := &Account{
+		ID:       43,
+		Name:     "openai-embeddings-proxy-bad",
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeAPIKey,
+		Credentials: map[string]any{
+			"api_key": "sk-test",
+		},
+	}
+
+	result, err := svc.ForwardEmbeddings(context.Background(), c, account, reqBody, "")
+
+	require.Nil(t, result)
+	var failoverErr *UpstreamFailoverError
+	require.ErrorAs(t, err, &failoverErr)
+	require.Equal(t, http.StatusBadGateway, failoverErr.StatusCode)
+	require.Len(t, repo.tempCalls, 1)
+	require.Contains(t, repo.tempReasons[0], "connection refused")
 }
 
 func TestExtractOpenAIEmbeddingsUsage_CacheDetails(t *testing.T) {
