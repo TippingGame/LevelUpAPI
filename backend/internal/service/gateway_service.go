@@ -5371,6 +5371,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 			}
 			// Ensure the client receives an error response (handlers assume Forward writes on non-failover errors).
 			safeErr := sanitizeUpstreamErrorMessage(err.Error())
+			s.maybeTempUnscheduleAnthropicTransportError(ctx, account, err, safeErr)
 			setOpsUpstreamError(c, 0, safeErr, "")
 			appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
 				Platform:           account.Platform,
@@ -10262,7 +10263,9 @@ func (s *GatewayService) ForwardCountTokens(ctx context.Context, c *gin.Context,
 	// 发送请求
 	resp, err := s.httpUpstream.DoWithTLS(upstreamReq, proxyURL, account.ID, account.Concurrency, s.tlsFPProfileService.ResolveTLSProfile(account))
 	if err != nil {
-		setOpsUpstreamError(c, 0, sanitizeUpstreamErrorMessage(err.Error()), "")
+		safeErr := sanitizeUpstreamErrorMessage(err.Error())
+		s.maybeTempUnscheduleAnthropicTransportError(ctx, account, err, safeErr)
+		setOpsUpstreamError(c, 0, safeErr, "")
 		s.countTokensError(c, http.StatusBadGateway, "upstream_error", "Request failed")
 		return fmt.Errorf("upstream request failed: %w", err)
 	}
