@@ -4690,10 +4690,20 @@ func (s *GatewayService) shouldRetryUpstreamError(account *Account, statusCode i
 	if IsUpstreamReplayUnsafeTimeoutStatus(statusCode) {
 		return false
 	}
+	if account == nil {
+		return false
+	}
 
 	// OAuth/Setup Token 账号：仅 403 重试
 	if account.IsOAuth() {
 		return statusCode == 403
+	}
+
+	// Auth/payment/permission failures should fail over immediately instead of
+	// burning same-account retries when custom error-code settings omit them.
+	switch statusCode {
+	case 401, 402, 403:
+		return false
 	}
 
 	// API Key 账号：未配置的错误码重试
@@ -4706,7 +4716,7 @@ func (s *GatewayService) shouldFailoverUpstreamError(statusCode int) bool {
 		return false
 	}
 	switch statusCode {
-	case 401, 403, 429, 529:
+	case 401, 402, 403, 429, 529:
 		return true
 	default:
 		return statusCode >= 500

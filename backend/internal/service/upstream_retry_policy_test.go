@@ -24,7 +24,7 @@ func TestUpstreamReplayUnsafeTimeoutStatusesDoNotFailover(t *testing.T) {
 		require.False(t, (&GatewayService{}).shouldFailoverUpstreamError(status))
 		require.False(t, (&OpenAIGatewayService{}).shouldFailoverUpstreamError(status))
 		require.False(t, (&OpenAIGatewayService{}).shouldFailoverOpenAIUpstreamResponse(status, "model is at capacity", []byte(`{"error":{"message":"model is at capacity"}}`)))
-		require.False(t, shouldFailoverOpenAIPassthroughResponse(status, "model is at capacity", []byte(`{"error":{"message":"model is at capacity"}}`)))
+		require.False(t, shouldFailoverOpenAIPassthroughResponse(customRetryAccount, status, "model is at capacity", []byte(`{"error":{"message":"model is at capacity"}}`)))
 		require.False(t, (&AntigravityGatewayService{}).shouldFailoverUpstreamError(status))
 		require.False(t, shouldRetryAntigravityError(status))
 		require.False(t, (&GeminiMessagesCompatService{}).shouldRetryGeminiUpstreamError(nil, status))
@@ -49,8 +49,46 @@ func TestTransientUpstreamStatusesStillFailover(t *testing.T) {
 		require.True(t, (&GatewayService{}).shouldFailoverUpstreamError(status))
 		require.True(t, (&OpenAIGatewayService{}).shouldFailoverUpstreamError(status))
 		require.True(t, (&OpenAIGatewayService{}).shouldFailoverOpenAIUpstreamResponse(status, "", nil))
-		require.True(t, shouldFailoverOpenAIPassthroughResponse(status, "", nil))
+		require.True(t, shouldFailoverOpenAIPassthroughResponse(customRetryAccount, status, "", nil))
 		require.True(t, (&AntigravityGatewayService{}).shouldFailoverUpstreamError(status))
 		require.True(t, (&GeminiMessagesCompatService{}).shouldFailoverGeminiUpstreamError(status))
 	}
+}
+
+func TestAuthPaymentPermissionStatusesFailoverWithoutSameAccountRetry(t *testing.T) {
+	statuses := []int{http.StatusUnauthorized, http.StatusPaymentRequired, http.StatusForbidden}
+	customRetryAccount := &Account{
+		Type: AccountTypeAPIKey,
+		Credentials: map[string]any{
+			"custom_error_codes_enabled": true,
+			"custom_error_codes":         []any{float64(http.StatusBadRequest)},
+		},
+	}
+
+	for _, status := range statuses {
+		require.False(t, IsUpstreamReplayUnsafeTimeoutStatus(status))
+
+		require.False(t, (&GatewayService{}).shouldRetryUpstreamError(customRetryAccount, status))
+		require.True(t, (&GatewayService{}).shouldFailoverUpstreamError(status))
+		require.True(t, (&OpenAIGatewayService{}).shouldFailoverUpstreamError(status))
+		require.True(t, (&OpenAIGatewayService{}).shouldFailoverOpenAIUpstreamResponse(status, "", nil))
+		passthroughBody := []byte(nil)
+		passthroughMsg := ""
+		if status == http.StatusForbidden {
+			passthroughMsg = "This API key has been disabled"
+			passthroughBody = []byte(`{"error":{"message":"This API key has been disabled"}}`)
+		}
+		require.True(t, shouldFailoverOpenAIPassthroughResponse(customRetryAccount, status, passthroughMsg, passthroughBody))
+		require.True(t, (&AntigravityGatewayService{}).shouldFailoverUpstreamError(status))
+		require.False(t, shouldRetryAntigravityError(status))
+		require.False(t, (&GeminiMessagesCompatService{}).shouldRetryGeminiUpstreamError(customRetryAccount, status))
+		require.True(t, (&GeminiMessagesCompatService{}).shouldFailoverGeminiUpstreamError(status))
+	}
+
+	require.False(t, shouldFailoverOpenAIPassthroughResponse(
+		customRetryAccount,
+		http.StatusForbidden,
+		"This request has been blocked",
+		[]byte(`{"error":{"code":"cyber_policy","message":"This request has been blocked"}}`),
+	))
 }

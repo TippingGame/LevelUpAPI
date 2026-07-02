@@ -3366,7 +3366,7 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 		upstreamMsg = sanitizeUpstreamErrorMessage(upstreamMsg)
 		// 閫忎紶妯″紡榛樿淇濇寔鍘熸牱浠ｇ悊锛涗絾瀹归噺/杩囪浇绫婚敊璇簲鍏堣Е鍙戝璐﹀彿
 		// failover 浠ョ淮鎸佸熀纭€ SLA銆?
-		if shouldFailoverOpenAIPassthroughResponse(resp.StatusCode, upstreamMsg, respBody) {
+		if shouldFailoverOpenAIPassthroughResponse(account, resp.StatusCode, upstreamMsg, respBody) {
 			return nil, s.handleFailoverErrorResponsePassthrough(ctx, resp, c, account, body)
 		}
 		return nil, s.handleErrorResponsePassthrough(ctx, resp, c, account, body)
@@ -3575,13 +3575,19 @@ func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIPassthrough(
 	return req, nil
 }
 
-func shouldFailoverOpenAIPassthroughResponse(statusCode int, upstreamMsg string, upstreamBody []byte) bool {
+func shouldFailoverOpenAIPassthroughResponse(account *Account, statusCode int, upstreamMsg string, upstreamBody []byte) bool {
 	if IsUpstreamReplayUnsafeTimeoutStatus(statusCode) {
 		return false
 	}
 	switch statusCode {
-	case http.StatusTooManyRequests, 529:
+	case http.StatusUnauthorized, http.StatusPaymentRequired, http.StatusTooManyRequests, 529:
 		return true
+	case http.StatusForbidden:
+		if cyberHit, _, _ := detectOpenAICyberPolicy(upstreamBody); cyberHit {
+			return false
+		}
+		_, permanent := permanentAccountKeywordErrorMessage(account, statusCode, upstreamMsg, upstreamBody)
+		return permanent
 	default:
 		if statusCode >= http.StatusInternalServerError {
 			return true

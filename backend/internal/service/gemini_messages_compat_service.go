@@ -1712,7 +1712,7 @@ func (s *GeminiMessagesCompatService) shouldFailoverGeminiUpstreamError(statusCo
 		return false
 	}
 	switch statusCode {
-	case 401, 403, 429, 529:
+	case 401, 402, 403, 429, 529:
 		return true
 	default:
 		return statusCode >= 500
