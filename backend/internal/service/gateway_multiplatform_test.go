@@ -33,6 +33,7 @@ type mockAccountRepoForPlatform struct {
 	lastTempID       int64
 	lastTempUntil    time.Time
 	lastTempReason   string
+	lastTempCtxErr   error
 }
 
 func (m *mockAccountRepoForPlatform) GetByID(ctx context.Context, id int64) (*Account, error) {
@@ -178,6 +179,7 @@ func (m *mockAccountRepoForPlatform) SetTempUnschedulable(ctx context.Context, i
 	m.lastTempID = id
 	m.lastTempUntil = until
 	m.lastTempReason = reason
+	m.lastTempCtxErr = ctx.Err()
 	return nil
 }
 func (m *mockAccountRepoForPlatform) ClearTempUnschedulable(ctx context.Context, id int64) error {
@@ -481,6 +483,27 @@ func TestGatewayServiceTempUnscheduleRetryableStatusExhaustedWritesTempCache(t *
 	require.Equal(t, "retryable_status_429", state.MatchedKeyword)
 	require.Contains(t, state.ErrorMessage, "quota temporarily exhausted")
 	require.Greater(t, state.UntilUnix, time.Now().Unix())
+}
+
+func TestGatewayServiceTempUnscheduleRetryableStatusUsesDetachedContext(t *testing.T) {
+	repo := &mockAccountRepoForPlatform{}
+	svc := &GatewayService{
+		accountRepo: repo,
+		rateLimitService: &RateLimitService{
+			tempUnschedCache: &runtimeTempUnschedCacheStub{},
+		},
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	svc.TempUnscheduleRetryableError(ctx, 44, &UpstreamFailoverError{
+		StatusCode:             http.StatusTooManyRequests,
+		RetryableOnSameAccount: true,
+		ResponseBody:           []byte(`{"error":{"message":"quota temporarily exhausted"}}`),
+	})
+
+	require.Equal(t, 1, repo.tempCalls)
+	require.NoError(t, repo.lastTempCtxErr)
 }
 
 func TestGatewayService_SelectAccountForModel_BindsProxyExitIP(t *testing.T) {

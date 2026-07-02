@@ -2511,15 +2511,19 @@ func isGoogleProjectConfigError(lowerMsg string) bool {
 // googleConfigErrorCooldown 服务端配置类 400 错误的临时封禁时长
 const googleConfigErrorCooldown = 1 * time.Minute
 
+const retryableErrorStateUpdateTimeout = 3 * time.Second
+
 // tempUnscheduleGoogleConfigError 对服务端配置类 400 错误触发临时封禁，
 // 避免短时间内反复调度到同一个有问题的账号。
 func tempUnscheduleGoogleConfigError(ctx context.Context, repo AccountRepository, cache TempUnschedCache, accountID int64, logPrefix string) {
 	until := time.Now().Add(googleConfigErrorCooldown)
 	reason := "400: invalid project resource name (auto temp-unschedule 1m)"
-	if err := repo.SetTempUnschedulable(ctx, accountID, until, reason); err != nil {
+	writeCtx, cancel := retryableErrorStateContext(ctx)
+	defer cancel()
+	if err := repo.SetTempUnschedulable(writeCtx, accountID, until, reason); err != nil {
 		log.Printf("%s temp_unschedule_failed account=%d error=%v", logPrefix, accountID, err)
 	} else {
-		cacheTempUnschedState(ctx, cache, accountID, until, http.StatusBadRequest, "invalid project resource name", reason)
+		cacheTempUnschedState(writeCtx, cache, accountID, until, http.StatusBadRequest, "invalid project resource name", reason)
 		log.Printf("%s temp_unscheduled account=%d until=%v reason=%q", logPrefix, accountID, until.Format("15:04:05"), reason)
 	}
 }
@@ -2532,10 +2536,12 @@ const emptyResponseCooldown = 1 * time.Minute
 func tempUnscheduleEmptyResponse(ctx context.Context, repo AccountRepository, cache TempUnschedCache, accountID int64, logPrefix string) {
 	until := time.Now().Add(emptyResponseCooldown)
 	reason := "empty stream response (auto temp-unschedule 1m)"
-	if err := repo.SetTempUnschedulable(ctx, accountID, until, reason); err != nil {
+	writeCtx, cancel := retryableErrorStateContext(ctx)
+	defer cancel()
+	if err := repo.SetTempUnschedulable(writeCtx, accountID, until, reason); err != nil {
 		log.Printf("%s temp_unschedule_failed account=%d error=%v", logPrefix, accountID, err)
 	} else {
-		cacheTempUnschedState(ctx, cache, accountID, until, http.StatusBadGateway, "empty stream response", reason)
+		cacheTempUnschedState(writeCtx, cache, accountID, until, http.StatusBadGateway, "empty stream response", reason)
 		log.Printf("%s temp_unscheduled account=%d until=%v reason=%q", logPrefix, accountID, until.Format("15:04:05"), reason)
 	}
 }
@@ -2562,12 +2568,21 @@ func tempUnscheduleRetryableStatusError(ctx context.Context, repo AccountReposit
 	}
 	matchedKeyword := fmt.Sprintf("retryable_status_%d", statusCode)
 
-	if err := repo.SetTempUnschedulable(ctx, accountID, until, reason); err != nil {
+	writeCtx, cancel := retryableErrorStateContext(ctx)
+	defer cancel()
+	if err := repo.SetTempUnschedulable(writeCtx, accountID, until, reason); err != nil {
 		log.Printf("%s temp_unschedule_failed account=%d error=%v", logPrefix, accountID, err)
 		return
 	}
-	cacheTempUnschedState(ctx, cache, accountID, until, statusCode, matchedKeyword, reason)
+	cacheTempUnschedState(writeCtx, cache, accountID, until, statusCode, matchedKeyword, reason)
 	log.Printf("%s temp_unscheduled account=%d until=%v reason=%q", logPrefix, accountID, until.Format("15:04:05"), reason)
+}
+
+func retryableErrorStateContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithTimeout(context.WithoutCancel(ctx), retryableErrorStateUpdateTimeout)
 }
 
 func cacheTempUnschedState(ctx context.Context, cache TempUnschedCache, accountID int64, until time.Time, statusCode int, matchedKeyword string, message string) {
