@@ -2964,7 +2964,7 @@ func proxyHealthBlocksAnthropicScheduling(info *ProxyLatencyInfo) bool {
 
 func proxyCountryBlocksAnthropicScheduling(countryCode string) bool {
 	switch strings.ToUpper(strings.TrimSpace(countryCode)) {
-	case "CN":
+	case "BY", "CN", "CU", "IR", "KP", "RU", "SY":
 		return true
 	default:
 		return false
