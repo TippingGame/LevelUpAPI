@@ -88,10 +88,15 @@ func TestGatewayTryAcquireByLegacyOrderCapsAnthropicOAuthConcurrency(t *testing.
 	svc := &GatewayService{
 		concurrencyService: NewConcurrencyService(cache),
 	}
+	proxyID := int64(7)
 	account := &Account{
 		ID:          101,
 		Platform:    PlatformAnthropic,
 		Type:        AccountTypeOAuth,
+		Status:      StatusActive,
+		Schedulable: true,
+		ProxyID:     &proxyID,
+		Proxy:       &Proxy{ID: proxyID, Status: StatusActive},
 		Concurrency: 5,
 		Extra: map[string]any{
 			"max_sessions": 1,

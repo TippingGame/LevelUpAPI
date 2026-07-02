@@ -431,9 +431,15 @@ func (s *GeminiMessagesCompatService) getSchedulableAccount(ctx context.Context,
 }
 
 func (s *GeminiMessagesCompatService) hydrateSelectedAccount(ctx context.Context, account *Account) (*Account, error) {
-	if account == nil || s.schedulerSnapshot == nil {
+	if account == nil {
+		return account, nil
+	}
+	if s.schedulerSnapshot == nil {
 		if !IsAccountVisibleToRequestUser(ctx, account) {
 			return nil, ErrAccountNotFound
+		}
+		if !account.IsSchedulable() {
+			return nil, ErrNoAvailableAccounts
 		}
 		return account, nil
 	}
@@ -446,6 +452,9 @@ func (s *GeminiMessagesCompatService) hydrateSelectedAccount(ctx context.Context
 	}
 	if !IsAccountVisibleToRequestUser(ctx, hydrated) {
 		return nil, ErrAccountNotFound
+	}
+	if !hydrated.IsSchedulable() {
+		return nil, ErrNoAvailableAccounts
 	}
 	return hydrated, nil
 }

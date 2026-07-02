@@ -4,6 +4,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 )
@@ -161,5 +162,102 @@ func TestGatewaySelectAccountWithLoadAwareness_HydratesSelectedAccountFromSchedu
 	}
 	if got := result.Account.GetCredential("api_key"); got != "anthropic-live-key" {
 		t.Fatalf("expected hydrated api key, got %q", got)
+	}
+}
+
+func TestGatewayHydrateSelectedAccountRejectsUnschedulableSnapshotAccount(t *testing.T) {
+	cache := &snapshotHydrationCache{
+		accounts: map[int64]*Account{
+			11: {
+				ID:          11,
+				Platform:    PlatformAnthropic,
+				Type:        AccountTypeAPIKey,
+				Status:      StatusError,
+				Schedulable: false,
+				Concurrency: 1,
+			},
+		},
+	}
+
+	svc := &GatewayService{
+		schedulerSnapshot: NewSchedulerSnapshotService(cache, nil, nil, nil, nil),
+		cfg:               testConfig(),
+	}
+	selected := &Account{
+		ID:          11,
+		Platform:    PlatformAnthropic,
+		Type:        AccountTypeAPIKey,
+		Status:      StatusActive,
+		Schedulable: true,
+		Concurrency: 1,
+	}
+
+	account, err := svc.hydrateSelectedAccount(context.Background(), selected)
+	if !errors.Is(err, ErrNoAvailableAccounts) {
+		t.Fatalf("expected ErrNoAvailableAccounts, got account=%v err=%v", account, err)
+	}
+}
+
+func TestOpenAIHydrateSelectedAccountRejectsUnschedulableSnapshotAccount(t *testing.T) {
+	cache := &snapshotHydrationCache{
+		accounts: map[int64]*Account{
+			12: {
+				ID:          12,
+				Platform:    PlatformOpenAI,
+				Type:        AccountTypeAPIKey,
+				Status:      StatusError,
+				Schedulable: false,
+				Concurrency: 1,
+			},
+		},
+	}
+
+	svc := &OpenAIGatewayService{
+		schedulerSnapshot: NewSchedulerSnapshotService(cache, nil, nil, nil, nil),
+	}
+	selected := &Account{
+		ID:          12,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Status:      StatusActive,
+		Schedulable: true,
+		Concurrency: 1,
+	}
+
+	account, err := svc.hydrateSelectedAccount(context.Background(), selected)
+	if !errors.Is(err, ErrNoAvailableAccounts) {
+		t.Fatalf("expected ErrNoAvailableAccounts, got account=%v err=%v", account, err)
+	}
+}
+
+func TestGeminiMessagesHydrateSelectedAccountRejectsUnschedulableSnapshotAccount(t *testing.T) {
+	cache := &snapshotHydrationCache{
+		accounts: map[int64]*Account{
+			13: {
+				ID:          13,
+				Platform:    PlatformGemini,
+				Type:        AccountTypeAPIKey,
+				Status:      StatusError,
+				Schedulable: false,
+				Concurrency: 1,
+			},
+		},
+	}
+
+	svc := &GeminiMessagesCompatService{
+		schedulerSnapshot: NewSchedulerSnapshotService(cache, nil, nil, nil, nil),
+	}
+	selected := &Account{
+		ID:          13,
+		Platform:    PlatformGemini,
+		Type:        AccountTypeAPIKey,
+		Status:      StatusActive,
+		Schedulable: true,
+		Concurrency: 1,
+	}
+
+	account, err := svc.hydrateSelectedAccount(context.Background(), selected)
+	if !errors.Is(err, ErrNoAvailableAccounts) {
+		t.Fatalf("expected ErrNoAvailableAccounts, got account=%v err=%v", account, err)
 	}
 }

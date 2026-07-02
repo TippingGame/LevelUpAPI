@@ -1893,12 +1893,16 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 	clientAffinityKey := s.buildClientAffinityKey(metadataUserID, sub2apiUserID)
 	clientAffinityAccountID := s.getClientAffinityAccountID(ctx, groupID, clientAffinityKey)
 	finalizeSelectionResult := func(account *Account, acquired bool, release func(), waitPlan *AccountWaitPlan) (*AccountSelectionResult, error) {
-		if acquired {
-			s.bindClientAffinityAccount(ctx, groupID, clientAffinityKey, account)
-			s.bindAccountUserAffinity(ctx, groupID, account, sub2apiUserID)
-			s.bindAccountProxyExitIP(ctx, account)
+		selection, err := s.newSelectionResult(ctx, account, acquired, release, waitPlan)
+		if err != nil {
+			return nil, err
 		}
-		return s.newSelectionResult(ctx, account, acquired, release, waitPlan)
+		if acquired {
+			s.bindClientAffinityAccount(ctx, groupID, clientAffinityKey, selection.Account)
+			s.bindAccountUserAffinity(ctx, groupID, selection.Account, sub2apiUserID)
+			s.bindAccountProxyExitIP(ctx, selection.Account)
+		}
+		return selection, nil
 	}
 	tryClientAffinity := func(available []accountWithLoad, layer string) (*AccountSelectionResult, bool, error) {
 		if clientAffinityAccountID <= 0 || s.concurrencyService == nil {
@@ -3379,6 +3383,9 @@ func (s *GatewayService) hydrateSelectedAccount(ctx context.Context, account *Ac
 		if !IsAccountVisibleToRequestUser(ctx, account) {
 			return nil, ErrAccountNotFound
 		}
+		if !s.isAccountSchedulableForSelection(ctx, account) {
+			return nil, ErrNoAvailableAccounts
+		}
 		return account, nil
 	}
 	hydrated, err := s.schedulerSnapshot.GetAccount(ctx, account.ID)
@@ -3391,12 +3398,18 @@ func (s *GatewayService) hydrateSelectedAccount(ctx context.Context, account *Ac
 	if !IsAccountVisibleToRequestUser(ctx, hydrated) {
 		return nil, ErrAccountNotFound
 	}
+	if !s.isAccountSchedulableForSelection(ctx, hydrated) {
+		return nil, ErrNoAvailableAccounts
+	}
 	return hydrated, nil
 }
 
 func (s *GatewayService) newSelectionResult(ctx context.Context, account *Account, acquired bool, release func(), waitPlan *AccountWaitPlan) (*AccountSelectionResult, error) {
 	hydrated, err := s.hydrateSelectedAccount(ctx, account)
 	if err != nil {
+		if acquired && release != nil {
+			release()
+		}
 		return nil, err
 	}
 	return &AccountSelectionResult{

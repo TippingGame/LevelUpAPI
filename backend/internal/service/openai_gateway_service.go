@@ -2290,6 +2290,9 @@ func (s *OpenAIGatewayService) hydrateSelectedAccount(ctx context.Context, accou
 		if !IsAccountVisibleToRequestUser(ctx, account) {
 			return nil, ErrAccountNotFound
 		}
+		if !s.isOpenAIAccountProxyHealthSchedulable(ctx, account) || !account.IsSchedulable() || !account.IsOpenAI() {
+			return nil, ErrNoAvailableAccounts
+		}
 		return account, nil
 	}
 	hydrated, err := s.schedulerSnapshot.GetAccount(ctx, account.ID)
@@ -2302,12 +2305,18 @@ func (s *OpenAIGatewayService) hydrateSelectedAccount(ctx context.Context, accou
 	if !IsAccountVisibleToRequestUser(ctx, hydrated) {
 		return nil, ErrAccountNotFound
 	}
+	if !s.isOpenAIAccountProxyHealthSchedulable(ctx, hydrated) || !hydrated.IsSchedulable() || !hydrated.IsOpenAI() {
+		return nil, ErrNoAvailableAccounts
+	}
 	return hydrated, nil
 }
 
 func (s *OpenAIGatewayService) newSelectionResult(ctx context.Context, account *Account, acquired bool, release func(), waitPlan *AccountWaitPlan) (*AccountSelectionResult, error) {
 	hydrated, err := s.hydrateSelectedAccount(ctx, account)
 	if err != nil {
+		if acquired && release != nil {
+			release()
+		}
 		return nil, err
 	}
 	return &AccountSelectionResult{
