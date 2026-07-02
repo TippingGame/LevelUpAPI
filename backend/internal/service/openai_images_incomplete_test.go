@@ -3,6 +3,7 @@
 package service
 
 import (
+	"context"
 	"errors"
 	"io"
 	"net/http"
@@ -62,7 +63,7 @@ func TestImagesOAuthNonStreaming_CompletedNoImageTriggersSameAccountRetry(t *tes
 	}
 
 	svc := &OpenAIGatewayService{}
-	_, _, err := svc.handleOpenAIImagesOAuthNonStreamingResponse(resp, c, "b64_json", "gpt-image-2")
+	_, _, err := svc.handleOpenAIImagesOAuthNonStreamingResponse(context.Background(), nil, resp, c, "b64_json", "gpt-image-2")
 
 	require.Error(t, err)
 	var failoverErr *UpstreamFailoverError
@@ -86,7 +87,7 @@ func TestImagesOAuthNonStreaming_ContentRefusalReturns400NoRetry(t *testing.T) {
 
 	resp := &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(upstreamSSE))}
 	svc := &OpenAIGatewayService{}
-	_, _, err := svc.handleOpenAIImagesOAuthNonStreamingResponse(resp, c, "b64_json", "gpt-image-2")
+	_, _, err := svc.handleOpenAIImagesOAuthNonStreamingResponse(context.Background(), nil, resp, c, "b64_json", "gpt-image-2")
 
 	require.Error(t, err)
 	var failoverErr *UpstreamFailoverError

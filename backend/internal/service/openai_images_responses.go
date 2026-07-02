@@ -766,7 +766,14 @@ func openAIImagesUpstreamErrorFromGJSON(errorObj gjson.Result, upstreamRequestID
 	}
 }
 
-func openAIImagesResponsesFailure(body []byte) (int, string, bool) {
+type openAIImagesResponsesFailureInfo struct {
+	StatusCode int
+	Message    string
+	Body       []byte
+	Payload    []byte
+}
+
+func openAIImagesResponsesFailure(body []byte) (*openAIImagesResponsesFailureInfo, bool) {
 	for _, line := range bytes.Split(body, []byte("\n")) {
 		line = bytes.TrimRight(line, "\r")
 		data, ok := extractOpenAISSEDataLine(string(line))
@@ -774,28 +781,66 @@ func openAIImagesResponsesFailure(body []byte) (int, string, bool) {
 			continue
 		}
 		payload := []byte(data)
-		if !gjson.ValidBytes(payload) {
-			continue
+		if info, ok := openAIImagesResponsesFailureFromPayload(payload); ok {
+			return info, true
 		}
-		eventType := strings.TrimSpace(gjson.GetBytes(payload, "type").String())
-		responseStatus := strings.TrimSpace(gjson.GetBytes(payload, "response.status").String())
-		if eventType != "response.failed" && (eventType != "response.completed" || responseStatus != "failed") {
-			continue
-		}
-		message := strings.TrimSpace(gjson.GetBytes(payload, "response.error.message").String())
-		if message == "" {
-			message = strings.TrimSpace(gjson.GetBytes(payload, "error.message").String())
-		}
-		if message == "" {
-			message = "OpenAI image generation failed"
-		}
-		status := int(gjson.GetBytes(payload, "response.error.status").Int())
-		if status <= 0 {
-			status = http.StatusBadGateway
-		}
-		return status, sanitizeUpstreamErrorMessage(message), true
 	}
-	return 0, "", false
+	return nil, false
+}
+
+func openAIImagesResponsesFailureFromPayload(payload []byte) (*openAIImagesResponsesFailureInfo, bool) {
+	if !gjson.ValidBytes(payload) {
+		return nil, false
+	}
+	eventType := strings.TrimSpace(gjson.GetBytes(payload, "type").String())
+	responseStatus := strings.TrimSpace(gjson.GetBytes(payload, "response.status").String())
+	if eventType != "error" && eventType != "response.failed" && (eventType != "response.completed" || responseStatus != "failed") {
+		return nil, false
+	}
+
+	body := normalizeOpenAIResponsesStreamErrorBody(payload)
+	code, errType, message := parseOpenAIResponsesStreamErrorFields(body)
+	if message == "" {
+		message = "OpenAI image generation failed"
+	}
+	message = sanitizeUpstreamErrorMessage(message)
+
+	status := int(firstPositiveGJSONIntFromBytes(payload,
+		"response.error.status",
+		"response.error.status_code",
+		"error.status",
+		"error.status_code",
+	))
+	if status <= 0 {
+		status = openAIResponsesStreamErrorSideEffectStatus(code, errType, message, body)
+	}
+	if status <= 0 && isOpenAIModelCapacityError(http.StatusServiceUnavailable, strings.Join([]string{code, errType, message}, " "), body) {
+		status = http.StatusServiceUnavailable
+	}
+	if status <= 0 {
+		status = http.StatusBadGateway
+	}
+
+	if !gjson.GetBytes(body, "error").Exists() && !gjson.GetBytes(body, "response.error").Exists() {
+		body = openAIImagesFailoverBody(message)
+	}
+
+	return &openAIImagesResponsesFailureInfo{
+		StatusCode: status,
+		Message:    message,
+		Body:       body,
+		Payload:    payload,
+	}, true
+}
+
+func firstPositiveGJSONIntFromBytes(payload []byte, paths ...string) int64 {
+	for _, path := range paths {
+		value := gjson.GetBytes(payload, path)
+		if value.Exists() && value.Int() > 0 {
+			return value.Int()
+		}
+	}
+	return 0
 }
 
 func openAIImagesFailoverBody(message string) []byte {
@@ -821,6 +866,8 @@ func (s *OpenAIGatewayService) writeOpenAIImagesStreamEvent(c *gin.Context, flus
 }
 
 func (s *OpenAIGatewayService) handleOpenAIImagesOAuthNonStreamingResponse(
+	ctx context.Context,
+	account *Account,
 	resp *http.Response,
 	c *gin.Context,
 	responseFormat string,
@@ -835,10 +882,14 @@ func (s *OpenAIGatewayService) handleOpenAIImagesOAuthNonStreamingResponse(
 		writeOpenAIImagesUpstreamErrorResponse(c, upstreamErr)
 		return OpenAIUsage{}, 0, upstreamErr
 	}
-	if status, message, failed := openAIImagesResponsesFailure(body); failed {
+	if failure, failed := openAIImagesResponsesFailure(body); failed {
+		s.handleOpenAIResponsesStreamErrorSideEffect(ctx, account, resp.Header, failure.Payload, failure.Message, true)
+		if IsUpstreamReplayUnsafeTimeoutStatus(failure.StatusCode) {
+			return OpenAIUsage{}, 0, fmt.Errorf("openai image generation failed: %d %s", failure.StatusCode, failure.Message)
+		}
 		return OpenAIUsage{}, 0, &UpstreamFailoverError{
-			StatusCode:   status,
-			ResponseBody: openAIImagesFailoverBody(message),
+			StatusCode:   failure.StatusCode,
+			ResponseBody: failure.Body,
 		}
 	}
 
@@ -889,6 +940,8 @@ func (s *OpenAIGatewayService) handleOpenAIImagesOAuthNonStreamingResponse(
 }
 
 func (s *OpenAIGatewayService) handleOpenAIImagesOAuthStreamingResponse(
+	ctx context.Context,
+	account *Account,
 	resp *http.Response,
 	c *gin.Context,
 	startTime time.Time,
@@ -947,6 +1000,12 @@ func (s *OpenAIGatewayService) handleOpenAIImagesOAuthStreamingResponse(
 							_ = s.writeOpenAIImagesStreamEvent(c, flusher, "error", buildOpenAIImagesStreamErrorBodyFromUpstream(upstreamErr))
 							setOpsUpstreamError(c, upstreamErr.clientStatusCode(), upstreamErr.clientMessage(), "")
 							return OpenAIUsage{}, imageCount, firstTokenMs, upstreamErr
+						}
+						if failure, ok := openAIImagesResponsesFailureFromPayload(dataBytes); ok {
+							s.handleOpenAIResponsesStreamErrorSideEffect(ctx, account, resp.Header, dataBytes, failure.Message, true)
+							_ = s.writeOpenAIImagesStreamEvent(c, flusher, "error", failure.Body)
+							setOpsUpstreamError(c, failure.StatusCode, failure.Message, truncateString(string(failure.Body), 1024))
+							return OpenAIUsage{}, imageCount, firstTokenMs, fmt.Errorf("openai image generation failed: %d %s", failure.StatusCode, failure.Message)
 						}
 					case "response.image_generation_call.partial_image":
 						b64 := strings.TrimSpace(gjson.GetBytes(dataBytes, "partial_image_b64").String())
@@ -1165,12 +1224,12 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesOAuth(
 		firstTokenMs *int
 	)
 	if parsed.Stream {
-		usage, imageCount, firstTokenMs, err = s.handleOpenAIImagesOAuthStreamingResponse(resp, c, startTime, parsed.ResponseFormat, openAIImagesStreamPrefix(parsed), requestModel)
+		usage, imageCount, firstTokenMs, err = s.handleOpenAIImagesOAuthStreamingResponse(ctx, account, resp, c, startTime, parsed.ResponseFormat, openAIImagesStreamPrefix(parsed), requestModel)
 		if err != nil {
 			return nil, err
 		}
 	} else {
-		usage, imageCount, err = s.handleOpenAIImagesOAuthNonStreamingResponse(resp, c, parsed.ResponseFormat, requestModel)
+		usage, imageCount, err = s.handleOpenAIImagesOAuthNonStreamingResponse(ctx, account, resp, c, parsed.ResponseFormat, requestModel)
 		if err != nil {
 			return nil, err
 		}
