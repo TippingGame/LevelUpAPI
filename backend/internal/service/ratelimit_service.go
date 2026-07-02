@@ -69,6 +69,8 @@ const (
 	openAI403CounterWindowMinutes   = 180
 	openAIModelCapacityCooldown     = time.Minute
 	upstreamModelNotFoundCooldown   = 30 * time.Minute
+	oAuth401CooldownMinutesDefault  = 10
+	overloadCooldownMinutesDefault  = 10
 )
 
 var cloudflareChallengeCooldownSteps = []time.Duration{
@@ -257,10 +259,7 @@ func (s *RateLimitService) HandleUpstreamError(ctx context.Context, account *Acc
 			if upstreamMsg != "" {
 				msg = "OAuth 401: " + upstreamMsg
 			}
-			cooldownMinutes := s.cfg.RateLimit.OAuth401CooldownMinutes
-			if cooldownMinutes <= 0 {
-				cooldownMinutes = 10
-			}
+			cooldownMinutes := s.oAuth401CooldownMinutes()
 			until := time.Now().Add(time.Duration(cooldownMinutes) * time.Minute)
 			if err := s.accountRepo.SetTempUnschedulable(ctx, account.ID, until, msg); err != nil {
 				slog.Warn("oauth_401_set_temp_unschedulable_failed", "account_id", account.ID, "error", err)
@@ -1744,11 +1743,7 @@ func (s *RateLimitService) handle529(ctx context.Context, account *Account) {
 	}
 	// 回退到配置文件
 	if settings == nil {
-		cooldown := s.cfg.RateLimit.OverloadCooldownMinutes
-		if cooldown <= 0 {
-			cooldown = 10
-		}
-		settings = &OverloadCooldownSettings{Enabled: true, CooldownMinutes: cooldown}
+		settings = &OverloadCooldownSettings{Enabled: true, CooldownMinutes: s.overloadCooldownMinutes()}
 	}
 
 	if !settings.Enabled {
@@ -1758,7 +1753,7 @@ func (s *RateLimitService) handle529(ctx context.Context, account *Account) {
 
 	cooldownMinutes := settings.CooldownMinutes
 	if cooldownMinutes <= 0 {
-		cooldownMinutes = 10
+		cooldownMinutes = overloadCooldownMinutesDefault
 	}
 
 	until := time.Now().Add(time.Duration(cooldownMinutes) * time.Minute)
@@ -1768,6 +1763,20 @@ func (s *RateLimitService) handle529(ctx context.Context, account *Account) {
 	}
 
 	slog.Info("account_overloaded", "account_id", account.ID, "until", until)
+}
+
+func (s *RateLimitService) oAuth401CooldownMinutes() int {
+	if s != nil && s.cfg != nil && s.cfg.RateLimit.OAuth401CooldownMinutes > 0 {
+		return s.cfg.RateLimit.OAuth401CooldownMinutes
+	}
+	return oAuth401CooldownMinutesDefault
+}
+
+func (s *RateLimitService) overloadCooldownMinutes() int {
+	if s != nil && s.cfg != nil && s.cfg.RateLimit.OverloadCooldownMinutes > 0 {
+		return s.cfg.RateLimit.OverloadCooldownMinutes
+	}
+	return overloadCooldownMinutesDefault
 }
 
 // UpdateSessionWindow 从成功响应更新5h窗口状态

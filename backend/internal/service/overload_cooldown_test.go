@@ -250,6 +250,18 @@ func TestHandle529_NilSettingService_ZeroConfig_DefaultsTen(t *testing.T) {
 	require.WithinDuration(t, before.Add(10*time.Minute), accountRepo.lastOverloadEnd, 2*time.Second)
 }
 
+func TestHandle529_NilConfig_DefaultsTen(t *testing.T) {
+	accountRepo := &overloadAccountRepoStub{}
+	svc := NewRateLimitService(accountRepo, nil, nil, nil, nil)
+
+	account := &Account{ID: 89, Platform: PlatformAnthropic, Type: AccountTypeOAuth}
+	before := time.Now()
+	svc.handle529(context.Background(), account)
+
+	require.Equal(t, 1, accountRepo.overloadCalls)
+	require.WithinDuration(t, before.Add(10*time.Minute), accountRepo.lastOverloadEnd, 2*time.Second)
+}
+
 func TestHandle529_DBReadError_FallsBackToConfig(t *testing.T) {
 	accountRepo := &overloadAccountRepoStub{}
 	errRepo := &errSettingRepo{readErr: context.DeadlineExceeded}

@@ -160,6 +160,24 @@ func TestRateLimitService_HandleUpstreamError_OAuth401InvalidatorError(t *testin
 	require.Len(t, invalidator.accounts, 1)
 }
 
+func TestRateLimitService_HandleUpstreamError_OAuth401NilConfigDefaultsTen(t *testing.T) {
+	repo := &rateLimitAccountRepoStub{}
+	service := NewRateLimitService(repo, nil, nil, nil, nil)
+	account := &Account{
+		ID:       104,
+		Platform: PlatformGemini,
+		Type:     AccountTypeOAuth,
+	}
+
+	before := time.Now()
+	shouldDisable := service.HandleUpstreamError(context.Background(), account, 401, http.Header{}, []byte("unauthorized"))
+
+	require.True(t, shouldDisable)
+	require.Equal(t, 0, repo.setErrorCalls)
+	require.Equal(t, 1, repo.tempCalls)
+	require.WithinDuration(t, before.Add(10*time.Minute), repo.lastTempUntil, 2*time.Second)
+}
+
 func TestRateLimitService_HandleUpstreamError_NonOAuth401(t *testing.T) {
 	repo := &rateLimitAccountRepoStub{}
 	invalidator := &tokenCacheInvalidatorRecorder{}
