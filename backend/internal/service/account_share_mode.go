@@ -31,32 +31,33 @@ const (
 	AccountShareMembershipStatusActive = "active"
 	AccountShareMembershipStatusEnded  = "ended"
 
-	AccountShareModeDefaultMinBalance          = 1.0
-	AccountShareModeDefaultPlatformShareRatio  = 0.10
-	AccountShareModeDefaultOwnerShareRatio     = 0.90
-	AccountShareModeDefaultCodexLimitPercent   = CodexQuotaDefaultLimitPercent
-	AccountShareModeMinSeats                   = 2
-	AccountShareModeMaxSeats                   = 12
-	AccountShareModeDefaultPerUserConcurrency  = 5
-	AccountShareModeDefaultAccountConcurrency  = 20
-	AccountShareModeMaxAccountConcurrency      = 50
-	AccountShareModeSeatPrepayDuration         = time.Minute
-	AccountShareModeSeatBillingInterval        = 15 * time.Second
-	AccountShareModeSeatBillingBatchSize       = 100
-	AccountShareModeEndMembershipTokenTTL      = 2 * time.Minute
-	AccountShareModeMaxIdleTimeoutMinutes      = 10080
-	AccountShareModeLastRequestTouchInterval   = 30 * time.Second
-	AccountShareModeEditSessionTTL             = 10 * time.Minute
-	AccountShareModeListingTabUsing            = "using"
-	AccountShareModeListingTabHistory          = "history"
-	AccountShareModeListingTabAll              = "all"
-	AccountShareModeListingTabMine             = "mine"
-	AccountShareMembershipEndReasonManual      = "manual"
-	AccountShareMembershipEndReasonIdleTimeout = "idle_timeout"
-	AccountShareMembershipEndReasonPrepay      = "prepay_insufficient"
-	AccountShareMembershipEndReasonUnavailable = "account_unavailable"
-	accountShareModeContextBindingMissingError = "该分组未绑定账号"
-	accountShareModeEndMembershipTokenAction   = "account_share_mode:end_membership:v1"
+	AccountShareModeDefaultMinBalance           = 1.0
+	AccountShareModeDefaultPlatformShareRatio   = 0.10
+	AccountShareModeDefaultOwnerShareRatio      = 0.90
+	AccountShareModeDefaultCodexLimitPercent    = CodexQuotaDefaultLimitPercent
+	AccountShareModeMinSeats                    = 2
+	AccountShareModeMaxSeats                    = 12
+	AccountShareModeDefaultPerUserConcurrency   = 5
+	AccountShareModeDefaultAccountConcurrency   = 20
+	AccountShareModeMaxAccountConcurrency       = 50
+	AccountShareModeSeatPrepayDuration          = time.Minute
+	AccountShareModeSeatBillingInterval         = 15 * time.Second
+	AccountShareModeSeatBillingBatchSize        = 100
+	AccountShareModeEndMembershipTokenTTL       = 2 * time.Minute
+	AccountShareModeMaxIdleTimeoutMinutes       = 10080
+	AccountShareModeLastRequestTouchInterval    = 30 * time.Second
+	AccountShareModeEditSessionTTL              = 10 * time.Minute
+	accountShareModeUserProxyDefaultMaxAccounts = 1
+	AccountShareModeListingTabUsing             = "using"
+	AccountShareModeListingTabHistory           = "history"
+	AccountShareModeListingTabAll               = "all"
+	AccountShareModeListingTabMine              = "mine"
+	AccountShareMembershipEndReasonManual       = "manual"
+	AccountShareMembershipEndReasonIdleTimeout  = "idle_timeout"
+	AccountShareMembershipEndReasonPrepay       = "prepay_insufficient"
+	AccountShareMembershipEndReasonUnavailable  = "account_unavailable"
+	accountShareModeContextBindingMissingError  = "该分组未绑定账号"
+	accountShareModeEndMembershipTokenAction    = "account_share_mode:end_membership:v1"
 )
 
 var accountShareModeDefaultAllowedModels = []string{
@@ -1854,7 +1855,7 @@ func normalizeAccountShareProxyInput(ownerUserID int64, input CreateAccountShare
 		Password:    strings.TrimSpace(input.Password),
 		OwnerUserID: &ownerID,
 		Status:      StatusActive,
-		MaxAccounts: 0,
+		MaxAccounts: accountShareModeUserProxyDefaultMaxAccounts,
 	}, nil
 }
 

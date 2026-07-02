@@ -43,6 +43,7 @@ type accountShareModeBindingResult struct {
 
 type accountShareModeProxyRepoStub struct {
 	proxy            *Proxy
+	createCalls      int
 	getVisibleUserID int64
 	getVisibleID     int64
 	getVisibleCalls  int
@@ -89,6 +90,7 @@ func (s *accountShareModeRecoveryStub) RecoverAccountAfterSuccessfulTest(_ conte
 }
 
 func (r *accountShareModeProxyRepoStub) Create(_ context.Context, proxy *Proxy) error {
+	r.createCalls++
 	if proxy.ID <= 0 {
 		proxy.ID = 7
 	}
@@ -368,6 +370,45 @@ func TestAccountShareModeCreateUserProxyAssignsCurrentOwner(t *testing.T) {
 	}
 	if got.Protocol != "socks5" || got.Host != "192.168.0.1" || got.Username != "user" || got.Password != "pass" {
 		t.Fatalf("proxy normalization mismatch: %#v", got)
+	}
+	if got.MaxAccounts != accountShareModeUserProxyDefaultMaxAccounts {
+		t.Fatalf("expected default max accounts %d, got %d", accountShareModeUserProxyDefaultMaxAccounts, got.MaxAccounts)
+	}
+	if proxyRepo.createCalls != 1 {
+		t.Fatalf("expected proxy to be created once, got %d", proxyRepo.createCalls)
+	}
+}
+
+func TestAccountShareModeCreateUserProxyReusesExistingCapacity(t *testing.T) {
+	existing := &Proxy{
+		ID:          11,
+		Name:        "existing proxy",
+		Protocol:    "socks5",
+		Host:        "192.168.0.1",
+		Port:        8000,
+		Status:      StatusActive,
+		MaxAccounts: 5,
+	}
+	proxyRepo := &accountShareModeProxyRepoStub{proxy: existing}
+	svc := &AccountShareModeService{proxyRepo: proxyRepo}
+
+	got, err := svc.CreateUserProxy(context.Background(), 42, CreateAccountShareProxyInput{
+		Name:     "new proxy",
+		Protocol: "socks5",
+		Host:     "192.168.0.1",
+		Port:     8000,
+	})
+	if err != nil {
+		t.Fatalf("CreateUserProxy failed: %v", err)
+	}
+	if got != existing {
+		t.Fatalf("expected existing proxy to be reused, got %#v", got)
+	}
+	if got.MaxAccounts != 5 {
+		t.Fatalf("expected existing max accounts to be preserved, got %d", got.MaxAccounts)
+	}
+	if proxyRepo.createCalls != 0 {
+		t.Fatalf("expected no proxy create when existing endpoint is reused, got %d", proxyRepo.createCalls)
 	}
 }
 
