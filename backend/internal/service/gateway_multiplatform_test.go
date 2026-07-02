@@ -2613,6 +2613,46 @@ func TestGatewayService_SelectAccountWithLoadAwareness(t *testing.T) {
 		require.Equal(t, accountUserAffinityTTL, cache.stringTTLs[accountUserAffinityKey(2)])
 	})
 
+	t.Run("客户端亲和-失败账号清理匹配绑定", func(t *testing.T) {
+		const userID int64 = 44
+		metadataUserID := FormatMetadataUserID(
+			"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+			"acc-uuid-3",
+			"323e4567-e89b-12d3-a456-426614174000",
+			"2.1.78",
+		)
+		affinityKey := (&GatewayService{}).buildClientAffinityKey(metadataUserID, userID)
+		cache := &mockGatewayCacheForPlatform{
+			stringBindings: map[string]string{affinityKey: "1"},
+		}
+		svc := &GatewayService{cache: cache}
+
+		cleared, err := svc.ClearClientAffinityIfBoundTo(ctx, nil, metadataUserID, userID, 1)
+		require.NoError(t, err)
+		require.True(t, cleared)
+		require.NotContains(t, cache.stringBindings, affinityKey)
+	})
+
+	t.Run("客户端亲和-失败账号不清理其他绑定", func(t *testing.T) {
+		const userID int64 = 45
+		metadataUserID := FormatMetadataUserID(
+			"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+			"acc-uuid-4",
+			"423e4567-e89b-12d3-a456-426614174000",
+			"2.1.78",
+		)
+		affinityKey := (&GatewayService{}).buildClientAffinityKey(metadataUserID, userID)
+		cache := &mockGatewayCacheForPlatform{
+			stringBindings: map[string]string{affinityKey: "2"},
+		}
+		svc := &GatewayService{cache: cache}
+
+		cleared, err := svc.ClearClientAffinityIfBoundTo(ctx, nil, metadataUserID, userID, 1)
+		require.NoError(t, err)
+		require.False(t, cleared)
+		require.Equal(t, "2", cache.stringBindings[affinityKey])
+	})
+
 	t.Run("账号用户亲和-同用户允许继续使用绑定账号", func(t *testing.T) {
 		const userID int64 = 42
 

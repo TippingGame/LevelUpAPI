@@ -996,6 +996,30 @@ func (s *GatewayService) getClientAffinityAccountID(ctx context.Context, groupID
 	return accountID
 }
 
+// ClearClientAffinityIfBoundTo removes a user/device affinity only when it
+// still points at the failed account.
+func (s *GatewayService) ClearClientAffinityIfBoundTo(ctx context.Context, groupID *int64, metadataUserID string, sub2apiUserID int64, accountID int64) (bool, error) {
+	if s == nil || s.cache == nil || accountID <= 0 {
+		return false, nil
+	}
+	key := s.buildClientAffinityKey(metadataUserID, sub2apiUserID)
+	if key == "" {
+		return false, nil
+	}
+	raw, err := s.cache.GetSessionString(ctx, derefGroupID(groupID), key)
+	if err != nil {
+		return false, nil
+	}
+	currentAccountID, err := strconv.ParseInt(strings.TrimSpace(raw), 10, 64)
+	if err != nil || currentAccountID != accountID {
+		return false, nil
+	}
+	if err := s.cache.DeleteSessionString(ctx, derefGroupID(groupID), key); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 func (s *GatewayService) bindClientAffinityAccount(ctx context.Context, groupID *int64, key string, account *Account) {
 	if s == nil || s.cache == nil || key == "" || account == nil || account.ID <= 0 {
 		return

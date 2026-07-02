@@ -1016,6 +1016,7 @@ routeLoop:
 							currentSessionBoundAccountID = 0
 							currentHasBoundSession = false
 						}
+						h.clearClientAffinityIfBoundTo(c.Request.Context(), currentAPIKey.GroupID, parsedReq.MetadataUserID, subject.UserID, account.ID, reqLog, "upstream_failover")
 					}
 					switch action {
 					case FailoverContinue:
