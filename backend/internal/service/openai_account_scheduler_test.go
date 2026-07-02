@@ -2031,6 +2031,47 @@ func TestDefaultOpenAIAccountScheduler_IsAccountTransportCompatible_Branches(t *
 	require.True(t, scheduler.isAccountTransportCompatible(account, OpenAIUpstreamTransportResponsesWebsocketV2))
 }
 
+func TestDefaultOpenAIAccountScheduler_RequirePrivacySetRuntimeEvictsUnreadyAccount(t *testing.T) {
+	repo := &permanentKeywordAccountRepoStub{}
+	cache := &runtimeTempUnschedCacheStub{}
+	scheduler := &defaultOpenAIAccountScheduler{
+		service: &OpenAIGatewayService{
+			accountRepo:      repo,
+			rateLimitService: &RateLimitService{tempUnschedCache: cache},
+		},
+	}
+	accounts := []Account{
+		{
+			ID:          88,
+			Platform:    PlatformOpenAI,
+			Type:        AccountTypeOAuth,
+			Status:      StatusActive,
+			Schedulable: true,
+		},
+	}
+	group := &Group{
+		ID:                7,
+		Name:              "openai-private",
+		RequirePrivacySet: true,
+	}
+
+	filtered, loadReq := scheduler.filterOpenAIAccountsForLoadBalance(
+		context.Background(),
+		accounts,
+		OpenAIAccountScheduleRequest{},
+		group,
+	)
+
+	require.Empty(t, filtered)
+	require.Empty(t, loadReq)
+	require.Equal(t, 1, repo.setErrorCalls)
+	require.Contains(t, repo.lastErrorMsg, "Privacy not set")
+	require.Equal(t, StatusError, accounts[0].Status)
+	require.False(t, accounts[0].Schedulable)
+	require.NotNil(t, cache.states[88])
+	require.Equal(t, "account_error", cache.states[88].MatchedKeyword)
+}
+
 func int64PtrForTest(v int64) *int64 {
 	return &v
 }

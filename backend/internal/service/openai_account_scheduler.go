@@ -1152,8 +1152,7 @@ func (s *defaultOpenAIAccountScheduler) filterOpenAIAccountsForLoadBalance(
 		}
 		// require_privacy_set: 跳过 privacy 未设置的账号并标记异常
 		if schedGroup != nil && schedGroup.RequirePrivacySet && !account.IsPrivacySet() {
-			_ = s.service.accountRepo.SetError(ctx, account.ID,
-				fmt.Sprintf("Privacy not set, required by group [%s]", schedGroup.Name))
+			s.markPrivacyRequiredAccountError(ctx, account, schedGroup)
 			continue
 		}
 		if !s.isAccountRequestCompatible(account, req) {
@@ -1169,6 +1168,21 @@ func (s *defaultOpenAIAccountScheduler) filterOpenAIAccountsForLoadBalance(
 		})
 	}
 	return filtered, loadReq
+}
+
+func (s *defaultOpenAIAccountScheduler) markPrivacyRequiredAccountError(ctx context.Context, account *Account, group *Group) {
+	if s == nil || s.service == nil || s.service.accountRepo == nil || account == nil || group == nil {
+		return
+	}
+	msg := fmt.Sprintf("Privacy not set, required by group [%s]", group.Name)
+	if err := s.service.accountRepo.SetError(ctx, account.ID, msg); err != nil {
+		return
+	}
+	var cache TempUnschedCache
+	if s.service.rateLimitService != nil {
+		cache = s.service.rateLimitService.tempUnschedCache
+	}
+	markAccountErrorRuntimeEvicted(ctx, cache, account, msg, "openai_scheduler_require_privacy_set")
 }
 
 func (s *defaultOpenAIAccountScheduler) isAccountTransportCompatible(account *Account, requiredTransport OpenAIUpstreamTransport) bool {

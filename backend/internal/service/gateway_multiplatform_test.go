@@ -26,6 +26,9 @@ type mockAccountRepoForPlatform struct {
 	accountsByID     map[int64]*Account
 	listPlatformFunc func(ctx context.Context, platform string) ([]Account, error)
 	getByIDCalls     int
+	setErrorCalls    int
+	lastErrorID      int64
+	lastErrorMsg     string
 }
 
 func (m *mockAccountRepoForPlatform) GetByID(ctx context.Context, id int64) (*Account, error) {
@@ -112,6 +115,9 @@ func (m *mockAccountRepoForPlatform) BatchUpdateLastUsed(ctx context.Context, up
 	return nil
 }
 func (m *mockAccountRepoForPlatform) SetError(ctx context.Context, id int64, errorMsg string) error {
+	m.setErrorCalls++
+	m.lastErrorID = id
+	m.lastErrorMsg = errorMsg
 	return nil
 }
 func (m *mockAccountRepoForPlatform) ClearError(ctx context.Context, id int64) error {
@@ -3673,6 +3679,68 @@ func TestGatewayService_GroupResolution_ReusesContextGroup(t *testing.T) {
 	require.NotNil(t, account)
 	require.Equal(t, 1, groupRepo.getByIDCalls) // +1 for require_privacy_set check
 	require.Equal(t, 0, groupRepo.getByIDLiteCalls)
+}
+
+func TestGatewayService_RequirePrivacySetRuntimeEvictsUnreadyMixedAccount(t *testing.T) {
+	ctx := context.Background()
+	groupID := int64(77)
+	group := &Group{
+		ID:                groupID,
+		Name:              "gemini-private",
+		Platform:          PlatformGemini,
+		Status:            StatusActive,
+		RequirePrivacySet: true,
+		Hydrated:          true,
+	}
+	ctx = context.WithValue(ctx, ctxkey.Group, group)
+
+	repo := &mockAccountRepoForPlatform{
+		accounts: []Account{
+			{
+				ID:          1,
+				Platform:    PlatformAntigravity,
+				Type:        AccountTypeOAuth,
+				Status:      StatusActive,
+				Schedulable: true,
+				Priority:    1,
+				Extra:       map[string]any{"mixed_scheduling": true},
+				GroupIDs:    []int64{groupID},
+			},
+			{
+				ID:          2,
+				Platform:    PlatformGemini,
+				Type:        AccountTypeOAuth,
+				Status:      StatusActive,
+				Schedulable: true,
+				Priority:    2,
+				GroupIDs:    []int64{groupID},
+			},
+		},
+		accountsByID: map[int64]*Account{},
+	}
+	for i := range repo.accounts {
+		repo.accountsByID[repo.accounts[i].ID] = &repo.accounts[i]
+	}
+	cache := &runtimeTempUnschedCacheStub{}
+	svc := &GatewayService{
+		accountRepo: repo,
+		groupRepo: &mockGroupRepoForGateway{
+			groups: map[int64]*Group{groupID: group},
+		},
+		cfg:              testConfig(),
+		rateLimitService: &RateLimitService{tempUnschedCache: cache},
+	}
+
+	account, err := svc.SelectAccountForModelWithExclusions(ctx, &groupID, "", "", nil)
+
+	require.NoError(t, err)
+	require.NotNil(t, account)
+	require.Equal(t, int64(2), account.ID)
+	require.Equal(t, 1, repo.setErrorCalls)
+	require.Equal(t, int64(1), repo.lastErrorID)
+	require.Contains(t, repo.lastErrorMsg, "Privacy not set")
+	require.NotNil(t, cache.states[1])
+	require.Equal(t, "account_error", cache.states[1].MatchedKeyword)
 }
 
 func TestGatewayService_GroupResolution_IgnoresInvalidContextGroup(t *testing.T) {
