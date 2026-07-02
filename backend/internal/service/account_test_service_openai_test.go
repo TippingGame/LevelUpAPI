@@ -477,15 +477,16 @@ func TestAccountTestService_OpenAI429WithoutResetSignalDoesNotMutateRuntimeState
 	require.Nil(t, account.RateLimitResetAt)
 }
 
-func TestAccountTestService_OpenAI401SetsPermanentErrorOnly(t *testing.T) {
+func TestAccountTestService_OpenAI401SetsPermanentErrorAndRuntimeEviction(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	ctx, _ := newTestContext()
 
 	resp := newJSONResponse(http.StatusUnauthorized, `{"error":"bad token"}`)
 
 	repo := &openAIAccountTestRepo{}
+	cache := &runtimeTempUnschedCacheStub{}
 	upstream := &queuedHTTPUpstream{responses: []*http.Response{resp}}
-	svc := &AccountTestService{accountRepo: repo, httpUpstream: upstream}
+	svc := &AccountTestService{accountRepo: repo, httpUpstream: upstream, rateLimitService: NewRateLimitService(nil, nil, nil, nil, cache)}
 	account := &Account{
 		ID:          80,
 		Platform:    PlatformOpenAI,
@@ -502,6 +503,9 @@ func TestAccountTestService_OpenAI401SetsPermanentErrorOnly(t *testing.T) {
 	require.Zero(t, repo.rateLimitedID)
 	require.Zero(t, repo.clearedErrorID)
 	require.Nil(t, account.RateLimitResetAt)
+	require.NotNil(t, cache.states[80])
+	require.Equal(t, "account_error", cache.states[80].MatchedKeyword)
+	require.Contains(t, cache.states[80].ErrorMessage, "Authentication failed (401)")
 }
 
 func TestAccountTestService_OpenAIAPIKeyResponsesUnsupportedUsesChatCompletionsPath(t *testing.T) {

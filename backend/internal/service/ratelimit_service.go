@@ -1294,6 +1294,7 @@ func (s *RateLimitService) handleCustomErrorCode(ctx context.Context, account *A
 		slog.Warn("account_set_error_failed", "account_id", account.ID, "status_code", statusCode, "error", err)
 		return
 	}
+	markAccountErrorRuntimeEvicted(ctx, s.tempUnschedCache, account, msg, "custom_error_code")
 	slog.Warn("account_disabled_custom_error", "account_id", account.ID, "status_code", statusCode, "error", errorMsg)
 }
 
@@ -2060,6 +2061,21 @@ func (s *RateLimitService) RecoverAccountAfterSuccessfulTest(ctx context.Context
 	})
 }
 
+func (s *RateLimitService) EvictAccountErrorFromRuntimeCache(ctx context.Context, accountID int64, errorMsg string, source string) {
+	if s == nil || accountID <= 0 {
+		return
+	}
+	errorMsg = strings.TrimSpace(errorMsg)
+	if errorMsg == "" {
+		errorMsg = "account marked error"
+	}
+	source = strings.TrimSpace(source)
+	if source == "" {
+		source = "account_error"
+	}
+	markAccountErrorRuntimeEvicted(ctx, s.tempUnschedCache, &Account{ID: accountID}, errorMsg, source)
+}
+
 func (s *RateLimitService) ClearTempUnschedulable(ctx context.Context, accountID int64) error {
 	if err := s.accountRepo.ClearTempUnschedulable(ctx, accountID); err != nil {
 		return err
@@ -2464,6 +2480,7 @@ func (s *RateLimitService) triggerStreamTimeoutError(ctx context.Context, accoun
 		slog.Warn("stream_timeout_set_error_failed", "account_id", account.ID, "error", err)
 		return false
 	}
+	markAccountErrorRuntimeEvicted(ctx, s.tempUnschedCache, account, errorMsg, "stream_timeout_account_error")
 
 	// 重置超时计数
 	if s.timeoutCounterCache != nil {

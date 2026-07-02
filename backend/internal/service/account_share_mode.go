@@ -114,6 +114,10 @@ type accountShareAccountStateRecovery interface {
 	RecoverAccountAfterSuccessfulTest(ctx context.Context, accountID int64) (*SuccessfulTestRecoveryResult, error)
 }
 
+type accountShareAccountRuntimeEvictor interface {
+	EvictAccountErrorFromRuntimeCache(ctx context.Context, accountID int64, errorMsg string, source string)
+}
+
 type accountShareModeRequestContextKey struct{}
 
 type AccountShareModeRequestContext struct {
@@ -1703,6 +1707,10 @@ func (s *AccountShareModeService) schedulePostCreateConnectivityTest(listing *Ac
 		defer writeCancel()
 		if err := s.accountRepo.SetError(writeCtx, accountID, errorMessage); err != nil {
 			log.Printf("account_share_mode: mark account %d error after connectivity test failed: %v", accountID, err)
+			return
+		}
+		if evictor, ok := s.rateLimitService.(accountShareAccountRuntimeEvictor); ok {
+			evictor.EvictAccountErrorFromRuntimeCache(writeCtx, accountID, errorMessage, "account_share_connectivity_test")
 		}
 	}()
 }

@@ -195,6 +195,76 @@ func TestRateLimitServiceHandleUpstreamErrorPermanentErrorWritesRuntimeEvictionC
 	require.True(t, cache.states[55].UntilUnix > time.Now().Add(time.Hour).Unix())
 }
 
+func TestRateLimitServiceHandleUpstreamErrorCustomErrorWritesRuntimeEvictionCache(t *testing.T) {
+	repo := &permanentKeywordAccountRepoStub{}
+	cache := &runtimeTempUnschedCacheStub{}
+	svc := NewRateLimitService(repo, nil, nil, nil, cache)
+	account := &Account{
+		ID:          56,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Status:      StatusActive,
+		Schedulable: true,
+		Credentials: map[string]any{
+			"custom_error_codes_enabled": true,
+			"custom_error_codes":         []any{float64(http.StatusServiceUnavailable)},
+		},
+	}
+
+	shouldDisable := svc.HandleUpstreamError(
+		context.Background(),
+		account,
+		http.StatusServiceUnavailable,
+		http.Header{},
+		[]byte(`{"error":{"message":"temporary upstream account failure"}}`),
+	)
+
+	require.True(t, shouldDisable)
+	require.Equal(t, 1, repo.setErrorCalls)
+	require.Equal(t, StatusError, account.Status)
+	require.False(t, account.Schedulable)
+	require.Contains(t, account.ErrorMessage, "Custom error code")
+	require.NotNil(t, cache.states[56])
+	require.Equal(t, "account_error", cache.states[56].MatchedKeyword)
+	require.True(t, cache.states[56].UntilUnix > time.Now().Add(time.Hour).Unix())
+}
+
+func TestRateLimitServiceTriggerStreamTimeoutErrorWritesRuntimeEvictionCache(t *testing.T) {
+	repo := &permanentKeywordAccountRepoStub{}
+	cache := &runtimeTempUnschedCacheStub{}
+	svc := NewRateLimitService(repo, nil, nil, nil, cache)
+	account := &Account{
+		ID:          57,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeOAuth,
+		Status:      StatusActive,
+		Schedulable: true,
+	}
+
+	disabled := svc.triggerStreamTimeoutError(context.Background(), account, "gpt-5")
+
+	require.True(t, disabled)
+	require.Equal(t, 1, repo.setErrorCalls)
+	require.Equal(t, StatusError, account.Status)
+	require.False(t, account.Schedulable)
+	require.Contains(t, account.ErrorMessage, "Stream data interval timeout")
+	require.NotNil(t, cache.states[57])
+	require.Equal(t, "account_error", cache.states[57].MatchedKeyword)
+	require.True(t, cache.states[57].UntilUnix > time.Now().Add(time.Hour).Unix())
+}
+
+func TestRateLimitServiceEvictAccountErrorFromRuntimeCache(t *testing.T) {
+	cache := &runtimeTempUnschedCacheStub{}
+	svc := NewRateLimitService(nil, nil, nil, nil, cache)
+
+	svc.EvictAccountErrorFromRuntimeCache(context.Background(), 58, "connectivity failed", "account_share_connectivity_test")
+
+	require.NotNil(t, cache.states[58])
+	require.Equal(t, "account_error", cache.states[58].MatchedKeyword)
+	require.Contains(t, cache.states[58].ErrorMessage, "connectivity failed")
+	require.True(t, cache.states[58].UntilUnix > time.Now().Add(time.Hour).Unix())
+}
+
 func TestRateLimitServiceHandleUpstreamErrorOpenAIOAuthPermanentKeywordStillUses403Cooldown(t *testing.T) {
 	repo := &permanentKeywordAccountRepoStub{}
 	svc := &RateLimitService{accountRepo: repo}

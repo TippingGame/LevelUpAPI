@@ -71,6 +71,7 @@ type AccountTestService struct {
 	cfg                       *config.Config
 	tlsFPProfileService       *TLSFingerprintProfileService
 	settingService            *SettingService
+	rateLimitService          *RateLimitService
 }
 
 // NewAccountTestService creates a new AccountTestService
@@ -93,6 +94,25 @@ func NewAccountTestService(
 		cfg:                       cfg,
 		tlsFPProfileService:       tlsFPProfileService,
 		settingService:            settingService,
+	}
+}
+
+func (s *AccountTestService) SetRateLimitService(rateLimitService *RateLimitService) {
+	if s == nil {
+		return
+	}
+	s.rateLimitService = rateLimitService
+}
+
+func (s *AccountTestService) markAccountErrorFromTest(ctx context.Context, account *Account, errorMsg string, source string) {
+	if s == nil || s.accountRepo == nil || account == nil {
+		return
+	}
+	if err := s.accountRepo.SetError(ctx, account.ID, errorMsg); err != nil {
+		return
+	}
+	if s.rateLimitService != nil {
+		s.rateLimitService.EvictAccountErrorFromRuntimeCache(ctx, account.ID, errorMsg, source)
 	}
 }
 
@@ -347,7 +367,7 @@ func (s *AccountTestService) testClaudeAccountConnection(c *gin.Context, account
 
 		// 403 表示账号被上游封禁，标记为 error 状态
 		if resp.StatusCode == http.StatusForbidden {
-			_ = s.accountRepo.SetError(ctx, account.ID, errMsg)
+			s.markAccountErrorFromTest(ctx, account, errMsg, "account_test_claude_403")
 		}
 
 		return s.sendErrorAndEnd(c, errMsg)
@@ -414,7 +434,7 @@ func (s *AccountTestService) testClaudeVertexServiceAccountConnection(c *gin.Con
 		body, _ := io.ReadAll(resp.Body)
 		errMsg := fmt.Sprintf("API returned %d: %s", resp.StatusCode, string(body))
 		if resp.StatusCode == http.StatusForbidden {
-			_ = s.accountRepo.SetError(ctx, account.ID, errMsg)
+			s.markAccountErrorFromTest(ctx, account, errMsg, "account_test_claude_vertex_403")
 		}
 		return s.sendErrorAndEnd(c, errMsg)
 	}
@@ -656,7 +676,7 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 		// 401 Unauthorized: 标记账号为永久错误
 		if resp.StatusCode == http.StatusUnauthorized && s.accountRepo != nil {
 			errMsg := fmt.Sprintf("Authentication failed (401): %s", string(body))
-			_ = s.accountRepo.SetError(ctx, account.ID, errMsg)
+			s.markAccountErrorFromTest(ctx, account, errMsg, "account_test_openai_401")
 		}
 		return s.sendErrorAndEnd(c, fmt.Sprintf("API returned %d: %s", resp.StatusCode, string(body)))
 	}
@@ -715,7 +735,7 @@ func (s *AccountTestService) testOpenAIChatCompletionsConnection(
 		}
 		if resp.StatusCode == http.StatusUnauthorized && s.accountRepo != nil {
 			errMsg := fmt.Sprintf("Chat Completions authentication failed (401): %s", string(body))
-			_ = s.accountRepo.SetError(ctx, account.ID, errMsg)
+			s.markAccountErrorFromTest(ctx, account, errMsg, "account_test_openai_chat_401")
 		}
 		return s.sendErrorAndEnd(c, fmt.Sprintf("Chat Completions API (/v1/chat/completions) returned %d: %s", resp.StatusCode, string(body)))
 	}
@@ -829,7 +849,7 @@ func (s *AccountTestService) testOpenAICompactConnection(c *gin.Context, account
 	if resp.StatusCode != http.StatusOK {
 		if resp.StatusCode == http.StatusUnauthorized && s.accountRepo != nil {
 			errMsg := fmt.Sprintf("Authentication failed (401): %s", string(body))
-			_ = s.accountRepo.SetError(ctx, account.ID, errMsg)
+			s.markAccountErrorFromTest(ctx, account, errMsg, "account_test_openai_compact_401")
 		}
 		return s.sendErrorAndEnd(c, fmt.Sprintf("API returned %d: %s", resp.StatusCode, string(body)))
 	}

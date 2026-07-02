@@ -1200,6 +1200,10 @@ func (h *AccountHandler) persistManualRefreshFailureState(ctx context.Context, a
 		errorMsg := fmt.Sprintf("Token refresh failed (non-retryable): %v", refreshErr)
 		if err := h.adminService.SetAccountError(ctx, account.ID, errorMsg); err != nil {
 			slog.Warn("manual_token_refresh_set_error_failed", "account_id", account.ID, "error", err)
+			return
+		}
+		if h.rateLimitService != nil {
+			h.rateLimitService.EvictAccountErrorFromRuntimeCache(ctx, account.ID, errorMsg, "manual_token_refresh_non_retryable")
 		}
 		return
 	}

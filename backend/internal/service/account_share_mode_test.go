@@ -75,9 +75,14 @@ func (s *accountShareModeTesterStub) RunTestBackground(_ context.Context, accoun
 }
 
 type accountShareModeRecoveryStub struct {
-	calls     int
-	accountID int64
-	err       error
+	calls          int
+	accountID      int64
+	err            error
+	evictCalls     int
+	evictAccountID int64
+	evictErrorMsg  string
+	evictSource    string
+	evictDone      chan struct{}
 }
 
 func (s *accountShareModeRecoveryStub) RecoverAccountAfterSuccessfulTest(_ context.Context, accountID int64) (*SuccessfulTestRecoveryResult, error) {
@@ -87,6 +92,30 @@ func (s *accountShareModeRecoveryStub) RecoverAccountAfterSuccessfulTest(_ conte
 		return nil, s.err
 	}
 	return &SuccessfulTestRecoveryResult{ClearedError: true}, nil
+}
+
+func (s *accountShareModeRecoveryStub) EvictAccountErrorFromRuntimeCache(_ context.Context, accountID int64, errorMsg string, source string) {
+	s.evictCalls++
+	s.evictAccountID = accountID
+	s.evictErrorMsg = errorMsg
+	s.evictSource = source
+	if s.evictDone != nil {
+		s.evictDone <- struct{}{}
+	}
+}
+
+type accountShareModeAccountRepoStub struct {
+	AccountRepository
+	setErrorCalls int
+	accountID     int64
+	errorMsg      string
+}
+
+func (r *accountShareModeAccountRepoStub) SetError(_ context.Context, accountID int64, errorMsg string) error {
+	r.setErrorCalls++
+	r.accountID = accountID
+	r.errorMsg = errorMsg
+	return nil
 }
 
 func (r *accountShareModeProxyRepoStub) Create(_ context.Context, proxy *Proxy) error {
@@ -696,6 +725,38 @@ func TestAccountShareModeUpdateListingOwnerRelistRejectsUnavailableAccountAfterR
 	}
 	if repo.updateCalls != 0 {
 		t.Fatalf("expected unavailable relist to skip repository update, got %d calls", repo.updateCalls)
+	}
+}
+
+func TestAccountShareModePostCreateFailedTestEvictsRuntimeAccountCache(t *testing.T) {
+	evictDone := make(chan struct{}, 1)
+	accountRepo := &accountShareModeAccountRepoStub{}
+	tester := &accountShareModeTesterStub{result: &ScheduledTestResult{Status: "failed", ErrorMessage: "oauth expired"}}
+	recovery := &accountShareModeRecoveryStub{evictDone: evictDone}
+	svc := &AccountShareModeService{
+		accountRepo:        accountRepo,
+		accountTestService: tester,
+		rateLimitService:   recovery,
+	}
+
+	svc.schedulePostCreateConnectivityTest(&AccountShareListing{
+		AccountID:     99,
+		AllowedModels: []string{"gpt-5.5"},
+	})
+
+	select {
+	case <-evictDone:
+	case <-time.After(time.Second):
+		t.Fatal("expected runtime eviction after failed post-create connectivity test")
+	}
+	if tester.calls != 1 || tester.accountID != 99 || tester.modelID != "gpt-5.5" {
+		t.Fatalf("unexpected tester call: calls=%d account=%d model=%q", tester.calls, tester.accountID, tester.modelID)
+	}
+	if accountRepo.setErrorCalls != 1 || accountRepo.accountID != 99 || !strings.Contains(accountRepo.errorMsg, "oauth expired") {
+		t.Fatalf("unexpected SetError call: calls=%d account=%d msg=%q", accountRepo.setErrorCalls, accountRepo.accountID, accountRepo.errorMsg)
+	}
+	if recovery.evictCalls != 1 || recovery.evictAccountID != 99 || recovery.evictSource != "account_share_connectivity_test" || !strings.Contains(recovery.evictErrorMsg, "oauth expired") {
+		t.Fatalf("unexpected eviction call: calls=%d account=%d source=%q msg=%q", recovery.evictCalls, recovery.evictAccountID, recovery.evictSource, recovery.evictErrorMsg)
 	}
 }
 
