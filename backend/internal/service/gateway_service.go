@@ -2843,11 +2843,23 @@ func proxyHealthBlocksAnthropicScheduling(info *ProxyLatencyInfo) bool {
 	if info == nil {
 		return false
 	}
+	if proxyCountryBlocksAnthropicScheduling(info.CountryCode) {
+		return true
+	}
 	if !info.Success && (!info.UpdatedAt.IsZero() || strings.TrimSpace(info.Message) != "") {
 		return true
 	}
 	switch strings.ToLower(strings.TrimSpace(info.QualityStatus)) {
 	case "failed", "challenge":
+		return true
+	default:
+		return false
+	}
+}
+
+func proxyCountryBlocksAnthropicScheduling(countryCode string) bool {
+	switch strings.ToUpper(strings.TrimSpace(countryCode)) {
+	case "CN":
 		return true
 	default:
 		return false

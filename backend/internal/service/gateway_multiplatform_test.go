@@ -2682,6 +2682,40 @@ func TestGatewayService_SelectAccountWithLoadAwareness(t *testing.T) {
 		require.Equal(t, int64(2), result.Account.ID)
 	})
 
+	t.Run("代理健康-CN出口的Anthropic OAuth账号被跳过", func(t *testing.T) {
+		now := time.Now()
+		repo := &mockAccountRepoForPlatform{
+			accounts: []Account{
+				{ID: 1, Platform: PlatformAnthropic, Type: AccountTypeOAuth, Priority: 1, Status: StatusActive, Schedulable: true, Concurrency: 5, ProxyID: ptr(int64(7)), Proxy: &Proxy{ID: 7, Status: StatusActive}},
+				{ID: 2, Platform: PlatformAnthropic, Type: AccountTypeOAuth, Priority: 2, Status: StatusActive, Schedulable: true, Concurrency: 5, ProxyID: ptr(int64(8)), Proxy: &Proxy{ID: 8, Status: StatusActive}},
+			},
+			accountsByID: map[int64]*Account{},
+		}
+		for i := range repo.accounts {
+			repo.accountsByID[repo.accounts[i].ID] = &repo.accounts[i]
+		}
+
+		cfg := testConfig()
+		cfg.Gateway.Scheduling.LoadBatchEnabled = true
+
+		svc := &GatewayService{
+			accountRepo:        repo,
+			cache:              &mockGatewayCacheForPlatform{},
+			cfg:                cfg,
+			concurrencyService: NewConcurrencyService(&mockConcurrencyCache{}),
+			proxyLatencyCache: &mockProxyLatencyCacheForGateway{infos: map[int64]*ProxyLatencyInfo{
+				7: &ProxyLatencyInfo{Success: true, CountryCode: "cn", UpdatedAt: now},
+				8: &ProxyLatencyInfo{Success: true, CountryCode: "US", UpdatedAt: now},
+			}},
+		}
+
+		result, err := svc.SelectAccountWithLoadAwareness(ctx, nil, "cn-proxy-session", "claude-3-5-sonnet-20241022", nil, "", 42)
+		require.NoError(t, err)
+		require.NotNil(t, result)
+		require.NotNil(t, result.Account)
+		require.Equal(t, int64(2), result.Account.ID)
+	})
+
 	t.Run("代理健康-Anthropic APIKey账号不受OAuth代理健康规则影响", func(t *testing.T) {
 		now := time.Now()
 		repo := &mockAccountRepoForPlatform{
