@@ -331,10 +331,16 @@ func AccountFromServiceShallow(a *service.Account) *Account {
 		}
 		if rpm := a.GetBaseRPM(); rpm > 0 {
 			out.BaseRPM = &rpm
+			effectiveRPM := a.GetEffectiveBaseRPM()
+			out.EffectiveBaseRPM = &effectiveRPM
 			strategy := a.GetRPMStrategy()
 			out.RPMStrategy = &strategy
 			buffer := a.GetRPMStickyBuffer()
 			out.RPMStickyBuffer = &buffer
+			warmupMinutes := a.GetRPMWarmupMinutes()
+			out.RPMWarmupMinutes = &warmupMinutes
+			warmupStartRPM := a.GetRPMWarmupStartRPM()
+			out.RPMWarmupStartRPM = &warmupStartRPM
 		}
 		// 用户消息队列模式
 		if mode := a.GetUserMsgQueueMode(); mode != "" {

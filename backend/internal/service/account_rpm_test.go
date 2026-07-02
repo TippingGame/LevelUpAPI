@@ -3,6 +3,7 @@ package service
 import (
 	"encoding/json"
 	"testing"
+	"time"
 )
 
 func TestGetBaseRPM(t *testing.T) {
@@ -85,6 +86,84 @@ func TestCheckRPMSchedulability(t *testing.T) {
 				t.Errorf("CheckRPMSchedulability(%d) = %d, want %d", tt.currentRPM, got, tt.expected)
 			}
 		})
+	}
+}
+
+func TestAnthropicEffectiveBaseRPMWarmup(t *testing.T) {
+	now := time.Date(2026, 7, 2, 12, 0, 0, 0, time.UTC)
+	account := &Account{
+		Platform:  PlatformAnthropic,
+		Type:      AccountTypeOAuth,
+		CreatedAt: now,
+		Extra: map[string]any{
+			"base_rpm":             5,
+			"rpm_warmup_minutes":   60,
+			"rpm_warmup_start_rpm": 1,
+		},
+	}
+
+	tests := []struct {
+		name string
+		at   time.Time
+		want int
+	}{
+		{name: "start", at: now, want: 1},
+		{name: "quarter", at: now.Add(15 * time.Minute), want: 2},
+		{name: "half", at: now.Add(30 * time.Minute), want: 3},
+		{name: "done", at: now.Add(60 * time.Minute), want: 5},
+		{name: "after done", at: now.Add(90 * time.Minute), want: 5},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := account.GetEffectiveBaseRPMAt(tt.at); got != tt.want {
+				t.Fatalf("GetEffectiveBaseRPMAt() = %d, want %d", got, tt.want)
+			}
+		})
+	}
+
+	if got := account.CheckRPMSchedulabilityAt(0, now); got != WindowCostSchedulable {
+		t.Fatalf("CheckRPMSchedulabilityAt(0) = %d, want %d", got, WindowCostSchedulable)
+	}
+	if got := account.CheckRPMSchedulabilityAt(1, now); got != WindowCostStickyOnly {
+		t.Fatalf("CheckRPMSchedulabilityAt(1) = %d, want %d", got, WindowCostStickyOnly)
+	}
+}
+
+func TestAnthropicRPMWarmupCanBeDisabled(t *testing.T) {
+	now := time.Date(2026, 7, 2, 12, 0, 0, 0, time.UTC)
+	account := &Account{
+		Platform:  PlatformAnthropic,
+		Type:      AccountTypeOAuth,
+		CreatedAt: now,
+		Extra: map[string]any{
+			"base_rpm":           5,
+			"rpm_warmup_minutes": 0,
+		},
+	}
+
+	if got := account.GetEffectiveBaseRPMAt(now); got != 5 {
+		t.Fatalf("GetEffectiveBaseRPMAt() = %d, want %d", got, 5)
+	}
+}
+
+func TestAnthropicRPMWarmupRestartsAfterRateLimitReset(t *testing.T) {
+	now := time.Date(2026, 7, 2, 12, 0, 0, 0, time.UTC)
+	resetAt := now.Add(-5 * time.Minute)
+	account := &Account{
+		Platform:         PlatformAnthropic,
+		Type:             AccountTypeOAuth,
+		CreatedAt:        now.Add(-24 * time.Hour),
+		RateLimitResetAt: &resetAt,
+		Extra: map[string]any{
+			"base_rpm":             5,
+			"rpm_warmup_minutes":   60,
+			"rpm_warmup_start_rpm": 1,
+		},
+	}
+
+	if got := account.GetEffectiveBaseRPMAt(now); got != 1 {
+		t.Fatalf("GetEffectiveBaseRPMAt() = %d, want %d", got, 1)
 	}
 }
 

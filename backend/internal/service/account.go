@@ -2747,6 +2747,109 @@ func (a *Account) GetBaseRPM() int {
 	return 0
 }
 
+// GetRPMWarmupMinutes returns the cold-start ramp duration for Anthropic OAuth
+// accounts. 0 disables the ramp.
+func (a *Account) GetRPMWarmupMinutes() int {
+	if !a.IsAnthropicOAuthOrSetupToken() {
+		return 0
+	}
+	if a.Extra != nil {
+		if v, ok := a.Extra["rpm_warmup_minutes"]; ok {
+			if val, parsed := parseExtraIntOK(v); parsed {
+				if val < 0 {
+					return anthropicOAuthDefaultRPMWarmupMinutes
+				}
+				if val > 24*60 {
+					return 24 * 60
+				}
+				return val
+			}
+		}
+	}
+	return anthropicOAuthDefaultRPMWarmupMinutes
+}
+
+func (a *Account) GetRPMWarmupStartRPM() int {
+	if !a.IsAnthropicOAuthOrSetupToken() {
+		return 0
+	}
+	if a.Extra != nil {
+		if v, ok := a.Extra["rpm_warmup_start_rpm"]; ok {
+			if val, parsed := parseExtraIntOK(v); parsed && val > 0 {
+				if val > 10000 {
+					return 10000
+				}
+				return val
+			}
+		}
+	}
+	return anthropicOAuthDefaultRPMWarmupStartRPM
+}
+
+func (a *Account) rpmWarmupStartAt(now time.Time) time.Time {
+	if a == nil {
+		return time.Time{}
+	}
+	start := a.CreatedAt
+	if a.RateLimitResetAt != nil && !a.RateLimitResetAt.After(now) && (start.IsZero() || a.RateLimitResetAt.After(start)) {
+		start = *a.RateLimitResetAt
+	}
+	if a.OverloadUntil != nil && !a.OverloadUntil.After(now) && (start.IsZero() || a.OverloadUntil.After(start)) {
+		start = *a.OverloadUntil
+	}
+	if a.TempUnschedulableUntil != nil && !a.TempUnschedulableUntil.After(now) && (start.IsZero() || a.TempUnschedulableUntil.After(start)) {
+		start = *a.TempUnschedulableUntil
+	}
+	return start
+}
+
+func (a *Account) GetEffectiveBaseRPMAt(now time.Time) int {
+	baseRPM := a.GetBaseRPM()
+	if baseRPM <= 0 || !a.IsAnthropicOAuthOrSetupToken() {
+		return baseRPM
+	}
+	warmupMinutes := a.GetRPMWarmupMinutes()
+	if warmupMinutes <= 0 {
+		return baseRPM
+	}
+	startAt := a.rpmWarmupStartAt(now)
+	if startAt.IsZero() {
+		return baseRPM
+	}
+	startRPM := a.GetRPMWarmupStartRPM()
+	if startRPM <= 0 {
+		startRPM = 1
+	}
+	if startRPM >= baseRPM {
+		return baseRPM
+	}
+	duration := time.Duration(warmupMinutes) * time.Minute
+	age := now.Sub(startAt)
+	if age >= duration {
+		return baseRPM
+	}
+	if age <= 0 {
+		return startRPM
+	}
+	totalSeconds := int64(duration / time.Second)
+	if totalSeconds <= 0 {
+		return baseRPM
+	}
+	elapsedSeconds := int64(age / time.Second)
+	ramped := startRPM + int(int64(baseRPM-startRPM)*elapsedSeconds/totalSeconds)
+	if ramped < startRPM {
+		return startRPM
+	}
+	if ramped > baseRPM {
+		return baseRPM
+	}
+	return ramped
+}
+
+func (a *Account) GetEffectiveBaseRPM() int {
+	return a.GetEffectiveBaseRPMAt(time.Now())
+}
+
 // GetRPMStrategy 获取 RPM 策略
 // "tiered" = 三区模型（默认）, "sticky_exempt" = 粘性豁免
 func (a *Account) GetRPMStrategy() string {
@@ -2815,7 +2918,11 @@ func (a *Account) GetRPMStickyBuffer() int {
 // CheckRPMSchedulability 根据当前 RPM 计数检查调度状态
 // 复用 WindowCostSchedulability 三态：Schedulable / StickyOnly / NotSchedulable
 func (a *Account) CheckRPMSchedulability(currentRPM int) WindowCostSchedulability {
-	baseRPM := a.GetBaseRPM()
+	return a.CheckRPMSchedulabilityAt(currentRPM, time.Now())
+}
+
+func (a *Account) CheckRPMSchedulabilityAt(currentRPM int, now time.Time) WindowCostSchedulability {
+	baseRPM := a.GetEffectiveBaseRPMAt(now)
 	if baseRPM <= 0 {
 		return WindowCostSchedulable
 	}
@@ -2924,4 +3031,24 @@ func parseExtraInt(value any) int {
 		}
 	}
 	return 0
+}
+
+func parseExtraIntOK(value any) (int, bool) {
+	switch v := value.(type) {
+	case int:
+		return v, true
+	case int64:
+		return int(v), true
+	case float64:
+		return int(v), true
+	case json.Number:
+		if i, err := v.Int64(); err == nil {
+			return int(i), true
+		}
+	case string:
+		if i, err := strconv.Atoi(strings.TrimSpace(v)); err == nil {
+			return i, true
+		}
+	}
+	return 0, false
 }

@@ -31,6 +31,8 @@ func TestApplyAnthropicOAuthPoolProtectionDefaults(t *testing.T) {
 	require.Equal(t, anthropicOAuthDefaultSessionIdleTimeoutMinutes, account.GetSessionIdleTimeoutMinutes())
 	require.Equal(t, anthropicOAuthDefaultBaseRPM, account.GetBaseRPM())
 	require.Equal(t, anthropicOAuthDefaultRPMStrategy, account.GetRPMStrategy())
+	require.Equal(t, anthropicOAuthDefaultRPMWarmupMinutes, account.GetRPMWarmupMinutes())
+	require.Equal(t, anthropicOAuthDefaultRPMWarmupStartRPM, account.GetRPMWarmupStartRPM())
 	require.Equal(t, "serialize", account.GetUserMsgQueueMode())
 }
 
@@ -67,6 +69,8 @@ func TestAnthropicOAuthPoolProtectionRuntimeDefaultsForLegacyAccounts(t *testing
 			require.Equal(t, anthropicOAuthDefaultSessionIdleTimeoutMinutes, account.GetSessionIdleTimeoutMinutes())
 			require.Equal(t, anthropicOAuthDefaultBaseRPM, account.GetBaseRPM())
 			require.Equal(t, anthropicOAuthDefaultRPMStrategy, account.GetRPMStrategy())
+			require.Equal(t, anthropicOAuthDefaultRPMWarmupMinutes, account.GetRPMWarmupMinutes())
+			require.Equal(t, anthropicOAuthDefaultRPMWarmupStartRPM, account.GetRPMWarmupStartRPM())
 		})
 	}
 }
@@ -130,6 +134,8 @@ func TestApplyAnthropicOAuthPoolProtectionDefaultsPreservesOverrides(t *testing.
 			"session_idle_timeout_minutes": 15,
 			"base_rpm":                     20,
 			"rpm_strategy":                 "tiered",
+			"rpm_warmup_minutes":           0,
+			"rpm_warmup_start_rpm":         2,
 			"user_msg_queue_mode":          "throttle",
 		},
 	)
@@ -147,6 +153,8 @@ func TestApplyAnthropicOAuthPoolProtectionDefaultsPreservesOverrides(t *testing.
 	require.Equal(t, 15, account.GetSessionIdleTimeoutMinutes())
 	require.Equal(t, 20, account.GetBaseRPM())
 	require.Equal(t, "tiered", account.GetRPMStrategy())
+	require.Equal(t, 0, account.GetRPMWarmupMinutes())
+	require.Equal(t, 2, account.GetRPMWarmupStartRPM())
 	require.Equal(t, "throttle", account.GetUserMsgQueueMode())
 }
 

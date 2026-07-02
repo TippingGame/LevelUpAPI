@@ -61,6 +61,8 @@ const (
 	anthropicOAuthDefaultSessionIdleTimeoutMinutes = 60
 	anthropicOAuthDefaultBaseRPM                   = 3
 	anthropicOAuthDefaultRPMStrategy               = "sticky_exempt"
+	anthropicOAuthDefaultRPMWarmupMinutes          = 30
+	anthropicOAuthDefaultRPMWarmupStartRPM         = 1
 	anthropicOAuthDefaultCooldownMinutes           = 10
 )
 
@@ -788,6 +790,8 @@ func applyAnthropicOAuthPoolProtectionDefaults(platform, accountType string, cre
 	setDefaultExtra("session_idle_timeout_minutes", anthropicOAuthDefaultSessionIdleTimeoutMinutes)
 	setDefaultExtra("base_rpm", anthropicOAuthDefaultBaseRPM)
 	setDefaultExtra("rpm_strategy", anthropicOAuthDefaultRPMStrategy)
+	setDefaultExtra("rpm_warmup_minutes", anthropicOAuthDefaultRPMWarmupMinutes)
+	setDefaultExtra("rpm_warmup_start_rpm", anthropicOAuthDefaultRPMWarmupStartRPM)
 	setDefaultExtra("user_msg_queue_mode", config.UMQModeSerialize)
 
 	return nextCredentials, nextExtra
@@ -914,6 +918,8 @@ var ownedPersonalLockedAnthropicExtraKeys = []string{
 	"session_idle_timeout_minutes",
 	"base_rpm",
 	"rpm_strategy",
+	"rpm_warmup_minutes",
+	"rpm_warmup_start_rpm",
 }
 
 func preserveOwnedPersonalCredentialPolicy(account *Account, nextCredentials map[string]any) {

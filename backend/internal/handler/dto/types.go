@@ -251,10 +251,13 @@ type Account struct {
 
 	// RPM 限制（仅 Anthropic OAuth/SetupToken 账号有效）
 	// 从 extra 字段提取，方便前端显示和编辑
-	BaseRPM          *int    `json:"base_rpm,omitempty"`
-	RPMStrategy      *string `json:"rpm_strategy,omitempty"`
-	RPMStickyBuffer  *int    `json:"rpm_sticky_buffer,omitempty"`
-	UserMsgQueueMode *string `json:"user_msg_queue_mode,omitempty"`
+	BaseRPM           *int    `json:"base_rpm,omitempty"`
+	EffectiveBaseRPM  *int    `json:"effective_base_rpm,omitempty"`
+	RPMStrategy       *string `json:"rpm_strategy,omitempty"`
+	RPMStickyBuffer   *int    `json:"rpm_sticky_buffer,omitempty"`
+	RPMWarmupMinutes  *int    `json:"rpm_warmup_minutes,omitempty"`
+	RPMWarmupStartRPM *int    `json:"rpm_warmup_start_rpm,omitempty"`
+	UserMsgQueueMode  *string `json:"user_msg_queue_mode,omitempty"`
 
 	// TLS指纹伪装（仅 Anthropic OAuth/SetupToken 账号有效）
 	// 从 extra 字段提取，方便前端显示和编辑
