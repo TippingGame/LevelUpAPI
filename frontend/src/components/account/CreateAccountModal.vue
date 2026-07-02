@@ -2032,10 +2032,8 @@
                 <div>
                   <label class="input-label">{{ t('admin.accounts.tempUnschedulable.errorCode') }}</label>
                   <input
-                    v-model.number="rule.error_code"
-                    type="number"
-                    min="100"
-                    max="599"
+                    v-model="rule.error_code"
+                    type="text"
                     class="input"
                     :placeholder="t('admin.accounts.tempUnschedulable.errorCodePlaceholder')"
                   />
@@ -3401,7 +3399,7 @@ interface ModelMapping {
 }
 
 interface TempUnschedRuleForm {
-  error_code: number | null
+  error_code: string
   keywords: string
   duration_minutes: number | null
   description: string
@@ -3632,7 +3630,7 @@ const tempUnschedPresets = computed(() => [
   {
     label: t('admin.accounts.tempUnschedulable.presets.overloadLabel'),
     rule: {
-      error_code: 529,
+      error_code: '529',
       keywords: 'overloaded, too many',
       duration_minutes: 60,
       description: t('admin.accounts.tempUnschedulable.presets.overloadDesc')
@@ -3641,7 +3639,7 @@ const tempUnschedPresets = computed(() => [
   {
     label: t('admin.accounts.tempUnschedulable.presets.rateLimitLabel'),
     rule: {
-      error_code: 429,
+      error_code: '429',
       keywords: 'rate limit, too many requests',
       duration_minutes: 10,
       description: t('admin.accounts.tempUnschedulable.presets.rateLimitDesc')
@@ -3650,7 +3648,7 @@ const tempUnschedPresets = computed(() => [
   {
     label: t('admin.accounts.tempUnschedulable.presets.unavailableLabel'),
     rule: {
-      error_code: 503,
+      error_code: '503',
       keywords: 'unavailable, maintenance',
       duration_minutes: 30,
       description: t('admin.accounts.tempUnschedulable.presets.unavailableDesc')
@@ -4167,7 +4165,7 @@ const addTempUnschedRule = (preset?: TempUnschedRuleForm) => {
     return
   }
   tempUnschedRules.value.push({
-    error_code: null,
+    error_code: '',
     keywords: '',
     duration_minutes: 30,
     description: ''
@@ -4189,17 +4187,17 @@ const moveTempUnschedRule = (index: number, direction: number) => {
 
 const buildTempUnschedRules = (rules: TempUnschedRuleForm[]) => {
   const out: Array<{
-    error_code: number
+    error_code: number | string
     keywords: string[]
     duration_minutes: number
     description: string
   }> = []
 
   for (const rule of rules) {
-    const errorCode = Number(rule.error_code)
+    const errorCode = normalizeTempUnschedErrorCodePayload(rule.error_code)
     const duration = Number(rule.duration_minutes)
     const keywords = splitTempUnschedKeywords(rule.keywords)
-    if (!Number.isFinite(errorCode) || errorCode < 100 || errorCode > 599) {
+    if (errorCode === null) {
       continue
     }
     if (!Number.isFinite(duration) || duration <= 0) {
@@ -4209,7 +4207,7 @@ const buildTempUnschedRules = (rules: TempUnschedRuleForm[]) => {
       continue
     }
     out.push({
-      error_code: Math.trunc(errorCode),
+      error_code: errorCode,
       keywords,
       duration_minutes: Math.trunc(duration),
       description: rule.description.trim()
@@ -4217,6 +4215,15 @@ const buildTempUnschedRules = (rules: TempUnschedRuleForm[]) => {
   }
 
   return out
+}
+
+const normalizeTempUnschedErrorCodePayload = (value: string): number | string | null => {
+  const parsed = parseCustomErrorCodeInput(value)
+  if (parsed.invalidTokens.length > 0 || parsed.tokens.length !== 1) {
+    return null
+  }
+  const [payload] = customErrorCodeTokensToPayload(parsed.tokens)
+  return payload ?? null
 }
 
 const applyTempUnschedConfig = (credentials: Record<string, unknown>) => {

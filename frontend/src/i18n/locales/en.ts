@@ -4085,7 +4085,7 @@ export default {
         ruleOrder: 'Rule Order',
         ruleIndex: 'Rule #{index}',
         errorCode: 'Error Code',
-        errorCodePlaceholder: 'e.g. 429',
+        errorCodePlaceholder: 'e.g. 429 or 500-503',
         durationMinutes: 'Duration (minutes)',
         durationPlaceholder: 'e.g. 30',
         keywords: 'Keywords',

@@ -4213,7 +4213,7 @@ export default {
         ruleOrder: '规则序号',
         ruleIndex: '规则 #{index}',
         errorCode: '错误码',
-        errorCodePlaceholder: '例如 429',
+        errorCodePlaceholder: '例如 429 或 500-503',
         durationMinutes: '持续时间（分钟）',
         durationPlaceholder: '例如 30',
         keywords: '关键词',
