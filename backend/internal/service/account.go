@@ -1311,7 +1311,7 @@ func isPoolModeRetryableStatus(statusCode int) bool {
 // 返回值语义：
 //   - nil：未配置，调用方应回退到默认值 [401, 403, 429]
 //   - 长度为 0 的切片：管理员显式置空，关闭按状态码触发的同账号重试
-//   - 非空切片：去重、过滤为合法 HTTP 状态码（100-599）后的覆盖列表
+//   - 非空切片：去重、过滤为合法 HTTP 状态码（100-599）后的覆盖列表，支持 "500-503" 范围
 func (a *Account) GetPoolModeRetryStatusCodes() []int {
 	if a == nil || a.Credentials == nil {
 		return nil
@@ -1320,47 +1320,45 @@ func (a *Account) GetPoolModeRetryStatusCodes() []int {
 	if !ok || raw == nil {
 		return nil
 	}
-	arr, ok := raw.([]any)
-	if !ok {
+
+	if isExplicitEmptyStatusCodeCollection(raw) {
+		return []int{}
+	}
+
+	ranges := parseHTTPStatusCodeRangesValue(raw)
+	if len(ranges) == 0 {
+		if isStatusCodeCollection(raw) {
+			return []int{}
+		}
 		return nil
 	}
-	seen := make(map[int]struct{}, len(arr))
-	codes := make([]int, 0, len(arr))
-	for _, v := range arr {
-		var code int
-		switch n := v.(type) {
-		case float64:
-			code = int(n)
-		case int:
-			code = n
-		case int64:
-			code = int(n)
-		case json.Number:
-			i, err := n.Int64()
-			if err != nil {
-				continue
-			}
-			code = int(i)
-		case string:
-			i, err := strconv.Atoi(strings.TrimSpace(n))
-			if err != nil {
-				continue
-			}
-			code = i
-		default:
-			continue
-		}
-		if code < 100 || code > 599 {
-			continue
-		}
-		if _, exists := seen[code]; exists {
-			continue
-		}
-		seen[code] = struct{}{}
-		codes = append(codes, code)
+	return expandHTTPStatusCodeRanges(ranges)
+}
+
+func isExplicitEmptyStatusCodeCollection(value any) bool {
+	switch v := value.(type) {
+	case []any:
+		return len(v) == 0
+	case []int:
+		return len(v) == 0
+	case []int64:
+		return len(v) == 0
+	case []float64:
+		return len(v) == 0
+	case []string:
+		return len(v) == 0
+	default:
+		return false
 	}
-	sort.Ints(codes)
-	return codes
+}
+
+func isStatusCodeCollection(value any) bool {
+	switch value.(type) {
+	case []any, []int, []int64, []float64, []string:
+		return true
+	default:
+		return false
+	}
 }
 
 // IsPoolModeRetryableStatus 在账号上下文中判断给定状态码是否应触发同账号重试。

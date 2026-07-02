@@ -160,6 +160,20 @@ func httpStatusCodeRangesContain(ranges []httpStatusCodeRange, code int) bool {
 	return false
 }
 
+func expandHTTPStatusCodeRanges(ranges []httpStatusCodeRange) []int {
+	ranges = normalizeHTTPStatusCodeRanges(ranges)
+	if len(ranges) == 0 {
+		return nil
+	}
+	codes := make([]int, 0, len(ranges))
+	for _, r := range ranges {
+		for code := r.Start; code <= r.End; code++ {
+			codes = append(codes, code)
+		}
+	}
+	return codes
+}
+
 func isHTTPStatusCode(code int) bool {
 	return code >= 100 && code <= 599
 }

@@ -146,12 +146,13 @@ func TestGetPoolModeRetryStatusCodes(t *testing.T) {
 			expected: []int{},
 		},
 		{
-			name: "normalizes_mixed_values",
+			name: "normalizes_mixed_values_and_ranges",
 			account: &Account{
 				Credentials: map[string]any{
 					"pool_mode_retry_status_codes": []any{
 						float64(503),
 						"502",
+						"500-501",
 						json.Number("529"),
 						int64(503),
 						99,
@@ -160,13 +161,31 @@ func TestGetPoolModeRetryStatusCodes(t *testing.T) {
 					},
 				},
 			},
-			expected: []int{502, 503, 529},
+			expected: []int{500, 501, 502, 503, 529},
 		},
 		{
-			name: "non_array_returns_nil",
+			name: "string_list_is_parsed",
 			account: &Account{
 				Credentials: map[string]any{
 					"pool_mode_retry_status_codes": "502,503",
+				},
+			},
+			expected: []int{502, 503},
+		},
+		{
+			name: "string_range_is_expanded",
+			account: &Account{
+				Credentials: map[string]any{
+					"pool_mode_retry_status_codes": "500-503",
+				},
+			},
+			expected: []int{500, 501, 502, 503},
+		},
+		{
+			name: "invalid_string_returns_nil",
+			account: &Account{
+				Credentials: map[string]any{
+					"pool_mode_retry_status_codes": "bad",
 				},
 			},
 			expected: nil,
@@ -228,6 +247,26 @@ func TestIsPoolModeRetryableStatus_Account(t *testing.T) {
 			},
 			statusCode: 502,
 			expected:   true,
+		},
+		{
+			name: "configured_range_adds_503",
+			account: &Account{
+				Credentials: map[string]any{
+					"pool_mode_retry_status_codes": "500-503",
+				},
+			},
+			statusCode: 503,
+			expected:   true,
+		},
+		{
+			name: "configured_range_overrides_default",
+			account: &Account{
+				Credentials: map[string]any{
+					"pool_mode_retry_status_codes": "500-503",
+				},
+			},
+			statusCode: 429,
+			expected:   false,
 		},
 		{
 			name: "empty_list_disables_default_codes",
