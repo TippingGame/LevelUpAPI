@@ -828,6 +828,20 @@ func (s *OpenAIGatewayService) writeOpenAIWSFallbackErrorResponse(c *gin.Context
 		upstreamMessage = clientMessage
 	}
 
+	if s.rateLimitService != nil && account != nil {
+		body, _ := json.Marshal(gin.H{
+			"error": gin.H{
+				"type":    errType,
+				"message": upstreamMessage,
+			},
+		})
+		ctx := context.Background()
+		if c.Request != nil {
+			ctx = c.Request.Context()
+		}
+		s.rateLimitService.HandlePermanentAccountError(ctx, account, statusCode, body)
+	}
+
 	setOpsUpstreamError(c, statusCode, upstreamMessage, "")
 	if account != nil {
 		appendOpsUpstreamError(c, OpsUpstreamErrorEvent{

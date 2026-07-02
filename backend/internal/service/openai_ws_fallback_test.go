@@ -4,11 +4,13 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	coderws "github.com/coder/websocket"
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
 
@@ -174,6 +176,38 @@ func TestResolveOpenAIWSFallbackErrorResponse(t *testing.T) {
 		require.Equal(t, "Selected model is at capacity. Please try a different model.", clientMessage)
 		require.Equal(t, "Selected model is at capacity. Please try a different model.", upstreamMessage)
 	})
+}
+
+func TestOpenAIWSFallbackErrorMarksPermanentAccountFailure(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodGet, "/v1/responses", nil)
+
+	repo := &permanentKeywordAccountRepoStub{}
+	svc := &OpenAIGatewayService{rateLimitService: &RateLimitService{accountRepo: repo}}
+	account := &Account{
+		ID:       701,
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeAPIKey,
+		Status:   StatusActive,
+	}
+
+	ok := svc.writeOpenAIWSFallbackErrorResponse(
+		c,
+		account,
+		wrapOpenAIWSFallback("auth_failed", &openAIWSDialError{
+			StatusCode: http.StatusUnauthorized,
+			Err:        errors.New("This API key has been disabled"),
+		}),
+	)
+
+	require.True(t, ok)
+	require.Equal(t, http.StatusUnauthorized, rec.Code)
+	require.Equal(t, 1, repo.setErrorCalls)
+	require.Contains(t, repo.lastErrorMsg, "API key has been disabled")
+	require.Equal(t, StatusError, account.Status)
+	require.False(t, account.Schedulable)
 }
 
 func TestOpenAIWSFallbackCooling(t *testing.T) {
