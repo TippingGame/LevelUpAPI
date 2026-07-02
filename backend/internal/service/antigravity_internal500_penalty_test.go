@@ -45,20 +45,22 @@ type tempUnschedCall struct {
 	accountID int64
 	until     time.Time
 	reason    string
+	ctxErr    error
 }
 
 type setErrorCall struct {
 	accountID int64
 	reason    string
+	ctxErr    error
 }
 
-func (r *internal500AccountRepoStub) SetTempUnschedulable(_ context.Context, id int64, until time.Time, reason string) error {
-	r.tempUnschedCalls = append(r.tempUnschedCalls, tempUnschedCall{accountID: id, until: until, reason: reason})
+func (r *internal500AccountRepoStub) SetTempUnschedulable(ctx context.Context, id int64, until time.Time, reason string) error {
+	r.tempUnschedCalls = append(r.tempUnschedCalls, tempUnschedCall{accountID: id, until: until, reason: reason, ctxErr: ctx.Err()})
 	return nil
 }
 
-func (r *internal500AccountRepoStub) SetError(_ context.Context, id int64, errorMsg string) error {
-	r.setErrorCalls = append(r.setErrorCalls, setErrorCall{accountID: id, reason: errorMsg})
+func (r *internal500AccountRepoStub) SetError(ctx context.Context, id int64, errorMsg string) error {
+	r.setErrorCalls = append(r.setErrorCalls, setErrorCall{accountID: id, reason: errorMsg, ctxErr: ctx.Err()})
 	return nil
 }
 
@@ -219,6 +221,43 @@ func TestApplyInternal500Penalty(t *testing.T) {
 
 		require.Empty(t, repo.tempUnschedCalls)
 		require.Empty(t, repo.setErrorCalls)
+	})
+
+	t.Run("count=1 canceled context still temp unschedules", func(t *testing.T) {
+		repo := &internal500AccountRepoStub{}
+		tempCache := &runtimeTempUnschedCacheStub{}
+		svc := &AntigravityGatewayService{
+			accountRepo:      repo,
+			rateLimitService: &RateLimitService{tempUnschedCache: tempCache},
+		}
+		account := &Account{ID: 11, Name: "acc-11"}
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+
+		svc.applyInternal500Penalty(ctx, "[test]", account, 1)
+
+		require.Len(t, repo.tempUnschedCalls, 1)
+		require.NoError(t, repo.tempUnschedCalls[0].ctxErr)
+		require.NotNil(t, tempCache.states[11])
+	})
+
+	t.Run("count=3 canceled context still sets error", func(t *testing.T) {
+		repo := &internal500AccountRepoStub{}
+		tempCache := &runtimeTempUnschedCacheStub{}
+		svc := &AntigravityGatewayService{
+			accountRepo:      repo,
+			rateLimitService: &RateLimitService{tempUnschedCache: tempCache},
+		}
+		account := &Account{ID: 12, Name: "acc-12", Status: StatusActive, Schedulable: true}
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+
+		svc.applyInternal500Penalty(ctx, "[test]", account, 3)
+
+		require.Len(t, repo.setErrorCalls, 1)
+		require.NoError(t, repo.setErrorCalls[0].ctxErr)
+		require.Equal(t, StatusError, account.Status)
+		require.NotNil(t, tempCache.states[12])
 	})
 }
 

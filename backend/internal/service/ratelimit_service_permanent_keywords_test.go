@@ -11,21 +11,25 @@ import (
 
 type permanentKeywordAccountRepoStub struct {
 	AccountRepository
-	setErrorCalls  int
-	lastErrorMsg   string
-	tempCalls      int
-	lastTempReason string
+	setErrorCalls   int
+	lastErrorMsg    string
+	lastErrorCtxErr error
+	tempCalls       int
+	lastTempReason  string
+	lastTempCtxErr  error
 }
 
-func (r *permanentKeywordAccountRepoStub) SetError(_ context.Context, _ int64, errorMsg string) error {
+func (r *permanentKeywordAccountRepoStub) SetError(ctx context.Context, _ int64, errorMsg string) error {
 	r.setErrorCalls++
 	r.lastErrorMsg = errorMsg
+	r.lastErrorCtxErr = ctx.Err()
 	return nil
 }
 
-func (r *permanentKeywordAccountRepoStub) SetTempUnschedulable(_ context.Context, _ int64, _ time.Time, reason string) error {
+func (r *permanentKeywordAccountRepoStub) SetTempUnschedulable(ctx context.Context, _ int64, _ time.Time, reason string) error {
 	r.tempCalls++
 	r.lastTempReason = reason
+	r.lastTempCtxErr = ctx.Err()
 	return nil
 }
 

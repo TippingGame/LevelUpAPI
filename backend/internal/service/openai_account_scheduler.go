@@ -1175,14 +1175,16 @@ func (s *defaultOpenAIAccountScheduler) markPrivacyRequiredAccountError(ctx cont
 		return
 	}
 	msg := fmt.Sprintf("Privacy not set, required by group [%s]", group.Name)
-	if err := s.service.accountRepo.SetError(ctx, account.ID, msg); err != nil {
+	writeCtx, cancel := rateLimitStateContext(ctx)
+	defer cancel()
+	if err := s.service.accountRepo.SetError(writeCtx, account.ID, msg); err != nil {
 		return
 	}
 	var cache TempUnschedCache
 	if s.service.rateLimitService != nil {
 		cache = s.service.rateLimitService.tempUnschedCache
 	}
-	markAccountErrorRuntimeEvicted(ctx, cache, account, msg, "openai_scheduler_require_privacy_set")
+	markAccountErrorRuntimeEvicted(writeCtx, cache, account, msg, "openai_scheduler_require_privacy_set")
 }
 
 func (s *defaultOpenAIAccountScheduler) isAccountTransportCompatible(account *Account, requiredTransport OpenAIUpstreamTransport) bool {

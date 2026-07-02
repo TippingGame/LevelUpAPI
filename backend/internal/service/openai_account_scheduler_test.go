@@ -2054,9 +2054,11 @@ func TestDefaultOpenAIAccountScheduler_RequirePrivacySetRuntimeEvictsUnreadyAcco
 		Name:              "openai-private",
 		RequirePrivacySet: true,
 	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
 
 	filtered, loadReq := scheduler.filterOpenAIAccountsForLoadBalance(
-		context.Background(),
+		ctx,
 		accounts,
 		OpenAIAccountScheduleRequest{},
 		group,
@@ -2066,6 +2068,7 @@ func TestDefaultOpenAIAccountScheduler_RequirePrivacySetRuntimeEvictsUnreadyAcco
 	require.Empty(t, loadReq)
 	require.Equal(t, 1, repo.setErrorCalls)
 	require.Contains(t, repo.lastErrorMsg, "Privacy not set")
+	require.NoError(t, repo.lastErrorCtxErr)
 	require.Equal(t, StatusError, accounts[0].Status)
 	require.False(t, accounts[0].Schedulable)
 	require.NotNil(t, cache.states[88])

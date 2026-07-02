@@ -29,6 +29,7 @@ type mockAccountRepoForPlatform struct {
 	setErrorCalls    int
 	lastErrorID      int64
 	lastErrorMsg     string
+	lastErrorCtxErr  error
 	tempCalls        int
 	lastTempID       int64
 	lastTempUntil    time.Time
@@ -123,6 +124,7 @@ func (m *mockAccountRepoForPlatform) SetError(ctx context.Context, id int64, err
 	m.setErrorCalls++
 	m.lastErrorID = id
 	m.lastErrorMsg = errorMsg
+	m.lastErrorCtxErr = ctx.Err()
 	return nil
 }
 func (m *mockAccountRepoForPlatform) ClearError(ctx context.Context, id int64) error {
@@ -3745,7 +3747,8 @@ func TestGatewayService_GroupResolution_ReusesContextGroup(t *testing.T) {
 }
 
 func TestGatewayService_RequirePrivacySetRuntimeEvictsUnreadyMixedAccount(t *testing.T) {
-	ctx := context.Background()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
 	groupID := int64(77)
 	group := &Group{
 		ID:                groupID,
@@ -3802,6 +3805,7 @@ func TestGatewayService_RequirePrivacySetRuntimeEvictsUnreadyMixedAccount(t *tes
 	require.Equal(t, 1, repo.setErrorCalls)
 	require.Equal(t, int64(1), repo.lastErrorID)
 	require.Contains(t, repo.lastErrorMsg, "Privacy not set")
+	require.NoError(t, repo.lastErrorCtxErr)
 	require.NotNil(t, cache.states[1])
 	require.Equal(t, "account_error", cache.states[1].MatchedKeyword)
 }

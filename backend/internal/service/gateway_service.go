@@ -644,7 +644,9 @@ func (s *GatewayService) markPrivacyRequiredAccountError(ctx context.Context, ac
 		return
 	}
 	msg := fmt.Sprintf("Privacy not set, required by group [%s]", group.Name)
-	if err := s.accountRepo.SetError(ctx, account.ID, msg); err != nil {
+	writeCtx, cancel := rateLimitStateContext(ctx)
+	defer cancel()
+	if err := s.accountRepo.SetError(writeCtx, account.ID, msg); err != nil {
 		slog.Warn("gateway_privacy_required_set_error_failed", "account_id", account.ID, "group_id", group.ID, "error", err)
 		return
 	}
@@ -652,7 +654,7 @@ func (s *GatewayService) markPrivacyRequiredAccountError(ctx context.Context, ac
 	if s.rateLimitService != nil {
 		cache = s.rateLimitService.tempUnschedCache
 	}
-	markAccountErrorRuntimeEvicted(ctx, cache, account, msg, "gateway_require_privacy_set")
+	markAccountErrorRuntimeEvicted(writeCtx, cache, account, msg, "gateway_require_privacy_set")
 }
 
 // GatewayService handles API gateway operations
