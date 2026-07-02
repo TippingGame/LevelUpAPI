@@ -27,6 +27,7 @@ type rateLimitAccountRepoStub struct {
 	lastTempUntil          time.Time
 	lastTempCtxErr         error
 	lastRateLimitCtxErr    error
+	lastModelRateLimitErr  error
 }
 
 func (r *rateLimitAccountRepoStub) SetError(ctx context.Context, id int64, errorMsg string) error {
@@ -57,6 +58,7 @@ func (r *rateLimitAccountRepoStub) UpdateCredentials(ctx context.Context, id int
 
 func (r *rateLimitAccountRepoStub) SetModelRateLimit(ctx context.Context, id int64, modelKey string, resetAt time.Time) error {
 	r.modelRateLimitCalls = append(r.modelRateLimitCalls, modelRateLimitCall{accountID: id, modelKey: modelKey, resetAt: resetAt})
+	r.lastModelRateLimitErr = ctx.Err()
 	return nil
 }
 
@@ -193,6 +195,28 @@ func TestRateLimitService_StateWritesSurviveCanceledRequestContext(t *testing.T)
 		require.False(t, disable)
 		require.Equal(t, 1, repo.rateLimitCalls)
 		require.NoError(t, repo.lastRateLimitCtxErr)
+	})
+
+	t.Run("model_not_found_model_rate_limit", func(t *testing.T) {
+		repo := &rateLimitAccountRepoStub{}
+		service := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+		account := &Account{
+			ID:          112,
+			Platform:    PlatformOpenAI,
+			Type:        AccountTypeAPIKey,
+			Status:      StatusActive,
+			Credentials: map[string]any{},
+		}
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+
+		disable := service.HandleUpstreamErrorForModel(ctx, account, "gpt-test", http.StatusNotFound, http.Header{}, []byte(`{"error":{"message":"model not found"}}`))
+
+		require.True(t, disable)
+		require.Len(t, repo.modelRateLimitCalls, 1)
+		require.Equal(t, "gpt-test", repo.modelRateLimitCalls[0].modelKey)
+		require.NoError(t, repo.lastModelRateLimitErr)
+		require.True(t, account.isModelRateLimitedWithContext(context.Background(), "gpt-test"))
 	})
 }
 

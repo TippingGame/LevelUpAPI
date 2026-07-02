@@ -229,6 +229,34 @@ func (s *RateLimitService) persistOverloadedState(ctx context.Context, account *
 	return nil
 }
 
+func (s *RateLimitService) persistModelRateLimitedState(ctx context.Context, account *Account, modelKey string, resetAt time.Time) error {
+	modelKey = strings.TrimSpace(modelKey)
+	if account == nil || modelKey == "" {
+		return nil
+	}
+	if s == nil || s.accountRepo == nil {
+		return fmt.Errorf("account repository is nil")
+	}
+	writeCtx, cancel := rateLimitStateContext(ctx)
+	defer cancel()
+	if err := s.accountRepo.SetModelRateLimit(writeCtx, account.ID, modelKey, resetAt); err != nil {
+		return err
+	}
+	if account.Extra == nil {
+		account.Extra = make(map[string]any)
+	}
+	limits, _ := account.Extra[modelRateLimitsKey].(map[string]any)
+	if limits == nil {
+		limits = make(map[string]any)
+		account.Extra[modelRateLimitsKey] = limits
+	}
+	limits[modelKey] = map[string]any{
+		"rate_limited_at":     time.Now().UTC().Format(time.RFC3339),
+		"rate_limit_reset_at": resetAt.UTC().Format(time.RFC3339),
+	}
+	return nil
+}
+
 // HandlePermanentAccountError marks non-pool API key accounts as errored when
 // upstream returns an unambiguous permanent account/key/billing failure. It is
 // intentionally narrower than HandleUpstreamError so early-return paths such as
@@ -478,7 +506,7 @@ func (s *RateLimitService) handleUpstreamModelNotFound(ctx context.Context, acco
 		return false
 	}
 	resetAt := time.Now().Add(upstreamModelNotFoundCooldown)
-	if err := s.accountRepo.SetModelRateLimit(ctx, account.ID, modelKey, resetAt); err != nil {
+	if err := s.persistModelRateLimitedState(ctx, account, modelKey, resetAt); err != nil {
 		slog.Warn("upstream_model_not_found_set_model_rate_limit_failed", "account_id", account.ID, "model", modelKey, "error", err)
 		return true
 	}
