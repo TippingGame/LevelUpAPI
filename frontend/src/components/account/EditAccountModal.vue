@@ -413,7 +413,7 @@
                 @click="toggleErrorCode(code.value)"
                 :class="[
                   'rounded-lg px-3 py-1.5 text-sm font-medium transition-colors',
-                  selectedErrorCodes.includes(code.value)
+                  selectedErrorCodeTokens.includes(String(code.value))
                     ? 'bg-red-100 text-red-700 ring-1 ring-red-500 dark:bg-red-900/30 dark:text-red-400'
                     : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-dark-600 dark:text-gray-400 dark:hover:bg-dark-500'
                 ]"
@@ -425,10 +425,8 @@
             <!-- Manual input -->
             <div class="flex items-center gap-2">
               <input
-                v-model.number="customErrorCodeInput"
-                type="number"
-                min="100"
-                max="599"
+                v-model="customErrorCodeInput"
+                type="text"
                 class="input flex-1"
                 :placeholder="t('admin.accounts.enterErrorCode')"
                 @keyup.enter="addCustomErrorCode"
@@ -448,20 +446,20 @@
             <!-- Selected codes summary -->
             <div class="flex flex-wrap gap-1.5">
               <span
-                v-for="code in selectedErrorCodes.sort((a, b) => a - b)"
-                :key="code"
+                v-for="token in selectedErrorCodeTokens"
+                :key="token"
                 class="inline-flex items-center gap-1 rounded-full bg-red-100 px-2.5 py-0.5 text-sm font-medium text-red-700 dark:bg-red-900/30 dark:text-red-400"
               >
-                {{ code }}
+                {{ token }}
                 <button
                   type="button"
-                  @click="removeErrorCode(code)"
+                  @click="removeErrorCode(token)"
                   class="hover:text-red-900 dark:hover:text-red-300"
                 >
                   <Icon name="x" size="sm" :stroke-width="2" />
                 </button>
               </span>
-              <span v-if="selectedErrorCodes.length === 0" class="text-xs text-gray-400">
+              <span v-if="selectedErrorCodeTokens.length === 0" class="text-xs text-gray-400">
                 {{ t('admin.accounts.noneSelectedUsesDefault') }}
               </span>
             </div>
@@ -2246,6 +2244,13 @@ import ModelWhitelistSelector from '@/components/account/ModelWhitelistSelector.
 import QuotaLimitCard from '@/components/account/QuotaLimitCard.vue'
 import { applyInterceptWarmup } from '@/components/account/credentialsBuilder'
 import {
+  customErrorCodeTokensFromValue,
+  customErrorCodeTokensIncludeCode,
+  customErrorCodeTokensToPayload,
+  parseCustomErrorCodeInput,
+  sortCustomErrorCodeTokens
+} from '@/components/account/customErrorCodePolicy'
+import {
   PERSONAL_ACCOUNT_DEFAULT_AUTO_PAUSE_ON_EXPIRED,
   PERSONAL_ACCOUNT_MAX_CONCURRENCY,
   PERSONAL_ACCOUNT_MIN_CONCURRENCY,
@@ -2361,8 +2366,8 @@ const MAX_POOL_MODE_RETRY_COUNT = 10
 const poolModeEnabled = ref(false)
 const poolModeRetryCount = ref(DEFAULT_POOL_MODE_RETRY_COUNT)
 const customErrorCodesEnabled = ref(false)
-const selectedErrorCodes = ref<number[]>([])
-const customErrorCodeInput = ref<number | null>(null)
+const selectedErrorCodeTokens = ref<string[]>([])
+const customErrorCodeInput = ref('')
 const interceptWarmupRequests = ref(false)
 const autoPauseOnExpired = ref(false)
 const mixedScheduling = ref(false) // For antigravity accounts: enable mixed scheduling
@@ -2903,12 +2908,7 @@ const syncFormFromAccount = (newAccount: Account | null) => {
 
     // Load custom error codes
     customErrorCodesEnabled.value = credentials.custom_error_codes_enabled === true
-    const existingErrorCodes = credentials.custom_error_codes as number[] | undefined
-    if (existingErrorCodes && Array.isArray(existingErrorCodes)) {
-      selectedErrorCodes.value = [...existingErrorCodes]
-    } else {
-      selectedErrorCodes.value = []
-    }
+    selectedErrorCodeTokens.value = customErrorCodeTokensFromValue(credentials.custom_error_codes)
   } else if (newAccount.type === 'bedrock' && newAccount.credentials) {
     const bedrockCreds = newAccount.credentials as Record<string, unknown>
     const authMode = (bedrockCreds.auth_mode as string) || 'sigv4'
@@ -2927,6 +2927,8 @@ const syncFormFromAccount = (newAccount: Account | null) => {
     poolModeEnabled.value = bedrockCreds.pool_mode === true
     const retryCount = bedrockCreds.pool_mode_retry_count
     poolModeRetryCount.value = (typeof retryCount === 'number' && retryCount >= 0) ? retryCount : DEFAULT_POOL_MODE_RETRY_COUNT
+    customErrorCodesEnabled.value = bedrockCreds.custom_error_codes_enabled === true
+    selectedErrorCodeTokens.value = customErrorCodeTokensFromValue(bedrockCreds.custom_error_codes)
 
     // Load quota limits for bedrock
     const bedrockExtra = (newAccount.extra as Record<string, unknown>) || {}
@@ -3021,7 +3023,8 @@ const syncFormFromAccount = (newAccount: Account | null) => {
     poolModeEnabled.value = false
     poolModeRetryCount.value = DEFAULT_POOL_MODE_RETRY_COUNT
     customErrorCodesEnabled.value = false
-    selectedErrorCodes.value = []
+    selectedErrorCodeTokens.value = []
+    customErrorCodeInput.value = ''
   }
   if (isUserScope.value) {
     modelRestrictionMode.value = 'whitelist'
@@ -3104,54 +3107,55 @@ const addAntigravityPresetMapping = (from: string, to: string) => {
 
 // Error code toggle helper
 const toggleErrorCode = (code: number) => {
-  const index = selectedErrorCodes.value.indexOf(code)
+  const token = String(code)
+  const index = selectedErrorCodeTokens.value.indexOf(token)
   if (index === -1) {
-    // Adding code - check for 429/529 warning
-    if (code === 429) {
-      if (!confirm(t('admin.accounts.customErrorCodes429Warning'))) {
-        return
-      }
-    } else if (code === 529) {
-      if (!confirm(t('admin.accounts.customErrorCodes529Warning'))) {
-        return
-      }
+    if (!confirmCustomErrorCodeTokens([token])) {
+      return
     }
-    selectedErrorCodes.value.push(code)
+    selectedErrorCodeTokens.value = sortCustomErrorCodeTokens([...selectedErrorCodeTokens.value, token])
   } else {
-    selectedErrorCodes.value.splice(index, 1)
+    selectedErrorCodeTokens.value.splice(index, 1)
   }
 }
 
 // Add custom error code from input
 const addCustomErrorCode = () => {
-  const code = customErrorCodeInput.value
-  if (code === null || code < 100 || code > 599) {
+  const parsed = parseCustomErrorCodeInput(customErrorCodeInput.value)
+  if (parsed.invalidTokens.length > 0 || parsed.tokens.length === 0) {
     appStore.showError(t('admin.accounts.invalidErrorCode'))
     return
   }
-  if (selectedErrorCodes.value.includes(code)) {
+  const additions = parsed.tokens.filter((token) => !selectedErrorCodeTokens.value.includes(token))
+  if (additions.length === 0) {
     appStore.showInfo(t('admin.accounts.errorCodeExists'))
     return
   }
-  // Check for 429/529 warning
-  if (code === 429) {
-    if (!confirm(t('admin.accounts.customErrorCodes429Warning'))) {
-      return
-    }
-  } else if (code === 529) {
-    if (!confirm(t('admin.accounts.customErrorCodes529Warning'))) {
-      return
-    }
+  if (!confirmCustomErrorCodeTokens(additions)) {
+    return
   }
-  selectedErrorCodes.value.push(code)
-  customErrorCodeInput.value = null
+  selectedErrorCodeTokens.value = sortCustomErrorCodeTokens([
+    ...selectedErrorCodeTokens.value,
+    ...additions
+  ])
+  customErrorCodeInput.value = ''
+}
+
+const confirmCustomErrorCodeTokens = (tokens: string[]) => {
+  if (customErrorCodeTokensIncludeCode(tokens, 429) && !confirm(t('admin.accounts.customErrorCodes429Warning'))) {
+    return false
+  }
+  if (customErrorCodeTokensIncludeCode(tokens, 529) && !confirm(t('admin.accounts.customErrorCodes529Warning'))) {
+    return false
+  }
+  return true
 }
 
 // Remove error code
-const removeErrorCode = (code: number) => {
-  const index = selectedErrorCodes.value.indexOf(code)
+const removeErrorCode = (token: string) => {
+  const index = selectedErrorCodeTokens.value.indexOf(token)
   if (index !== -1) {
-    selectedErrorCodes.value.splice(index, 1)
+    selectedErrorCodeTokens.value.splice(index, 1)
   }
 }
 
@@ -3606,7 +3610,7 @@ const handleSubmit = async () => {
       // Add custom error codes if enabled
       if (customErrorCodesEnabled.value) {
         newCredentials.custom_error_codes_enabled = true
-        newCredentials.custom_error_codes = [...selectedErrorCodes.value]
+        newCredentials.custom_error_codes = customErrorCodeTokensToPayload(selectedErrorCodeTokens.value)
       } else {
         delete newCredentials.custom_error_codes_enabled
         delete newCredentials.custom_error_codes

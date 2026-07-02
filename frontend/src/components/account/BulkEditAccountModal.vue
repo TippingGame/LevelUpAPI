@@ -386,7 +386,7 @@
               type="button"
               :class="[
                 'rounded-lg px-3 py-1.5 text-sm font-medium transition-colors',
-                selectedErrorCodes.includes(code.value)
+                selectedErrorCodeTokens.includes(String(code.value))
                   ? 'bg-red-100 text-red-700 ring-1 ring-red-500 dark:bg-red-900/30 dark:text-red-400'
                   : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-dark-600 dark:text-gray-400 dark:hover:bg-dark-500'
               ]"
@@ -401,9 +401,7 @@
             <input
               v-model="customErrorCodeInput"
               id="bulk-edit-custom-error-code-input"
-              type="number"
-              min="100"
-              max="599"
+              type="text"
               class="input flex-1"
               :placeholder="t('admin.accounts.enterErrorCode')"
               aria-labelledby="bulk-edit-custom-error-codes-label"
@@ -424,20 +422,20 @@
           <!-- Selected codes summary -->
           <div class="flex flex-wrap gap-1.5">
             <span
-              v-for="code in selectedErrorCodes.sort((a, b) => a - b)"
-              :key="code"
+              v-for="token in selectedErrorCodeTokens"
+              :key="token"
               class="inline-flex items-center gap-1 rounded-full bg-red-100 px-2.5 py-0.5 text-sm font-medium text-red-700 dark:bg-red-900/30 dark:text-red-400"
             >
-              {{ code }}
+              {{ token }}
               <button
                 type="button"
                 class="hover:text-red-900 dark:hover:text-red-300"
-                @click="removeErrorCode(code)"
+                @click="removeErrorCode(token)"
               >
                 <Icon name="x" size="xs" class="h-3.5 w-3.5" :stroke-width="2" />
               </button>
             </span>
-            <span v-if="selectedErrorCodes.length === 0" class="text-xs text-gray-400">
+            <span v-if="selectedErrorCodeTokens.length === 0" class="text-xs text-gray-400">
               {{ t('admin.accounts.noneSelectedUsesDefault') }}
             </span>
           </div>
@@ -1232,6 +1230,12 @@ import GroupSelector from '@/components/common/GroupSelector.vue'
 import ModelWhitelistSelector from '@/components/account/ModelWhitelistSelector.vue'
 import Icon from '@/components/icons/Icon.vue'
 import {
+  customErrorCodeTokensIncludeCode,
+  customErrorCodeTokensToPayload,
+  parseCustomErrorCodeInput,
+  sortCustomErrorCodeTokens
+} from '@/components/account/customErrorCodePolicy'
+import {
   PERSONAL_ACCOUNT_DEFAULT_CONCURRENCY,
   PERSONAL_ACCOUNT_DEFAULT_LOAD_FACTOR,
   PERSONAL_ACCOUNT_DEFAULT_PRIORITY,
@@ -1437,8 +1441,8 @@ const baseUrl = ref('')
 const modelRestrictionMode = ref<'whitelist' | 'mapping'>('whitelist')
 const allowedModels = ref<string[]>([])
 const modelMappings = ref<ModelMapping[]>([])
-const selectedErrorCodes = ref<number[]>([])
-const customErrorCodeInput = ref<number | null>(null)
+const selectedErrorCodeTokens = ref<string[]>([])
+const customErrorCodeInput = ref('')
 const interceptWarmupRequests = ref(false)
 const proxyId = ref<number | null>(null)
 const concurrency = ref(1)
@@ -1563,52 +1567,53 @@ const addPresetMapping = (from: string, to: string) => {
 
 // Error code helpers
 const toggleErrorCode = (code: number) => {
-  const index = selectedErrorCodes.value.indexOf(code)
+  const token = String(code)
+  const index = selectedErrorCodeTokens.value.indexOf(token)
   if (index === -1) {
-    // Adding code - check for 429/529 warning
-    if (code === 429) {
-      if (!confirm(t('admin.accounts.customErrorCodes429Warning'))) {
-        return
-      }
-    } else if (code === 529) {
-      if (!confirm(t('admin.accounts.customErrorCodes529Warning'))) {
-        return
-      }
+    if (!confirmCustomErrorCodeTokens([token])) {
+      return
     }
-    selectedErrorCodes.value.push(code)
+    selectedErrorCodeTokens.value = sortCustomErrorCodeTokens([...selectedErrorCodeTokens.value, token])
   } else {
-    selectedErrorCodes.value.splice(index, 1)
+    selectedErrorCodeTokens.value.splice(index, 1)
   }
 }
 
 const addCustomErrorCode = () => {
-  const code = customErrorCodeInput.value
-  if (code === null || code < 100 || code > 599) {
+  const parsed = parseCustomErrorCodeInput(customErrorCodeInput.value)
+  if (parsed.invalidTokens.length > 0 || parsed.tokens.length === 0) {
     appStore.showError(t('admin.accounts.invalidErrorCode'))
     return
   }
-  if (selectedErrorCodes.value.includes(code)) {
+  const additions = parsed.tokens.filter((token) => !selectedErrorCodeTokens.value.includes(token))
+  if (additions.length === 0) {
     appStore.showInfo(t('admin.accounts.errorCodeExists'))
     return
   }
-  // Check for 429/529 warning
-  if (code === 429) {
-    if (!confirm(t('admin.accounts.customErrorCodes429Warning'))) {
-      return
-    }
-  } else if (code === 529) {
-    if (!confirm(t('admin.accounts.customErrorCodes529Warning'))) {
-      return
-    }
+  if (!confirmCustomErrorCodeTokens(additions)) {
+    return
   }
-  selectedErrorCodes.value.push(code)
-  customErrorCodeInput.value = null
+  selectedErrorCodeTokens.value = sortCustomErrorCodeTokens([
+    ...selectedErrorCodeTokens.value,
+    ...additions
+  ])
+  customErrorCodeInput.value = ''
 }
 
-const removeErrorCode = (code: number) => {
-  const index = selectedErrorCodes.value.indexOf(code)
+const confirmCustomErrorCodeTokens = (tokens: string[]) => {
+  if (customErrorCodeTokensIncludeCode(tokens, 429) && !confirm(t('admin.accounts.customErrorCodes429Warning'))) {
+    return false
+  }
+  if (customErrorCodeTokensIncludeCode(tokens, 529) && !confirm(t('admin.accounts.customErrorCodes529Warning'))) {
+    return false
+  }
+  return true
+}
+
+const removeErrorCode = (token: string) => {
+  const index = selectedErrorCodeTokens.value.indexOf(token)
   if (index !== -1) {
-    selectedErrorCodes.value.splice(index, 1)
+    selectedErrorCodeTokens.value.splice(index, 1)
   }
 }
 
@@ -1730,7 +1735,7 @@ const buildUpdatePayload = (): Record<string, unknown> | null => {
 
   if (canManageCustomErrorCodes.value && enableCustomErrorCodes.value) {
     credentials.custom_error_codes_enabled = true
-    credentials.custom_error_codes = [...selectedErrorCodes.value]
+    credentials.custom_error_codes = customErrorCodeTokensToPayload(selectedErrorCodeTokens.value)
     credentialsChanged = true
   }
 
@@ -2071,8 +2076,8 @@ watch(
       modelRestrictionMode.value = 'whitelist'
       allowedModels.value = []
       modelMappings.value = []
-      selectedErrorCodes.value = []
-      customErrorCodeInput.value = null
+      selectedErrorCodeTokens.value = []
+      customErrorCodeInput.value = ''
       interceptWarmupRequests.value = false
       proxyId.value = null
       concurrency.value = isUserScope.value ? PERSONAL_ACCOUNT_DEFAULT_CONCURRENCY : 1

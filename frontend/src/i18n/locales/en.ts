@@ -4353,18 +4353,18 @@ export default {
       poolModeRetryCountHint:
         'Only applies in pool mode. Use 0 to disable in-place retry. Default {default}, maximum {max}.',
       customErrorCodes: 'Custom Error Codes',
-      customErrorCodesHint: 'Only stop scheduling for selected error codes',
+      customErrorCodesHint: 'Only stop scheduling for selected error codes or ranges',
       customErrorCodesWarning:
-        'Only selected error codes will stop scheduling. Other errors will return 500.',
+        'Only selected error codes or ranges will stop scheduling. Other errors will return 500.',
       customErrorCodes429Warning:
         '429 already has built-in rate limit handling. Adding it to custom error codes will disable the account instead of temporary rate limiting. Are you sure?',
       customErrorCodes529Warning:
         '529 already has built-in overload handling. Adding it to custom error codes will disable the account instead of temporary overload marking. Are you sure?',
       selectedErrorCodes: 'Selected',
       noneSelectedUsesDefault: 'None selected (uses default policy)',
-      enterErrorCode: 'Enter error code (100-599)',
-      invalidErrorCode: 'Please enter a valid HTTP error code (100-599)',
-      errorCodeExists: 'This error code is already selected',
+      enterErrorCode: 'Enter code or range, e.g. 401,500-503',
+      invalidErrorCode: 'Please enter a valid HTTP error code or range (100-599)',
+      errorCodeExists: 'This error code or range is already selected',
       interceptWarmupRequests: 'Intercept Warmup Requests',
       interceptWarmupRequestsDesc:
         'When enabled, warmup requests like title generation will return mock responses without consuming upstream tokens',
