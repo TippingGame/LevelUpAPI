@@ -2212,17 +2212,6 @@ func (h *GatewayHandler) CountTokens(c *gin.Context) {
 	// 获取订阅信息（可能为nil）
 	subscription, _ := middleware2.GetSubscriptionFromContext(c)
 
-	// 校验 billing eligibility（订阅/余额）
-	// 【注意】不计算并发，但需要校验订阅/余额
-	if err := h.billingCacheService.CheckBillingEligibility(c.Request.Context(), apiKey.User, apiKey, apiKey.Group, subscription); err != nil {
-		status, code, message, retryAfter := billingErrorDetails(err)
-		if retryAfter > 0 {
-			c.Header("Retry-After", strconv.Itoa(retryAfter))
-		}
-		h.errorResponse(c, status, code, message)
-		return
-	}
-
 	// 计算粘性会话 hash
 	parsedReq.SessionContext = &service.SessionContext{
 		ClientIP:  ip.GetClientIP(c),
@@ -2231,26 +2220,77 @@ func (h *GatewayHandler) CountTokens(c *gin.Context) {
 	}
 	sessionHash := h.gatewayService.GenerateSessionHash(parsedReq)
 
-	// 选择支持该模型的账号
-	account, err := h.gatewayService.SelectAccountForModel(c.Request.Context(), apiKey.GroupID, sessionHash, parsedReq.Model)
-	if err != nil {
-		reqLog.Warn("gateway.count_tokens_select_account_failed", zap.Error(err))
-		h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "Service temporarily unavailable")
+	routeCursor := newAPIKeyGroupRouteCursor(apiKey)
+	if _, ok := routeCursor.current(); !ok {
+		h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "No available API key group routes")
 		return
 	}
-	setOpsSelectedAccount(c, account.ID, account.Platform)
-
-	// 转发请求（不记录使用量）
-	if err := h.gatewayService.ForwardCountTokens(c.Request.Context(), c, account, parsedReq); err != nil {
-		reqLog.Error("gateway.count_tokens_forward_failed", zap.Int64("account_id", account.ID), zap.Error(err))
-		// 错误响应已在 ForwardCountTokens 中处理
-		return
-	}
-
-	if account.IsAnthropicOAuthOrSetupToken() && account.GetBaseRPM() > 0 {
-		if err := h.gatewayService.IncrementAccountRPM(c.Request.Context(), account.ID); err != nil {
-			reqLog.Warn("gateway.count_tokens_rpm_increment_failed", zap.Int64("account_id", account.ID), zap.Error(err))
+	baseRequestContext := c.Request.Context()
+	for {
+		routeCandidate, ok := routeCursor.current()
+		if !ok {
+			h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "No available API key group routes")
+			return
 		}
+		currentAPIKey := routeCandidate.APIKey
+		currentSubscription, resolveErr := h.gatewayService.ResolveRouteSubscription(baseRequestContext, currentAPIKey, subscription)
+		if resolveErr != nil {
+			reqLog.Info("gateway.count_tokens_route_subscription_resolve_failed",
+				zap.Error(resolveErr),
+				zap.Int64p("group_id", currentAPIKey.GroupID),
+			)
+			if shouldSkipRouteOnSubscriptionResolveError(resolveErr) &&
+				routeCursor.skipToNext("route_subscription_resolve_failed", reqLog, zap.Error(resolveErr), zap.Int64p("group_id", currentAPIKey.GroupID)) {
+				continue
+			}
+			status, code, message, retryAfter := billingErrorDetails(resolveErr)
+			if retryAfter > 0 {
+				c.Header("Retry-After", strconv.Itoa(retryAfter))
+			}
+			h.errorResponse(c, status, code, message)
+			return
+		}
+
+		// 校验 billing eligibility（订阅/余额）
+		// 【注意】不计算并发，但需要校验订阅/余额
+		if err := h.billingCacheService.CheckBillingEligibility(baseRequestContext, currentAPIKey.User, currentAPIKey, currentAPIKey.Group, currentSubscription); err != nil {
+			status, code, message, retryAfter := billingErrorDetails(err)
+			if retryAfter > 0 {
+				c.Header("Retry-After", strconv.Itoa(retryAfter))
+			}
+			h.errorResponse(c, status, code, message)
+			return
+		}
+
+		// 选择支持该模型的账号
+		account, err := h.gatewayService.SelectAccountForModel(baseRequestContext, currentAPIKey.GroupID, sessionHash, parsedReq.Model)
+		if err != nil {
+			reqLog.Warn("gateway.count_tokens_select_account_failed",
+				zap.Error(err),
+				zap.Int64p("group_id", currentAPIKey.GroupID),
+			)
+			if routeCursor.switchToNext(apiKey.ID, "count_tokens_account_select_failed", reqLog, zap.Error(err), zap.Int64p("group_id", currentAPIKey.GroupID)) {
+				continue
+			}
+			h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "Service temporarily unavailable")
+			return
+		}
+		setOpsSelectedAccount(c, account.ID, account.Platform)
+
+		// 转发请求（不记录使用量）。ForwardCountTokens 会直接写响应；写出后不再切换分组，避免双响应。
+		if err := h.gatewayService.ForwardCountTokens(baseRequestContext, c, account, parsedReq); err != nil {
+			reqLog.Error("gateway.count_tokens_forward_failed", zap.Int64("account_id", account.ID), zap.Error(err))
+			// 错误响应已在 ForwardCountTokens 中处理
+			return
+		}
+		routeCursor.recordSuccess(apiKey.ID)
+
+		if account.IsAnthropicOAuthOrSetupToken() && account.GetBaseRPM() > 0 {
+			if err := h.gatewayService.IncrementAccountRPM(baseRequestContext, account.ID); err != nil {
+				reqLog.Warn("gateway.count_tokens_rpm_increment_failed", zap.Int64("account_id", account.ID), zap.Error(err))
+			}
+		}
+		return
 	}
 }
 
