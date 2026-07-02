@@ -8,11 +8,19 @@ import (
 )
 
 func TestUpstreamReplayUnsafeTimeoutStatusesDoNotFailover(t *testing.T) {
-	statuses := []int{http.StatusGatewayTimeout, cloudflareOriginTimeoutStatus}
+	statuses := []int{http.StatusRequestTimeout, http.StatusGatewayTimeout, cloudflareOriginTimeoutStatus}
+	customRetryAccount := &Account{
+		Type: AccountTypeAPIKey,
+		Credentials: map[string]any{
+			"custom_error_codes_enabled": true,
+			"custom_error_codes":         []any{float64(http.StatusBadRequest)},
+		},
+	}
 
 	for _, status := range statuses {
 		require.True(t, IsUpstreamReplayUnsafeTimeoutStatus(status))
 
+		require.False(t, (&GatewayService{}).shouldRetryUpstreamError(customRetryAccount, status))
 		require.False(t, (&GatewayService{}).shouldFailoverUpstreamError(status))
 		require.False(t, (&OpenAIGatewayService{}).shouldFailoverUpstreamError(status))
 		require.False(t, (&OpenAIGatewayService{}).shouldFailoverOpenAIUpstreamResponse(status, "model is at capacity", []byte(`{"error":{"message":"model is at capacity"}}`)))
@@ -26,10 +34,18 @@ func TestUpstreamReplayUnsafeTimeoutStatusesDoNotFailover(t *testing.T) {
 
 func TestTransientUpstreamStatusesStillFailover(t *testing.T) {
 	statuses := []int{http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusTooManyRequests, 529}
+	customRetryAccount := &Account{
+		Type: AccountTypeAPIKey,
+		Credentials: map[string]any{
+			"custom_error_codes_enabled": true,
+			"custom_error_codes":         []any{float64(http.StatusBadRequest)},
+		},
+	}
 
 	for _, status := range statuses {
 		require.False(t, IsUpstreamReplayUnsafeTimeoutStatus(status))
 
+		require.True(t, (&GatewayService{}).shouldRetryUpstreamError(customRetryAccount, status))
 		require.True(t, (&GatewayService{}).shouldFailoverUpstreamError(status))
 		require.True(t, (&OpenAIGatewayService{}).shouldFailoverUpstreamError(status))
 		require.True(t, (&OpenAIGatewayService{}).shouldFailoverOpenAIUpstreamResponse(status, "", nil))
