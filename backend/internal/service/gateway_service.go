@@ -634,6 +634,8 @@ func (s *GatewayService) TempUnscheduleRetryableError(ctx context.Context, accou
 		tempUnscheduleGoogleConfigError(ctx, s.accountRepo, tempUnschedCache, accountID, "[handler]")
 	case http.StatusBadGateway:
 		tempUnscheduleEmptyResponse(ctx, s.accountRepo, tempUnschedCache, accountID, "[handler]")
+	default:
+		tempUnscheduleRetryableStatusError(ctx, s.accountRepo, tempUnschedCache, accountID, failoverErr.StatusCode, failoverErr.ResponseBody, "[handler]")
 	}
 }
 

@@ -2540,6 +2540,36 @@ func tempUnscheduleEmptyResponse(ctx context.Context, repo AccountRepository, ca
 	}
 }
 
+// retryableErrorExhaustedCooldown 同账号可重试错误耗尽后的兜底临停时长。
+const retryableErrorExhaustedCooldown = 1 * time.Minute
+
+func tempUnscheduleRetryableStatusError(ctx context.Context, repo AccountRepository, cache TempUnschedCache, accountID int64, statusCode int, responseBody []byte, logPrefix string) {
+	if repo == nil || accountID <= 0 || statusCode <= 0 {
+		return
+	}
+
+	until := time.Now().Add(retryableErrorExhaustedCooldown)
+	upstreamMsg := strings.TrimSpace(extractUpstreamErrorMessage(responseBody))
+	if upstreamMsg == "" {
+		upstreamMsg = truncateTempUnschedMessage(responseBody, tempUnschedMessageMaxBytes)
+	} else {
+		upstreamMsg = truncateTempUnschedMessage([]byte(upstreamMsg), tempUnschedMessageMaxBytes)
+	}
+
+	reason := fmt.Sprintf("retryable upstream status %d exhausted (auto temp-unschedule 1m)", statusCode)
+	if upstreamMsg != "" {
+		reason += ": " + upstreamMsg
+	}
+	matchedKeyword := fmt.Sprintf("retryable_status_%d", statusCode)
+
+	if err := repo.SetTempUnschedulable(ctx, accountID, until, reason); err != nil {
+		log.Printf("%s temp_unschedule_failed account=%d error=%v", logPrefix, accountID, err)
+		return
+	}
+	cacheTempUnschedState(ctx, cache, accountID, until, statusCode, matchedKeyword, reason)
+	log.Printf("%s temp_unscheduled account=%d until=%v reason=%q", logPrefix, accountID, until.Format("15:04:05"), reason)
+}
+
 func cacheTempUnschedState(ctx context.Context, cache TempUnschedCache, accountID int64, until time.Time, statusCode int, matchedKeyword string, message string) {
 	if cache == nil || accountID <= 0 || until.IsZero() {
 		return
