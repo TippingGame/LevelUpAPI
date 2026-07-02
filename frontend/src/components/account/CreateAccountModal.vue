@@ -3708,8 +3708,17 @@ const userOpenAIProxyLoginRequired = computed(() =>
   form.account_level === 'pro'
 )
 
+const userAnthropicProxyRequired = computed(() =>
+  isUserScope.value &&
+  form.platform === 'anthropic'
+)
+
+const userAccountProxyRequired = computed(() =>
+  userOpenAIProxyLoginRequired.value || userAnthropicProxyRequired.value
+)
+
 const canManageProxy = computed(() =>
-  props.allowProxy !== false && (!isUserScope.value || userOpenAIProxyLoginRequired.value)
+  props.allowProxy !== false && (!isUserScope.value || userAccountProxyRequired.value)
 )
 
 const PROXY_PURCHASE_URL = 'https://www.seekproxy.com/user/reg?invite_id=105978'
@@ -3985,7 +3994,7 @@ watch(
 )
 
 watch(
-  userOpenAIProxyLoginRequired,
+  userAccountProxyRequired,
   (required) => {
     if (!required) {
       form.proxy_id = null
@@ -4675,10 +4684,10 @@ const handleSubmit = async () => {
       appStore.showError(t('userAccounts.importAccountLevelRequired'))
       return
     }
-    if (userOpenAIProxyLoginRequired.value && !form.proxy_id) {
-      appStore.showError(t('userAccounts.importProxyRequired'))
-      return
-    }
+  }
+  if (userAccountProxyRequired.value && !form.proxy_id) {
+    appStore.showError(t('userAccounts.importProxyRequired'))
+    return
   }
 
   // For OAuth-based type, handle OAuth flow (goes to step 2)
@@ -4891,15 +4900,15 @@ const goBackToBasicInfo = () => {
 }
 
 const handleGenerateUrl = async () => {
+  if (isUserScope.value && form.platform === 'openai' && form.account_level === 'unknown') {
+    appStore.showError(t('userAccounts.importAccountLevelRequired'))
+    return
+  }
+  if (userAccountProxyRequired.value && !form.proxy_id) {
+    appStore.showError(t('userAccounts.importProxyRequired'))
+    return
+  }
   if (form.platform === 'openai') {
-    if (isUserScope.value && form.account_level === 'unknown') {
-      appStore.showError(t('userAccounts.importAccountLevelRequired'))
-      return
-    }
-    if (userOpenAIProxyLoginRequired.value && !form.proxy_id) {
-      appStore.showError(t('userAccounts.importProxyRequired'))
-      return
-    }
     await openaiOAuth.generateAuthUrl(form.proxy_id)
   } else if (form.platform === 'gemini') {
     await geminiOAuth.generateAuthUrl(

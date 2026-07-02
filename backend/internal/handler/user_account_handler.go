@@ -374,17 +374,36 @@ func rejectUserProxyID(c *gin.Context, proxyID *int64) bool {
 	return false
 }
 
+func (h *UserAccountHandler) requireVisibleUserProxy(c *gin.Context, ownerUserID int64, proxyID *int64, requiredErr error) bool {
+	if proxyID == nil || *proxyID <= 0 {
+		response.ErrorFrom(c, requiredErr)
+		return false
+	}
+	if h.openaiOAuthService == nil {
+		response.ErrorFrom(c, service.ErrServiceUnavailable)
+		return false
+	}
+	if err := h.openaiOAuthService.EnsureProxyVisibleToUser(c.Request.Context(), ownerUserID, proxyID); err != nil {
+		response.ErrorFrom(c, err)
+		return false
+	}
+	return true
+}
+
 func rejectUserManualCredentialAuth(c *gin.Context) {
 	response.BadRequest(c, "manual credential account creation is not allowed for user accounts; use official OAuth or import OAuth credentials")
 }
 
-func (h *UserAccountHandler) prepareUserOpenAIAccountRequest(c *gin.Context, ownerUserID int64, req *createUserAccountRequest) bool {
+func (h *UserAccountHandler) prepareUserAccountRequest(c *gin.Context, ownerUserID int64, req *createUserAccountRequest) bool {
 	if req == nil {
 		response.BadRequest(c, "Invalid account request")
 		return false
 	}
 	if req.Platform != service.PlatformOpenAI {
 		req.AccountLevel = service.AccountLevelUnknown
+		if service.RequiresUserAccountProxy(req.Platform, req.AccountLevel) {
+			return h.requireVisibleUserProxy(c, ownerUserID, req.ProxyID, service.ErrOwnedAnthropicAccountProxyRequired)
+		}
 		return rejectUserProxyID(c, req.ProxyID)
 	}
 
@@ -397,15 +416,7 @@ func (h *UserAccountHandler) prepareUserOpenAIAccountRequest(c *gin.Context, own
 	if !service.RequiresUserOpenAIProxyLogin(targetLevel) {
 		return rejectUserProxyID(c, req.ProxyID)
 	}
-	if h.openaiOAuthService == nil {
-		response.ErrorFrom(c, service.ErrServiceUnavailable)
-		return false
-	}
-	if err := h.openaiOAuthService.EnsureProxyVisibleToUser(c.Request.Context(), ownerUserID, req.ProxyID); err != nil {
-		response.ErrorFrom(c, err)
-		return false
-	}
-	return true
+	return h.requireVisibleUserProxy(c, ownerUserID, req.ProxyID, service.ErrOwnedOpenAIAccountProxyRequired)
 }
 
 func normalizeUserCredentialImportTargetLevel(req *importUserAccountCredentialsRequest) {
@@ -462,6 +473,13 @@ func validateOpenAIImportTargetLevel(defaults importUserAccountCredentialsReques
 		return "", service.ErrOwnedOpenAIAccountProxyRequired
 	}
 	return targetLevel, nil
+}
+
+func userAccountProxyRequiredError(platform string) error {
+	if platform == service.PlatformAnthropic {
+		return service.ErrOwnedAnthropicAccountProxyRequired
+	}
+	return service.ErrOwnedOpenAIAccountProxyRequired
 }
 
 func userUnixSecondsToTime(value *int64) *time.Time {
@@ -1172,7 +1190,7 @@ func (h *UserAccountHandler) Create(c *gin.Context) {
 		response.BadRequest(c, "Invalid request: "+err.Error())
 		return
 	}
-	if !h.prepareUserOpenAIAccountRequest(c, subject.UserID, &req) {
+	if !h.prepareUserAccountRequest(c, subject.UserID, &req) {
 		return
 	}
 	if req.Concurrency <= 0 {
@@ -1220,7 +1238,7 @@ func (h *UserAccountHandler) Import(c *gin.Context) {
 		response.BadRequest(c, "Invalid request: "+err.Error())
 		return
 	}
-	if !h.prepareUserOpenAIAccountRequest(c, subject.UserID, &req) {
+	if !h.prepareUserAccountRequest(c, subject.UserID, &req) {
 		return
 	}
 	if req.Concurrency <= 0 {
@@ -1289,19 +1307,12 @@ func (h *UserAccountHandler) ImportCredentials(c *gin.Context) {
 		response.BadRequest(c, fmt.Sprintf("Too many import items; maximum is %d", importLimit))
 		return
 	}
-	if req.Platform == service.PlatformOpenAI && service.RequiresUserOpenAIProxyLogin(req.AccountLevel) {
-		if req.ProxyID == nil || *req.ProxyID <= 0 {
-			response.ErrorFrom(c, service.ErrOwnedOpenAIAccountProxyRequired)
+	if service.RequiresUserAccountProxy(req.Platform, req.AccountLevel) {
+		if !h.requireVisibleUserProxy(c, subject.UserID, req.ProxyID, userAccountProxyRequiredError(req.Platform)) {
 			return
 		}
-		if h.openaiOAuthService == nil {
-			response.ErrorFrom(c, service.ErrServiceUnavailable)
-			return
-		}
-		if err := h.openaiOAuthService.EnsureProxyVisibleToUser(c.Request.Context(), subject.UserID, req.ProxyID); err != nil {
-			response.ErrorFrom(c, err)
-			return
-		}
+	} else if !rejectUserProxyID(c, req.ProxyID) {
+		return
 	}
 
 	result := service.AccountCredentialImportResult{
@@ -1415,9 +1426,12 @@ func (h *UserAccountHandler) createOwnedAccountFromCredentialImportSource(
 			req.Name = fmt.Sprintf("OpenAI OAuth Account #%d", sequence)
 		}
 	case service.AccountCredentialImportKindClaudeSessionKey:
+		if h.oauthService == nil {
+			return nil, service.ErrServiceUnavailable
+		}
 		tokenInfo, err := h.oauthService.CookieAuth(ctx, &service.CookieAuthInput{
 			SessionKey: source.Token,
-			ProxyID:    nil,
+			ProxyID:    defaults.ProxyID,
 			Scope:      "full",
 		})
 		if err != nil {
@@ -1444,6 +1458,9 @@ func (h *UserAccountHandler) createOwnedAccountFromCredentialImportSource(
 		if service.RequiresUserOpenAIProxyLogin(openAIAccountLevel) {
 			req.ProxyID = defaults.ProxyID
 		}
+	}
+	if req.Platform == service.PlatformAnthropic {
+		req.ProxyID = defaults.ProxyID
 	}
 	if strings.TrimSpace(req.Name) == "" {
 		return nil, fmt.Errorf("account name is required")
@@ -2228,17 +2245,19 @@ func (h *UserAccountHandler) SetPrivacy(c *gin.Context) {
 }
 
 func (h *UserAccountHandler) GenerateAnthropicOAuthURL(c *gin.Context) {
-	if !requireUserAccountAuth(c) {
+	subject, ok := middleware2.GetAuthSubjectFromContext(c)
+	if !ok {
+		response.Unauthorized(c, "User not authenticated")
 		return
 	}
 	var req userOAuthProxyRequest
 	if !bindOptionalJSON(c, &req) {
 		return
 	}
-	if !rejectUserProxyID(c, req.ProxyID) {
+	if !h.requireVisibleUserProxy(c, subject.UserID, req.ProxyID, service.ErrOwnedAnthropicAccountProxyRequired) {
 		return
 	}
-	result, err := h.oauthService.GenerateAuthURL(c.Request.Context(), nil)
+	result, err := h.oauthService.GenerateAuthURL(c.Request.Context(), req.ProxyID)
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
@@ -2251,7 +2270,9 @@ func (h *UserAccountHandler) GenerateAnthropicSetupTokenURL(c *gin.Context) {
 }
 
 func (h *UserAccountHandler) ExchangeAnthropicOAuthCode(c *gin.Context) {
-	if !requireUserAccountAuth(c) {
+	subject, ok := middleware2.GetAuthSubjectFromContext(c)
+	if !ok {
+		response.Unauthorized(c, "User not authenticated")
 		return
 	}
 	var req userExchangeCodeRequest
@@ -2259,13 +2280,13 @@ func (h *UserAccountHandler) ExchangeAnthropicOAuthCode(c *gin.Context) {
 		response.BadRequest(c, "Invalid request: "+err.Error())
 		return
 	}
-	if !rejectUserProxyID(c, req.ProxyID) {
+	if !h.requireVisibleUserProxy(c, subject.UserID, req.ProxyID, service.ErrOwnedAnthropicAccountProxyRequired) {
 		return
 	}
 	tokenInfo, err := h.oauthService.ExchangeCode(c.Request.Context(), &service.ExchangeCodeInput{
 		SessionID: req.SessionID,
 		Code:      req.Code,
-		ProxyID:   nil,
+		ProxyID:   req.ProxyID,
 	})
 	if err != nil {
 		response.ErrorFrom(c, err)

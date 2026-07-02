@@ -832,6 +832,25 @@ func TestAccountServiceCreateOwnedRejectsOpenAIProWithoutProxy(t *testing.T) {
 	require.Empty(t, repo.createdAccounts)
 }
 
+func TestAccountServiceCreateOwnedRejectsAnthropicWithoutProxy(t *testing.T) {
+	ownerID := int64(101)
+	repo := &ownedAccountDuplicateRepoStub{}
+	svc := &AccountService{accountRepo: repo}
+
+	account, err := svc.CreateOwned(context.Background(), ownerID, CreateAccountRequest{
+		Name:        "claude-without-proxy",
+		Platform:    PlatformAnthropic,
+		Type:        AccountTypeOAuth,
+		Credentials: map[string]any{"access_token": "token"},
+		Concurrency: ownedPersonalDefaultConcurrency,
+		Priority:    1,
+	})
+
+	require.Nil(t, account)
+	require.ErrorIs(t, err, ErrOwnedAnthropicAccountProxyRequired)
+	require.Empty(t, repo.createdAccounts)
+}
+
 func TestAccountServiceCreateOwnedRejectsOpenAILevelMismatch(t *testing.T) {
 	ownerID := int64(101)
 	repo := &ownedAccountDuplicateRepoStub{}
@@ -889,6 +908,7 @@ func TestAccountServiceCreateOwnedAllowsOpenAITeamWithoutProxy(t *testing.T) {
 
 func TestAccountServiceCreateOwnedKeepsAllowedPersonalConcurrency(t *testing.T) {
 	ownerID := int64(101)
+	proxyID := int64(7)
 	repo := &ownedAccountDuplicateRepoStub{}
 	svc := &AccountService{
 		accountRepo: repo,
@@ -902,6 +922,7 @@ func TestAccountServiceCreateOwnedKeepsAllowedPersonalConcurrency(t *testing.T) 
 		Platform:    PlatformAnthropic,
 		Type:        AccountTypeOAuth,
 		Credentials: map[string]any{"access_token": "token"},
+		ProxyID:     &proxyID,
 		Concurrency: ownedPersonalMaxConcurrency,
 		Priority:    ownedPersonalDefaultPriority,
 	})
@@ -909,12 +930,17 @@ func TestAccountServiceCreateOwnedKeepsAllowedPersonalConcurrency(t *testing.T) 
 	require.NoError(t, err)
 	require.NotNil(t, account)
 	require.Equal(t, ownedPersonalMaxConcurrency, account.Concurrency)
+	require.NotNil(t, account.ProxyID)
+	require.Equal(t, proxyID, *account.ProxyID)
 	require.Len(t, repo.createdAccounts, 1)
 	require.Equal(t, ownedPersonalMaxConcurrency, repo.createdAccounts[0].Concurrency)
+	require.NotNil(t, repo.createdAccounts[0].ProxyID)
+	require.Equal(t, proxyID, *repo.createdAccounts[0].ProxyID)
 }
 
 func TestAccountServiceCreateOwnedKeepsGlobalPriorityDefaultAndPrivatePriority(t *testing.T) {
 	ownerID := int64(101)
+	proxyID := int64(8)
 	privatePriority := 7
 	repo := &ownedAccountDuplicateRepoStub{}
 	svc := &AccountService{
@@ -929,6 +955,7 @@ func TestAccountServiceCreateOwnedKeepsGlobalPriorityDefaultAndPrivatePriority(t
 		Platform:        PlatformAnthropic,
 		Type:            AccountTypeOAuth,
 		Credentials:     map[string]any{"access_token": "token"},
+		ProxyID:         &proxyID,
 		Concurrency:     ownedPersonalDefaultConcurrency,
 		PrivatePriority: &privatePriority,
 	})

@@ -33,6 +33,7 @@ var (
 	ErrOwnedAccountLevelNotAllowed               = infraerrors.BadRequest("OWNED_ACCOUNT_LEVEL_NOT_ALLOWED", "user accounts cannot manually change account level")
 	ErrOwnedOpenAIAccountLevelRequired           = infraerrors.BadRequest("OWNED_OPENAI_ACCOUNT_LEVEL_REQUIRED", "OpenAI user accounts must select an account level before import")
 	ErrOwnedOpenAIAccountProxyRequired           = infraerrors.BadRequest("OWNED_OPENAI_ACCOUNT_PROXY_REQUIRED", "Pro OpenAI user accounts must select a proxy IP")
+	ErrOwnedAnthropicAccountProxyRequired        = infraerrors.BadRequest("OWNED_ANTHROPIC_ACCOUNT_PROXY_REQUIRED", "Claude user accounts must select a proxy IP")
 	ErrOwnedAccountGroupPlatformMismatch         = infraerrors.BadRequest("OWNED_ACCOUNT_GROUP_PLATFORM_MISMATCH", "account group platform does not match account platform")
 	ErrOwnedAccountGroupValidationUnavailable    = infraerrors.InternalServer("OWNED_ACCOUNT_GROUP_VALIDATION_UNAVAILABLE", "owned account group validation is unavailable")
 	ErrOwnedAccountPublicPoolUnavailable         = infraerrors.BadRequest("OWNED_ACCOUNT_PUBLIC_POOL_UNAVAILABLE", "public shared account pool group is not configured for this account platform")
@@ -440,7 +441,7 @@ func (s *AccountService) createOwned(ctx context.Context, ownerUserID int64, req
 		return nil, ErrUserNotFound
 	}
 	targetLevel := NormalizeAccountLevel(req.AccountLevel)
-	preserveProxy := req.Platform == PlatformOpenAI && RequiresUserOpenAIProxyLogin(targetLevel)
+	preserveProxy := RequiresUserAccountProxy(req.Platform, targetLevel)
 	proxyID := req.ProxyID
 	if err := applyOwnedPersonalAccountTemplateToCreate(&req); err != nil {
 		return nil, err
@@ -449,15 +450,15 @@ func (s *AccountService) createOwned(ctx context.Context, ownerUserID int64, req
 		if !IsUserSelectableOpenAIAccountLevel(targetLevel) {
 			return nil, ErrOwnedOpenAIAccountLevelRequired
 		}
-		if preserveProxy {
-			if proxyID == nil || *proxyID <= 0 {
-				return nil, ErrOwnedOpenAIAccountProxyRequired
-			}
-			req.ProxyID = proxyID
-		}
 		req.AccountLevel = targetLevel
 	} else {
 		req.AccountLevel = AccountLevelUnknown
+	}
+	if preserveProxy {
+		if proxyID == nil || *proxyID <= 0 {
+			return nil, ownedAccountProxyRequiredError(req.Platform)
+		}
+		req.ProxyID = proxyID
 	}
 	if err := validateOwnedAccountSource(req.Type, req.Credentials, req.Extra); err != nil {
 		return nil, err
@@ -558,6 +559,13 @@ func validateOwnedAccountSource(accountType string, credentials, extra map[strin
 		})
 	}
 	return nil
+}
+
+func ownedAccountProxyRequiredError(platform string) error {
+	if platform == PlatformAnthropic {
+		return ErrOwnedAnthropicAccountProxyRequired
+	}
+	return ErrOwnedOpenAIAccountProxyRequired
 }
 
 func resolveOwnedOpenAIAccountLevel(platform, targetLevel string, credentials, extra map[string]any) (string, error) {

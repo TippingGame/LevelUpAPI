@@ -915,7 +915,7 @@ export default {
     importOAuthOnlyHint: 'Select a proxy IP, generate the login URL, then paste the callback result.',
     importOAuthNamePlaceholder: 'Optional; OpenAI email is used when blank',
     importProxy: 'Proxy IP',
-    importProxyHint: 'Select a visible active proxy IP for OpenAI Pro login/import. It will be bound to imported accounts.',
+    importProxyHint: 'Select a visible active proxy IP for OpenAI Pro / Claude login or import. It will be bound to imported accounts.',
     importProxyEmpty: 'No proxy IP is available. Add or buy one from account mode first.',
     importProxyLoading: 'Loading proxy IPs...',
     importProxyLoadFailed: 'Failed to load proxy IPs',

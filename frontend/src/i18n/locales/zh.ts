@@ -914,7 +914,7 @@ export default {
     importOAuthOnlyHint: '请先选择代理 IP，再生成登录链接并粘贴回调结果。',
     importOAuthNamePlaceholder: '可选；留空则使用 OpenAI 邮箱',
     importProxy: '代理 IP',
-    importProxyHint: '请选择一个可见且启用的代理 IP，用于 OpenAI Pro 登录/导入，并绑定到导入账号。',
+    importProxyHint: '请选择一个可见且启用的代理 IP，用于 OpenAI Pro / Claude 登录或导入，并绑定到导入账号。',
     importProxyEmpty: '暂无可选代理 IP，请先在账号模式中添加或购买代理 IP。',
     importProxyLoading: '正在加载代理 IP...',
     importProxyLoadFailed: '代理 IP 加载失败',

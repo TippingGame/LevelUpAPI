@@ -248,6 +248,7 @@ const isOpenAILike = computed(() => isOpenAI.value)
 const isGemini = computed(() => props.account?.platform === 'gemini')
 const isAnthropic = computed(() => props.account?.platform === 'anthropic')
 const isAntigravity = computed(() => props.account?.platform === 'antigravity')
+const userAnthropicProxyRequired = computed(() => isUserScope.value && isAnthropic.value)
 
 // Computed - current OAuth state based on platform
 const currentAuthUrl = computed(() => {
@@ -339,12 +340,21 @@ const resetState = () => {
   oauthFlowRef.value?.reset()
 }
 
+const ensureRequiredProxy = () => {
+  if (userAnthropicProxyRequired.value && !props.account?.proxy_id) {
+    appStore.showError(t('userAccounts.importProxyRequired'))
+    return false
+  }
+  return true
+}
+
 const handleClose = () => {
   emit('close')
 }
 
 const handleGenerateUrl = async () => {
   if (!props.account) return
+  if (!ensureRequiredProxy()) return
 
   if (isOpenAILike.value) {
     await openaiOAuth.generateAuthUrl(props.account.proxy_id)
@@ -362,6 +372,7 @@ const handleGenerateUrl = async () => {
 
 const handleExchangeCode = async () => {
   if (!props.account) return
+  if (!ensureRequiredProxy()) return
 
   const authCode = oauthFlowRef.value?.authCode || ''
   if (!authCode.trim()) return
@@ -518,6 +529,7 @@ const handleExchangeCode = async () => {
 
 const handleCookieAuth = async (sessionKey: string) => {
   if (!props.account || isOpenAILike.value) return
+  if (!ensureRequiredProxy()) return
 
   claudeOAuth.loading.value = true
   claudeOAuth.error.value = ''
