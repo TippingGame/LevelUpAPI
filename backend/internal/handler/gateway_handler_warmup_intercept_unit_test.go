@@ -25,10 +25,14 @@ import (
 // 后端会在转发上游前直接拦截并返回 mock 响应（不依赖上游）。
 
 type fakeSchedulerCache struct {
-	accounts []*service.Account
+	accounts  []*service.Account
+	snapshots map[service.SchedulerBucket][]*service.Account
 }
 
-func (f *fakeSchedulerCache) GetSnapshot(_ context.Context, _ service.SchedulerBucket) ([]*service.Account, bool, error) {
+func (f *fakeSchedulerCache) GetSnapshot(_ context.Context, bucket service.SchedulerBucket) ([]*service.Account, bool, error) {
+	if f.snapshots != nil {
+		return f.snapshots[bucket], true, nil
+	}
 	return f.accounts, true, nil
 }
 func (f *fakeSchedulerCache) SetSnapshot(_ context.Context, _ service.SchedulerBucket, _ []service.Account) error {
@@ -38,6 +42,13 @@ func (f *fakeSchedulerCache) GetAccount(_ context.Context, id int64) (*service.A
 	for _, account := range f.accounts {
 		if account != nil && account.ID == id {
 			return account, nil
+		}
+	}
+	for _, accounts := range f.snapshots {
+		for _, account := range accounts {
+			if account != nil && account.ID == id {
+				return account, nil
+			}
 		}
 	}
 	return nil, nil
@@ -60,15 +71,22 @@ func (f *fakeSchedulerCache) GetOutboxWatermark(_ context.Context) (int64, error
 func (f *fakeSchedulerCache) SetOutboxWatermark(_ context.Context, _ int64) error { return nil }
 
 type fakeGroupRepo struct {
-	group *service.Group
+	group  *service.Group
+	groups map[int64]*service.Group
 }
 
 func (f *fakeGroupRepo) Create(context.Context, *service.Group) error { return nil }
-func (f *fakeGroupRepo) GetByID(context.Context, int64) (*service.Group, error) {
+func (f *fakeGroupRepo) get(id int64) (*service.Group, error) {
+	if f.groups != nil {
+		return f.groups[id], nil
+	}
 	return f.group, nil
 }
-func (f *fakeGroupRepo) GetByIDLite(context.Context, int64) (*service.Group, error) {
-	return f.group, nil
+func (f *fakeGroupRepo) GetByID(_ context.Context, id int64) (*service.Group, error) {
+	return f.get(id)
+}
+func (f *fakeGroupRepo) GetByIDLite(_ context.Context, id int64) (*service.Group, error) {
+	return f.get(id)
 }
 func (f *fakeGroupRepo) Update(context.Context, *service.Group) error          { return nil }
 func (f *fakeGroupRepo) Delete(context.Context, int64) error                   { return nil }
@@ -141,14 +159,17 @@ func (f *fakeConcurrencyCache) CleanupStaleProcessSlots(context.Context, string)
 
 func newTestGatewayHandler(t *testing.T, group *service.Group, accounts []*service.Account) (*GatewayHandler, func()) {
 	t.Helper()
+	return newTestGatewayHandlerWithFakes(t, &fakeGroupRepo{group: group}, &fakeSchedulerCache{accounts: accounts})
+}
 
-	schedulerCache := &fakeSchedulerCache{accounts: accounts}
+func newTestGatewayHandlerWithFakes(t *testing.T, groupRepo *fakeGroupRepo, schedulerCache *fakeSchedulerCache) (*GatewayHandler, func()) {
+	t.Helper()
 	schedulerSnapshot := service.NewSchedulerSnapshotService(schedulerCache, nil, nil, nil, nil)
 
 	gwSvc := service.NewGatewayService(
 		nil, // accountRepo (not used: scheduler snapshot hit)
 		nil, // accountSharePolicyRepo
-		&fakeGroupRepo{group: group},
+		groupRepo,
 		nil, // usageLogRepo
 		nil, // usageBillingRepo
 		nil, // userRepo
@@ -363,4 +384,114 @@ func TestGatewayHandlerMessages_InterceptWarmup_AntigravityAccount_ForcePlatform
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
 	require.Equal(t, "msg_mock_warmup", resp["id"])
 	require.Equal(t, "claude-sonnet-4-5", resp["model"])
+}
+
+func TestGatewayHandlerMessages_GeminiRouteSwitchesWhenFirstGroupHasNoAccounts(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	resetAPIKeyGroupRouteBreakerForTest(t)
+
+	firstGroupID := int64(2101)
+	secondGroupID := int64(2102)
+	accountID := int64(1102)
+
+	firstGroup := &service.Group{
+		ID:       firstGroupID,
+		Hydrated: true,
+		Platform: service.PlatformGemini,
+		Status:   service.StatusActive,
+	}
+	secondGroup := &service.Group{
+		ID:       secondGroupID,
+		Hydrated: true,
+		Platform: service.PlatformGemini,
+		Status:   service.StatusActive,
+	}
+
+	account := &service.Account{
+		ID:       accountID,
+		Name:     "gemini-2",
+		Platform: service.PlatformGemini,
+		Type:     service.AccountTypeOAuth,
+		Credentials: map[string]any{
+			"access_token":              "tok_gemini",
+			"intercept_warmup_requests": true,
+		},
+		Concurrency:   1,
+		Priority:      1,
+		Status:        service.StatusActive,
+		Schedulable:   true,
+		AccountGroups: []service.AccountGroup{{AccountID: accountID, GroupID: secondGroupID}},
+	}
+
+	snapshots := map[service.SchedulerBucket][]*service.Account{
+		{GroupID: firstGroupID, Platform: service.PlatformGemini, Mode: service.SchedulerModeMixed}:  nil,
+		{GroupID: secondGroupID, Platform: service.PlatformGemini, Mode: service.SchedulerModeMixed}: {account},
+	}
+	h, cleanup := newTestGatewayHandlerWithFakes(t,
+		&fakeGroupRepo{groups: map[int64]*service.Group{
+			firstGroupID:  firstGroup,
+			secondGroupID: secondGroup,
+		}},
+		&fakeSchedulerCache{snapshots: snapshots},
+	)
+	defer cleanup()
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+
+	body := []byte(`{
+		"model": "gemini-2.5-pro",
+		"max_tokens": 256,
+		"messages": [{"role":"user","content":[{"type":"text","text":"Warmup"}]}]
+	}`)
+	req := httptest.NewRequest("POST", "/v1/messages", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req = req.WithContext(context.WithValue(req.Context(), ctxkey.Group, firstGroup))
+	c.Request = req
+
+	apiKey := &service.APIKey{
+		ID:      3102,
+		UserID:  4102,
+		GroupID: &firstGroupID,
+		Status:  service.StatusActive,
+		User: &service.User{
+			ID:          4102,
+			Concurrency: 10,
+			Balance:     100,
+		},
+		Group: firstGroup,
+		GroupRoutes: []service.APIKeyGroupRoute{
+			{
+				GroupID:         firstGroupID,
+				Priority:        100,
+				Weight:          1,
+				Enabled:         true,
+				CooldownSeconds: 30,
+				Group:           firstGroup,
+			},
+			{
+				GroupID:         secondGroupID,
+				Priority:        100,
+				Weight:          1,
+				Enabled:         true,
+				CooldownSeconds: 30,
+				Group:           secondGroup,
+			},
+		},
+	}
+
+	c.Set(string(middleware.ContextKeyAPIKey), apiKey)
+	c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: apiKey.UserID, Concurrency: 10})
+
+	h.Messages(c)
+
+	require.Equal(t, 200, rec.Code)
+	selected, ok := c.Get(opsAccountIDKey)
+	require.True(t, ok)
+	require.Equal(t, accountID, selected)
+
+	var resp map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	require.Equal(t, "msg_mock_warmup", resp["id"])
+	require.Equal(t, "gemini-2.5-pro", resp["model"])
 }

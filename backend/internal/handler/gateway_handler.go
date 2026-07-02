@@ -169,9 +169,6 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 	reqStream := parsedReq.Stream
 	reqLog = reqLog.With(zap.String("model", reqModel), zap.Bool("stream", reqStream))
 
-	// 解析渠道级模型映射
-	channelMapping, _ := h.gatewayService.ResolveChannelMappingAndRestrict(c.Request.Context(), apiKey.GroupID, reqModel)
-
 	// 设置 max_tokens=1 + haiku 探测请求标识到 context 中
 	// 必须在 SetClaudeCodeClientContext 之前设置，因为 ClaudeCodeValidator 需要读取此标识进行绕过判断
 	if isMaxTokensOneHaikuRequest(reqModel, parsedReq.MaxTokens, reqStream) {
@@ -276,277 +273,338 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 	} else {
 		reqLog.Info("sticky.no_session_key", zap.String("session_hash", sessionHash))
 	}
-	// 判断是否真的绑定了粘性会话：有 sessionKey 且已经绑定到某个账号
-	hasBoundSession := sessionKey != "" && sessionBoundAccountID > 0
-
 	if platform == service.PlatformGemini {
-		if err := h.billingCacheService.CheckBillingEligibility(c.Request.Context(), apiKey.User, apiKey, apiKey.Group, subscription); err != nil {
-			reqLog.Info("gateway.billing_eligibility_check_failed", zap.Error(err))
-			status, code, message, retryAfter := billingErrorDetails(err)
-			if retryAfter > 0 {
-				c.Header("Retry-After", strconv.Itoa(retryAfter))
-			}
-			h.handleStreamingAwareError(c, status, code, message, streamStarted)
+		routeCursor := newAPIKeyGroupRouteCursor(apiKey)
+		if _, ok := routeCursor.current(); !ok {
+			h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "api_error", "No available API key group routes", streamStarted)
 			return
 		}
-		if decision := h.checkCyberPreflight(c, reqLog, apiKey, subject, service.ContentModerationProtocolAnthropicMessages, reqModel, body); decision != nil && decision.Blocked {
-			h.handleStreamingAwareError(c, contentModerationStatus(decision), cyberPreflightErrorCode(decision), decision.Message, streamStarted)
-			return
-		}
-		if decision := h.checkContentModeration(c, reqLog, apiKey, subject, service.ContentModerationProtocolAnthropicMessages, reqModel, body); decision != nil && decision.Blocked {
-			h.handleStreamingAwareError(c, contentModerationStatus(decision), contentModerationErrorCode(decision), decision.Message, streamStarted)
-			return
-		}
+		baseRequestContext := c.Request.Context()
 
-		fs := NewFailoverState(h.maxAccountSwitchesGemini, hasBoundSession)
-
-		// 单账号分组提前设置 SingleAccountRetry 标记，让 Service 层首次 503 就不设模型限流标记。
-		// 避免单账号分组收到 503 (MODEL_CAPACITY_EXHAUSTED) 时设 29s 限流，导致后续请求连续快速失败。
-		if h.gatewayService.IsSingleAntigravityAccountGroup(c.Request.Context(), apiKey.GroupID) {
-			ctx := service.WithSingleAccountRetry(c.Request.Context(), true, h.metadataBridgeEnabled())
-			c.Request = c.Request.WithContext(ctx)
-		}
-
+	geminiRouteLoop:
 		for {
-			selection, err := h.gatewayService.SelectAccountWithLoadAwareness(c.Request.Context(), apiKey.GroupID, sessionKey, reqModel, fs.FailedAccountIDs, "", int64(0)) // Gemini 不使用会话限制
-			if err != nil {
-				if len(fs.FailedAccountIDs) == 0 {
-					reqLog.Warn("gateway.select_account_no_available",
-						zap.String("model", reqModel),
-						zap.Int64p("group_id", apiKey.GroupID),
-						zap.String("platform", platform),
-						zap.Error(err),
-					)
-					h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "api_error", "No available accounts: "+err.Error(), streamStarted)
-					return
-				}
-				action := fs.HandleSelectionExhausted(c.Request.Context())
-				switch action {
-				case FailoverContinue:
-					ctx := service.WithSingleAccountRetry(c.Request.Context(), true, h.metadataBridgeEnabled())
-					c.Request = c.Request.WithContext(ctx)
-					continue
-				case FailoverCanceled:
-					return
-				default: // FailoverExhausted
-					if fs.LastFailoverErr != nil {
-						h.handleFailoverExhausted(c, fs.LastFailoverErr, service.PlatformGemini, streamStarted)
-					} else {
-						h.handleFailoverExhaustedSimple(c, 502, streamStarted)
-					}
-					return
-				}
-			}
-			if selection == nil || selection.Account == nil {
-				reqLog.Warn("gateway.select_account_empty",
-					zap.String("model", reqModel),
-					zap.Int64p("group_id", apiKey.GroupID),
-					zap.String("platform", platform),
-				)
-				h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "api_error", "No available accounts", streamStarted)
+			routeCandidate, ok := routeCursor.current()
+			if !ok {
+				h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "api_error", "No available API key group routes", streamStarted)
 				return
 			}
-			account := selection.Account
-			setOpsSelectedAccount(c, account.ID, account.Platform)
-
-			// 检查请求拦截（预热请求、SUGGESTION MODE等）
-			if account.IsInterceptWarmupEnabled() {
-				interceptType := detectInterceptType(body, reqModel, parsedReq.MaxTokens, reqStream, isClaudeCodeClient)
-				if interceptType != InterceptTypeNone {
-					if selection.Acquired && selection.ReleaseFunc != nil {
-						selection.ReleaseFunc()
-					}
-					if reqStream {
-						sendMockInterceptStream(c, reqModel, interceptType)
-					} else {
-						sendMockInterceptResponse(c, reqModel, interceptType)
-					}
-					return
+			currentAPIKey := routeCandidate.APIKey
+			currentSubscription, resolveErr := h.gatewayService.ResolveRouteSubscription(baseRequestContext, currentAPIKey, subscription)
+			if resolveErr != nil {
+				reqLog.Info("gateway.route_subscription_resolve_failed",
+					zap.Error(resolveErr),
+					zap.Int64p("group_id", currentAPIKey.GroupID),
+				)
+				if shouldSkipRouteOnSubscriptionResolveError(resolveErr) &&
+					routeCursor.skipToNext("route_subscription_resolve_failed", reqLog, zap.Error(resolveErr), zap.Int64p("group_id", currentAPIKey.GroupID)) {
+					continue geminiRouteLoop
 				}
+				status, code, message, retryAfter := billingErrorDetails(resolveErr)
+				if retryAfter > 0 {
+					c.Header("Retry-After", strconv.Itoa(retryAfter))
+				}
+				h.handleStreamingAwareError(c, status, code, message, streamStarted)
+				return
 			}
 
-			// 3. 获取账号并发槽位
-			accountReleaseFunc := selection.ReleaseFunc
-			if !selection.Acquired {
-				if selection.WaitPlan == nil {
-					reqLog.Warn("gateway.select_account_no_slot_no_wait_plan",
-						zap.Int64("account_id", account.ID),
+			routeContext := baseRequestContext
+			currentSessionBoundAccountID := int64(0)
+			if sessionKey != "" {
+				if apiKeyGroupIDValue(currentAPIKey) == apiKeyGroupIDValue(apiKey) {
+					currentSessionBoundAccountID = sessionBoundAccountID
+				} else {
+					currentSessionBoundAccountID, _ = h.gatewayService.GetCachedSessionAccountID(routeContext, currentAPIKey.GroupID, sessionKey)
+				}
+				if currentSessionBoundAccountID > 0 {
+					routeContext = service.WithPrefetchedStickySession(routeContext, currentSessionBoundAccountID, apiKeyGroupIDValue(currentAPIKey), h.metadataBridgeEnabled())
+				}
+			}
+			currentHasBoundSession := sessionKey != "" && currentSessionBoundAccountID > 0
+
+			// 单账号分组提前设置 SingleAccountRetry 标记，让 Service 层首次 503 就不设模型限流标记。
+			// 避免单账号分组收到 503 (MODEL_CAPACITY_EXHAUSTED) 时设 29s 限流，导致后续请求连续快速失败。
+			if h.gatewayService.IsSingleAntigravityAccountGroup(routeContext, currentAPIKey.GroupID) {
+				routeContext = service.WithSingleAccountRetry(routeContext, true, h.metadataBridgeEnabled())
+			}
+			c.Request = c.Request.WithContext(routeContext)
+
+			channelMapping, _ := h.gatewayService.ResolveChannelMappingAndRestrict(c.Request.Context(), currentAPIKey.GroupID, reqModel)
+			if err := h.billingCacheService.CheckBillingEligibility(c.Request.Context(), currentAPIKey.User, currentAPIKey, currentAPIKey.Group, currentSubscription); err != nil {
+				reqLog.Info("gateway.billing_eligibility_check_failed",
+					zap.Error(err),
+					zap.Int64p("group_id", currentAPIKey.GroupID),
+				)
+				status, code, message, retryAfter := billingErrorDetails(err)
+				if retryAfter > 0 {
+					c.Header("Retry-After", strconv.Itoa(retryAfter))
+				}
+				h.handleStreamingAwareError(c, status, code, message, streamStarted)
+				return
+			}
+			if decision := h.checkCyberPreflight(c, reqLog, currentAPIKey, subject, service.ContentModerationProtocolAnthropicMessages, reqModel, body); decision != nil && decision.Blocked {
+				h.handleStreamingAwareError(c, contentModerationStatus(decision), cyberPreflightErrorCode(decision), decision.Message, streamStarted)
+				return
+			}
+			if decision := h.checkContentModeration(c, reqLog, currentAPIKey, subject, service.ContentModerationProtocolAnthropicMessages, reqModel, body); decision != nil && decision.Blocked {
+				h.handleStreamingAwareError(c, contentModerationStatus(decision), contentModerationErrorCode(decision), decision.Message, streamStarted)
+				return
+			}
+			parsedReq.GroupID = currentAPIKey.GroupID
+			fs := NewFailoverState(h.maxAccountSwitchesGemini, currentHasBoundSession)
+
+			for {
+				selection, err := h.gatewayService.SelectAccountWithLoadAwareness(c.Request.Context(), currentAPIKey.GroupID, sessionKey, reqModel, fs.FailedAccountIDs, "", int64(0)) // Gemini 不使用会话限制
+				if err != nil {
+					if len(fs.FailedAccountIDs) == 0 {
+						reqLog.Warn("gateway.select_account_no_available",
+							zap.String("model", reqModel),
+							zap.Int64p("group_id", currentAPIKey.GroupID),
+							zap.String("platform", platform),
+							zap.Error(err),
+						)
+						if routeCursor.switchToNext(apiKey.ID, "account_select_failed", reqLog, zap.Error(err), zap.Int64p("group_id", currentAPIKey.GroupID)) {
+							continue geminiRouteLoop
+						}
+						h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "api_error", "No available accounts: "+err.Error(), streamStarted)
+						return
+					}
+					action := fs.HandleSelectionExhausted(c.Request.Context())
+					switch action {
+					case FailoverContinue:
+						ctx := service.WithSingleAccountRetry(c.Request.Context(), true, h.metadataBridgeEnabled())
+						c.Request = c.Request.WithContext(ctx)
+						continue
+					case FailoverCanceled:
+						return
+					default: // FailoverExhausted
+						if fs.LastFailoverErr != nil {
+							if !streamStarted && shouldSwitchAPIKeyGroupRoute(fs.LastFailoverErr) &&
+								routeCursor.switchToNext(apiKey.ID, "account_selection_exhausted", reqLog, zap.Int("upstream_status", fs.LastFailoverErr.StatusCode), zap.Int64p("group_id", currentAPIKey.GroupID)) {
+								continue geminiRouteLoop
+							}
+							h.handleFailoverExhausted(c, fs.LastFailoverErr, service.PlatformGemini, streamStarted)
+						} else {
+							h.handleFailoverExhaustedSimple(c, 502, streamStarted)
+						}
+						return
+					}
+				}
+				if selection == nil || selection.Account == nil {
+					reqLog.Warn("gateway.select_account_empty",
 						zap.String("model", reqModel),
+						zap.Int64p("group_id", currentAPIKey.GroupID),
 						zap.String("platform", platform),
 					)
+					if routeCursor.switchToNext(apiKey.ID, "account_selection_empty", reqLog, zap.Int64p("group_id", currentAPIKey.GroupID)) {
+						continue geminiRouteLoop
+					}
 					h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "api_error", "No available accounts", streamStarted)
 					return
 				}
-				accountWaitCounted := false
-				canWait, err := h.concurrencyHelper.IncrementAccountWaitCount(c.Request.Context(), account.ID, selection.WaitPlan.MaxWaiting)
-				if err != nil {
-					reqLog.Warn("gateway.account_wait_counter_increment_failed", zap.Int64("account_id", account.ID), zap.Error(err))
-				} else if !canWait {
-					reqLog.Info("gateway.account_wait_queue_full",
-						zap.Int64("account_id", account.ID),
-						zap.Int("max_waiting", selection.WaitPlan.MaxWaiting),
-					)
-					h.handleStreamingAwareError(c, http.StatusTooManyRequests, "rate_limit_error", "Too many pending requests, please retry later", streamStarted)
-					return
-				}
-				if err == nil && canWait {
-					accountWaitCounted = true
-				}
-				releaseWait := func() {
-					if accountWaitCounted {
-						h.concurrencyHelper.DecrementAccountWaitCount(c.Request.Context(), account.ID)
-						accountWaitCounted = false
-					}
-				}
+				account := selection.Account
+				setOpsSelectedAccount(c, account.ID, account.Platform)
 
-				accountReleaseFunc, err = h.concurrencyHelper.AcquireAccountSlotWithWaitTimeout(
-					c,
-					account.ID,
-					selection.WaitPlan.MaxConcurrency,
-					selection.WaitPlan.Timeout,
-					reqStream,
-					&streamStarted,
-				)
-				if err != nil {
-					reqLog.Warn("gateway.account_slot_acquire_failed", zap.Int64("account_id", account.ID), zap.Error(err))
-					releaseWait()
-					h.handleConcurrencyError(c, err, "account", streamStarted)
-					return
-				}
-				// Slot acquired: no longer waiting in queue.
-				releaseWait()
-				if err := h.gatewayService.BindStickySession(c.Request.Context(), apiKey.GroupID, sessionKey, account.ID); err != nil {
-					reqLog.Warn("gateway.bind_sticky_session_failed", zap.Int64("account_id", account.ID), zap.Error(err))
-				}
-			}
-			// 账号槽位/等待计数需要在超时或断开时安全回收
-			accountReleaseFunc = wrapReleaseOnDone(c.Request.Context(), accountReleaseFunc)
-
-			// 转发请求 - 根据账号平台分流
-			var result *service.ForwardResult
-			requestCtx := c.Request.Context()
-			if fs.SwitchCount > 0 {
-				requestCtx = service.WithAccountSwitchCount(requestCtx, fs.SwitchCount, h.metadataBridgeEnabled())
-			}
-			// 记录 Forward 前已写入字节数，Forward 后若增加则说明 SSE 内容已发，禁止 failover
-			writerSizeBeforeForward := c.Writer.Size()
-			if account.Platform == service.PlatformAntigravity {
-				result, err = h.antigravityGatewayService.ForwardGemini(requestCtx, c, account, reqModel, "generateContent", reqStream, body, hasBoundSession)
-			} else {
-				result, err = h.geminiCompatService.Forward(requestCtx, c, account, body)
-			}
-			if accountReleaseFunc != nil {
-				accountReleaseFunc()
-			}
-			h.gatewayService.ReportAccountForwardResult(account.ID, result, err)
-			if err != nil {
-				var failoverErr *service.UpstreamFailoverError
-				if errors.As(err, &failoverErr) {
-					// 流式内容已写入客户端，无法撤销，禁止 failover 以防止流拼接腐化
-					if c.Writer.Size() != writerSizeBeforeForward {
-						h.handleFailoverExhausted(c, failoverErr, service.PlatformGemini, true)
+				// 检查请求拦截（预热请求、SUGGESTION MODE等）
+				if account.IsInterceptWarmupEnabled() {
+					interceptType := detectInterceptType(body, reqModel, parsedReq.MaxTokens, reqStream, isClaudeCodeClient)
+					if interceptType != InterceptTypeNone {
+						if selection.Acquired && selection.ReleaseFunc != nil {
+							selection.ReleaseFunc()
+						}
+						if reqStream {
+							sendMockInterceptStream(c, reqModel, interceptType)
+						} else {
+							sendMockInterceptResponse(c, reqModel, interceptType)
+						}
+						routeCursor.recordSuccess(apiKey.ID)
 						return
 					}
-					action := fs.HandleFailoverError(c.Request.Context(), h.gatewayService, account.ID, account.Platform, failoverErr)
-					if _, failed := fs.FailedAccountIDs[account.ID]; failed {
-						if h.clearStickySessionIfBoundTo(c.Request.Context(), apiKey.GroupID, sessionKey, account.ID, reqLog, "upstream_failover") {
-							sessionBoundAccountID = 0
-							hasBoundSession = false
+				}
+
+				// 3. 获取账号并发槽位
+				accountReleaseFunc := selection.ReleaseFunc
+				if !selection.Acquired {
+					if selection.WaitPlan == nil {
+						reqLog.Warn("gateway.select_account_no_slot_no_wait_plan",
+							zap.Int64("account_id", account.ID),
+							zap.String("model", reqModel),
+							zap.String("platform", platform),
+						)
+						h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "api_error", "No available accounts", streamStarted)
+						return
+					}
+					accountWaitCounted := false
+					canWait, err := h.concurrencyHelper.IncrementAccountWaitCount(c.Request.Context(), account.ID, selection.WaitPlan.MaxWaiting)
+					if err != nil {
+						reqLog.Warn("gateway.account_wait_counter_increment_failed", zap.Int64("account_id", account.ID), zap.Error(err))
+					} else if !canWait {
+						reqLog.Info("gateway.account_wait_queue_full",
+							zap.Int64("account_id", account.ID),
+							zap.Int("max_waiting", selection.WaitPlan.MaxWaiting),
+						)
+						h.handleStreamingAwareError(c, http.StatusTooManyRequests, "rate_limit_error", "Too many pending requests, please retry later", streamStarted)
+						return
+					}
+					if err == nil && canWait {
+						accountWaitCounted = true
+					}
+					releaseWait := func() {
+						if accountWaitCounted {
+							h.concurrencyHelper.DecrementAccountWaitCount(c.Request.Context(), account.ID)
+							accountWaitCounted = false
 						}
 					}
-					switch action {
-					case FailoverContinue:
-						continue
-					case FailoverExhausted:
-						h.handleFailoverExhausted(c, fs.LastFailoverErr, service.PlatformGemini, streamStarted)
-						return
-					case FailoverCanceled:
+
+					accountReleaseFunc, err = h.concurrencyHelper.AcquireAccountSlotWithWaitTimeout(
+						c,
+						account.ID,
+						selection.WaitPlan.MaxConcurrency,
+						selection.WaitPlan.Timeout,
+						reqStream,
+						&streamStarted,
+					)
+					if err != nil {
+						reqLog.Warn("gateway.account_slot_acquire_failed", zap.Int64("account_id", account.ID), zap.Error(err))
+						releaseWait()
+						h.handleConcurrencyError(c, err, "account", streamStarted)
 						return
 					}
+					// Slot acquired: no longer waiting in queue.
+					releaseWait()
+					if err := h.gatewayService.BindStickySession(c.Request.Context(), currentAPIKey.GroupID, sessionKey, account.ID); err != nil {
+						reqLog.Warn("gateway.bind_sticky_session_failed", zap.Int64("account_id", account.ID), zap.Error(err))
+					}
 				}
-				upstreamErrorAlreadyCommunicated := gatewayForwardErrorAlreadyCommunicated(c, writerSizeBeforeForward, err)
-				wroteFallback := false
-				if !upstreamErrorAlreadyCommunicated {
-					wroteFallback = h.ensureForwardErrorResponse(c, streamStarted)
+				// 账号槽位/等待计数需要在超时或断开时安全回收
+				accountReleaseFunc = wrapReleaseOnDone(c.Request.Context(), accountReleaseFunc)
+
+				// 转发请求 - 根据账号平台分流
+				var result *service.ForwardResult
+				requestCtx := c.Request.Context()
+				if fs.SwitchCount > 0 {
+					requestCtx = service.WithAccountSwitchCount(requestCtx, fs.SwitchCount, h.metadataBridgeEnabled())
 				}
-				forwardFailedFields := []zap.Field{
-					zap.Int64("account_id", account.ID),
-					zap.String("account_name", account.Name),
-					zap.String("account_platform", account.Platform),
-					zap.Bool("fallback_error_response_written", wroteFallback),
-					zap.Bool("upstream_error_response_already_written", upstreamErrorAlreadyCommunicated),
-					zap.Error(err),
+				// 记录 Forward 前已写入字节数，Forward 后若增加则说明 SSE 内容已发，禁止 failover
+				writerSizeBeforeForward := c.Writer.Size()
+				if account.Platform == service.PlatformAntigravity {
+					result, err = h.antigravityGatewayService.ForwardGemini(requestCtx, c, account, reqModel, "generateContent", reqStream, body, currentHasBoundSession)
+				} else {
+					result, err = h.geminiCompatService.Forward(requestCtx, c, account, body)
 				}
-				if account.Proxy != nil {
-					forwardFailedFields = append(forwardFailedFields,
-						zap.Int64("proxy_id", account.Proxy.ID),
-						zap.String("proxy_name", account.Proxy.Name),
-						zap.String("proxy_host", account.Proxy.Host),
-						zap.Int("proxy_port", account.Proxy.Port),
-					)
-				} else if account.ProxyID != nil {
-					forwardFailedFields = append(forwardFailedFields, zap.Int64p("proxy_id", account.ProxyID))
+				if accountReleaseFunc != nil {
+					accountReleaseFunc()
 				}
-				reqLog.Error("gateway.forward_failed", forwardFailedFields...)
+				h.gatewayService.ReportAccountForwardResult(account.ID, result, err)
+				if err != nil {
+					var failoverErr *service.UpstreamFailoverError
+					if errors.As(err, &failoverErr) {
+						// 流式内容已写入客户端，无法撤销，禁止 failover 以防止流拼接腐化
+						if c.Writer.Size() != writerSizeBeforeForward {
+							h.handleFailoverExhausted(c, failoverErr, service.PlatformGemini, true)
+							return
+						}
+						action := fs.HandleFailoverError(c.Request.Context(), h.gatewayService, account.ID, account.Platform, failoverErr)
+						if _, failed := fs.FailedAccountIDs[account.ID]; failed {
+							if h.clearStickySessionIfBoundTo(c.Request.Context(), currentAPIKey.GroupID, sessionKey, account.ID, reqLog, "upstream_failover") {
+								currentSessionBoundAccountID = 0
+								currentHasBoundSession = false
+							}
+						}
+						switch action {
+						case FailoverContinue:
+							continue
+						case FailoverExhausted:
+							h.handleFailoverExhausted(c, fs.LastFailoverErr, service.PlatformGemini, streamStarted)
+							return
+						case FailoverCanceled:
+							return
+						}
+					}
+					upstreamErrorAlreadyCommunicated := gatewayForwardErrorAlreadyCommunicated(c, writerSizeBeforeForward, err)
+					wroteFallback := false
+					if !upstreamErrorAlreadyCommunicated {
+						wroteFallback = h.ensureForwardErrorResponse(c, streamStarted)
+					}
+					forwardFailedFields := []zap.Field{
+						zap.Int64("account_id", account.ID),
+						zap.String("account_name", account.Name),
+						zap.String("account_platform", account.Platform),
+						zap.Bool("fallback_error_response_written", wroteFallback),
+						zap.Bool("upstream_error_response_already_written", upstreamErrorAlreadyCommunicated),
+						zap.Error(err),
+					}
+					if account.Proxy != nil {
+						forwardFailedFields = append(forwardFailedFields,
+							zap.Int64("proxy_id", account.Proxy.ID),
+							zap.String("proxy_name", account.Proxy.Name),
+							zap.String("proxy_host", account.Proxy.Host),
+							zap.Int("proxy_port", account.Proxy.Port),
+						)
+					} else if account.ProxyID != nil {
+						forwardFailedFields = append(forwardFailedFields, zap.Int64p("proxy_id", account.ProxyID))
+					}
+					reqLog.Error("gateway.forward_failed", forwardFailedFields...)
+					return
+				}
+
+				// RPM 计数递增（Forward 成功后）
+				// 注意：TOCTOU 竞态是已知且可接受的设计权衡，与 WindowCost 一致的 soft-limit 模式。
+				// 在高并发下可能短暂超出 RPM 限制，但不会导致请求失败。
+				if account.IsAnthropicOAuthOrSetupToken() && account.GetBaseRPM() > 0 {
+					if err := h.gatewayService.IncrementAccountRPM(c.Request.Context(), account.ID); err != nil {
+						reqLog.Warn("gateway.rpm_increment_failed", zap.Int64("account_id", account.ID), zap.Error(err))
+					}
+				}
+
+				// 捕获请求信息（用于异步记录，避免在 goroutine 中访问 gin.Context）
+				userAgent := c.GetHeader("User-Agent")
+				clientIP := ip.GetClientIP(c)
+				requestPayloadHash := service.HashUsageRequestPayload(body)
+				inboundEndpoint := GetInboundEndpoint(c)
+				upstreamEndpoint := GetUpstreamEndpoint(c, account.Platform)
+
+				if result.ReasoningEffort == nil {
+					result.ReasoningEffort = service.NormalizeClaudeOutputEffort(parsedReq.OutputEffort)
+				}
+				if result.ReasoningEffort == nil && parsedReq.ThinkingEnabled {
+					protocolModel := result.UpstreamModel
+					if protocolModel == "" {
+						protocolModel = result.Model
+					}
+					result.ReasoningEffort = service.DefaultEffortForThinkingEnabled(protocolModel)
+				}
+
+				// 使用量记录通过有界 worker 池提交，避免请求热路径创建无界 goroutine。
+				h.submitUsageRecordTask(c.Request.Context(), func(ctx context.Context) {
+					if err := h.gatewayService.RecordUsage(ctx, &service.RecordUsageInput{
+						Result:             result,
+						ParsedRequest:      parsedReq,
+						APIKey:             currentAPIKey,
+						User:               currentAPIKey.User,
+						Account:            account,
+						Subscription:       currentSubscription,
+						InboundEndpoint:    inboundEndpoint,
+						UpstreamEndpoint:   upstreamEndpoint,
+						UserAgent:          userAgent,
+						IPAddress:          clientIP,
+						RequestPayloadHash: requestPayloadHash,
+						ForceCacheBilling:  fs.ForceCacheBilling,
+						APIKeyService:      h.apiKeyService,
+						ChannelUsageFields: channelMapping.ToUsageFields(reqModel, result.UpstreamModel),
+					}); err != nil {
+						logger.L().With(
+							zap.String("component", "handler.gateway.messages"),
+							zap.Int64("user_id", subject.UserID),
+							zap.Int64("api_key_id", currentAPIKey.ID),
+							zap.Any("group_id", currentAPIKey.GroupID),
+							zap.String("model", reqModel),
+							zap.Int64("account_id", account.ID),
+						).Error("gateway.record_usage_failed", zap.Error(err))
+					}
+				})
+				routeCursor.recordSuccess(apiKey.ID)
 				return
 			}
-
-			// RPM 计数递增（Forward 成功后）
-			// 注意：TOCTOU 竞态是已知且可接受的设计权衡，与 WindowCost 一致的 soft-limit 模式。
-			// 在高并发下可能短暂超出 RPM 限制，但不会导致请求失败。
-			if account.IsAnthropicOAuthOrSetupToken() && account.GetBaseRPM() > 0 {
-				if err := h.gatewayService.IncrementAccountRPM(c.Request.Context(), account.ID); err != nil {
-					reqLog.Warn("gateway.rpm_increment_failed", zap.Int64("account_id", account.ID), zap.Error(err))
-				}
-			}
-
-			// 捕获请求信息（用于异步记录，避免在 goroutine 中访问 gin.Context）
-			userAgent := c.GetHeader("User-Agent")
-			clientIP := ip.GetClientIP(c)
-			requestPayloadHash := service.HashUsageRequestPayload(body)
-			inboundEndpoint := GetInboundEndpoint(c)
-			upstreamEndpoint := GetUpstreamEndpoint(c, account.Platform)
-
-			if result.ReasoningEffort == nil {
-				result.ReasoningEffort = service.NormalizeClaudeOutputEffort(parsedReq.OutputEffort)
-			}
-			if result.ReasoningEffort == nil && parsedReq.ThinkingEnabled {
-				protocolModel := result.UpstreamModel
-				if protocolModel == "" {
-					protocolModel = result.Model
-				}
-				result.ReasoningEffort = service.DefaultEffortForThinkingEnabled(protocolModel)
-			}
-
-			// 使用量记录通过有界 worker 池提交，避免请求热路径创建无界 goroutine。
-			h.submitUsageRecordTask(c.Request.Context(), func(ctx context.Context) {
-				if err := h.gatewayService.RecordUsage(ctx, &service.RecordUsageInput{
-					Result:             result,
-					ParsedRequest:      parsedReq,
-					APIKey:             apiKey,
-					User:               apiKey.User,
-					Account:            account,
-					Subscription:       subscription,
-					InboundEndpoint:    inboundEndpoint,
-					UpstreamEndpoint:   upstreamEndpoint,
-					UserAgent:          userAgent,
-					IPAddress:          clientIP,
-					RequestPayloadHash: requestPayloadHash,
-					ForceCacheBilling:  fs.ForceCacheBilling,
-					APIKeyService:      h.apiKeyService,
-					ChannelUsageFields: channelMapping.ToUsageFields(reqModel, result.UpstreamModel),
-				}); err != nil {
-					logger.L().With(
-						zap.String("component", "handler.gateway.messages"),
-						zap.Int64("user_id", subject.UserID),
-						zap.Int64("api_key_id", apiKey.ID),
-						zap.Any("group_id", apiKey.GroupID),
-						zap.String("model", reqModel),
-						zap.Int64("account_id", account.ID),
-					).Error("gateway.record_usage_failed", zap.Error(err))
-				}
-			})
-			return
 		}
 	}
 
