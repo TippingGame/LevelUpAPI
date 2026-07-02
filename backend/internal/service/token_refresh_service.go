@@ -294,6 +294,8 @@ func (s *TokenRefreshService) refreshWithRetry(ctx context.Context, account *Acc
 					"account_id", account.ID,
 					"error", setErr,
 				)
+			} else {
+				markAccountErrorRuntimeEvicted(ctx, s.tempUnschedCache, account, errorMsg, "token_refresh_non_retryable")
 			}
 			return err
 		}

@@ -58,6 +58,11 @@ func (s *AntigravityGatewayService) applyInternal500Penalty(
 			slog.Error("internal500_set_error_failed", "account_id", account.ID, "error", err)
 			return
 		}
+		var cache TempUnschedCache
+		if s != nil && s.rateLimitService != nil {
+			cache = s.rateLimitService.tempUnschedCache
+		}
+		markAccountErrorRuntimeEvicted(ctx, cache, account, reason, "antigravity_internal_500_error")
 		slog.Warn("internal500_account_disabled",
 			"account_id", account.ID, "account_name", account.Name, "consecutive_count", count)
 	case count == 2:

@@ -415,17 +415,20 @@ func TestTokenRefreshService_RefreshWithRetry_AntigravityRefreshFailed(t *testin
 func TestTokenRefreshService_RefreshWithRetry_AntigravityNonRetryableError(t *testing.T) {
 	repo := &tokenRefreshAccountRepo{}
 	invalidator := &tokenCacheInvalidatorStub{}
+	tempCache := &tempUnschedCacheStub{}
 	cfg := &config.Config{
 		TokenRefresh: config.TokenRefreshConfig{
 			MaxRetries:          3,
 			RetryBackoffSeconds: 0,
 		},
 	}
-	service := NewTokenRefreshService(repo, nil, nil, nil, nil, invalidator, nil, cfg, nil)
+	service := NewTokenRefreshService(repo, nil, nil, nil, nil, invalidator, nil, cfg, tempCache)
 	account := &Account{
-		ID:       14,
-		Platform: PlatformAntigravity,
-		Type:     AccountTypeOAuth,
+		ID:          14,
+		Platform:    PlatformAntigravity,
+		Type:        AccountTypeOAuth,
+		Status:      StatusActive,
+		Schedulable: true,
 	}
 	refresher := &tokenRefresherStub{
 		err: errors.New("invalid_grant: token revoked"), // 不可重试错误
@@ -436,6 +439,12 @@ func TestTokenRefreshService_RefreshWithRetry_AntigravityNonRetryableError(t *te
 	require.Equal(t, 0, repo.updateCalls)
 	require.Equal(t, 0, invalidator.calls)
 	require.Equal(t, 1, repo.setErrorCalls) // 不可重试错误应设置错误状态
+	require.Equal(t, StatusError, account.Status)
+	require.False(t, account.Schedulable)
+	require.Equal(t, 1, tempCache.setCalls)
+	require.Equal(t, int64(14), tempCache.accountID)
+	require.NotNil(t, tempCache.state)
+	require.Equal(t, "account_error", tempCache.state.MatchedKeyword)
 }
 
 // TestTokenRefreshService_RefreshWithRetry_ClearsTempUnschedulable 测试刷新成功后清除临时不可调度（DB + Redis）

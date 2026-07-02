@@ -1289,7 +1289,17 @@ func (h *AccountHandler) ClearError(c *gin.Context) {
 		return
 	}
 
-	account, err := h.adminService.ClearAccountError(c.Request.Context(), accountID)
+	ctx := c.Request.Context()
+	var account *service.Account
+	if h.rateLimitService != nil {
+		if _, err := h.rateLimitService.RecoverAccountState(ctx, accountID, service.AccountRecoveryOptions{}); err != nil {
+			response.ErrorFrom(c, err)
+			return
+		}
+		account, err = h.adminService.GetAccount(ctx, accountID)
+	} else {
+		account, err = h.adminService.ClearAccountError(ctx, accountID)
+	}
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
@@ -1298,12 +1308,12 @@ func (h *AccountHandler) ClearError(c *gin.Context) {
 	// 清除错误后，同时清除 token 缓存，确保下次请求会获取最新的 token（触发刷新或从 DB 读取）
 	// 这解决了管理员重置账号状态后，旧的失效 token 仍在缓存中导致立即再次 401 的问题
 	if h.tokenCacheInvalidator != nil && account.IsOAuth() {
-		if invalidateErr := h.tokenCacheInvalidator.InvalidateToken(c.Request.Context(), account); invalidateErr != nil {
+		if invalidateErr := h.tokenCacheInvalidator.InvalidateToken(ctx, account); invalidateErr != nil {
 			log.Printf("[WARN] Failed to invalidate token cache for account %d: %v", accountID, invalidateErr)
 		}
 	}
 
-	response.Success(c, h.buildAccountResponseWithRuntime(c.Request.Context(), account))
+	response.Success(c, h.buildAccountResponseWithRuntime(ctx, account))
 }
 
 // BatchClearError handles batch clearing account errors
@@ -1335,7 +1345,15 @@ func (h *AccountHandler) BatchClearError(c *gin.Context) {
 	for _, id := range req.AccountIDs {
 		accountID := id // 闭包捕获
 		g.Go(func() error {
-			account, err := h.adminService.ClearAccountError(gctx, accountID)
+			var account *service.Account
+			var err error
+			if h.rateLimitService != nil {
+				if _, err = h.rateLimitService.RecoverAccountState(gctx, accountID, service.AccountRecoveryOptions{}); err == nil {
+					account, err = h.adminService.GetAccount(gctx, accountID)
+				}
+			} else {
+				account, err = h.adminService.ClearAccountError(gctx, accountID)
+			}
 			if err != nil {
 				mu.Lock()
 				failedCount++

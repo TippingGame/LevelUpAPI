@@ -165,6 +165,36 @@ func TestRateLimitServiceHandleUpstreamErrorAPIKeyPermanentKeywordsDisable(t *te
 	}
 }
 
+func TestRateLimitServiceHandleUpstreamErrorPermanentErrorWritesRuntimeEvictionCache(t *testing.T) {
+	repo := &permanentKeywordAccountRepoStub{}
+	cache := &runtimeTempUnschedCacheStub{}
+	svc := NewRateLimitService(repo, nil, nil, nil, cache)
+	account := &Account{
+		ID:          55,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Status:      StatusActive,
+		Schedulable: true,
+	}
+
+	shouldDisable := svc.HandleUpstreamError(
+		context.Background(),
+		account,
+		http.StatusUnauthorized,
+		http.Header{},
+		[]byte(`{"error":{"message":"The API key has been revoked."}}`),
+	)
+
+	require.True(t, shouldDisable)
+	require.Equal(t, 1, repo.setErrorCalls)
+	require.Equal(t, StatusError, account.Status)
+	require.False(t, account.Schedulable)
+	require.Contains(t, account.ErrorMessage, "API key has been revoked")
+	require.NotNil(t, cache.states[55])
+	require.Equal(t, "account_error", cache.states[55].MatchedKeyword)
+	require.True(t, cache.states[55].UntilUnix > time.Now().Add(time.Hour).Unix())
+}
+
 func TestRateLimitServiceHandleUpstreamErrorOpenAIOAuthPermanentKeywordStillUses403Cooldown(t *testing.T) {
 	repo := &permanentKeywordAccountRepoStub{}
 	svc := &RateLimitService{accountRepo: repo}

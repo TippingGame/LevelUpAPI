@@ -71,6 +71,7 @@ const (
 	upstreamModelNotFoundCooldown   = 30 * time.Minute
 	oAuth401CooldownMinutesDefault  = 10
 	overloadCooldownMinutesDefault  = 10
+	runtimeAccountErrorEvictionTTL  = 24 * time.Hour
 )
 
 var cloudflareChallengeCooldownSteps = []time.Duration{
@@ -860,10 +861,14 @@ func (s *RateLimitService) GeminiCooldown(ctx context.Context, account *Account)
 
 // handleAuthError 处理认证类错误(401/403)，停止账号调度
 func (s *RateLimitService) handleAuthError(ctx context.Context, account *Account, errorMsg string) {
+	if s == nil || account == nil || s.accountRepo == nil {
+		return
+	}
 	if err := s.accountRepo.SetError(ctx, account.ID, errorMsg); err != nil {
 		slog.Warn("account_set_error_failed", "account_id", account.ID, "error", err)
 		return
 	}
+	markAccountErrorRuntimeEvicted(ctx, s.tempUnschedCache, account, errorMsg, "account_error")
 	slog.Warn("account_disabled_auth_error", "account_id", account.ID, "error", errorMsg)
 }
 
@@ -2025,11 +2030,14 @@ func (s *RateLimitService) RecoverAccountState(ctx context.Context, accountID in
 		result.ClearedError = true
 	}
 
-	if hasRecoverableRuntimeState(account) {
+	hadRecoverableRuntimeState := hasRecoverableRuntimeState(account)
+	if hadRecoverableRuntimeState {
 		if err := s.ClearRateLimit(ctx, accountID); err != nil {
 			return nil, err
 		}
 		result.ClearedRateLimit = true
+	} else if result.ClearedError {
+		deleteTempUnschedCacheBestEffort(ctx, s.tempUnschedCache, accountID, "recover_account_error")
 	}
 	if options.InvalidateToken && s.tokenCacheInvalidator != nil && account.IsOAuth() {
 		if invalidateErr := s.tokenCacheInvalidator.InvalidateToken(ctx, account); invalidateErr != nil {

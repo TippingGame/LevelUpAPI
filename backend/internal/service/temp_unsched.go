@@ -36,12 +36,38 @@ func newTempUnschedState(until time.Time, statusCode int, matchedKeyword string,
 	}
 }
 
+func markAccountErrorRuntimeEvicted(ctx context.Context, cache TempUnschedCache, account *Account, errorMsg string, source string) {
+	if account == nil {
+		return
+	}
+	account.Status = StatusError
+	account.ErrorMessage = errorMsg
+	account.Schedulable = false
+
+	until := time.Now().Add(runtimeAccountErrorEvictionTTL)
+	state := newTempUnschedState(until, 0, "account_error", truncateTempUnschedMessage([]byte(errorMsg), tempUnschedMessageMaxBytes))
+	setTempUnschedCacheBestEffort(ctx, cache, account.ID, state, source)
+}
+
 func setTempUnschedCacheBestEffort(ctx context.Context, cache TempUnschedCache, accountID int64, state *TempUnschedState, source string) {
 	if cache == nil || accountID <= 0 || state == nil {
 		return
 	}
 	if err := cache.SetTempUnsched(ctx, accountID, state); err != nil {
 		slog.Warn("temp_unsched_cache_set_failed",
+			"account_id", accountID,
+			"source", source,
+			"error", err,
+		)
+	}
+}
+
+func deleteTempUnschedCacheBestEffort(ctx context.Context, cache TempUnschedCache, accountID int64, source string) {
+	if cache == nil || accountID <= 0 {
+		return
+	}
+	if err := cache.DeleteTempUnsched(ctx, accountID); err != nil {
+		slog.Warn("temp_unsched_cache_delete_failed",
 			"account_id", accountID,
 			"source", source,
 			"error", err,

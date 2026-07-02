@@ -263,6 +263,31 @@ func TestRateLimitService_RecoverAccountAfterSuccessfulTest_NoRecoverableStateIs
 	require.Empty(t, cache.deletedIDs)
 }
 
+func TestRateLimitService_RecoverAccountState_ClearsRuntimeErrorEvictionCache(t *testing.T) {
+	repo := &rateLimitClearRepoStub{
+		getByIDAccount: &Account{
+			ID:          22,
+			Status:      StatusError,
+			Schedulable: false,
+			Extra:       map[string]any{},
+		},
+	}
+	cache := &tempUnschedCacheRecorder{}
+	svc := NewRateLimitService(repo, nil, &config.Config{}, nil, cache)
+
+	result, err := svc.RecoverAccountState(context.Background(), 22, AccountRecoveryOptions{})
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.True(t, result.ClearedError)
+	require.False(t, result.ClearedRateLimit)
+
+	require.Equal(t, 1, repo.getByIDCalls)
+	require.Equal(t, 1, repo.clearErrorCalls)
+	require.Equal(t, 0, repo.clearRateLimitCalls)
+	require.Equal(t, 0, repo.clearTempUnschedCalls)
+	require.Equal(t, []int64{22}, cache.deletedIDs)
+}
+
 func TestRateLimitService_RecoverAccountAfterSuccessfulTest_InvalidatesOAuthTokenCache(t *testing.T) {
 	repo := &rateLimitClearRepoStub{
 		getByIDAccount: &Account{

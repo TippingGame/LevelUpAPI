@@ -174,8 +174,12 @@ func TestApplyInternal500Penalty(t *testing.T) {
 
 	t.Run("count=3 → SetError 永久禁用", func(t *testing.T) {
 		repo := &internal500AccountRepoStub{}
-		svc := &AntigravityGatewayService{accountRepo: repo}
-		account := &Account{ID: 3, Name: "acc-3"}
+		tempCache := &runtimeTempUnschedCacheStub{}
+		svc := &AntigravityGatewayService{
+			accountRepo:      repo,
+			rateLimitService: &RateLimitService{tempUnschedCache: tempCache},
+		}
+		account := &Account{ID: 3, Name: "acc-3", Status: StatusActive, Schedulable: true}
 
 		svc.applyInternal500Penalty(context.Background(), "[test]", account, 3)
 
@@ -185,6 +189,10 @@ func TestApplyInternal500Penalty(t *testing.T) {
 		call := repo.setErrorCalls[0]
 		require.Equal(t, int64(3), call.accountID)
 		require.Contains(t, call.reason, "INTERNAL 500 consecutive failures: 3")
+		require.Equal(t, StatusError, account.Status)
+		require.False(t, account.Schedulable)
+		require.NotNil(t, tempCache.states[3])
+		require.Equal(t, "account_error", tempCache.states[3].MatchedKeyword)
 	})
 
 	t.Run("count=5 → SetError 永久禁用（>=3 都走永久禁用）", func(t *testing.T) {
