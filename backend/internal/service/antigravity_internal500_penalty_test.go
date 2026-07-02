@@ -117,7 +117,11 @@ func TestIsAntigravityInternalServerError(t *testing.T) {
 func TestApplyInternal500Penalty(t *testing.T) {
 	t.Run("count=1 → SetTempUnschedulable 10 分钟", func(t *testing.T) {
 		repo := &internal500AccountRepoStub{}
-		svc := &AntigravityGatewayService{accountRepo: repo}
+		tempCache := &runtimeTempUnschedCacheStub{}
+		svc := &AntigravityGatewayService{
+			accountRepo:      repo,
+			rateLimitService: &RateLimitService{tempUnschedCache: tempCache},
+		}
 		account := &Account{ID: 1, Name: "acc-1"}
 
 		before := time.Now()
@@ -133,11 +137,20 @@ func TestApplyInternal500Penalty(t *testing.T) {
 		// until 应在 [before+10m, after+10m] 范围内
 		require.True(t, call.until.After(before.Add(internal500PenaltyTier1Duration).Add(-time.Second)))
 		require.True(t, call.until.Before(after.Add(internal500PenaltyTier1Duration).Add(time.Second)))
+		require.NotNil(t, account.TempUnschedulableUntil)
+		require.Equal(t, call.reason, account.TempUnschedulableReason)
+		require.NotNil(t, tempCache.states[1])
+		require.Equal(t, "antigravity_internal_500", tempCache.states[1].MatchedKeyword)
+		require.Equal(t, 1, tempCache.states[1].ConsecutiveCount)
 	})
 
 	t.Run("count=2 → SetTempUnschedulable 10 小时", func(t *testing.T) {
 		repo := &internal500AccountRepoStub{}
-		svc := &AntigravityGatewayService{accountRepo: repo}
+		tempCache := &runtimeTempUnschedCacheStub{}
+		svc := &AntigravityGatewayService{
+			accountRepo:      repo,
+			rateLimitService: &RateLimitService{tempUnschedCache: tempCache},
+		}
 		account := &Account{ID: 2, Name: "acc-2"}
 
 		before := time.Now()
@@ -152,6 +165,11 @@ func TestApplyInternal500Penalty(t *testing.T) {
 		require.Contains(t, call.reason, "INTERNAL 500")
 		require.True(t, call.until.After(before.Add(internal500PenaltyTier2Duration).Add(-time.Second)))
 		require.True(t, call.until.Before(after.Add(internal500PenaltyTier2Duration).Add(time.Second)))
+		require.NotNil(t, account.TempUnschedulableUntil)
+		require.Equal(t, call.reason, account.TempUnschedulableReason)
+		require.NotNil(t, tempCache.states[2])
+		require.Equal(t, "antigravity_internal_500", tempCache.states[2].MatchedKeyword)
+		require.Equal(t, 2, tempCache.states[2].ConsecutiveCount)
 	})
 
 	t.Run("count=3 → SetError 永久禁用", func(t *testing.T) {

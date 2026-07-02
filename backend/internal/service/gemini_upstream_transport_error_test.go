@@ -54,7 +54,11 @@ func TestClassifyGeminiTransportError(t *testing.T) {
 func TestHandleGeminiUpstreamTransportError_PersistentEvictsAndFailsOver(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	repo := &geminiTransportAccountRepoStub{}
-	svc := &GeminiMessagesCompatService{accountRepo: repo}
+	tempCache := &runtimeTempUnschedCacheStub{}
+	svc := &GeminiMessagesCompatService{
+		accountRepo:      repo,
+		rateLimitService: &RateLimitService{tempUnschedCache: tempCache},
+	}
 	account := &Account{ID: 42, Name: "gemini-proxy", Platform: PlatformGemini, Type: AccountTypeOAuth}
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
@@ -74,6 +78,8 @@ func TestHandleGeminiUpstreamTransportError_PersistentEvictsAndFailsOver(t *test
 	require.True(t, repo.lastTempUntil.Before(time.Now().Add(geminiTransportErrorTempUnschedDuration+time.Second)))
 	require.NotNil(t, account.TempUnschedulableUntil)
 	require.Equal(t, repo.lastTempReason, account.TempUnschedulableReason)
+	require.NotNil(t, tempCache.states[42])
+	require.Equal(t, "gemini_transport_error", tempCache.states[42].MatchedKeyword)
 	require.Equal(t, 0, rec.Body.Len())
 }
 

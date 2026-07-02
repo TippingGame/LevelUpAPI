@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"log/slog"
 	"time"
 )
 
@@ -21,6 +22,31 @@ type TempUnschedCache interface {
 	SetTempUnsched(ctx context.Context, accountID int64, state *TempUnschedState) error
 	GetTempUnsched(ctx context.Context, accountID int64) (*TempUnschedState, error)
 	DeleteTempUnsched(ctx context.Context, accountID int64) error
+}
+
+func newTempUnschedState(until time.Time, statusCode int, matchedKeyword string, errorMessage string) *TempUnschedState {
+	now := time.Now()
+	return &TempUnschedState{
+		UntilUnix:       until.Unix(),
+		TriggeredAtUnix: now.Unix(),
+		StatusCode:      statusCode,
+		MatchedKeyword:  matchedKeyword,
+		RuleIndex:       -1,
+		ErrorMessage:    errorMessage,
+	}
+}
+
+func setTempUnschedCacheBestEffort(ctx context.Context, cache TempUnschedCache, accountID int64, state *TempUnschedState, source string) {
+	if cache == nil || accountID <= 0 || state == nil {
+		return
+	}
+	if err := cache.SetTempUnsched(ctx, accountID, state); err != nil {
+		slog.Warn("temp_unsched_cache_set_failed",
+			"account_id", accountID,
+			"source", source,
+			"error", err,
+		)
+	}
 }
 
 // TimeoutCounterCache 超时计数器缓存接口

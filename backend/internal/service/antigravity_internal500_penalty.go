@@ -28,6 +28,22 @@ func isAntigravityInternalServerError(statusCode int, body []byte) bool {
 		gjson.GetBytes(body, "error.status").String() == "INTERNAL"
 }
 
+func (s *AntigravityGatewayService) syncInternal500TempUnschedState(ctx context.Context, account *Account, until time.Time, reason string, count int64) {
+	if account == nil {
+		return
+	}
+	account.TempUnschedulableUntil = &until
+	account.TempUnschedulableReason = reason
+
+	var cache TempUnschedCache
+	if s != nil && s.rateLimitService != nil {
+		cache = s.rateLimitService.tempUnschedCache
+	}
+	state := newTempUnschedState(until, http.StatusInternalServerError, "antigravity_internal_500", reason)
+	state.ConsecutiveCount = int(count)
+	setTempUnschedCacheBestEffort(ctx, cache, account.ID, state, "antigravity_internal_500")
+}
+
 // applyInternal500Penalty 根据连续 INTERNAL 500 轮次数应用渐进惩罚
 // count=1: temp_unschedulable 10 分钟
 // count=2: temp_unschedulable 10 小时
@@ -51,6 +67,7 @@ func (s *AntigravityGatewayService) applyInternal500Penalty(
 			slog.Error("internal500_temp_unsched_failed", "account_id", account.ID, "error", err)
 			return
 		}
+		s.syncInternal500TempUnschedState(ctx, account, until, reason, count)
 		slog.Warn("internal500_temp_unschedulable",
 			"account_id", account.ID, "account_name", account.Name,
 			"duration", internal500PenaltyTier2Duration, "consecutive_count", count)
@@ -61,6 +78,7 @@ func (s *AntigravityGatewayService) applyInternal500Penalty(
 			slog.Error("internal500_temp_unsched_failed", "account_id", account.ID, "error", err)
 			return
 		}
+		s.syncInternal500TempUnschedState(ctx, account, until, reason, count)
 		slog.Info("internal500_temp_unschedulable",
 			"account_id", account.ID, "account_name", account.Name,
 			"duration", internal500PenaltyTier1Duration, "consecutive_count", count)

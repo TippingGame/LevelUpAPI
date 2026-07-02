@@ -99,6 +99,14 @@ func (s *OpenAIGatewayService) tempUnscheduleOpenAITransportError(ctx context.Co
 		)
 		return
 	}
+	account.TempUnschedulableUntil = &until
+	account.TempUnschedulableReason = reason
+	var cache TempUnschedCache
+	if s.rateLimitService != nil {
+		cache = s.rateLimitService.tempUnschedCache
+	}
+	state := newTempUnschedState(until, 0, "openai_transport_error", reason)
+	setTempUnschedCacheBestEffort(bgCtx, cache, account.ID, state, "openai_transport_error")
 
 	logger.L().With(zap.String("component", "service.openai_gateway")).Warn(
 		"openai.account_temp_unscheduled_transport",

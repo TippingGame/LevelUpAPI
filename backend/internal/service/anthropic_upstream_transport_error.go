@@ -111,6 +111,13 @@ func (s *GatewayService) maybeTempUnscheduleAnthropicTransportError(ctx context.
 
 	account.TempUnschedulableUntil = &until
 	account.TempUnschedulableReason = reason
+	var cache TempUnschedCache
+	if s.rateLimitService != nil {
+		cache = s.rateLimitService.tempUnschedCache
+	}
+	state := newTempUnschedState(until, 0, "anthropic_transport_error", reason)
+	setTempUnschedCacheBestEffort(bgCtx, cache, account.ID, state, "anthropic_transport_error")
+
 	logger.L().With(zap.String("component", "service.gateway")).Warn(
 		"anthropic.account_temp_unscheduled_transport",
 		zap.Int64("account_id", account.ID),

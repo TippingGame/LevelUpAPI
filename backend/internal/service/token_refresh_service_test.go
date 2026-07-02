@@ -76,9 +76,15 @@ func (s *tokenCacheInvalidatorStub) InvalidateToken(ctx context.Context, account
 
 type tempUnschedCacheStub struct {
 	deleteCalls int
+	setCalls    int
+	accountID   int64
+	state       *TempUnschedState
 }
 
 func (s *tempUnschedCacheStub) SetTempUnsched(ctx context.Context, accountID int64, state *TempUnschedState) error {
+	s.setCalls++
+	s.accountID = accountID
+	s.state = state
 	return nil
 }
 
@@ -348,13 +354,14 @@ func TestTokenRefreshService_RefreshWithRetry_UpdateFailed(t *testing.T) {
 func TestTokenRefreshService_RefreshWithRetry_RefreshFailed(t *testing.T) {
 	repo := &tokenRefreshAccountRepo{}
 	invalidator := &tokenCacheInvalidatorStub{}
+	tempCache := &tempUnschedCacheStub{}
 	cfg := &config.Config{
 		TokenRefresh: config.TokenRefreshConfig{
 			MaxRetries:          2,
 			RetryBackoffSeconds: 0,
 		},
 	}
-	service := NewTokenRefreshService(repo, nil, nil, nil, nil, invalidator, nil, cfg, nil)
+	service := NewTokenRefreshService(repo, nil, nil, nil, nil, invalidator, nil, cfg, tempCache)
 	account := &Account{
 		ID:       12,
 		Platform: PlatformGemini,
@@ -369,6 +376,12 @@ func TestTokenRefreshService_RefreshWithRetry_RefreshFailed(t *testing.T) {
 	require.Equal(t, 0, repo.updateCalls)   // 刷新失败不应更新
 	require.Equal(t, 0, invalidator.calls)  // 刷新失败不应触发缓存失效
 	require.Equal(t, 0, repo.setErrorCalls) // 可重试错误耗尽不标记 error，下个周期继续重试
+	require.Equal(t, 1, repo.setTempUnschedCalls)
+	require.NotNil(t, account.TempUnschedulableUntil)
+	require.Equal(t, 1, tempCache.setCalls)
+	require.Equal(t, int64(12), tempCache.accountID)
+	require.NotNil(t, tempCache.state)
+	require.Equal(t, "token_refresh_retry_exhausted", tempCache.state.MatchedKeyword)
 }
 
 // TestTokenRefreshService_RefreshWithRetry_AntigravityRefreshFailed 测试 Antigravity 刷新失败不设置错误状态

@@ -86,7 +86,8 @@ func TestRateLimitService_HandleUpstreamError_OAuth401SetsTempUnschedulable(t *t
 	t.Run("gemini", func(t *testing.T) {
 		repo := &rateLimitAccountRepoStub{}
 		invalidator := &tokenCacheInvalidatorRecorder{}
-		service := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+		tempCache := &runtimeTempUnschedCacheStub{}
+		service := NewRateLimitService(repo, nil, &config.Config{}, nil, tempCache)
 		service.SetTokenCacheInvalidator(invalidator)
 		account := &Account{
 			ID:       100,
@@ -111,6 +112,11 @@ func TestRateLimitService_HandleUpstreamError_OAuth401SetsTempUnschedulable(t *t
 		require.Equal(t, 0, repo.setErrorCalls)
 		require.Equal(t, 1, repo.tempCalls)
 		require.Len(t, invalidator.accounts, 1)
+		require.NotNil(t, account.TempUnschedulableUntil)
+		require.Equal(t, repo.lastTempReason, account.TempUnschedulableReason)
+		require.NotNil(t, tempCache.states[100])
+		require.Equal(t, http.StatusUnauthorized, tempCache.states[100].StatusCode)
+		require.Equal(t, "oauth_401", tempCache.states[100].MatchedKeyword)
 	})
 
 	t.Run("antigravity_401_uses_SetError", func(t *testing.T) {

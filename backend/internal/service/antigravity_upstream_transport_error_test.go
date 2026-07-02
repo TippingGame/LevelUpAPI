@@ -54,7 +54,11 @@ func TestClassifyAntigravityTransportError(t *testing.T) {
 func TestHandleAntigravityUpstreamTransportError_PersistentEvictsAndFailsOver(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	repo := &antigravityTransportAccountRepoStub{}
-	svc := &AntigravityGatewayService{accountRepo: repo}
+	tempCache := &runtimeTempUnschedCacheStub{}
+	svc := &AntigravityGatewayService{
+		accountRepo:      repo,
+		rateLimitService: &RateLimitService{tempUnschedCache: tempCache},
+	}
 	account := &Account{ID: 42, Name: "ag-proxy", Platform: PlatformAntigravity, Type: AccountTypeOAuth}
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
@@ -74,6 +78,8 @@ func TestHandleAntigravityUpstreamTransportError_PersistentEvictsAndFailsOver(t 
 	require.True(t, repo.lastTempUntil.Before(time.Now().Add(antigravityTransportErrorTempUnschedDuration+time.Second)))
 	require.NotNil(t, account.TempUnschedulableUntil)
 	require.Equal(t, repo.lastTempReason, account.TempUnschedulableReason)
+	require.NotNil(t, tempCache.states[42])
+	require.Equal(t, "antigravity_transport_error", tempCache.states[42].MatchedKeyword)
 	require.Equal(t, 0, rec.Body.Len())
 }
 

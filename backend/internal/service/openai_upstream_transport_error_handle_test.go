@@ -52,7 +52,11 @@ func (u *failingOpenAIHTTPUpstream) DoWithTLS(_ *http.Request, _ string, _ int64
 
 func TestHandleOpenAIUpstreamTransportError_PersistentEvictsAndFailsOver(t *testing.T) {
 	repo := &openaiTransportAccountRepoStub{}
-	svc := &OpenAIGatewayService{accountRepo: repo}
+	tempCache := &runtimeTempUnschedCacheStub{}
+	svc := &OpenAIGatewayService{
+		accountRepo:      repo,
+		rateLimitService: &RateLimitService{tempUnschedCache: tempCache},
+	}
 	account := &Account{ID: 4627, Name: "proxy-expired", Platform: PlatformOpenAI}
 	c, rec := newOpenAITransportErrTestContext()
 
@@ -71,6 +75,10 @@ func TestHandleOpenAIUpstreamTransportError_PersistentEvictsAndFailsOver(t *test
 	require.Contains(t, call.reason, "authentication failed")
 	require.True(t, call.until.After(before.Add(openAITransportErrorTempUnschedDuration-time.Second)))
 	require.True(t, call.until.Before(after.Add(openAITransportErrorTempUnschedDuration+time.Second)))
+	require.NotNil(t, account.TempUnschedulableUntil)
+	require.Equal(t, call.reason, account.TempUnschedulableReason)
+	require.NotNil(t, tempCache.states[4627])
+	require.Equal(t, "openai_transport_error", tempCache.states[4627].MatchedKeyword)
 	require.Equal(t, 0, rec.Body.Len())
 }
 

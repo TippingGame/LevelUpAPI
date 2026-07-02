@@ -312,6 +312,11 @@ func (s *RateLimitService) HandleUpstreamError(ctx context.Context, account *Acc
 			until := time.Now().Add(time.Duration(cooldownMinutes) * time.Minute)
 			if err := s.accountRepo.SetTempUnschedulable(ctx, account.ID, until, msg); err != nil {
 				slog.Warn("oauth_401_set_temp_unschedulable_failed", "account_id", account.ID, "error", err)
+			} else {
+				account.TempUnschedulableUntil = &until
+				account.TempUnschedulableReason = msg
+				state := newTempUnschedState(until, http.StatusUnauthorized, "oauth_401", msg)
+				setTempUnschedCacheBestEffort(ctx, s.tempUnschedCache, account.ID, state, "oauth_401")
 			}
 			shouldDisable = true
 		} else {

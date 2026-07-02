@@ -52,7 +52,11 @@ func TestClassifyAnthropicTransportError(t *testing.T) {
 
 func TestMaybeTempUnscheduleAnthropicTransportError(t *testing.T) {
 	repo := &anthropicTransportAccountRepoStub{}
-	svc := &GatewayService{accountRepo: repo}
+	tempCache := &runtimeTempUnschedCacheStub{}
+	svc := &GatewayService{
+		accountRepo:      repo,
+		rateLimitService: &RateLimitService{tempUnschedCache: tempCache},
+	}
 
 	account := &Account{
 		ID:       42,
@@ -70,6 +74,8 @@ func TestMaybeTempUnscheduleAnthropicTransportError(t *testing.T) {
 	require.WithinDuration(t, time.Now().Add(anthropicTransportErrorTempUnschedDuration), repo.lastTempUntil, 2*time.Second)
 	require.NotNil(t, account.TempUnschedulableUntil)
 	require.Equal(t, repo.lastTempReason, account.TempUnschedulableReason)
+	require.NotNil(t, tempCache.states[42])
+	require.Equal(t, "anthropic_transport_error", tempCache.states[42].MatchedKeyword)
 }
 
 func TestMaybeTempUnscheduleAnthropicTransportErrorSkipsNonPersistentAndAPIKey(t *testing.T) {

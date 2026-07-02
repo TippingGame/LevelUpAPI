@@ -331,6 +331,10 @@ func (s *TokenRefreshService) refreshWithRetry(ctx context.Context, account *Acc
 			"error", setErr,
 		)
 	} else {
+		account.TempUnschedulableUntil = &until
+		account.TempUnschedulableReason = reason
+		state := newTempUnschedState(until, 0, "token_refresh_retry_exhausted", reason)
+		setTempUnschedCacheBestEffort(ctx, s.tempUnschedCache, account.ID, state, "token_refresh_retry_exhausted")
 		slog.Info("token_refresh.temp_unschedulable_set",
 			"account_id", account.ID,
 			"until", until.Format(time.RFC3339),

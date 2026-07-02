@@ -109,6 +109,13 @@ func (s *GeminiMessagesCompatService) tempUnscheduleGeminiTransportError(ctx con
 
 	account.TempUnschedulableUntil = &until
 	account.TempUnschedulableReason = reason
+	var cache TempUnschedCache
+	if s.rateLimitService != nil {
+		cache = s.rateLimitService.tempUnschedCache
+	}
+	state := newTempUnschedState(until, 0, "gemini_transport_error", reason)
+	setTempUnschedCacheBestEffort(bgCtx, cache, account.ID, state, "gemini_transport_error")
+
 	logger.L().With(zap.String("component", "service.gemini_messages_compat")).Warn(
 		"gemini.account_temp_unscheduled_transport",
 		zap.Int64("account_id", account.ID),
