@@ -2115,7 +2115,7 @@ func (s *RateLimitService) tryTempUnschedulable(ctx context.Context, account *Ac
 	bodyLower := strings.ToLower(string(body))
 
 	for idx, rule := range rules {
-		if rule.ErrorCode != statusCode || len(rule.Keywords) == 0 {
+		if !httpStatusCodeRangesContain(rule.ErrorCodeRanges, statusCode) || len(rule.Keywords) == 0 {
 			continue
 		}
 		matchedKeyword := matchTempUnschedKeyword(bodyLower, rule.Keywords)

@@ -377,10 +377,11 @@ func (a *Account) IsVisibleToConsumer(userID int64) bool {
 }
 
 type TempUnschedulableRule struct {
-	ErrorCode       int      `json:"error_code"`
-	Keywords        []string `json:"keywords"`
-	DurationMinutes int      `json:"duration_minutes"`
-	Description     string   `json:"description"`
+	ErrorCode       int                   `json:"error_code"`
+	ErrorCodeRanges []httpStatusCodeRange `json:"-"`
+	Keywords        []string              `json:"keywords"`
+	DurationMinutes int                   `json:"duration_minutes"`
+	Description     string                `json:"description"`
 }
 
 func (a *Account) IsActive() bool {
@@ -686,13 +687,23 @@ func (a *Account) GetTempUnschedulableRules() []TempUnschedulableRule {
 
 		rule := TempUnschedulableRule{
 			ErrorCode:       parseTempUnschedInt(entry["error_code"]),
+			ErrorCodeRanges: parseHTTPStatusCodeRangesValue(entry["error_code"]),
 			Keywords:        parseTempUnschedStrings(entry["keywords"]),
 			DurationMinutes: parseTempUnschedInt(entry["duration_minutes"]),
 			Description:     parseTempUnschedString(entry["description"]),
 		}
+		if len(rule.ErrorCodeRanges) == 0 {
+			rule.ErrorCodeRanges = parseHTTPStatusCodeRangesValue(entry["error_codes"])
+		}
+		if len(rule.ErrorCodeRanges) == 0 {
+			rule.ErrorCodeRanges = parseHTTPStatusCodeRangesValue(entry["status_codes"])
+		}
 
-		if rule.ErrorCode <= 0 || rule.DurationMinutes <= 0 || len(rule.Keywords) == 0 {
+		if len(rule.ErrorCodeRanges) == 0 || rule.DurationMinutes <= 0 || len(rule.Keywords) == 0 {
 			continue
+		}
+		if rule.ErrorCode <= 0 {
+			rule.ErrorCode = rule.ErrorCodeRanges[0].Start
 		}
 
 		rules = append(rules, rule)
@@ -1387,20 +1398,26 @@ func (a *Account) GetCustomErrorCodes() []int {
 	return nil
 }
 
+func (a *Account) GetCustomErrorCodeRanges() []httpStatusCodeRange {
+	if a.Credentials == nil {
+		return nil
+	}
+	raw, ok := a.Credentials["custom_error_codes"]
+	if !ok || raw == nil {
+		return nil
+	}
+	return parseHTTPStatusCodeRangesValue(raw)
+}
+
 func (a *Account) ShouldHandleErrorCode(statusCode int) bool {
 	if !a.IsCustomErrorCodesEnabled() {
 		return true
 	}
-	codes := a.GetCustomErrorCodes()
-	if len(codes) == 0 {
+	ranges := a.GetCustomErrorCodeRanges()
+	if len(ranges) == 0 {
 		return true
 	}
-	for _, code := range codes {
-		if code == statusCode {
-			return true
-		}
-	}
-	return false
+	return httpStatusCodeRangesContain(ranges, statusCode)
 }
 
 func (a *Account) IsInterceptWarmupEnabled() bool {
