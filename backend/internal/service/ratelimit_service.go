@@ -161,8 +161,19 @@ func (s *RateLimitService) HandleUpstreamError(ctx context.Context, account *Acc
 		return false
 	}
 
-	// apikey 类型账号：检查自定义错误码配置
-	// 如果启用且错误码不在列表中，则不处理（不停止调度、不标记限流/过载）
+	upstreamMsg := strings.TrimSpace(extractUpstreamErrorMessage(responseBody))
+	upstreamMsg = sanitizeUpstreamErrorMessage(upstreamMsg)
+	if upstreamMsg != "" {
+		upstreamMsg = truncateForLog([]byte(upstreamMsg), 512)
+	}
+
+	if msg, ok := permanentAccountKeywordErrorMessage(account, statusCode, upstreamMsg, responseBody); ok {
+		s.handleAuthError(ctx, account, msg)
+		return true
+	}
+
+	// apikey 类型账号：检查自定义错误码配置。
+	// 永久账号硬失败已在上面优先处理，避免自定义列表漏配导致废号继续被调度。
 	if !account.ShouldHandleErrorCode(statusCode) {
 		slog.Info("account_error_code_skipped", "account_id", account.ID, "status_code", statusCode)
 		return false
@@ -178,17 +189,6 @@ func (s *RateLimitService) HandleUpstreamError(ctx context.Context, account *Acc
 		if s.persistAnthropicExhaustedWindowLimit(ctx, account, headers) {
 			return false
 		}
-	}
-
-	upstreamMsg := strings.TrimSpace(extractUpstreamErrorMessage(responseBody))
-	upstreamMsg = sanitizeUpstreamErrorMessage(upstreamMsg)
-	if upstreamMsg != "" {
-		upstreamMsg = truncateForLog([]byte(upstreamMsg), 512)
-	}
-
-	if msg, ok := permanentAccountKeywordErrorMessage(account, statusCode, upstreamMsg, responseBody); ok {
-		s.handleAuthError(ctx, account, msg)
-		return true
 	}
 
 	// 先尝试临时不可调度规则（401除外）

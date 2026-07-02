@@ -183,6 +183,33 @@ func TestRateLimitServiceHandleUpstreamErrorPermanentKeywordBeatsTempRule(t *tes
 	require.Contains(t, repo.lastErrorMsg, "account has been suspended")
 }
 
+func TestRateLimitServiceHandleUpstreamErrorPermanentKeywordBypassesCustomErrorCodeFilter(t *testing.T) {
+	repo := &permanentKeywordAccountRepoStub{}
+	svc := &RateLimitService{accountRepo: repo}
+	account := &Account{
+		ID:       210,
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeAPIKey,
+		Credentials: map[string]any{
+			"custom_error_codes_enabled": true,
+			"custom_error_codes":         []any{float64(http.StatusTooManyRequests)},
+		},
+	}
+
+	shouldDisable := svc.HandleUpstreamError(
+		context.Background(),
+		account,
+		http.StatusForbidden,
+		http.Header{},
+		[]byte(`{"error":{"message":"This API key has been disabled"}}`),
+	)
+
+	require.True(t, shouldDisable)
+	require.Equal(t, 1, repo.setErrorCalls)
+	require.Equal(t, 0, repo.tempCalls)
+	require.Contains(t, repo.lastErrorMsg, "API key has been disabled")
+}
+
 func TestRateLimitServiceHandleUpstreamErrorNilAccountDoesNotPanic(t *testing.T) {
 	svc := &RateLimitService{}
 
