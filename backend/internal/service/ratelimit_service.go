@@ -122,9 +122,20 @@ const (
 	ErrorPolicyTempUnscheduled                          // 临时不可调度规则命中
 )
 
-// CheckErrorPolicy 检查自定义错误码和临时不可调度规则。
-// 自定义错误码开启时覆盖后续所有逻辑（包括临时不可调度）。
+// CheckErrorPolicy 检查永久账号硬失败、自定义错误码和临时不可调度规则。
+// 永久账号硬失败优先于自定义错误码；自定义错误码命中后覆盖临时不可调度规则。
 func (s *RateLimitService) CheckErrorPolicy(ctx context.Context, account *Account, statusCode int, responseBody []byte) ErrorPolicyResult {
+	if s == nil || account == nil {
+		return ErrorPolicyNone
+	}
+	if msg, ok := permanentAccountKeywordErrorMessageFromBody(account, statusCode, responseBody); ok {
+		if s.accountRepo != nil {
+			s.handleAuthError(ctx, account, msg)
+		} else {
+			slog.Warn("permanent_account_error_without_repo", "account_id", account.ID, "status_code", statusCode)
+		}
+		return ErrorPolicyMatched
+	}
 	if account.IsCustomErrorCodesEnabled() {
 		if account.ShouldHandleErrorCode(statusCode) {
 			return ErrorPolicyMatched
@@ -998,6 +1009,15 @@ func permanentAccountKeywordErrorMessage(account *Account, statusCode int, upstr
 		}
 	}
 	return "", false
+}
+
+func permanentAccountKeywordErrorMessageFromBody(account *Account, statusCode int, responseBody []byte) (string, bool) {
+	upstreamMsg := strings.TrimSpace(extractUpstreamErrorMessage(responseBody))
+	upstreamMsg = sanitizeUpstreamErrorMessage(upstreamMsg)
+	if upstreamMsg != "" {
+		upstreamMsg = truncateForLog([]byte(upstreamMsg), 512)
+	}
+	return permanentAccountKeywordErrorMessage(account, statusCode, upstreamMsg, responseBody)
 }
 
 // handle403 处理 403 Forbidden 错误
