@@ -1057,14 +1057,18 @@ func (s *RateLimitService) handleOpenAI403(ctx context.Context, account *Account
 	)
 
 	if s.openAI403CounterCache == nil {
-		s.handleAuthError(ctx, account, msg)
+		if !s.setOpenAI403TempUnschedulable(ctx, account, msg, 0, "counter_unavailable") {
+			s.handleAuthError(ctx, account, msg)
+		}
 		return true
 	}
 
 	count, err := s.openAI403CounterCache.IncrementOpenAI403Count(ctx, account.ID, openAI403CounterWindowMinutes)
 	if err != nil {
 		slog.Warn("openai_403_increment_failed", "account_id", account.ID, "error", err)
-		s.handleAuthError(ctx, account, msg)
+		if !s.setOpenAI403TempUnschedulable(ctx, account, msg, 0, "counter_error") {
+			s.handleAuthError(ctx, account, msg)
+		}
 		return true
 	}
 
@@ -1074,12 +1078,54 @@ func (s *RateLimitService) handleOpenAI403(ctx context.Context, account *Account
 		return true
 	}
 
+	if !s.setOpenAI403TempUnschedulable(ctx, account, msg, count, "") {
+		s.handleAuthError(ctx, account, msg)
+	}
+	return true
+}
+
+func (s *RateLimitService) setOpenAI403TempUnschedulable(ctx context.Context, account *Account, msg string, count int64, reasonLabel string) bool {
+	if account == nil {
+		return false
+	}
+	if wasTempUnschedByStatusCode(account.TempUnschedulableReason, http.StatusForbidden) {
+		repeatedMsg := "OpenAI repeated 403 after cooldown: " + msg
+		s.handleAuthError(ctx, account, repeatedMsg)
+		return true
+	}
+
 	until := time.Now().Add(time.Duration(openAI403CooldownMinutesDefault) * time.Minute)
-	reason := fmt.Sprintf("OpenAI 403 temporary cooldown (%d/%d): %s", count, openAI403DisableThreshold, msg)
+	state := &TempUnschedState{
+		UntilUnix:       until.Unix(),
+		TriggeredAtUnix: time.Now().Unix(),
+		StatusCode:      http.StatusForbidden,
+		MatchedKeyword:  "openai_403",
+		RuleIndex:       -1,
+		ErrorMessage:    msg,
+	}
+	if count > 0 {
+		state.MatchedKeyword = fmt.Sprintf("openai_403_%d_%d", count, openAI403DisableThreshold)
+		state.ErrorMessage = fmt.Sprintf("OpenAI 403 temporary cooldown (%d/%d): %s", count, openAI403DisableThreshold, msg)
+	} else if strings.TrimSpace(reasonLabel) != "" {
+		state.MatchedKeyword = "openai_403_" + strings.TrimSpace(reasonLabel)
+		state.ErrorMessage = "OpenAI 403 temporary cooldown (" + strings.TrimSpace(reasonLabel) + "): " + msg
+	}
+
+	reason := state.ErrorMessage
+	if raw, err := json.Marshal(state); err == nil {
+		reason = string(raw)
+	}
 	if err := s.accountRepo.SetTempUnschedulable(ctx, account.ID, until, reason); err != nil {
 		slog.Warn("openai_403_set_temp_unschedulable_failed", "account_id", account.ID, "error", err)
-		s.handleAuthError(ctx, account, msg)
-		return true
+		return false
+	}
+	account.TempUnschedulableUntil = &until
+	account.TempUnschedulableReason = reason
+
+	if s.tempUnschedCache != nil {
+		if err := s.tempUnschedCache.SetTempUnsched(ctx, account.ID, state); err != nil {
+			slog.Warn("openai_403_temp_unsched_cache_failed", "account_id", account.ID, "error", err)
+		}
 	}
 
 	slog.Warn(
@@ -1088,6 +1134,7 @@ func (s *RateLimitService) handleOpenAI403(ctx context.Context, account *Account
 		"until", until,
 		"count", count,
 		"threshold", openAI403DisableThreshold,
+		"reason_label", reasonLabel,
 	)
 	return true
 }
