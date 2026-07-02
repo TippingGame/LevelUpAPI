@@ -80,7 +80,7 @@ func TestAPIKeyServiceValidateAPIKeyGroupRoutesRequiresSamePlatform(t *testing.T
 	require.ErrorIs(t, err, ErrAPIKeyGroupRouteInvalid)
 }
 
-func TestNormalizeAPIKeyGroupRoutePriorityPreservesInputOrder(t *testing.T) {
+func TestNormalizeAPIKeyGroupRoutePriorityPreservesExplicitPriorityAndWeight(t *testing.T) {
 	routes := []APIKeyGroupRoute{
 		{GroupID: 1, Priority: 10, Weight: 9, Enabled: true, Group: &Group{ID: 1, RateMultiplier: 1.2}},
 		{GroupID: 2, Priority: 20, Weight: 1, Enabled: true, Group: &Group{ID: 2, RateMultiplier: 0.8}},
@@ -90,6 +90,19 @@ func TestNormalizeAPIKeyGroupRoutePriorityPreservesInputOrder(t *testing.T) {
 	normalizeAPIKeyGroupRoutePriority(routes)
 
 	require.Equal(t, []int64{1, 2, 3}, []int64{routes[0].GroupID, routes[1].GroupID, routes[2].GroupID})
+	require.Equal(t, []int{10, 20, 30}, []int{routes[0].Priority, routes[1].Priority, routes[2].Priority})
+	require.Equal(t, []int{9, 1, 1}, []int{routes[0].Weight, routes[1].Weight, routes[2].Weight})
+}
+
+func TestNormalizeAPIKeyGroupRoutesDefaultsPriorityByInputOrder(t *testing.T) {
+	routes, err := normalizeAPIKeyGroupRoutes([]APIKeyGroupRoute{
+		{GroupID: 1, Enabled: true},
+		{GroupID: 2, Enabled: true},
+		{GroupID: 3, Enabled: true},
+	})
+
+	require.NoError(t, err)
 	require.Equal(t, []int{100, 200, 300}, []int{routes[0].Priority, routes[1].Priority, routes[2].Priority})
 	require.Equal(t, []int{1, 1, 1}, []int{routes[0].Weight, routes[1].Weight, routes[2].Weight})
+	require.Equal(t, []int{30, 30, 30}, []int{routes[0].CooldownSeconds, routes[1].CooldownSeconds, routes[2].CooldownSeconds})
 }

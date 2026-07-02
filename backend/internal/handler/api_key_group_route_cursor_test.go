@@ -156,6 +156,38 @@ func TestBuildAPIKeyGroupRouteCandidates_SkipsUnavailableRoutes(t *testing.T) {
 	require.Equal(t, group2, candidates[0].APIKey.Group)
 }
 
+func TestWeightedAPIKeyGroupRouteStartIndexUsesBestPriorityBucket(t *testing.T) {
+	candidates := []apiKeyGroupRouteCandidate{
+		{Route: service.APIKeyGroupRoute{GroupID: 1, Priority: 100, Weight: 1}},
+		{Route: service.APIKeyGroupRoute{GroupID: 2, Priority: 100, Weight: 3}},
+		{Route: service.APIKeyGroupRoute{GroupID: 3, Priority: 200, Weight: 1000}},
+	}
+
+	bucketLen, totalWeight := apiKeyGroupRouteBestPriorityBucket(candidates)
+	require.Equal(t, 2, bucketLen)
+	require.Equal(t, 4, totalWeight)
+	require.Equal(t, 0, weightedAPIKeyGroupRouteStartIndex(candidates, 0))
+	require.Equal(t, 1, weightedAPIKeyGroupRouteStartIndex(candidates, 1))
+	require.Equal(t, 1, weightedAPIKeyGroupRouteStartIndex(candidates, 3))
+	require.Equal(t, 1, weightedAPIKeyGroupRouteStartIndex(candidates, 5))
+}
+
+func TestRotateAPIKeyGroupRouteCandidatesByStartKeepsLowerPriorityFallbacks(t *testing.T) {
+	candidates := []apiKeyGroupRouteCandidate{
+		{Route: service.APIKeyGroupRoute{GroupID: 1, Priority: 100, Weight: 1}},
+		{Route: service.APIKeyGroupRoute{GroupID: 2, Priority: 100, Weight: 1}},
+		{Route: service.APIKeyGroupRoute{GroupID: 3, Priority: 200, Weight: 1}},
+	}
+
+	rotated := rotateAPIKeyGroupRouteCandidatesByStart(candidates, 2, 1)
+
+	require.Equal(t, []int64{2, 1, 3}, []int64{
+		rotated[0].Route.GroupID,
+		rotated[1].Route.GroupID,
+		rotated[2].Route.GroupID,
+	})
+}
+
 func TestShouldSkipRouteOnSubscriptionResolveError(t *testing.T) {
 	require.True(t, shouldSkipRouteOnSubscriptionResolveError(service.ErrSubscriptionNotFound))
 	require.True(t, shouldSkipRouteOnSubscriptionResolveError(service.ErrSubscriptionInvalid))

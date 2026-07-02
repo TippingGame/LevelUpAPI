@@ -367,7 +367,7 @@ func normalizeAPIKeyGroupRoutes(routes []APIKeyGroupRoute) ([]APIKeyGroupRoute, 
 		}
 		seen[route.GroupID] = struct{}{}
 		if route.Priority <= 0 {
-			route.Priority = 100
+			route.Priority = (len(normalized) + 1) * 100
 		}
 		if route.Weight <= 0 {
 			route.Weight = 1
@@ -438,8 +438,12 @@ func (s *APIKeyService) validateAPIKeyGroupRoutes(ctx context.Context, user *Use
 
 func normalizeAPIKeyGroupRoutePriority(routes []APIKeyGroupRoute) {
 	for i := range routes {
-		routes[i].Priority = (i + 1) * 100
-		routes[i].Weight = 1
+		if routes[i].Priority <= 0 {
+			routes[i].Priority = (i + 1) * 100
+		}
+		if routes[i].Weight <= 0 {
+			routes[i].Weight = 1
+		}
 	}
 }
 

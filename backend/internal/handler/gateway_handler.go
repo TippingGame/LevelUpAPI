@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	mathrand "math/rand/v2"
 	"net/http"
 	"strconv"
 	"strings"
@@ -1495,7 +1496,66 @@ func buildAPIKeyGroupRouteCandidates(apiKey *service.APIKey) ([]apiKeyGroupRoute
 			},
 		})
 	}
+	candidates = rotateAPIKeyGroupRouteCandidatesByWeightedStart(candidates)
 	return candidates, len(candidates) > 0
+}
+
+func rotateAPIKeyGroupRouteCandidatesByWeightedStart(candidates []apiKeyGroupRouteCandidate) []apiKeyGroupRouteCandidate {
+	bucketLen, totalWeight := apiKeyGroupRouteBestPriorityBucket(candidates)
+	if bucketLen <= 1 || totalWeight <= 1 {
+		return candidates
+	}
+	start := weightedAPIKeyGroupRouteStartIndex(candidates[:bucketLen], mathrand.IntN(totalWeight))
+	return rotateAPIKeyGroupRouteCandidatesByStart(candidates, bucketLen, start)
+}
+
+func rotateAPIKeyGroupRouteCandidatesByStart(candidates []apiKeyGroupRouteCandidate, bucketLen, start int) []apiKeyGroupRouteCandidate {
+	if len(candidates) == 0 || bucketLen <= 1 || start <= 0 || start >= bucketLen {
+		return candidates
+	}
+	rotated := make([]apiKeyGroupRouteCandidate, 0, len(candidates))
+	rotated = append(rotated, candidates[start:bucketLen]...)
+	rotated = append(rotated, candidates[:start]...)
+	rotated = append(rotated, candidates[bucketLen:]...)
+	return rotated
+}
+
+func weightedAPIKeyGroupRouteStartIndex(candidates []apiKeyGroupRouteCandidate, pick int) int {
+	bucketLen, totalWeight := apiKeyGroupRouteBestPriorityBucket(candidates)
+	if bucketLen <= 1 || totalWeight <= 0 {
+		return 0
+	}
+	pick %= totalWeight
+	if pick < 0 {
+		pick += totalWeight
+	}
+	seen := 0
+	for i := 0; i < bucketLen; i++ {
+		seen += normalizedAPIKeyGroupRouteWeight(candidates[i].Route)
+		if pick < seen {
+			return i
+		}
+	}
+	return 0
+}
+
+func apiKeyGroupRouteBestPriorityBucket(candidates []apiKeyGroupRouteCandidate) (bucketLen int, totalWeight int) {
+	if len(candidates) == 0 {
+		return 0, 0
+	}
+	priority := candidates[0].Route.Priority
+	for bucketLen < len(candidates) && candidates[bucketLen].Route.Priority == priority {
+		totalWeight += normalizedAPIKeyGroupRouteWeight(candidates[bucketLen].Route)
+		bucketLen++
+	}
+	return bucketLen, totalWeight
+}
+
+func normalizedAPIKeyGroupRouteWeight(route service.APIKeyGroupRoute) int {
+	if route.Weight <= 0 {
+		return 1
+	}
+	return route.Weight
 }
 
 func shouldSwitchAPIKeyGroupRoute(failoverErr *service.UpstreamFailoverError) bool {
