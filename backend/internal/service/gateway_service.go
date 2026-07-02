@@ -5745,26 +5745,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 				return nil, failoverErr
 			}
 			// Ensure the client receives an error response (handlers assume Forward writes on non-failover errors).
-			safeErr := sanitizeUpstreamErrorMessage(err.Error())
-			s.maybeTempUnscheduleAnthropicTransportError(ctx, account, err, safeErr)
-			setOpsUpstreamError(c, 0, safeErr, "")
-			appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
-				Platform:           account.Platform,
-				AccountID:          account.ID,
-				AccountName:        account.Name,
-				UpstreamStatusCode: 0,
-				UpstreamURL:        safeUpstreamURL(upstreamReq.URL.String()),
-				Kind:               "request_error",
-				Message:            safeErr,
-			})
-			c.JSON(http.StatusBadGateway, gin.H{
-				"type": "error",
-				"error": gin.H{
-					"type":    "upstream_error",
-					"message": "Upstream request failed",
-				},
-			})
-			return nil, fmt.Errorf("upstream request failed: %s", safeErr)
+			return nil, s.handleAnthropicUpstreamTransportError(ctx, c, account, err, safeUpstreamURL(upstreamReq.URL.String()), false)
 		}
 
 		// 优先检测thinking block签名错误（400）并重试一次
@@ -6308,26 +6289,7 @@ func (s *GatewayService) forwardAnthropicAPIKeyPassthroughWithInput(
 				logger.LegacyPrintf("service.gateway", "Anthropic passthrough account %d: upstream first response timeout, failing over: %v", account.ID, err)
 				return nil, failoverErr
 			}
-			safeErr := sanitizeUpstreamErrorMessage(err.Error())
-			setOpsUpstreamError(c, 0, safeErr, "")
-			appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
-				Platform:           account.Platform,
-				AccountID:          account.ID,
-				AccountName:        account.Name,
-				UpstreamStatusCode: 0,
-				UpstreamURL:        safeUpstreamURL(upstreamReq.URL.String()),
-				Passthrough:        true,
-				Kind:               "request_error",
-				Message:            safeErr,
-			})
-			c.JSON(http.StatusBadGateway, gin.H{
-				"type": "error",
-				"error": gin.H{
-					"type":    "upstream_error",
-					"message": "Upstream request failed",
-				},
-			})
-			return nil, fmt.Errorf("upstream request failed: %s", safeErr)
+			return nil, s.handleAnthropicUpstreamTransportError(ctx, c, account, err, safeUpstreamURL(upstreamReq.URL.String()), true)
 		}
 
 		// 透传分支禁止 400 请求体降级重试（该重试会改写请求体）

@@ -4,11 +4,13 @@ import (
 	"context"
 	"errors"
 	"net"
+	"net/http"
 	"strings"
 	"syscall"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
+	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 )
 
@@ -16,6 +18,8 @@ const (
 	anthropicTransportErrorTempUnschedDuration = 10 * time.Minute
 	anthropicTransportErrorStateUpdateTimeout  = 3 * time.Second
 )
+
+var anthropicTransportFailoverBody = []byte(`{"type":"error","error":{"type":"upstream_error","message":"Upstream request failed"}}`)
 
 type anthropicTransportErrorClass struct {
 	Persistent bool
@@ -54,6 +58,30 @@ func classifyAnthropicTransportError(err error) anthropicTransportErrorClass {
 		}
 	}
 	return anthropicTransportErrorClass{}
+}
+
+func (s *GatewayService) handleAnthropicUpstreamTransportError(ctx context.Context, c *gin.Context, account *Account, err error, upstreamURL string, passthrough bool) error {
+	safeErr := sanitizeUpstreamErrorMessage(err.Error())
+	setOpsUpstreamError(c, 0, safeErr, "")
+	appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
+		Platform:           account.Platform,
+		AccountID:          account.ID,
+		AccountName:        account.Name,
+		UpstreamStatusCode: 0,
+		UpstreamURL:        strings.TrimSpace(upstreamURL),
+		Passthrough:        passthrough,
+		Kind:               "request_error",
+		Message:            safeErr,
+	})
+
+	if errors.Is(err, context.Canceled) {
+		return err
+	}
+	s.maybeTempUnscheduleAnthropicTransportError(ctx, account, err, safeErr)
+	return &UpstreamFailoverError{
+		StatusCode:   http.StatusBadGateway,
+		ResponseBody: anthropicTransportFailoverBody,
+	}
 }
 
 func (s *GatewayService) maybeTempUnscheduleAnthropicTransportError(ctx context.Context, account *Account, err error, safeErr string) {

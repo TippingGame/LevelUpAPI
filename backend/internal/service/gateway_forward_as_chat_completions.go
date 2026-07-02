@@ -136,18 +136,7 @@ func (s *GatewayService) ForwardAsChatCompletions(
 		if failoverErr := upstreamFirstResponseFailoverError(err); failoverErr != nil && !c.Writer.Written() {
 			return nil, failoverErr
 		}
-		safeErr := sanitizeUpstreamErrorMessage(err.Error())
-		setOpsUpstreamError(c, 0, safeErr, "")
-		appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
-			Platform:           account.Platform,
-			AccountID:          account.ID,
-			AccountName:        account.Name,
-			UpstreamStatusCode: 0,
-			Kind:               "request_error",
-			Message:            safeErr,
-		})
-		writeGatewayCCError(c, http.StatusBadGateway, "server_error", "Upstream request failed")
-		return nil, fmt.Errorf("upstream request failed: %s", safeErr)
+		return nil, s.handleAnthropicUpstreamTransportError(ctx, c, account, err, safeUpstreamURL(upstreamReq.URL.String()), false)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
