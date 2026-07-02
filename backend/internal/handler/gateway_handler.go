@@ -2058,6 +2058,12 @@ func (h *GatewayHandler) CountTokens(c *gin.Context) {
 		// 错误响应已在 ForwardCountTokens 中处理
 		return
 	}
+
+	if account.IsAnthropicOAuthOrSetupToken() && account.GetBaseRPM() > 0 {
+		if err := h.gatewayService.IncrementAccountRPM(c.Request.Context(), account.ID); err != nil {
+			reqLog.Warn("gateway.count_tokens_rpm_increment_failed", zap.Int64("account_id", account.ID), zap.Error(err))
+		}
+	}
 }
 
 // InterceptType 表示请求拦截类型
