@@ -901,6 +901,57 @@ func (s *AccountRepoSuite) TestClearRateLimit() {
 	s.Require().Nil(got.OverloadUntil)
 }
 
+func (s *AccountRepoSuite) TestSetModelRateLimit_SyncSchedulerSnapshot() {
+	account := mustCreateAccount(s.T(), s.client, &service.Account{
+		Name:        "acc-model-limit",
+		Status:      service.StatusActive,
+		Schedulable: true,
+		Extra:       map[string]any{},
+	})
+	cacheRecorder := &schedulerCacheRecorder{}
+	s.repo.schedulerCache = cacheRecorder
+
+	resetAt := time.Now().Add(30 * time.Minute).UTC().Truncate(time.Second)
+	s.Require().NoError(s.repo.SetModelRateLimit(s.ctx, account.ID, "claude-sonnet-4-5", resetAt))
+
+	got, err := s.repo.GetByID(s.ctx, account.ID)
+	s.Require().NoError(err)
+	s.Require().Greater(got.GetModelRateLimitRemainingTime("claude-sonnet-4-5"), time.Duration(0))
+	s.Require().Len(cacheRecorder.setAccounts, 1)
+	cached := cacheRecorder.setAccounts[0]
+	s.Require().Equal(account.ID, cached.ID)
+	s.Require().Greater(cached.GetModelRateLimitRemainingTime("claude-sonnet-4-5"), time.Duration(0))
+}
+
+func (s *AccountRepoSuite) TestClearModelRateLimits_SyncSchedulerSnapshotOnRecovery() {
+	resetAt := time.Now().Add(30 * time.Minute).UTC().Format(time.RFC3339)
+	account := mustCreateAccount(s.T(), s.client, &service.Account{
+		Name:        "acc-clear-model-limit",
+		Status:      service.StatusActive,
+		Schedulable: true,
+		Extra: map[string]any{
+			"model_rate_limits": map[string]any{
+				"claude-sonnet-4-5": map[string]any{
+					"rate_limited_at":     time.Now().UTC().Format(time.RFC3339),
+					"rate_limit_reset_at": resetAt,
+				},
+			},
+		},
+	})
+	cacheRecorder := &schedulerCacheRecorder{}
+	s.repo.schedulerCache = cacheRecorder
+
+	s.Require().NoError(s.repo.ClearModelRateLimits(s.ctx, account.ID))
+
+	got, err := s.repo.GetByID(s.ctx, account.ID)
+	s.Require().NoError(err)
+	s.Require().Equal(time.Duration(0), got.GetModelRateLimitRemainingTime("claude-sonnet-4-5"))
+	s.Require().Len(cacheRecorder.setAccounts, 1)
+	cached := cacheRecorder.setAccounts[0]
+	s.Require().Equal(account.ID, cached.ID)
+	s.Require().Equal(time.Duration(0), cached.GetModelRateLimitRemainingTime("claude-sonnet-4-5"))
+}
+
 func (s *AccountRepoSuite) TestTempUnschedulableFieldsLoadedByGetByIDAndGetByIDs() {
 	acc1 := mustCreateAccount(s.T(), s.client, &service.Account{Name: "acc-temp-1"})
 	acc2 := mustCreateAccount(s.T(), s.client, &service.Account{Name: "acc-temp-2"})
