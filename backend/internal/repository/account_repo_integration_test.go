@@ -1292,6 +1292,69 @@ func (s *AccountRepoSuite) TestUpdateExtra_SchedulerRelevantStillEnqueuesOutbox(
 	s.Require().Equal(1, count)
 }
 
+func (s *AccountRepoSuite) TestIncrementQuotaUsed_DailyQuotaCrossingSyncsSchedulerSnapshot() {
+	now := time.Now().UTC()
+	account := mustCreateAccount(s.T(), s.client, &service.Account{
+		Name:        "acc-quota-daily-cross",
+		Type:        service.AccountTypeAPIKey,
+		Status:      service.StatusActive,
+		Schedulable: true,
+		Extra: map[string]any{
+			"quota_daily_limit": 10.0,
+			"quota_daily_used":  9.0,
+			"quota_daily_start": now.Add(-1 * time.Hour).Format(time.RFC3339),
+		},
+	})
+	cacheRecorder := &schedulerCacheRecorder{}
+	s.repo.schedulerCache = cacheRecorder
+	_, err := s.repo.sql.ExecContext(s.ctx, "TRUNCATE scheduler_outbox")
+	s.Require().NoError(err)
+
+	s.Require().NoError(s.repo.IncrementQuotaUsed(s.ctx, account.ID, 2.0))
+
+	got, err := s.repo.GetByID(s.ctx, account.ID)
+	s.Require().NoError(err)
+	s.Require().False(got.IsSchedulable())
+	s.Require().Equal(11.0, got.GetQuotaDailyUsed())
+
+	var count int
+	err = scanSingleRow(s.ctx, s.repo.sql, "SELECT COUNT(*) FROM scheduler_outbox", nil, &count)
+	s.Require().NoError(err)
+	s.Require().Equal(1, count)
+	s.Require().Len(cacheRecorder.setAccounts, 1)
+	cached := cacheRecorder.setAccounts[0]
+	s.Require().Equal(account.ID, cached.ID)
+	s.Require().Equal(11.0, cached.GetQuotaDailyUsed())
+	s.Require().False(cached.IsSchedulable())
+}
+
+func (s *AccountRepoSuite) TestResetQuotaUsed_SyncSchedulerSnapshotOnRecovery() {
+	account := mustCreateAccount(s.T(), s.client, &service.Account{
+		Name:        "acc-quota-reset",
+		Type:        service.AccountTypeAPIKey,
+		Status:      service.StatusActive,
+		Schedulable: true,
+		Extra: map[string]any{
+			"quota_limit": 10.0,
+			"quota_used":  10.0,
+		},
+	})
+	cacheRecorder := &schedulerCacheRecorder{}
+	s.repo.schedulerCache = cacheRecorder
+
+	s.Require().NoError(s.repo.ResetQuotaUsed(s.ctx, account.ID))
+
+	got, err := s.repo.GetByID(s.ctx, account.ID)
+	s.Require().NoError(err)
+	s.Require().Equal(0.0, got.GetQuotaUsed())
+	s.Require().True(got.IsSchedulable())
+	s.Require().Len(cacheRecorder.setAccounts, 1)
+	cached := cacheRecorder.setAccounts[0]
+	s.Require().Equal(account.ID, cached.ID)
+	s.Require().Equal(0.0, cached.GetQuotaUsed())
+	s.Require().True(cached.IsSchedulable())
+}
+
 // --- GetByCRSAccountID ---
 
 func (s *AccountRepoSuite) TestGetByCRSAccountID() {

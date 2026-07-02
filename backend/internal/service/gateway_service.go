@@ -9811,11 +9811,50 @@ func finalizePostUsageBilling(p *postUsageBillingParams, deps *billingDeps, resu
 	}
 
 	deps.deferredService.ScheduleLastUsedUpdate(p.Account.ID)
+	syncAccountQuotaSchedulerSnapshot(p, deps, result)
 
 	// Notification checks run async — all parameters are already captured,
 	// no dependency on the request context or upstream connection.
 	go notifyBalanceLow(p, deps, result)
 	go notifyAccountQuota(p, deps, result)
+}
+
+func syncAccountQuotaSchedulerSnapshot(p *postUsageBillingParams, deps *billingDeps, result *UsageBillingApplyResult) {
+	if p == nil || p.Cost == nil || p.Account == nil || deps == nil ||
+		deps.accountRepo == nil || deps.schedulerSnapshot == nil || result == nil || result.QuotaState == nil {
+		return
+	}
+	if !p.Account.IsAPIKeyOrBedrock() {
+		return
+	}
+	accountCost := p.Cost.TotalCost * p.AccountRateMultiplier
+	if !accountQuotaStateCrossedLimit(result.QuotaState, accountCost) {
+		return
+	}
+
+	ctx, cancel := detachedBillingContext(context.Background())
+	defer cancel()
+	account, err := deps.accountRepo.GetByID(ctx, p.Account.ID)
+	if err != nil {
+		slog.Warn("account_quota_scheduler_sync_reload_failed", "account_id", p.Account.ID, "error", err)
+		return
+	}
+	if err := deps.schedulerSnapshot.UpdateAccountInCache(ctx, account); err != nil {
+		slog.Warn("account_quota_scheduler_sync_failed", "account_id", p.Account.ID, "error", err)
+	}
+}
+
+func accountQuotaStateCrossedLimit(state *AccountQuotaState, amount float64) bool {
+	if state == nil || amount <= 0 {
+		return false
+	}
+	return quotaDimensionCrossedLimit(state.TotalUsed, state.TotalLimit, amount) ||
+		quotaDimensionCrossedLimit(state.DailyUsed, state.DailyLimit, amount) ||
+		quotaDimensionCrossedLimit(state.WeeklyUsed, state.WeeklyLimit, amount)
+}
+
+func quotaDimensionCrossedLimit(used, limit, amount float64) bool {
+	return limit > 0 && used >= limit && used-amount < limit
 }
 
 // notifyBalanceLow sends balance low notification after deduction.
@@ -9930,10 +9969,15 @@ type billingDeps struct {
 	billingCacheService    *BillingCacheService
 	deferredService        *DeferredService
 	balanceNotifyService   *BalanceNotifyService
+	schedulerSnapshot      accountSchedulerSnapshotRefresher
 }
 
 type usageBillingWalletAdjuster interface {
 	AdjustUsageBillingWallet(ctx context.Context, userID int64, amount float64, preferPoints bool, metadata map[string]any) (*UsageBillingApplyResult, error)
+}
+
+type accountSchedulerSnapshotRefresher interface {
+	UpdateAccountInCache(ctx context.Context, account *Account) error
 }
 
 func (s *GatewayService) billingDeps() *billingDeps {
@@ -9945,6 +9989,7 @@ func (s *GatewayService) billingDeps() *billingDeps {
 		billingCacheService:    s.billingCacheService,
 		deferredService:        s.deferredService,
 		balanceNotifyService:   s.balanceNotifyService,
+		schedulerSnapshot:      s.schedulerSnapshot,
 	}
 }
 
