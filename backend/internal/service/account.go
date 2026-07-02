@@ -405,13 +405,32 @@ func (a *Account) EffectiveLoadFactor() int {
 	if a == nil {
 		return 1
 	}
+	loadFactor := 1
 	if a.LoadFactor != nil && *a.LoadFactor > 0 {
-		return *a.LoadFactor
+		loadFactor = *a.LoadFactor
+	} else if a.Concurrency > 0 {
+		loadFactor = a.Concurrency
 	}
-	if a.Concurrency > 0 {
-		return a.Concurrency
+	return a.capConcurrencyBySessionLimit(loadFactor)
+}
+
+func (a *Account) EffectiveConcurrencyLimit() int {
+	if a == nil {
+		return 1
 	}
-	return 1
+	return a.capConcurrencyBySessionLimit(a.Concurrency)
+}
+
+func (a *Account) capConcurrencyBySessionLimit(value int) int {
+	if value <= 0 {
+		value = 1
+	}
+	if a != nil && a.IsAnthropicOAuthOrSetupToken() {
+		if maxSessions := a.GetMaxSessions(); maxSessions > 0 && value > maxSessions {
+			return maxSessions
+		}
+	}
+	return value
 }
 
 func (a *Account) IsSchedulable() bool {

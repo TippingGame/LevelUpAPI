@@ -71,6 +71,45 @@ func TestAnthropicOAuthPoolProtectionRuntimeDefaultsForLegacyAccounts(t *testing
 	}
 }
 
+func TestAnthropicOAuthEffectiveConcurrencyLimitCappedByMaxSessions(t *testing.T) {
+	account := &Account{
+		Platform:    PlatformAnthropic,
+		Type:        AccountTypeOAuth,
+		Concurrency: 5,
+		LoadFactor:  intPtr(10),
+		Extra: map[string]any{
+			"max_sessions": 2,
+		},
+	}
+
+	require.Equal(t, 2, account.EffectiveConcurrencyLimit())
+	require.Equal(t, 2, account.EffectiveLoadFactor())
+}
+
+func TestAnthropicOAuthEffectiveConcurrencyLimitUsesRuntimeDefault(t *testing.T) {
+	account := &Account{
+		Platform:    PlatformAnthropic,
+		Type:        AccountTypeSetupToken,
+		Concurrency: 3,
+		Extra:       nil,
+	}
+
+	require.Equal(t, anthropicOAuthDefaultMaxSessions, account.EffectiveConcurrencyLimit())
+	require.Equal(t, anthropicOAuthDefaultMaxSessions, account.EffectiveLoadFactor())
+}
+
+func TestEffectiveConcurrencyLimitLeavesNonAnthropicOAuthUncapped(t *testing.T) {
+	account := &Account{
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeOAuth,
+		Concurrency: 5,
+		LoadFactor:  intPtr(10),
+	}
+
+	require.Equal(t, 5, account.EffectiveConcurrencyLimit())
+	require.Equal(t, 10, account.EffectiveLoadFactor())
+}
+
 func TestApplyAnthropicOAuthPoolProtectionDefaultsPreservesOverrides(t *testing.T) {
 	customRules := []any{
 		map[string]any{
