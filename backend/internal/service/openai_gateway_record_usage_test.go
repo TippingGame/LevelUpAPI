@@ -190,6 +190,32 @@ func (s *openAIRecordUsageAPIKeyQuotaStub) InvalidateAuthCacheByUserID(ctx conte
 	s.lastAuthUserID = userID
 }
 
+type openAIRecordUsageAccountRepoStub struct {
+	AccountRepository
+
+	account      *Account
+	getByIDCalls int
+}
+
+func (s *openAIRecordUsageAccountRepoStub) GetByID(ctx context.Context, id int64) (*Account, error) {
+	s.getByIDCalls++
+	if s.account != nil && s.account.ID == id {
+		return s.account, nil
+	}
+	return nil, errors.New("account not found")
+}
+
+type openAIRecordUsageSchedulerCacheStub struct {
+	SchedulerCache
+
+	setAccounts []*Account
+}
+
+func (s *openAIRecordUsageSchedulerCacheStub) SetAccount(ctx context.Context, account *Account) error {
+	s.setAccounts = append(s.setAccounts, account)
+	return nil
+}
+
 type openAIUserGroupRateRepoStub struct {
 	UserGroupRateRepository
 
@@ -826,6 +852,58 @@ func TestOpenAIGatewayServiceRecordUsage_UpdatesAPIKeyQuotaWhenConfigured(t *tes
 	require.Equal(t, 0, quotaSvc.rateLimitCalls)
 	expected := expectedOpenAICost(t, svc, "gpt-5.1", usage, 1.1)
 	require.InDelta(t, expected.ActualCost, quotaSvc.lastAmount, 1e-12)
+}
+
+func TestOpenAIGatewayServiceRecordUsage_SyncsSchedulerSnapshotOnAccountQuotaExhaustion(t *testing.T) {
+	usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
+	billingRepo := &openAIRecordUsageBillingRepoStub{
+		result: &UsageBillingApplyResult{
+			Applied: true,
+			QuotaState: &AccountQuotaState{
+				DailyUsed:  10,
+				DailyLimit: 10,
+			},
+		},
+	}
+	userRepo := &openAIRecordUsageUserRepoStub{}
+	subRepo := &openAIRecordUsageSubRepoStub{}
+	svc := newOpenAIRecordUsageServiceWithBillingRepoForTest(usageRepo, billingRepo, userRepo, subRepo, nil)
+	freshAccount := &Account{
+		ID:          30051,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Status:      StatusActive,
+		Schedulable: true,
+		Extra: map[string]any{
+			"quota_daily_limit": 10.0,
+			"quota_daily_used":  10.0,
+		},
+	}
+	accountRepo := &openAIRecordUsageAccountRepoStub{account: freshAccount}
+	schedulerCache := &openAIRecordUsageSchedulerCacheStub{}
+	svc.accountRepo = accountRepo
+	svc.schedulerSnapshot = NewSchedulerSnapshotService(schedulerCache, nil, accountRepo, nil, nil)
+
+	err := svc.RecordUsage(context.Background(), &OpenAIRecordUsageInput{
+		Result: &OpenAIForwardResult{
+			RequestID: "resp_account_quota_scheduler_sync",
+			Usage: OpenAIUsage{
+				InputTokens:  10,
+				OutputTokens: 6,
+			},
+			Model:    "gpt-5.1",
+			Duration: time.Second,
+		},
+		APIKey:  &APIKey{ID: 10051},
+		User:    &User{ID: 20051},
+		Account: &Account{ID: freshAccount.ID, Platform: PlatformOpenAI, Type: AccountTypeAPIKey},
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, 1, billingRepo.calls)
+	require.Equal(t, 1, accountRepo.getByIDCalls)
+	require.Len(t, schedulerCache.setAccounts, 1)
+	require.Same(t, freshAccount, schedulerCache.setAccounts[0])
 }
 
 func TestOpenAIGatewayServiceRecordUsage_ClampsActualInputTokensToZero(t *testing.T) {
