@@ -1142,10 +1142,10 @@ func TestExtractSystemMessagesFromInput(t *testing.T) {
 		require.True(t, result)
 		input, ok := reqBody["input"].([]any)
 		require.True(t, ok)
-		require.Len(t, input, 1)
+		require.Len(t, input, 2)
 		msg, ok := input[0].(map[string]any)
 		require.True(t, ok)
-		require.Equal(t, "user", msg["role"])
+		require.Equal(t, "developer", msg["role"])
 		require.Equal(t, "You are an assistant.", reqBody["instructions"])
 	})
 
@@ -1165,7 +1165,10 @@ func TestExtractSystemMessagesFromInput(t *testing.T) {
 		require.Equal(t, "Be helpful.", reqBody["instructions"])
 		input, ok := reqBody["input"].([]any)
 		require.True(t, ok)
-		require.Len(t, input, 0)
+		require.Len(t, input, 1)
+		msg, ok := input[0].(map[string]any)
+		require.True(t, ok)
+		require.Equal(t, "developer", msg["role"])
 	})
 
 	t.Run("developer input_text content message", func(t *testing.T) {
@@ -1186,7 +1189,10 @@ func TestExtractSystemMessagesFromInput(t *testing.T) {
 		require.Equal(t, "Project rules.", reqBody["instructions"])
 		input, ok := reqBody["input"].([]any)
 		require.True(t, ok)
-		require.Len(t, input, 1)
+		require.Len(t, input, 2)
+		msg, ok := input[0].(map[string]any)
+		require.True(t, ok)
+		require.Equal(t, "developer", msg["role"])
 	})
 
 	t.Run("multiple system messages concatenated", func(t *testing.T) {
@@ -1202,7 +1208,13 @@ func TestExtractSystemMessagesFromInput(t *testing.T) {
 		require.Equal(t, "First.\n\nSecond.", reqBody["instructions"])
 		input, ok := reqBody["input"].([]any)
 		require.True(t, ok)
-		require.Len(t, input, 1)
+		require.Len(t, input, 3)
+		first, ok := input[0].(map[string]any)
+		require.True(t, ok)
+		require.Equal(t, "developer", first["role"])
+		second, ok := input[1].(map[string]any)
+		require.True(t, ok)
+		require.Equal(t, "developer", second["role"])
 	})
 
 	t.Run("mixed system and non-system preserves non-system", func(t *testing.T) {
@@ -1215,15 +1227,19 @@ func TestExtractSystemMessagesFromInput(t *testing.T) {
 		}
 		result := extractSystemMessagesFromInput(reqBody)
 		require.True(t, result)
+		require.Equal(t, "Sys prompt.", reqBody["instructions"])
 		input, ok := reqBody["input"].([]any)
 		require.True(t, ok)
-		require.Len(t, input, 2)
+		require.Len(t, input, 3)
 		first, ok := input[0].(map[string]any)
 		require.True(t, ok)
 		require.Equal(t, "user", first["role"])
 		second, ok := input[1].(map[string]any)
 		require.True(t, ok)
-		require.Equal(t, "assistant", second["role"])
+		require.Equal(t, "developer", second["role"])
+		third, ok := input[2].(map[string]any)
+		require.True(t, ok)
+		require.Equal(t, "assistant", third["role"])
 	})
 
 	t.Run("existing instructions prepended", func(t *testing.T) {
@@ -1326,7 +1342,7 @@ func TestApplyCodexOAuthTransform_ExtractsDeveloperInputTextMessages(t *testing.
 	result := applyCodexOAuthTransform(reqBody, false, false)
 
 	require.True(t, result.Modified)
-	require.Equal(t, "You are a helpful coding assistant.", reqBody["instructions"])
+	require.Equal(t, "You are a coding assistant.", reqBody["instructions"])
 	input, ok := reqBody["input"].([]any)
 	require.True(t, ok)
 	require.Len(t, input, 2)

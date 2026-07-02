@@ -945,8 +945,9 @@ func extractTextFromContent(content any) string {
 	}
 }
 
-// extractSystemMessagesFromInput scans input for role=="system", maps those
-// items to developer, and mirrors their text into reqBody["instructions"].
+// extractSystemMessagesFromInput scans input for role=="system"/"developer".
+// System items are normalized to developer, and guidance text is mirrored into
+// reqBody["instructions"] so the Codex OAuth path keeps client instructions.
 func extractSystemMessagesFromInput(reqBody map[string]any) bool {
 	input, ok := reqBody["input"].([]any)
 	if !ok || len(input) == 0 {
@@ -960,11 +961,14 @@ func extractSystemMessagesFromInput(reqBody map[string]any) bool {
 		if !ok {
 			continue
 		}
-		if role, _ := m["role"].(string); role != "system" {
+		role, _ := m["role"].(string)
+		if role != "system" && role != "developer" {
 			continue
 		}
-		m["role"] = "developer"
-		modified = true
+		if role == "system" {
+			m["role"] = "developer"
+			modified = true
+		}
 		if text := extractTextFromContent(m["content"]); text != "" {
 			systemTexts = append(systemTexts, text)
 		}
@@ -973,6 +977,7 @@ func extractSystemMessagesFromInput(reqBody map[string]any) bool {
 	if len(systemTexts) == 0 {
 		return modified
 	}
+	modified = true
 
 	extracted := strings.Join(systemTexts, "\n\n")
 	if existing, ok := reqBody["instructions"].(string); ok && strings.TrimSpace(existing) != "" {
