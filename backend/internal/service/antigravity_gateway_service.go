@@ -637,20 +637,29 @@ urlFallbackLoop:
 			}
 			if err != nil {
 				safeErr := sanitizeUpstreamErrorMessage(err.Error())
-				appendOpsUpstreamError(p.c, OpsUpstreamErrorEvent{
-					Platform:           p.account.Platform,
-					AccountID:          p.account.ID,
-					AccountName:        p.account.Name,
-					UpstreamStatusCode: 0,
-					UpstreamURL:        safeUpstreamURL(upstreamReq.URL.String()),
-					Kind:               "request_error",
-					Message:            safeErr,
-				})
 				if shouldAntigravityFallbackToNextURL(err, 0) && urlIdx < len(availableURLs)-1 {
+					appendOpsUpstreamError(p.c, OpsUpstreamErrorEvent{
+						Platform:           p.account.Platform,
+						AccountID:          p.account.ID,
+						AccountName:        p.account.Name,
+						UpstreamStatusCode: 0,
+						UpstreamURL:        safeUpstreamURL(upstreamReq.URL.String()),
+						Kind:               "request_error",
+						Message:            safeErr,
+					})
 					logger.LegacyPrintf("service.antigravity_gateway", "%s URL fallback (connection error): %s -> %s", p.prefix, baseURL, availableURLs[urlIdx+1])
 					continue urlFallbackLoop
 				}
 				if attempt < antigravityMaxRetries {
+					appendOpsUpstreamError(p.c, OpsUpstreamErrorEvent{
+						Platform:           p.account.Platform,
+						AccountID:          p.account.ID,
+						AccountName:        p.account.Name,
+						UpstreamStatusCode: 0,
+						UpstreamURL:        safeUpstreamURL(upstreamReq.URL.String()),
+						Kind:               "request_error",
+						Message:            safeErr,
+					})
 					logger.LegacyPrintf("service.antigravity_gateway", "%s status=request_failed retry=%d/%d error=%v", p.prefix, attempt, antigravityMaxRetries, err)
 					if !sleepAntigravityBackoffWithContext(p.ctx, attempt) {
 						logger.LegacyPrintf("service.antigravity_gateway", "%s status=context_canceled_during_backoff", p.prefix)
@@ -659,8 +668,7 @@ urlFallbackLoop:
 					continue
 				}
 				logger.LegacyPrintf("service.antigravity_gateway", "%s status=request_failed retries_exhausted error=%v", p.prefix, err)
-				setOpsUpstreamError(p.c, 0, safeErr, "")
-				return nil, fmt.Errorf("upstream request failed after retries: %w", err)
+				return nil, s.handleAntigravityUpstreamTransportError(p.ctx, p.c, p.account, err, safeUpstreamURL(upstreamReq.URL.String()))
 			}
 
 			// 统一处理错误响应
@@ -1431,12 +1439,9 @@ func (s *AntigravityGatewayService) Forward(ctx context.Context, c *gin.Context,
 		sessionHash:     "",              // Forward 方法没有 sessionHash，由上层处理粘性会话清除
 	})
 	if err != nil {
-		// 检查是否是账号切换信号，转换为 UpstreamFailoverError 让 Handler 切换账号
-		if switchErr, ok := IsAntigravityAccountSwitchError(err); ok {
-			return nil, &UpstreamFailoverError{
-				StatusCode:        http.StatusServiceUnavailable,
-				ForceCacheBilling: switchErr.IsStickySession,
-			}
+		// 检查是否是账号切换或上游 failover 信号，让 Handler 切换账号
+		if failoverErr, ok := antigravityRetryErrorToFailover(err); ok {
+			return nil, failoverErr
 		}
 		// 区分客户端取消和真正的上游失败，返回更准确的错误消息
 		if c.Request.Context().Err() != nil {
@@ -1515,6 +1520,17 @@ func (s *AntigravityGatewayService) Forward(ctx context.Context, c *gin.Context,
 					sessionHash:     "", // Forward 方法没有 sessionHash，由上层处理粘性会话清除
 				})
 				if retryErr != nil {
+					if failoverErr, ok := antigravityRetryErrorToFailover(retryErr); ok {
+						appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
+							Platform:           account.Platform,
+							AccountID:          account.ID,
+							AccountName:        account.Name,
+							UpstreamStatusCode: failoverErr.StatusCode,
+							Kind:               "failover",
+							Message:            sanitizeUpstreamErrorMessage(retryErr.Error()),
+						})
+						return nil, failoverErr
+					}
 					appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
 						Platform:           account.Platform,
 						AccountID:          account.ID,
@@ -1653,6 +1669,9 @@ func (s *AntigravityGatewayService) Forward(ctx context.Context, c *gin.Context,
 								}
 							}
 						} else {
+							if failoverErr, ok := antigravityRetryErrorToFailover(retryErr); ok {
+								return nil, failoverErr
+							}
 							logger.LegacyPrintf("service.antigravity_gateway", "Antigravity account %d: budget rectifier retry failed: %v", account.ID, retryErr)
 						}
 					}
@@ -2189,12 +2208,9 @@ func (s *AntigravityGatewayService) ForwardGemini(ctx context.Context, c *gin.Co
 		sessionHash:     "",              // ForwardGemini 方法没有 sessionHash，由上层处理粘性会话清除
 	})
 	if err != nil {
-		// 检查是否是账号切换信号，转换为 UpstreamFailoverError 让 Handler 切换账号
-		if switchErr, ok := IsAntigravityAccountSwitchError(err); ok {
-			return nil, &UpstreamFailoverError{
-				StatusCode:        http.StatusServiceUnavailable,
-				ForceCacheBilling: switchErr.IsStickySession,
-			}
+		// 检查是否是账号切换或上游 failover 信号，让 Handler 切换账号
+		if failoverErr, ok := antigravityRetryErrorToFailover(err); ok {
+			return nil, failoverErr
 		}
 		// 区分客户端取消和真正的上游失败，返回更准确的错误消息
 		if c.Request.Context().Err() != nil {
@@ -2317,19 +2333,16 @@ func (s *AntigravityGatewayService) ForwardGemini(ctx context.Context, c *gin.Co
 						contentType = resp.Header.Get("Content-Type")
 					}
 				} else {
-					if switchErr, ok := IsAntigravityAccountSwitchError(retryErr); ok {
+					if failoverErr, ok := antigravityRetryErrorToFailover(retryErr); ok {
 						appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
 							Platform:           account.Platform,
 							AccountID:          account.ID,
 							AccountName:        account.Name,
-							UpstreamStatusCode: http.StatusServiceUnavailable,
+							UpstreamStatusCode: failoverErr.StatusCode,
 							Kind:               "failover",
 							Message:            sanitizeUpstreamErrorMessage(retryErr.Error()),
 						})
-						return nil, &UpstreamFailoverError{
-							StatusCode:        http.StatusServiceUnavailable,
-							ForceCacheBilling: switchErr.IsStickySession,
-						}
+						return nil, failoverErr
 					}
 					appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
 						Platform:           account.Platform,
