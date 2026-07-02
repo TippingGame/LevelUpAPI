@@ -150,6 +150,39 @@ func TestRateLimitServiceHandleUpstreamErrorOpenAIOAuthPermanentKeywordStillUses
 	require.Contains(t, repo.lastTempReason, "(1/3)")
 }
 
+func TestRateLimitServiceHandleUpstreamErrorPermanentKeywordBeatsTempRule(t *testing.T) {
+	repo := &permanentKeywordAccountRepoStub{}
+	svc := &RateLimitService{accountRepo: repo}
+	account := &Account{
+		ID:       209,
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeAPIKey,
+		Credentials: map[string]any{
+			"temp_unschedulable_enabled": true,
+			"temp_unschedulable_rules": []any{
+				map[string]any{
+					"error_code":       403,
+					"keywords":         []any{"account"},
+					"duration_minutes": 10,
+				},
+			},
+		},
+	}
+
+	shouldDisable := svc.HandleUpstreamError(
+		context.Background(),
+		account,
+		http.StatusForbidden,
+		http.Header{},
+		[]byte(`{"error":{"message":"Your account has been suspended. Please contact support."}}`),
+	)
+
+	require.True(t, shouldDisable)
+	require.Equal(t, 1, repo.setErrorCalls)
+	require.Equal(t, 0, repo.tempCalls)
+	require.Contains(t, repo.lastErrorMsg, "account has been suspended")
+}
+
 func TestRateLimitServiceHandleUpstreamErrorNilAccountDoesNotPanic(t *testing.T) {
 	svc := &RateLimitService{}
 

@@ -180,14 +180,6 @@ func (s *RateLimitService) HandleUpstreamError(ctx context.Context, account *Acc
 		}
 	}
 
-	// 先尝试临时不可调度规则（401除外）
-	// 如果匹配成功，直接返回，不执行后续禁用逻辑
-	if statusCode != 401 {
-		if s.tryTempUnschedulable(ctx, account, statusCode, responseBody) {
-			return true
-		}
-	}
-
 	upstreamMsg := strings.TrimSpace(extractUpstreamErrorMessage(responseBody))
 	upstreamMsg = sanitizeUpstreamErrorMessage(upstreamMsg)
 	if upstreamMsg != "" {
@@ -197,6 +189,14 @@ func (s *RateLimitService) HandleUpstreamError(ctx context.Context, account *Acc
 	if msg, ok := permanentAccountKeywordErrorMessage(account, statusCode, upstreamMsg, responseBody); ok {
 		s.handleAuthError(ctx, account, msg)
 		return true
+	}
+
+	// 先尝试临时不可调度规则（401除外）
+	// 如果匹配成功，直接返回，不执行后续禁用逻辑
+	if statusCode != 401 {
+		if s.tryTempUnschedulable(ctx, account, statusCode, responseBody) {
+			return true
+		}
 	}
 
 	switch statusCode {
