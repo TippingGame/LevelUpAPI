@@ -919,6 +919,87 @@ func TestOpenAIGatewayService_OpenAIPassthrough_429And529TriggerFailover(t *test
 	}
 }
 
+func TestShouldFailoverOpenAIPassthroughResponse_PoolMode403Retryable(t *testing.T) {
+	account := &Account{
+		ID:       123,
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeAPIKey,
+		Credentials: map[string]any{
+			"api_key":   "sk-test",
+			"pool_mode": true,
+		},
+	}
+
+	require.True(t, shouldFailoverOpenAIPassthroughResponse(
+		account,
+		http.StatusForbidden,
+		"ip blocked",
+		[]byte(`{"error":{"type":"access_denied","code":"ip_blocked","message":"ip blocked"}}`),
+	))
+
+	require.False(t, shouldFailoverOpenAIPassthroughResponse(
+		account,
+		http.StatusForbidden,
+		"access denied by content policy",
+		[]byte(`{"error":{"type":"invalid_request_error","code":"content_policy_violation","message":"access denied by content policy"}}`),
+	))
+}
+
+func TestOpenAIGatewayService_OpenAIPassthroughPoolMode403TriggerSameAccountRetry(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(nil))
+	c.Request.Header.Set("User-Agent", "codex_cli_rs/0.1.0")
+
+	originalBody := []byte(`{"model":"gpt-5.2","stream":false,"instructions":"local-test-instructions","input":[{"type":"text","text":"hi"}]}`)
+	resp := &http.Response{
+		StatusCode: http.StatusForbidden,
+		Header: http.Header{
+			"Content-Type": []string{"application/json"},
+			"x-request-id": []string{"rid-pool-403"},
+		},
+		Body: io.NopCloser(strings.NewReader(`{"error":{"type":"access_denied","code":"ip_blocked","message":"ip blocked"}}`)),
+	}
+	upstream := &httpUpstreamRecorder{resp: resp}
+	repo := &openAIPassthroughFailoverRepo{}
+	svc := &OpenAIGatewayService{
+		cfg:          &config.Config{Gateway: config.GatewayConfig{ForceCodexCLI: false}},
+		httpUpstream: upstream,
+		rateLimitService: &RateLimitService{
+			accountRepo: repo,
+			cfg:         &config.Config{},
+		},
+	}
+	account := &Account{
+		ID:          123,
+		Name:        "acc",
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Concurrency: 1,
+		Credentials: map[string]any{
+			"api_key":   "sk-test",
+			"pool_mode": true,
+		},
+		Extra:          map[string]any{"openai_passthrough": true},
+		Status:         StatusActive,
+		Schedulable:    true,
+		RateMultiplier: f64p(1),
+	}
+
+	_, err := svc.Forward(context.Background(), c, account, originalBody)
+
+	require.Error(t, err)
+	var failoverErr *UpstreamFailoverError
+	require.ErrorAs(t, err, &failoverErr)
+	require.Equal(t, http.StatusForbidden, failoverErr.StatusCode)
+	require.True(t, failoverErr.RetryableOnSameAccount)
+	require.False(t, c.Writer.Written(), "pool mode 403 should enter same-account retry instead of writing directly to the client")
+	require.Empty(t, repo.rateLimitCalls)
+	require.Empty(t, repo.tempCalls)
+}
+
 func TestOpenAIGatewayService_OAuthPassthrough_NonCodexUAFallbackToCodexUA(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 

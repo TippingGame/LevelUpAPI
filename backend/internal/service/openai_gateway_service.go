@@ -3610,13 +3610,16 @@ func shouldFailoverOpenAIPassthroughResponse(account *Account, statusCode int, u
 	if IsUpstreamReplayUnsafeTimeoutStatus(statusCode) {
 		return false
 	}
+	if statusCode == http.StatusForbidden && isOpenAIRequestPolicyError(upstreamBody, upstreamMsg) {
+		return false
+	}
+	if account != nil && account.IsPoolMode() && account.IsPoolModeRetryableStatus(statusCode) {
+		return true
+	}
 	switch statusCode {
 	case http.StatusUnauthorized, http.StatusPaymentRequired, http.StatusTooManyRequests, 529:
 		return true
 	case http.StatusForbidden:
-		if isOpenAIRequestPolicyError(upstreamBody, upstreamMsg) {
-			return false
-		}
 		_, permanent := permanentAccountKeywordErrorMessage(account, statusCode, upstreamMsg, upstreamBody)
 		return permanent
 	default:
@@ -3664,10 +3667,14 @@ func (s *OpenAIGatewayService) handleFailoverErrorResponsePassthrough(
 		Detail:               upstreamDetail,
 		UpstreamResponseBody: upstreamDetail,
 	})
+	retryableOnSameAccount := account != nil &&
+		account.IsPoolMode() &&
+		(account.IsPoolModeRetryableStatus(resp.StatusCode) || isOpenAITransientProcessingError(resp.StatusCode, upstreamMsg, body))
 	return &UpstreamFailoverError{
-		StatusCode:      resp.StatusCode,
-		ResponseBody:    body,
-		ResponseHeaders: resp.Header.Clone(),
+		StatusCode:             resp.StatusCode,
+		ResponseBody:           body,
+		ResponseHeaders:        resp.Header.Clone(),
+		RetryableOnSameAccount: retryableOnSameAccount,
 	}
 }
 
