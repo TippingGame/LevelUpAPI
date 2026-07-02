@@ -774,6 +774,12 @@ func applyAnthropicOAuthPoolProtectionDefaults(platform, accountType string, cre
 				"duration_minutes": anthropicOAuthDefaultCooldownMinutes,
 				"description":      "Claude upstream overload cooldown",
 			},
+			map[string]any{
+				"error_code":       503,
+				"keywords":         []any{"overloaded", "capacity", "temporarily unavailable"},
+				"duration_minutes": anthropicOAuthDefaultCooldownMinutes,
+				"description":      "Claude upstream unavailable cooldown",
+			},
 		}
 	}
 

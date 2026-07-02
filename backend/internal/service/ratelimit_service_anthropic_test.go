@@ -1,10 +1,27 @@
 package service
 
 import (
+	"context"
 	"net/http"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
 )
+
+type anthropicDefaultTempUnschedRepoStub struct {
+	AccountRepository
+	tempCalls      int
+	lastTempUntil  time.Time
+	lastTempReason string
+}
+
+func (r *anthropicDefaultTempUnschedRepoStub) SetTempUnschedulable(_ context.Context, _ int64, until time.Time, reason string) error {
+	r.tempCalls++
+	r.lastTempUntil = until
+	r.lastTempReason = reason
+	return nil
+}
 
 func TestCalculateAnthropic429ResetTime_Only5hExceeded(t *testing.T) {
 	headers := http.Header{}
@@ -199,4 +216,54 @@ func makeHeader(key, value string) http.Header {
 	h := http.Header{}
 	h.Set(key, value)
 	return h
+}
+
+func TestHandleUpstreamErrorAnthropicOAuthDefault503OverloadTempUnschedulable(t *testing.T) {
+	credentials, extra := applyAnthropicOAuthPoolProtectionDefaults(PlatformAnthropic, AccountTypeOAuth, nil, nil)
+	repo := &anthropicDefaultTempUnschedRepoStub{}
+	svc := &RateLimitService{accountRepo: repo}
+	account := &Account{
+		ID:          42,
+		Platform:    PlatformAnthropic,
+		Type:        AccountTypeOAuth,
+		Credentials: credentials,
+		Extra:       extra,
+	}
+
+	shouldDisable := svc.HandleUpstreamError(
+		context.Background(),
+		account,
+		http.StatusServiceUnavailable,
+		http.Header{},
+		[]byte(`{"error":{"type":"overloaded_error","message":"temporarily unavailable"}}`),
+	)
+
+	require.True(t, shouldDisable)
+	require.Equal(t, 1, repo.tempCalls)
+	require.WithinDuration(t, time.Now().Add(time.Duration(anthropicOAuthDefaultCooldownMinutes)*time.Minute), repo.lastTempUntil, 2*time.Second)
+	require.Contains(t, repo.lastTempReason, "temporarily unavailable")
+}
+
+func TestHandleUpstreamErrorAnthropicOAuthDefault503WithoutKeywordIsNotTempUnschedulable(t *testing.T) {
+	credentials, extra := applyAnthropicOAuthPoolProtectionDefaults(PlatformAnthropic, AccountTypeOAuth, nil, nil)
+	repo := &anthropicDefaultTempUnschedRepoStub{}
+	svc := &RateLimitService{accountRepo: repo}
+	account := &Account{
+		ID:          42,
+		Platform:    PlatformAnthropic,
+		Type:        AccountTypeOAuth,
+		Credentials: credentials,
+		Extra:       extra,
+	}
+
+	shouldDisable := svc.HandleUpstreamError(
+		context.Background(),
+		account,
+		http.StatusServiceUnavailable,
+		http.Header{},
+		[]byte(`{"error":{"type":"api_error","message":"internal server error"}}`),
+	)
+
+	require.False(t, shouldDisable)
+	require.Zero(t, repo.tempCalls)
 }

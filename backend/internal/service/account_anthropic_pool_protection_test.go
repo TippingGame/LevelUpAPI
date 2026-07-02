@@ -24,9 +24,11 @@ func TestApplyAnthropicOAuthPoolProtectionDefaults(t *testing.T) {
 
 	require.True(t, account.IsTempUnschedulableEnabled())
 	rules := account.GetTempUnschedulableRules()
-	require.Len(t, rules, 1)
+	require.Len(t, rules, 2)
 	require.Equal(t, 529, rules[0].ErrorCode)
 	require.Equal(t, anthropicOAuthDefaultCooldownMinutes, rules[0].DurationMinutes)
+	require.Equal(t, 503, rules[1].ErrorCode)
+	require.Equal(t, anthropicOAuthDefaultCooldownMinutes, rules[1].DurationMinutes)
 	require.Equal(t, anthropicOAuthDefaultMaxSessions, account.GetMaxSessions())
 	require.Equal(t, anthropicOAuthDefaultSessionIdleTimeoutMinutes, account.GetSessionIdleTimeoutMinutes())
 	require.Equal(t, anthropicOAuthDefaultBaseRPM, account.GetBaseRPM())
