@@ -933,6 +933,30 @@ func (s *AccountRepoSuite) TestTempUnschedulableFieldsLoadedByGetByIDAndGetByIDs
 	s.Require().Equal("", cleared.TempUnschedulableReason)
 }
 
+func (s *AccountRepoSuite) TestClearTempUnschedulable_SyncSchedulerSnapshotOnRecovery() {
+	until := time.Now().Add(15 * time.Minute)
+	account := mustCreateAccount(s.T(), s.client, &service.Account{
+		Name:                    "acc-clear-temp-unsched",
+		Status:                  service.StatusActive,
+		Schedulable:             true,
+		TempUnschedulableUntil:  &until,
+		TempUnschedulableReason: "temporary cooldown",
+	})
+	cacheRecorder := &schedulerCacheRecorder{}
+	s.repo.schedulerCache = cacheRecorder
+
+	s.Require().NoError(s.repo.ClearTempUnschedulable(s.ctx, account.ID))
+
+	cleared, err := s.repo.GetByID(s.ctx, account.ID)
+	s.Require().NoError(err)
+	s.Require().Nil(cleared.TempUnschedulableUntil)
+	s.Require().Empty(cleared.TempUnschedulableReason)
+	s.Require().Len(cacheRecorder.setAccounts, 1)
+	s.Require().Equal(account.ID, cacheRecorder.setAccounts[0].ID)
+	s.Require().Nil(cacheRecorder.setAccounts[0].TempUnschedulableUntil)
+	s.Require().Empty(cacheRecorder.setAccounts[0].TempUnschedulableReason)
+}
+
 // --- UpdateLastUsed ---
 
 func (s *AccountRepoSuite) TestUpdateLastUsed() {
