@@ -65,6 +65,68 @@ func TestRateLimitService_HandleUpstreamError_OpenAI403ThresholdDisables(t *test
 	require.Contains(t, repo.lastErrorMsg, "consecutive_403=3/3")
 }
 
+func TestRateLimitService_HandleUpstreamError_AnthropicOAuth403FirstHitTempUnschedulable(t *testing.T) {
+	repo := &rateLimitAccountRepoStub{}
+	service := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+	account := &Account{
+		ID:       305,
+		Platform: PlatformAnthropic,
+		Type:     AccountTypeOAuth,
+	}
+
+	before := time.Now()
+	shouldDisable := service.HandleUpstreamError(
+		context.Background(),
+		account,
+		http.StatusForbidden,
+		http.Header{},
+		[]byte(`{"error":{"message":"temporary access forbidden"}}`),
+	)
+
+	require.True(t, shouldDisable)
+	require.Equal(t, 0, repo.setErrorCalls)
+	require.Equal(t, 1, repo.tempCalls)
+	require.NotNil(t, account.TempUnschedulableUntil)
+	require.WithinDuration(t, before.Add(time.Duration(anthropicOAuthDefaultCooldownMinutes)*time.Minute), repo.lastTempUntil, 3*time.Second)
+
+	var state TempUnschedState
+	require.NoError(t, json.Unmarshal([]byte(repo.lastTempReason), &state))
+	require.Equal(t, http.StatusForbidden, state.StatusCode)
+	require.Equal(t, "anthropic_oauth_403", state.MatchedKeyword)
+	require.Contains(t, state.ErrorMessage, "temporary access forbidden")
+}
+
+func TestRateLimitService_HandleUpstreamError_AnthropicOAuthRepeated403Disables(t *testing.T) {
+	repo := &rateLimitAccountRepoStub{}
+	service := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+	previousReason, err := json.Marshal(&TempUnschedState{
+		StatusCode:     http.StatusForbidden,
+		MatchedKeyword: "anthropic_oauth_403",
+	})
+	require.NoError(t, err)
+	account := &Account{
+		ID:                      306,
+		Platform:                PlatformAnthropic,
+		Type:                    AccountTypeSetupToken,
+		TempUnschedulableReason: string(previousReason),
+		TempUnschedulableUntil:  ptrTime(time.Now().Add(-time.Minute)),
+	}
+
+	shouldDisable := service.HandleUpstreamError(
+		context.Background(),
+		account,
+		http.StatusForbidden,
+		http.Header{},
+		[]byte(`{"error":{"message":"still forbidden"}}`),
+	)
+
+	require.True(t, shouldDisable)
+	require.Equal(t, 1, repo.setErrorCalls)
+	require.Equal(t, 0, repo.tempCalls)
+	require.Contains(t, repo.lastErrorMsg, "repeated 403")
+	require.Contains(t, repo.lastErrorMsg, "still forbidden")
+}
+
 func TestRateLimitService_HandleUpstreamError_Cloudflare403TempUnschedulable(t *testing.T) {
 	repo := &rateLimitAccountRepoStub{}
 	service := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)

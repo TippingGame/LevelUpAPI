@@ -2735,6 +2735,7 @@ func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccou
 		return nil, err
 	}
 	input.Extra = extra
+	input.Credentials, input.Extra = applyAnthropicOAuthPoolProtectionDefaults(input.Platform, input.Type, input.Credentials, input.Extra)
 
 	// 绑定分组
 	groupIDs := input.GroupIDs

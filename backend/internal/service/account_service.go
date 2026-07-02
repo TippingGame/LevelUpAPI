@@ -56,6 +56,14 @@ const ownedPersonalDefaultOpenAIWSMode = OpenAIWSIngressModeOff
 const accountQuotaPoolDashboardCacheTTL = 15 * time.Second
 
 const (
+	anthropicOAuthDefaultMaxSessions               = 1
+	anthropicOAuthDefaultSessionIdleTimeoutMinutes = 60
+	anthropicOAuthDefaultBaseRPM                   = 3
+	anthropicOAuthDefaultRPMStrategy               = "sticky_exempt"
+	anthropicOAuthDefaultCooldownMinutes           = 10
+)
+
+const (
 	AccountLevelUnknown = domain.AccountLevelUnknown
 	AccountLevelFree    = domain.AccountLevelFree
 	AccountLevelPlus    = domain.AccountLevelPlus
@@ -304,6 +312,7 @@ func (s *AccountService) Create(ctx context.Context, req CreateAccountRequest) (
 		return nil, err
 	}
 	req.Extra = extra
+	req.Credentials, req.Extra = applyAnthropicOAuthPoolProtectionDefaults(req.Platform, req.Type, req.Credentials, req.Extra)
 
 	// 验证分组是否存在（如果指定了分组）
 	if len(req.GroupIDs) > 0 {
@@ -460,6 +469,7 @@ func (s *AccountService) createOwned(ctx context.Context, ownerUserID int64, req
 		}
 		req.ProxyID = proxyID
 	}
+	req.Credentials, req.Extra = applyAnthropicOAuthPoolProtectionDefaults(req.Platform, req.Type, req.Credentials, req.Extra)
 	if err := validateOwnedAccountSource(req.Type, req.Credentials, req.Extra); err != nil {
 		return nil, err
 	}
@@ -705,6 +715,46 @@ func applyOwnedPersonalAccountTemplateToMaps(platform string, credentials, extra
 	return nextCredentials, nextExtra
 }
 
+func applyAnthropicOAuthPoolProtectionDefaults(platform, accountType string, credentials, extra map[string]any) (map[string]any, map[string]any) {
+	if platform != PlatformAnthropic || (accountType != AccountTypeOAuth && accountType != AccountTypeSetupToken) {
+		return credentials, extra
+	}
+
+	nextCredentials := mergeAccountMap(credentials, nil)
+	if nextCredentials == nil {
+		nextCredentials = map[string]any{}
+	}
+	if _, exists := nextCredentials["temp_unschedulable_enabled"]; !exists {
+		nextCredentials["temp_unschedulable_enabled"] = true
+	}
+	if _, exists := nextCredentials["temp_unschedulable_rules"]; !exists {
+		nextCredentials["temp_unschedulable_rules"] = []any{
+			map[string]any{
+				"error_code":       529,
+				"keywords":         []any{"overloaded", "capacity", "temporarily unavailable"},
+				"duration_minutes": anthropicOAuthDefaultCooldownMinutes,
+				"description":      "Claude upstream overload cooldown",
+			},
+		}
+	}
+
+	nextExtra := mergeAccountMap(extra, nil)
+	if nextExtra == nil {
+		nextExtra = map[string]any{}
+	}
+	setDefaultExtra := func(key string, value any) {
+		if _, exists := nextExtra[key]; !exists {
+			nextExtra[key] = value
+		}
+	}
+	setDefaultExtra("max_sessions", anthropicOAuthDefaultMaxSessions)
+	setDefaultExtra("session_idle_timeout_minutes", anthropicOAuthDefaultSessionIdleTimeoutMinutes)
+	setDefaultExtra("base_rpm", anthropicOAuthDefaultBaseRPM)
+	setDefaultExtra("rpm_strategy", anthropicOAuthDefaultRPMStrategy)
+
+	return nextCredentials, nextExtra
+}
+
 func normalizeOwnedPersonalAccountConcurrency(concurrency int) int {
 	if concurrency <= 0 {
 		return ownedPersonalDefaultConcurrency
@@ -803,6 +853,11 @@ var ownedPersonalLockedCredentialKeys = []string{
 	"compact_model_mapping",
 }
 
+var ownedPersonalLockedAnthropicCredentialKeys = []string{
+	"temp_unschedulable_enabled",
+	"temp_unschedulable_rules",
+}
+
 var ownedPersonalLockedOpenAIExtraKeys = []string{
 	"openai_oauth_responses_websockets_v2_mode",
 	"openai_oauth_responses_websockets_v2_enabled",
@@ -816,6 +871,13 @@ var ownedPersonalLockedOpenAIExtraKeys = []string{
 	"codex_cli_only",
 }
 
+var ownedPersonalLockedAnthropicExtraKeys = []string{
+	"max_sessions",
+	"session_idle_timeout_minutes",
+	"base_rpm",
+	"rpm_strategy",
+}
+
 func preserveOwnedPersonalCredentialPolicy(account *Account, nextCredentials map[string]any) {
 	if account == nil || nextCredentials == nil {
 		return
@@ -823,14 +885,26 @@ func preserveOwnedPersonalCredentialPolicy(account *Account, nextCredentials map
 	for _, key := range ownedPersonalLockedCredentialKeys {
 		preserveMapKey(account.Credentials, nextCredentials, key)
 	}
+	if account.Platform == PlatformAnthropic {
+		for _, key := range ownedPersonalLockedAnthropicCredentialKeys {
+			preserveMapKey(account.Credentials, nextCredentials, key)
+		}
+	}
 }
 
 func preserveOwnedPersonalExtraPolicy(account *Account, nextExtra map[string]any) {
-	if account == nil || nextExtra == nil || account.Platform != PlatformOpenAI {
+	if account == nil || nextExtra == nil {
 		return
 	}
-	for _, key := range ownedPersonalLockedOpenAIExtraKeys {
-		preserveMapKey(account.Extra, nextExtra, key)
+	switch account.Platform {
+	case PlatformOpenAI:
+		for _, key := range ownedPersonalLockedOpenAIExtraKeys {
+			preserveMapKey(account.Extra, nextExtra, key)
+		}
+	case PlatformAnthropic:
+		for _, key := range ownedPersonalLockedAnthropicExtraKeys {
+			preserveMapKey(account.Extra, nextExtra, key)
+		}
 	}
 }
 

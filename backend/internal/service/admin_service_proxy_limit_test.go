@@ -172,6 +172,31 @@ func TestAdminService_CreateAccount_OpenAIAPIKeyIgnoresDefaultGroupRequiredLevel
 	require.Equal(t, []int64{groupID}, accountRepo.boundGroupIDs[created.ID])
 }
 
+func TestAdminService_CreateAccount_AnthropicOAuthAppliesPoolProtectionDefaults(t *testing.T) {
+	accountRepo := &accountRepoStubForProxyLimit{}
+	svc := &adminServiceImpl{accountRepo: accountRepo}
+
+	created, err := svc.CreateAccount(context.Background(), &CreateAccountInput{
+		Name:                 "claude-oauth",
+		Platform:             PlatformAnthropic,
+		Type:                 AccountTypeOAuth,
+		Credentials:          map[string]any{"access_token": "token"},
+		Concurrency:          3,
+		Priority:             50,
+		SkipDefaultGroupBind: true,
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, created)
+	require.NotNil(t, accountRepo.created)
+	require.True(t, accountRepo.created.IsTempUnschedulableEnabled())
+	require.Len(t, accountRepo.created.GetTempUnschedulableRules(), 1)
+	require.Equal(t, anthropicOAuthDefaultMaxSessions, accountRepo.created.GetMaxSessions())
+	require.Equal(t, anthropicOAuthDefaultSessionIdleTimeoutMinutes, accountRepo.created.GetSessionIdleTimeoutMinutes())
+	require.Equal(t, anthropicOAuthDefaultBaseRPM, accountRepo.created.GetBaseRPM())
+	require.Equal(t, anthropicOAuthDefaultRPMStrategy, accountRepo.created.GetRPMStrategy())
+}
+
 func TestAdminService_UpdateProxy_MaxAccountsBelowCurrentRejected(t *testing.T) {
 	proxyID := int64(7)
 	maxAccounts := 2

@@ -917,6 +917,9 @@ func (s *RateLimitService) handle403(ctx context.Context, account *Account, upst
 	if account.Platform == PlatformOpenAI {
 		return s.handleOpenAI403(ctx, account, upstreamMsg, responseBody)
 	}
+	if account.IsAnthropicOAuthOrSetupToken() {
+		return s.handleAnthropicOAuth403(ctx, account, upstreamMsg, responseBody)
+	}
 	// 非 Antigravity 平台：保持原有行为
 	msg := buildForbiddenErrorMessage(
 		"Access forbidden (403):",
@@ -925,6 +928,53 @@ func (s *RateLimitService) handle403(ctx context.Context, account *Account, upst
 		"account may be suspended or lack permissions",
 	)
 	s.handleAuthError(ctx, account, msg)
+	return true
+}
+
+func (s *RateLimitService) handleAnthropicOAuth403(ctx context.Context, account *Account, upstreamMsg string, responseBody []byte) (shouldDisable bool) {
+	msg := buildForbiddenErrorMessage(
+		"Claude OAuth access forbidden (403):",
+		upstreamMsg,
+		responseBody,
+		"temporary access rejection or account permission issue",
+	)
+
+	if wasTempUnschedByStatusCode(account.TempUnschedulableReason, http.StatusForbidden) {
+		msg = "Claude OAuth repeated 403 after cooldown: " + msg
+		s.handleAuthError(ctx, account, msg)
+		return true
+	}
+
+	now := time.Now()
+	until := now.Add(time.Duration(anthropicOAuthDefaultCooldownMinutes) * time.Minute)
+	state := &TempUnschedState{
+		UntilUnix:       until.Unix(),
+		TriggeredAtUnix: now.Unix(),
+		StatusCode:      http.StatusForbidden,
+		MatchedKeyword:  "anthropic_oauth_403",
+		RuleIndex:       -1,
+		ErrorMessage:    msg,
+	}
+	reason := msg
+	if raw, err := json.Marshal(state); err == nil {
+		reason = string(raw)
+	}
+
+	if err := s.accountRepo.SetTempUnschedulable(ctx, account.ID, until, reason); err != nil {
+		slog.Warn("anthropic_oauth_403_set_temp_unschedulable_failed", "account_id", account.ID, "error", err)
+		s.handleAuthError(ctx, account, msg)
+		return true
+	}
+	account.TempUnschedulableUntil = &until
+	account.TempUnschedulableReason = reason
+
+	if s.tempUnschedCache != nil {
+		if err := s.tempUnschedCache.SetTempUnsched(ctx, account.ID, state); err != nil {
+			slog.Warn("anthropic_oauth_403_temp_unsched_cache_failed", "account_id", account.ID, "error", err)
+		}
+	}
+
+	slog.Warn("anthropic_oauth_403_temp_unschedulable", "account_id", account.ID, "until", until)
 	return true
 }
 
