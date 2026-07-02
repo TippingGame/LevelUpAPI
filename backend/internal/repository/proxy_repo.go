@@ -3,12 +3,14 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"sort"
 	"strings"
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/ent/predicate"
 	"github.com/Wei-Shaw/sub2api/ent/proxy"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
@@ -16,20 +18,16 @@ import (
 	entsql "entgo.io/ent/dialect/sql"
 )
 
-type sqlQuerier interface {
-	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
-}
-
 type proxyRepository struct {
 	client *dbent.Client
-	sql    sqlQuerier
+	sql    sqlExecutor
 }
 
 func NewProxyRepository(client *dbent.Client, sqlDB *sql.DB) service.ProxyRepository {
 	return newProxyRepositoryWithSQL(client, sqlDB)
 }
 
-func newProxyRepositoryWithSQL(client *dbent.Client, sqlq sqlQuerier) *proxyRepository {
+func newProxyRepositoryWithSQL(client *dbent.Client, sqlq sqlExecutor) *proxyRepository {
 	return &proxyRepository{client: client, sql: sqlq}
 }
 
@@ -115,12 +113,59 @@ func (r *proxyRepository) Update(ctx context.Context, proxyIn *service.Proxy) er
 	updated, err := builder.Save(ctx)
 	if err == nil {
 		applyProxyEntityToService(proxyIn, updated)
+		r.enqueueSchedulerOutboxForBoundAccounts(ctx, proxyIn.ID)
 		return nil
 	}
 	if dbent.IsNotFound(err) {
 		return service.ErrProxyNotFound
 	}
 	return err
+}
+
+func (r *proxyRepository) enqueueSchedulerOutboxForBoundAccounts(ctx context.Context, proxyID int64) {
+	if r == nil || r.sql == nil || proxyID <= 0 {
+		return
+	}
+	ids, err := r.accountIDsByProxyID(ctx, proxyID)
+	if err != nil {
+		logger.LegacyPrintf("repository.proxy", "[SchedulerOutbox] list proxy accounts failed: proxy=%d err=%v", proxyID, err)
+		return
+	}
+	if len(ids) == 0 {
+		return
+	}
+	payload := map[string]any{"account_ids": ids}
+	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventAccountBulkChanged, nil, nil, payload); err != nil {
+		encoded, _ := json.Marshal(payload)
+		logger.LegacyPrintf("repository.proxy", "[SchedulerOutbox] enqueue proxy account refresh failed: proxy=%d payload=%s err=%v", proxyID, string(encoded), err)
+	}
+}
+
+func (r *proxyRepository) accountIDsByProxyID(ctx context.Context, proxyID int64) ([]int64, error) {
+	rows, err := r.sql.QueryContext(ctx, `
+		SELECT id
+		FROM accounts
+		WHERE proxy_id = $1
+			AND deleted_at IS NULL
+		ORDER BY id ASC
+	`, proxyID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	ids := make([]int64, 0)
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return ids, nil
 }
 
 func (r *proxyRepository) Delete(ctx context.Context, id int64) error {

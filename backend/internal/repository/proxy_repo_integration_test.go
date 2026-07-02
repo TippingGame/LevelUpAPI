@@ -4,6 +4,7 @@ package repository
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -73,6 +74,42 @@ func (s *ProxyRepoSuite) TestUpdate() {
 	got, err := s.repo.GetByID(s.ctx, proxy.ID)
 	s.Require().NoError(err, "GetByID after update")
 	s.Require().Equal("updated", got.Name)
+}
+
+func (s *ProxyRepoSuite) TestUpdate_EnqueuesSchedulerRefreshForBoundAccounts() {
+	proxy := s.mustCreateProxy(&service.Proxy{
+		Name:     "proxy-refresh",
+		Protocol: "http",
+		Host:     "127.0.0.1",
+		Port:     8080,
+		Status:   service.StatusActive,
+	})
+	accountID1 := s.mustInsertAccount("proxy-bound-1", &proxy.ID)
+	accountID2 := s.mustInsertAccount("proxy-bound-2", &proxy.ID)
+	otherProxy := s.mustCreateProxy(&service.Proxy{Name: "other-proxy", Protocol: "http", Host: "127.0.0.1", Port: 8081, Status: service.StatusActive})
+	otherAccountID := s.mustInsertAccount("proxy-bound-other", &otherProxy.ID)
+	_, err := s.tx.ExecContext(s.ctx, "TRUNCATE scheduler_outbox")
+	s.Require().NoError(err)
+
+	proxy.Status = service.StatusDisabled
+	s.Require().NoError(s.repo.Update(s.ctx, proxy))
+
+	var rawPayload []byte
+	err = scanSingleRow(
+		s.ctx,
+		s.tx,
+		"SELECT payload FROM scheduler_outbox WHERE event_type = $1 ORDER BY id DESC LIMIT 1",
+		[]any{service.SchedulerOutboxEventAccountBulkChanged},
+		&rawPayload,
+	)
+	s.Require().NoError(err)
+
+	var payload struct {
+		AccountIDs []int64 `json:"account_ids"`
+	}
+	s.Require().NoError(json.Unmarshal(rawPayload, &payload))
+	s.Require().ElementsMatch([]int64{accountID1, accountID2}, payload.AccountIDs)
+	s.Require().NotContains(payload.AccountIDs, otherAccountID)
 }
 
 func (s *ProxyRepoSuite) TestDelete() {
@@ -311,19 +348,20 @@ func (s *ProxyRepoSuite) mustCreateProxyWithTimes(name, status string, createdAt
 	return p
 }
 
-func (s *ProxyRepoSuite) mustInsertAccount(name string, proxyID *int64) {
+func (s *ProxyRepoSuite) mustInsertAccount(name string, proxyID *int64) int64 {
 	s.T().Helper()
 	var pid any
 	if proxyID != nil {
 		pid = *proxyID
 	}
-	_, err := s.tx.ExecContext(
+	var id int64
+	err := scanSingleRow(
 		s.ctx,
-		"INSERT INTO accounts (name, platform, type, proxy_id) VALUES ($1, $2, $3, $4)",
-		name,
-		service.PlatformAnthropic,
-		service.AccountTypeOAuth,
-		pid,
+		s.tx,
+		"INSERT INTO accounts (name, platform, type, proxy_id) VALUES ($1, $2, $3, $4) RETURNING id",
+		[]any{name, service.PlatformAnthropic, service.AccountTypeOAuth, pid},
+		&id,
 	)
 	s.Require().NoError(err, "insert account")
+	return id
 }
