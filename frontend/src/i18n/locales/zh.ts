@@ -7492,8 +7492,8 @@ export default {
         descriptionPlaceholder: '描述此规则的用途...',
         matchConditions: '匹配条件',
         errorCodes: '错误码',
-        errorCodesPlaceholder: '422, 400, 429',
-        errorCodesHint: '多个错误码用逗号分隔',
+        errorCodesPlaceholder: '422, 429, 500-503',
+        errorCodesHint: '多个错误码或范围用逗号分隔',
         keywords: '关键词',
         keywordsPlaceholder: '每行一个关键词\ncontext limit\nmodel not supported',
         keywordsHint: '每行一个关键词，不区分大小写',
@@ -7514,6 +7514,7 @@ export default {
       // Messages
       nameRequired: '请输入规则名称',
       conditionsRequired: '请至少配置一个错误码或关键词',
+      invalidErrorCodes: '请输入有效的 HTTP 错误码或范围 (100-599)',
       ruleCreated: '规则创建成功',
       ruleUpdated: '规则更新成功',
       ruleDeleted: '规则删除成功',

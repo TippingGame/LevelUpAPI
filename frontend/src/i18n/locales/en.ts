@@ -7341,8 +7341,8 @@ export default {
         descriptionPlaceholder: 'Describe the purpose of this rule...',
         matchConditions: 'Match Conditions',
         errorCodes: 'Error Codes',
-        errorCodesPlaceholder: '422, 400, 429',
-        errorCodesHint: 'Separate multiple codes with commas',
+        errorCodesPlaceholder: '422, 429, 500-503',
+        errorCodesHint: 'Separate multiple codes or ranges with commas',
         keywords: 'Keywords',
         keywordsPlaceholder: 'One keyword per line\ncontext limit\nmodel not supported',
         keywordsHint: 'One keyword per line, case-insensitive',
@@ -7363,6 +7363,7 @@ export default {
       // Messages
       nameRequired: 'Please enter rule name',
       conditionsRequired: 'Please configure at least one error code or keyword',
+      invalidErrorCodes: 'Please enter valid HTTP error codes or ranges (100-599)',
       ruleCreated: 'Rule created successfully',
       ruleUpdated: 'Rule updated successfully',
       ruleDeleted: 'Rule deleted successfully',

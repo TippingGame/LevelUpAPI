@@ -435,6 +435,10 @@ import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { adminAPI } from '@/api/admin'
 import type { ErrorPassthroughRule } from '@/api/admin/errorPassthrough'
+import {
+  customErrorCodeTokensToCodes,
+  parseCustomErrorCodeInput
+} from '@/components/account/customErrorCodePolicy'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import Icon from '@/components/icons/Icon.vue'
@@ -557,12 +561,13 @@ const handleDelete = (rule: ErrorPassthroughRule) => {
   showDeleteDialog.value = true
 }
 
-const parseErrorCodes = (): number[] => {
+const parseErrorCodes = (): number[] | null => {
   if (!errorCodesInput.value.trim()) return []
-  return errorCodesInput.value
-    .split(/[,\s]+/)
-    .map(s => parseInt(s.trim(), 10))
-    .filter(n => !isNaN(n) && n > 0)
+  const parsed = parseCustomErrorCodeInput(errorCodesInput.value)
+  if (parsed.invalidTokens.length > 0) {
+    return null
+  }
+  return customErrorCodeTokensToCodes(parsed.tokens)
 }
 
 const parseKeywords = (): string[] => {
@@ -580,6 +585,10 @@ const handleSubmit = async () => {
   }
 
   const errorCodes = parseErrorCodes()
+  if (errorCodes === null) {
+    appStore.showError(t('admin.errorPassthrough.invalidErrorCodes'))
+    return
+  }
   const keywords = parseKeywords()
 
   if (errorCodes.length === 0 && keywords.length === 0) {

@@ -1,6 +1,8 @@
 package admin
 
 import (
+	"encoding/json"
+	"fmt"
 	"strconv"
 
 	"github.com/Wei-Shaw/sub2api/internal/model"
@@ -21,36 +23,36 @@ func NewErrorPassthroughHandler(service *service.ErrorPassthroughService) *Error
 
 // CreateErrorPassthroughRuleRequest 创建规则请求
 type CreateErrorPassthroughRuleRequest struct {
-	Name            string   `json:"name" binding:"required"`
-	Enabled         *bool    `json:"enabled"`
-	Priority        int      `json:"priority"`
-	ErrorCodes      []int    `json:"error_codes"`
-	Keywords        []string `json:"keywords"`
-	MatchMode       string   `json:"match_mode"`
-	Platforms       []string `json:"platforms"`
-	PassthroughCode *bool    `json:"passthrough_code"`
-	ResponseCode    *int     `json:"response_code"`
-	PassthroughBody *bool    `json:"passthrough_body"`
-	CustomMessage   *string  `json:"custom_message"`
-	SkipMonitoring  *bool    `json:"skip_monitoring"`
-	Description     *string  `json:"description"`
+	Name            string          `json:"name" binding:"required"`
+	Enabled         *bool           `json:"enabled"`
+	Priority        int             `json:"priority"`
+	ErrorCodes      json.RawMessage `json:"error_codes"`
+	Keywords        []string        `json:"keywords"`
+	MatchMode       string          `json:"match_mode"`
+	Platforms       []string        `json:"platforms"`
+	PassthroughCode *bool           `json:"passthrough_code"`
+	ResponseCode    *int            `json:"response_code"`
+	PassthroughBody *bool           `json:"passthrough_body"`
+	CustomMessage   *string         `json:"custom_message"`
+	SkipMonitoring  *bool           `json:"skip_monitoring"`
+	Description     *string         `json:"description"`
 }
 
 // UpdateErrorPassthroughRuleRequest 更新规则请求（部分更新，所有字段可选）
 type UpdateErrorPassthroughRuleRequest struct {
-	Name            *string  `json:"name"`
-	Enabled         *bool    `json:"enabled"`
-	Priority        *int     `json:"priority"`
-	ErrorCodes      []int    `json:"error_codes"`
-	Keywords        []string `json:"keywords"`
-	MatchMode       *string  `json:"match_mode"`
-	Platforms       []string `json:"platforms"`
-	PassthroughCode *bool    `json:"passthrough_code"`
-	ResponseCode    *int     `json:"response_code"`
-	PassthroughBody *bool    `json:"passthrough_body"`
-	CustomMessage   *string  `json:"custom_message"`
-	SkipMonitoring  *bool    `json:"skip_monitoring"`
-	Description     *string  `json:"description"`
+	Name            *string         `json:"name"`
+	Enabled         *bool           `json:"enabled"`
+	Priority        *int            `json:"priority"`
+	ErrorCodes      json.RawMessage `json:"error_codes"`
+	Keywords        []string        `json:"keywords"`
+	MatchMode       *string         `json:"match_mode"`
+	Platforms       []string        `json:"platforms"`
+	PassthroughCode *bool           `json:"passthrough_code"`
+	ResponseCode    *int            `json:"response_code"`
+	PassthroughBody *bool           `json:"passthrough_body"`
+	CustomMessage   *string         `json:"custom_message"`
+	SkipMonitoring  *bool           `json:"skip_monitoring"`
+	Description     *string         `json:"description"`
 }
 
 // List 获取所有规则
@@ -95,10 +97,16 @@ func (h *ErrorPassthroughHandler) Create(c *gin.Context) {
 		return
 	}
 
+	errorCodes, _, err := parseErrorPassthroughStatusCodes(req.ErrorCodes)
+	if err != nil {
+		response.BadRequest(c, "Invalid error_codes: "+err.Error())
+		return
+	}
+
 	rule := &model.ErrorPassthroughRule{
 		Name:       req.Name,
 		Priority:   req.Priority,
-		ErrorCodes: req.ErrorCodes,
+		ErrorCodes: errorCodes,
 		Keywords:   req.Keywords,
 		Platforms:  req.Platforms,
 	}
@@ -170,6 +178,12 @@ func (h *ErrorPassthroughHandler) Update(c *gin.Context) {
 		return
 	}
 
+	errorCodes, errorCodesProvided, err := parseErrorPassthroughStatusCodes(req.ErrorCodes)
+	if err != nil {
+		response.BadRequest(c, "Invalid error_codes: "+err.Error())
+		return
+	}
+
 	// 先获取现有规则
 	existing, err := h.service.GetByID(c.Request.Context(), id)
 	if err != nil {
@@ -209,8 +223,8 @@ func (h *ErrorPassthroughHandler) Update(c *gin.Context) {
 	if req.Priority != nil {
 		rule.Priority = *req.Priority
 	}
-	if req.ErrorCodes != nil {
-		rule.ErrorCodes = req.ErrorCodes
+	if errorCodesProvided {
+		rule.ErrorCodes = errorCodes
 	}
 	if req.Keywords != nil {
 		rule.Keywords = req.Keywords
@@ -279,4 +293,23 @@ func (h *ErrorPassthroughHandler) Delete(c *gin.Context) {
 	}
 
 	response.Success(c, gin.H{"message": "Rule deleted successfully"})
+}
+
+func parseErrorPassthroughStatusCodes(raw json.RawMessage) ([]int, bool, error) {
+	if len(raw) == 0 {
+		return nil, false, nil
+	}
+
+	var value any
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return nil, true, fmt.Errorf("invalid JSON: %w", err)
+	}
+	codes, err := service.ParseHTTPStatusCodesValue(value)
+	if err != nil {
+		return nil, true, err
+	}
+	if codes == nil {
+		codes = []int{}
+	}
+	return codes, true, nil
 }

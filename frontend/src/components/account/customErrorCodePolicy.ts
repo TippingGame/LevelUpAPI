@@ -54,6 +54,20 @@ export function customErrorCodeTokensToPayload(tokens: CustomErrorCodeToken[]): 
   })
 }
 
+export function customErrorCodeTokensToCodes(tokens: CustomErrorCodeToken[]): number[] {
+  const codes: number[] = []
+  for (const token of sortCustomErrorCodeTokens(uniqueTokens(tokens))) {
+    const parsed = parseStatusCodeToken(token)
+    if (!parsed) {
+      continue
+    }
+    for (let code = parsed.start; code <= parsed.end; code += 1) {
+      codes.push(code)
+    }
+  }
+  return codes
+}
+
 export function sortCustomErrorCodeTokens(tokens: CustomErrorCodeToken[]): CustomErrorCodeToken[] {
   return [...tokens].sort((a, b) => {
     const pa = parseStatusCodeToken(a)

@@ -5,6 +5,8 @@
 
 import { apiClient } from '../client'
 
+export type ErrorPassthroughCodeInput = number | string
+
 /**
  * Error passthrough rule interface
  */
@@ -34,7 +36,7 @@ export interface CreateRuleRequest {
   name: string
   enabled?: boolean
   priority?: number
-  error_codes?: number[]
+  error_codes?: ErrorPassthroughCodeInput[] | string
   keywords?: string[]
   match_mode?: 'any' | 'all'
   platforms?: string[]
@@ -53,7 +55,7 @@ export interface UpdateRuleRequest {
   name?: string
   enabled?: boolean
   priority?: number
-  error_codes?: number[]
+  error_codes?: ErrorPassthroughCodeInput[] | string
   keywords?: string[]
   match_mode?: 'any' | 'all'
   platforms?: string[]

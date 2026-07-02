@@ -45,6 +45,25 @@ func TestParseHTTPStatusCodeRangesValue_MixedInputs(t *testing.T) {
 	require.False(t, httpStatusCodeRangesContain(ranges, 501))
 }
 
+func TestParseHTTPStatusCodesValue_StrictMixedInputs(t *testing.T) {
+	codes, err := ParseHTTPStatusCodesValue([]any{
+		float64(401),
+		"403-405",
+		"500, 502-503",
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, []int{401, 403, 404, 405, 500, 502, 503}, codes)
+}
+
+func TestParseHTTPStatusCodesValue_StrictRejectsInvalidTokens(t *testing.T) {
+	_, err := ParseHTTPStatusCodesValue("401, 600, bad")
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "600")
+	require.Contains(t, err.Error(), "bad")
+}
+
 func TestAccountShouldHandleErrorCode_CustomRanges(t *testing.T) {
 	account := &Account{
 		Type: AccountTypeAPIKey,

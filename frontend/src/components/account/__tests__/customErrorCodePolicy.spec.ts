@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   customErrorCodeTokenIncludesCode,
   customErrorCodeTokensFromValue,
+  customErrorCodeTokensToCodes,
   customErrorCodeTokensToPayload,
   parseCustomErrorCodeInput
 } from '../customErrorCodePolicy'
@@ -28,6 +29,17 @@ describe('customErrorCodePolicy', () => {
       401,
       429,
       '500-503'
+    ])
+  })
+
+  it('expands ranges to exact status codes', () => {
+    expect(customErrorCodeTokensToCodes(['500-503', '401', '429'])).toEqual([
+      401,
+      429,
+      500,
+      501,
+      502,
+      503
     ])
   })
 

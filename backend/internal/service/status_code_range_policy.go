@@ -2,6 +2,7 @@ package service
 
 import (
 	"encoding/json"
+	"fmt"
 	"sort"
 	"strconv"
 	"strings"
@@ -56,6 +57,93 @@ func parseHTTPStatusCodeRangesValue(value any) []httpStatusCodeRange {
 	return nil
 }
 
+func ParseHTTPStatusCodesValue(value any) ([]int, error) {
+	ranges, err := parseHTTPStatusCodeRangesValueStrict(value)
+	if err != nil {
+		return nil, err
+	}
+	return expandHTTPStatusCodeRanges(ranges), nil
+}
+
+func parseHTTPStatusCodeRangesValueStrict(value any) ([]httpStatusCodeRange, error) {
+	switch v := value.(type) {
+	case nil:
+		return nil, nil
+	case int:
+		return strictStatusCodeExactRange(v)
+	case int64:
+		return strictStatusCodeExactRange(int(v))
+	case float64:
+		if v != float64(int(v)) {
+			return nil, fmt.Errorf("status code must be an integer: %v", v)
+		}
+		return strictStatusCodeExactRange(int(v))
+	case json.Number:
+		i, err := v.Int64()
+		if err != nil {
+			return nil, fmt.Errorf("invalid status code: %s", v.String())
+		}
+		return strictStatusCodeExactRange(int(i))
+	case string:
+		return parseHTTPStatusCodeRangesStringStrict(v)
+	case []int:
+		ranges := make([]httpStatusCodeRange, 0, len(v))
+		for _, item := range v {
+			next, err := strictStatusCodeExactRange(item)
+			if err != nil {
+				return nil, err
+			}
+			ranges = append(ranges, next...)
+		}
+		return normalizeHTTPStatusCodeRanges(ranges), nil
+	case []int64:
+		ranges := make([]httpStatusCodeRange, 0, len(v))
+		for _, item := range v {
+			next, err := strictStatusCodeExactRange(int(item))
+			if err != nil {
+				return nil, err
+			}
+			ranges = append(ranges, next...)
+		}
+		return normalizeHTTPStatusCodeRanges(ranges), nil
+	case []float64:
+		ranges := make([]httpStatusCodeRange, 0, len(v))
+		for _, item := range v {
+			if item != float64(int(item)) {
+				return nil, fmt.Errorf("status code must be an integer: %v", item)
+			}
+			next, err := strictStatusCodeExactRange(int(item))
+			if err != nil {
+				return nil, err
+			}
+			ranges = append(ranges, next...)
+		}
+		return normalizeHTTPStatusCodeRanges(ranges), nil
+	case []string:
+		ranges := make([]httpStatusCodeRange, 0, len(v))
+		for _, item := range v {
+			next, err := parseHTTPStatusCodeRangesStringStrict(item)
+			if err != nil {
+				return nil, err
+			}
+			ranges = append(ranges, next...)
+		}
+		return normalizeHTTPStatusCodeRanges(ranges), nil
+	case []any:
+		ranges := make([]httpStatusCodeRange, 0, len(v))
+		for _, item := range v {
+			next, err := parseHTTPStatusCodeRangesValueStrict(item)
+			if err != nil {
+				return nil, err
+			}
+			ranges = append(ranges, next...)
+		}
+		return normalizeHTTPStatusCodeRanges(ranges), nil
+	default:
+		return nil, fmt.Errorf("unsupported status code value %T", value)
+	}
+}
+
 func parseHTTPStatusCodeRangesString(input string) []httpStatusCodeRange {
 	input = strings.TrimSpace(input)
 	if input == "" {
@@ -70,6 +158,32 @@ func parseHTTPStatusCodeRangesString(input string) []httpStatusCodeRange {
 		}
 	}
 	return normalizeHTTPStatusCodeRanges(ranges)
+}
+
+func parseHTTPStatusCodeRangesStringStrict(input string) ([]httpStatusCodeRange, error) {
+	input = strings.TrimSpace(input)
+	if input == "" {
+		return nil, nil
+	}
+	input = strings.NewReplacer("，", ",").Replace(input)
+	segments := strings.Split(input, ",")
+	ranges := make([]httpStatusCodeRange, 0, len(segments))
+	invalid := make([]string, 0)
+	for _, segment := range segments {
+		segment = strings.TrimSpace(segment)
+		if segment == "" {
+			continue
+		}
+		if r, ok := parseHTTPStatusCodeRangeToken(segment); ok {
+			ranges = append(ranges, r)
+			continue
+		}
+		invalid = append(invalid, segment)
+	}
+	if len(invalid) > 0 {
+		return nil, fmt.Errorf("invalid http status code rules: %s", strings.Join(invalid, ", "))
+	}
+	return normalizeHTTPStatusCodeRanges(ranges), nil
 }
 
 func parseHTTPStatusCodeRangeToken(token string) (httpStatusCodeRange, bool) {
@@ -108,6 +222,13 @@ func statusCodeExactRange(code int) []httpStatusCodeRange {
 		return nil
 	}
 	return []httpStatusCodeRange{{Start: code, End: code}}
+}
+
+func strictStatusCodeExactRange(code int) ([]httpStatusCodeRange, error) {
+	if !isHTTPStatusCode(code) {
+		return nil, fmt.Errorf("status code out of bounds: %d", code)
+	}
+	return []httpStatusCodeRange{{Start: code, End: code}}, nil
 }
 
 func normalizeHTTPStatusCodeRanges(ranges []httpStatusCodeRange) []httpStatusCodeRange {
