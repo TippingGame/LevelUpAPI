@@ -47,6 +47,7 @@ const (
 	claudeAPICountTokensURL = "https://api.anthropic.com/v1/messages/count_tokens?beta=true"
 	stickySessionTTL        = time.Hour // 粘性会话TTL
 	clientAffinityTTL       = 24 * time.Hour
+	accountUserAffinityTTL  = 24 * time.Hour
 	defaultMaxLineSize      = 500 * 1024 * 1024
 	// Canonical Claude Code banner. Keep it EXACT (no trailing whitespace/newlines)
 	// to match real Claude CLI traffic as closely as possible. When we need a visual
@@ -75,7 +76,10 @@ const (
 	claudeMimicDebugInfoKey = "claude_mimic_debug_info"
 )
 
-const clientAffinityKeyPrefix = "client_affinity:"
+const (
+	clientAffinityKeyPrefix      = "client_affinity:"
+	accountUserAffinityKeyPrefix = "account_user_affinity:"
+)
 
 const (
 	cacheTTLTarget5m = "5m"
@@ -974,6 +978,55 @@ func (s *GatewayService) bindClientAffinityAccount(ctx context.Context, groupID 
 	_ = s.cache.SetSessionString(ctx, derefGroupID(groupID), key, strconv.FormatInt(account.ID, 10), clientAffinityTTL)
 }
 
+func accountUserAffinityKey(accountID int64) string {
+	if accountID <= 0 {
+		return ""
+	}
+	return accountUserAffinityKeyPrefix + strconv.FormatInt(accountID, 10)
+}
+
+func (s *GatewayService) getAccountUserAffinityUserID(ctx context.Context, groupID *int64, accountID int64) int64 {
+	if s == nil || s.cache == nil || accountID <= 0 {
+		return 0
+	}
+	key := accountUserAffinityKey(accountID)
+	if key == "" {
+		return 0
+	}
+	raw, err := s.cache.GetSessionString(ctx, derefGroupID(groupID), key)
+	if err != nil {
+		return 0
+	}
+	userID, err := strconv.ParseInt(strings.TrimSpace(raw), 10, 64)
+	if err != nil || userID <= 0 {
+		_ = s.cache.DeleteSessionString(ctx, derefGroupID(groupID), key)
+		return 0
+	}
+	return userID
+}
+
+func (s *GatewayService) isAccountAllowedForUserAffinity(ctx context.Context, groupID *int64, account *Account, sub2apiUserID int64) bool {
+	if s == nil || account == nil || !account.IsAnthropicOAuthOrSetupToken() {
+		return true
+	}
+	if sub2apiUserID <= 0 || s.cache == nil {
+		return true
+	}
+	boundUserID := s.getAccountUserAffinityUserID(ctx, groupID, account.ID)
+	return boundUserID <= 0 || boundUserID == sub2apiUserID
+}
+
+func (s *GatewayService) bindAccountUserAffinity(ctx context.Context, groupID *int64, account *Account, sub2apiUserID int64) {
+	if s == nil || s.cache == nil || account == nil || !account.IsAnthropicOAuthOrSetupToken() || sub2apiUserID <= 0 {
+		return
+	}
+	key := accountUserAffinityKey(account.ID)
+	if key == "" {
+		return
+	}
+	_ = s.cache.SetSessionString(ctx, derefGroupID(groupID), key, strconv.FormatInt(sub2apiUserID, 10), accountUserAffinityTTL)
+}
+
 // FindGeminiSession 查找 Gemini 会话（基于内容摘要链的 Fallback 匹配）
 // 返回最长匹配的会话信息（uuid, accountID）
 func (s *GatewayService) FindGeminiSession(_ context.Context, groupID int64, prefixHash, digestChain string) (uuid string, accountID int64, matchedChain string, found bool) {
@@ -1689,6 +1742,7 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 	finalizeSelectionResult := func(account *Account, acquired bool, release func(), waitPlan *AccountWaitPlan) (*AccountSelectionResult, error) {
 		if acquired {
 			s.bindClientAffinityAccount(ctx, groupID, clientAffinityKey, account)
+			s.bindAccountUserAffinity(ctx, groupID, account, sub2apiUserID)
 		}
 		return s.newSelectionResult(ctx, account, acquired, release, waitPlan)
 	}
@@ -1699,6 +1753,14 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 		for _, item := range available {
 			if item.account == nil || item.account.ID != clientAffinityAccountID {
 				continue
+			}
+			if !s.isAccountAllowedForUserAffinity(ctx, groupID, item.account, sub2apiUserID) {
+				slog.Debug("client_affinity.account_user_mismatch",
+					"layer", layer,
+					"group_id", derefGroupID(groupID),
+					"account_id", item.account.ID,
+					"session", shortSessionHash(sessionHash))
+				return nil, false, nil
 			}
 			result, err := s.tryAcquireAccountSlot(ctx, item.account.ID, item.account.Concurrency)
 			if err != nil || !result.Acquired {
@@ -1753,6 +1815,10 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 			account, err := s.SelectAccountForModelWithExclusions(ctx, groupID, sessionHash, requestedModel, localExcluded)
 			if err != nil {
 				return nil, err
+			}
+			if !s.isAccountAllowedForUserAffinity(ctx, groupID, account, sub2apiUserID) {
+				localExcluded[account.ID] = struct{}{}
+				continue
 			}
 
 			result, err := s.tryAcquireAccountSlot(ctx, account.ID, account.Concurrency)
@@ -1857,7 +1923,7 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 	if len(routingAccountIDs) > 0 && s.concurrencyService != nil {
 		// 1. 过滤出路由列表中可调度的账号
 		var routingCandidates []*Account
-		var filteredExcluded, filteredMissing, filteredUnsched, filteredPlatform, filteredModelScope, filteredModelMapping, filteredWindowCost int
+		var filteredExcluded, filteredMissing, filteredUnsched, filteredPlatform, filteredModelScope, filteredModelMapping, filteredWindowCost, filteredUserAffinity int
 		var modelScopeSkippedIDs []int64 // 记录因模型限流被跳过的账号 ID
 		for _, routingAccountID := range routingAccountIDs {
 			if isExcluded(routingAccountID) {
@@ -1899,13 +1965,17 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 			if !s.isAccountSchedulableForRPM(ctx, account, false) {
 				continue
 			}
+			if !s.isAccountAllowedForUserAffinity(ctx, groupID, account, sub2apiUserID) {
+				filteredUserAffinity++
+				continue
+			}
 			routingCandidates = append(routingCandidates, account)
 		}
 
 		if s.debugModelRoutingEnabled() {
-			logger.LegacyPrintf("service.gateway", "[ModelRoutingDebug] routed candidates: group_id=%v model=%s routed=%d candidates=%d filtered(excluded=%d missing=%d unsched=%d platform=%d model_scope=%d model_mapping=%d window_cost=%d)",
+			logger.LegacyPrintf("service.gateway", "[ModelRoutingDebug] routed candidates: group_id=%v model=%s routed=%d candidates=%d filtered(excluded=%d missing=%d unsched=%d platform=%d model_scope=%d model_mapping=%d window_cost=%d user_affinity=%d)",
 				derefGroupID(groupID), requestedModel, len(routingAccountIDs), len(routingCandidates),
-				filteredExcluded, filteredMissing, filteredUnsched, filteredPlatform, filteredModelScope, filteredModelMapping, filteredWindowCost)
+				filteredExcluded, filteredMissing, filteredUnsched, filteredPlatform, filteredModelScope, filteredModelMapping, filteredWindowCost, filteredUserAffinity)
 			if len(modelScopeSkippedIDs) > 0 {
 				logger.LegacyPrintf("service.gateway", "[ModelRoutingDebug] model_rate_limited accounts skipped: group_id=%v model=%s account_ids=%v",
 					derefGroupID(groupID), requestedModel, modelScopeSkippedIDs)
@@ -1933,7 +2003,8 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 							(requestedModel == "" || s.isModelSupportedByAccountWithContext(ctx, stickyAccount, requestedModel)) &&
 							s.isAccountSchedulableForModelSelection(ctx, stickyAccount, requestedModel) &&
 							s.isAccountSchedulableForQuota(stickyAccount) &&
-							s.isAccountSchedulableForWindowCost(ctx, stickyAccount, true)
+							s.isAccountSchedulableForWindowCost(ctx, stickyAccount, true) &&
+							s.isAccountAllowedForUserAffinity(ctx, groupID, stickyAccount, sub2apiUserID)
 
 						rpmPass := gatePass && s.isAccountSchedulableForRPM(ctx, stickyAccount, true)
 
@@ -2132,6 +2203,7 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 				windowCostOK := s.isAccountSchedulableForWindowCost(ctx, account, true)
 				rpmOK := s.isAccountSchedulableForRPM(ctx, account, true)
 				schedulable := s.isAccountSchedulableForSelection(account)
+				userAffinityOK := s.isAccountAllowedForUserAffinity(ctx, groupID, account, sub2apiUserID)
 				stickyRuntime := s.stickyRuntimeDecision(accountID)
 
 				slog.Debug("sticky.layer1_5_no_routing_checks",
@@ -2145,13 +2217,14 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 					"quota_ok", quotaOK,
 					"window_cost_ok", windowCostOK,
 					"rpm_ok", rpmOK,
+					"user_affinity_ok", userAffinityOK,
 				)
 
-				if !clearSticky && platformOK && modelSupported && modelSchedulable && quotaOK && windowCostOK && rpmOK && schedulable && stickyRuntime.Bypass {
+				if !clearSticky && platformOK && modelSupported && modelSchedulable && quotaOK && windowCostOK && rpmOK && schedulable && userAffinityOK && stickyRuntime.Bypass {
 					logStickyRuntimeDecision(accountID, sessionHash, stickyRuntime, "sticky_bypass")
 				}
 
-				if !clearSticky && platformOK && modelSupported && modelSchedulable && quotaOK && windowCostOK && rpmOK && schedulable && !stickyRuntime.Bypass {
+				if !clearSticky && platformOK && modelSupported && modelSchedulable && quotaOK && windowCostOK && rpmOK && schedulable && userAffinityOK && !stickyRuntime.Bypass {
 					result, err := s.tryAcquireAccountSlot(ctx, accountID, account.Concurrency)
 					if err == nil && result.Acquired {
 						// 会话数量限制检查
@@ -2269,6 +2342,9 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 		if !s.isAccountSchedulableForRPM(ctx, acc, false) {
 			continue
 		}
+		if !s.isAccountAllowedForUserAffinity(ctx, groupID, acc, sub2apiUserID) {
+			continue
+		}
 		candidates = append(candidates, acc)
 	}
 
@@ -2291,6 +2367,7 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 		} else if ok {
 			if result.Acquired {
 				s.bindClientAffinityAccount(ctx, groupID, clientAffinityKey, result.Account)
+				s.bindAccountUserAffinity(ctx, groupID, result.Account, sub2apiUserID)
 			}
 			return result, nil
 		}

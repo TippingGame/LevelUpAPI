@@ -2550,6 +2550,82 @@ func TestGatewayService_SelectAccountWithLoadAwareness(t *testing.T) {
 		require.Equal(t, "2", cache.stringBindings[affinityKey])
 	})
 
+	t.Run("账号用户亲和-同用户允许继续使用绑定账号", func(t *testing.T) {
+		const userID int64 = 42
+
+		repo := &mockAccountRepoForPlatform{
+			accounts: []Account{
+				{ID: 1, Platform: PlatformAnthropic, Type: AccountTypeOAuth, Priority: 1, Status: StatusActive, Schedulable: true, Concurrency: 5, ProxyID: ptr(int64(7)), Proxy: &Proxy{ID: 7, Status: StatusActive}},
+				{ID: 2, Platform: PlatformAnthropic, Type: AccountTypeOAuth, Priority: 2, Status: StatusActive, Schedulable: true, Concurrency: 5, ProxyID: ptr(int64(8)), Proxy: &Proxy{ID: 8, Status: StatusActive}},
+			},
+			accountsByID: map[int64]*Account{},
+		}
+		for i := range repo.accounts {
+			repo.accountsByID[repo.accounts[i].ID] = &repo.accounts[i]
+		}
+
+		cache := &mockGatewayCacheForPlatform{
+			stringBindings: map[string]string{accountUserAffinityKey(1): "42"},
+		}
+
+		cfg := testConfig()
+		cfg.Gateway.Scheduling.LoadBatchEnabled = true
+
+		concurrencyCache := &mockConcurrencyCache{}
+		svc := &GatewayService{
+			accountRepo:        repo,
+			cache:              cache,
+			cfg:                cfg,
+			concurrencyService: NewConcurrencyService(concurrencyCache),
+		}
+
+		result, err := svc.SelectAccountWithLoadAwareness(ctx, nil, "same-user-session", "claude-3-5-sonnet-20241022", nil, "", userID)
+		require.NoError(t, err)
+		require.NotNil(t, result)
+		require.NotNil(t, result.Account)
+		require.Equal(t, int64(1), result.Account.ID)
+		require.Equal(t, "42", cache.stringBindings[accountUserAffinityKey(1)])
+	})
+
+	t.Run("账号用户亲和-不同用户跳过绑定账号并刷新新绑定", func(t *testing.T) {
+		const userID int64 = 42
+
+		repo := &mockAccountRepoForPlatform{
+			accounts: []Account{
+				{ID: 1, Platform: PlatformAnthropic, Type: AccountTypeOAuth, Priority: 1, Status: StatusActive, Schedulable: true, Concurrency: 5, ProxyID: ptr(int64(7)), Proxy: &Proxy{ID: 7, Status: StatusActive}},
+				{ID: 2, Platform: PlatformAnthropic, Type: AccountTypeOAuth, Priority: 2, Status: StatusActive, Schedulable: true, Concurrency: 5, ProxyID: ptr(int64(8)), Proxy: &Proxy{ID: 8, Status: StatusActive}},
+			},
+			accountsByID: map[int64]*Account{},
+		}
+		for i := range repo.accounts {
+			repo.accountsByID[repo.accounts[i].ID] = &repo.accounts[i]
+		}
+
+		cache := &mockGatewayCacheForPlatform{
+			stringBindings: map[string]string{accountUserAffinityKey(1): "99"},
+		}
+
+		cfg := testConfig()
+		cfg.Gateway.Scheduling.LoadBatchEnabled = true
+
+		concurrencyCache := &mockConcurrencyCache{}
+		svc := &GatewayService{
+			accountRepo:        repo,
+			cache:              cache,
+			cfg:                cfg,
+			concurrencyService: NewConcurrencyService(concurrencyCache),
+		}
+
+		result, err := svc.SelectAccountWithLoadAwareness(ctx, nil, "other-user-session", "claude-3-5-sonnet-20241022", nil, "", userID)
+		require.NoError(t, err)
+		require.NotNil(t, result)
+		require.NotNil(t, result.Account)
+		require.Equal(t, int64(2), result.Account.ID)
+		require.Equal(t, "99", cache.stringBindings[accountUserAffinityKey(1)])
+		require.Equal(t, "42", cache.stringBindings[accountUserAffinityKey(2)])
+		require.Equal(t, int64(2), cache.sessionBindings["other-user-session"])
+	})
+
 	t.Run("模型路由-粘性账号等待计划", func(t *testing.T) {
 		groupID := int64(20)
 		sessionHash := "route-sticky"
