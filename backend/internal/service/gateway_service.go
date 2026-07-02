@@ -4712,6 +4712,13 @@ func retryBackoffDelay(attempt int) time.Duration {
 	return delay
 }
 
+func (s *GatewayService) shouldStopRetryForPermanentAccountError(ctx context.Context, account *Account, statusCode int, body []byte) bool {
+	if s == nil || s.rateLimitService == nil {
+		return false
+	}
+	return s.rateLimitService.HandlePermanentAccountError(ctx, account, statusCode, body)
+}
+
 type upstreamFirstResponseTimeoutError struct {
 	err error
 }
@@ -5943,6 +5950,27 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 
 				respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
 				_ = resp.Body.Close()
+				if s.shouldStopRetryForPermanentAccountError(ctx, account, resp.StatusCode, respBody) {
+					resp.Body = io.NopCloser(bytes.NewReader(respBody))
+					appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
+						Platform:           account.Platform,
+						AccountID:          account.ID,
+						AccountName:        account.Name,
+						UpstreamStatusCode: resp.StatusCode,
+						UpstreamRequestID:  resp.Header.Get("x-request-id"),
+						UpstreamURL:        safeUpstreamURL(upstreamReq.URL.String()),
+						Kind:               "permanent_account_error",
+						Message:            extractUpstreamErrorMessage(respBody),
+						Detail: func() string {
+							if s.cfg != nil && s.cfg.Gateway.LogUpstreamErrorBody {
+								return truncateString(string(respBody), s.cfg.Gateway.LogUpstreamErrorBodyMaxBytes)
+							}
+							return ""
+						}(),
+					})
+					logger.LegacyPrintf("service.gateway", "Account %d: upstream permanent account error %d, stopping same-account retries", account.ID, resp.StatusCode)
+					break
+				}
 				appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
 					Platform:           account.Platform,
 					AccountID:          account.ID,
@@ -6311,6 +6339,28 @@ func (s *GatewayService) forwardAnthropicAPIKeyPassthroughWithInput(
 
 				respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
 				_ = resp.Body.Close()
+				if s.shouldStopRetryForPermanentAccountError(ctx, account, resp.StatusCode, respBody) {
+					resp.Body = io.NopCloser(bytes.NewReader(respBody))
+					appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
+						Platform:           account.Platform,
+						AccountID:          account.ID,
+						AccountName:        account.Name,
+						UpstreamStatusCode: resp.StatusCode,
+						UpstreamRequestID:  resp.Header.Get("x-request-id"),
+						UpstreamURL:        safeUpstreamURL(upstreamReq.URL.String()),
+						Passthrough:        true,
+						Kind:               "permanent_account_error",
+						Message:            extractUpstreamErrorMessage(respBody),
+						Detail: func() string {
+							if s.cfg != nil && s.cfg.Gateway.LogUpstreamErrorBody {
+								return truncateString(string(respBody), s.cfg.Gateway.LogUpstreamErrorBodyMaxBytes)
+							}
+							return ""
+						}(),
+					})
+					logger.LegacyPrintf("service.gateway", "Anthropic passthrough account %d: upstream permanent account error %d, stopping same-account retries", account.ID, resp.StatusCode)
+					break
+				}
 				appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
 					Platform:           account.Platform,
 					AccountID:          account.ID,
@@ -7154,6 +7204,26 @@ func (s *GatewayService) executeBedrockUpstream(
 
 				respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
 				_ = resp.Body.Close()
+				if s.shouldStopRetryForPermanentAccountError(ctx, account, resp.StatusCode, respBody) {
+					resp.Body = io.NopCloser(bytes.NewReader(respBody))
+					appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
+						Platform:           account.Platform,
+						AccountID:          account.ID,
+						AccountName:        account.Name,
+						UpstreamStatusCode: resp.StatusCode,
+						UpstreamURL:        safeUpstreamURL(upstreamReq.URL.String()),
+						Kind:               "permanent_account_error",
+						Message:            extractUpstreamErrorMessage(respBody),
+						Detail: func() string {
+							if s.cfg != nil && s.cfg.Gateway.LogUpstreamErrorBody {
+								return truncateString(string(respBody), s.cfg.Gateway.LogUpstreamErrorBodyMaxBytes)
+							}
+							return ""
+						}(),
+					})
+					logger.LegacyPrintf("service.gateway", "[Bedrock] account %d: upstream permanent account error %d, stopping same-account retries", account.ID, resp.StatusCode)
+					break
+				}
 				appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
 					Platform:           account.Platform,
 					AccountID:          account.ID,
@@ -8493,8 +8563,13 @@ func (s *GatewayService) handleRetryExhaustedSideEffects(ctx context.Context, re
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
 	statusCode := resp.StatusCode
 
+	if s.shouldStopRetryForPermanentAccountError(ctx, account, statusCode, body) {
+		logger.LegacyPrintf("service.gateway", "Account %d: marked as permanent account error after retry exhaustion for status %d", account.ID, statusCode)
+		return
+	}
+
 	// OAuth/Setup Token 账号的 403：标记账号异常
-	if account.IsOAuth() && statusCode == 403 {
+	if s.rateLimitService != nil && account.IsOAuth() && statusCode == 403 {
 		s.rateLimitService.HandleUpstreamError(ctx, account, statusCode, resp.Header, body)
 		logger.LegacyPrintf("service.gateway", "Account %d: marked as error after %d retries for status %d", account.ID, maxRetryAttempts, statusCode)
 	} else {
