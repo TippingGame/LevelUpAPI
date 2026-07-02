@@ -4723,6 +4723,10 @@ func (s *GatewayService) shouldFailoverUpstreamError(statusCode int) bool {
 	}
 }
 
+func (s *GatewayService) shouldFailoverAnthropicStreamError(statusCode int) bool {
+	return s.shouldFailoverUpstreamError(statusCode)
+}
+
 func retryBackoffDelay(attempt int) time.Duration {
 	// attempt 从 1 开始，表示第 attempt 次请求刚失败，需要等待后进行第 attempt+1 次请求。
 	if attempt <= 0 {
@@ -6214,6 +6218,12 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 					}, &BillableStreamUsageError{Err: err}
 				}
 				if IsUpstreamReplayUnsafeTimeoutStatus(statusCode) {
+					if upstreamMsg == "" {
+						return nil, fmt.Errorf("upstream stream error: %d", statusCode)
+					}
+					return nil, fmt.Errorf("upstream stream error: %d message=%s", statusCode, upstreamMsg)
+				}
+				if !s.shouldFailoverAnthropicStreamError(statusCode) {
 					if upstreamMsg == "" {
 						return nil, fmt.Errorf("upstream stream error: %d", statusCode)
 					}

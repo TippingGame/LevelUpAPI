@@ -55,6 +55,37 @@ func TestTransientUpstreamStatusesStillFailover(t *testing.T) {
 	}
 }
 
+func TestAnthropicStreamClientErrorStatusesDoNotFailover(t *testing.T) {
+	svc := &GatewayService{}
+	statuses := []int{
+		http.StatusBadRequest,
+		http.StatusNotFound,
+		http.StatusRequestEntityTooLarge,
+		http.StatusUnprocessableEntity,
+	}
+
+	for _, status := range statuses {
+		require.False(t, svc.shouldFailoverAnthropicStreamError(status))
+	}
+}
+
+func TestAnthropicStreamAccountOrTransientStatusesStillFailover(t *testing.T) {
+	svc := &GatewayService{}
+	statuses := []int{
+		http.StatusUnauthorized,
+		http.StatusPaymentRequired,
+		http.StatusForbidden,
+		http.StatusTooManyRequests,
+		http.StatusBadGateway,
+		http.StatusServiceUnavailable,
+		529,
+	}
+
+	for _, status := range statuses {
+		require.True(t, svc.shouldFailoverAnthropicStreamError(status))
+	}
+}
+
 func TestAuthPaymentPermissionStatusesFailoverWithoutSameAccountRetry(t *testing.T) {
 	statuses := []int{http.StatusUnauthorized, http.StatusPaymentRequired, http.StatusForbidden}
 	customRetryAccount := &Account{
