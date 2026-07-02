@@ -302,6 +302,10 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		}
 		currentSubscription, subErr := h.gatewayService.ResolveRouteSubscription(c.Request.Context(), currentAPIKey, subscription)
 		if subErr != nil {
+			if shouldSkipRouteOnSubscriptionResolveError(subErr) &&
+				routeCursor.skipToNext("route_subscription_resolve_failed", reqLog, zap.Error(subErr), zap.Int64p("group_id", currentAPIKey.GroupID)) {
+				continue
+			}
 			status, code, message, retryAfter := billingErrorDetails(subErr)
 			if retryAfter > 0 {
 				c.Header("Retry-After", strconv.Itoa(retryAfter))
@@ -773,6 +777,10 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 		}
 		currentSubscription, subErr := h.gatewayService.ResolveRouteSubscription(c.Request.Context(), currentAPIKey, subscription)
 		if subErr != nil {
+			if shouldSkipRouteOnSubscriptionResolveError(subErr) &&
+				routeCursor.skipToNext("route_subscription_resolve_failed", reqLog, zap.Error(subErr), zap.Int64p("group_id", currentAPIKey.GroupID)) {
+				continue
+			}
 			status, code, message, retryAfter := billingErrorDetails(subErr)
 			if retryAfter > 0 {
 				c.Header("Retry-After", strconv.Itoa(retryAfter))
@@ -1398,6 +1406,10 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				zap.Error(subErr),
 				zap.Int64p("group_id", currentAPIKey.GroupID),
 			)
+			if shouldSkipRouteOnSubscriptionResolveError(subErr) &&
+				routeCursor.skipToNext("route_subscription_resolve_failed", reqLog, zap.Error(subErr), zap.Int64p("group_id", currentAPIKey.GroupID)) {
+				continue
+			}
 			closeOpenAIClientWS(wsConn, coderws.StatusPolicyViolation, "subscription required")
 			return
 		}

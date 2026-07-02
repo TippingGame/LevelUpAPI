@@ -553,16 +553,6 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 	routeCursor := newAPIKeyGroupRouteCursor(apiKey)
 	if routeCandidate, ok := routeCursor.current(); ok {
 		currentAPIKey = routeCandidate.APIKey
-		var resolveErr error
-		currentSubscription, resolveErr = h.gatewayService.ResolveRouteSubscription(c.Request.Context(), currentAPIKey, subscription)
-		if resolveErr != nil {
-			status, code, message, retryAfter := billingErrorDetails(resolveErr)
-			if retryAfter > 0 {
-				c.Header("Retry-After", strconv.Itoa(retryAfter))
-			}
-			h.handleStreamingAwareError(c, status, code, message, streamStarted)
-			return
-		}
 	} else {
 		h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "api_error", "No available API key group routes", streamStarted)
 		return
@@ -597,6 +587,10 @@ routeLoop:
 					zap.Error(resolveErr),
 					zap.Int64p("group_id", currentAPIKey.GroupID),
 				)
+				if shouldSkipRouteOnSubscriptionResolveError(resolveErr) &&
+					routeCursor.skipToNext("route_subscription_resolve_failed", reqLog, zap.Error(resolveErr), zap.Int64p("group_id", currentAPIKey.GroupID)) {
+					continue routeLoop
+				}
 				status, code, message, retryAfter := billingErrorDetails(resolveErr)
 				if retryAfter > 0 {
 					c.Header("Retry-After", strconv.Itoa(retryAfter))
@@ -1488,6 +1482,14 @@ func shouldSwitchAPIKeyGroupRoute(failoverErr *service.UpstreamFailoverError) bo
 	default:
 		return failoverErr.StatusCode >= 500
 	}
+}
+
+func shouldSkipRouteOnSubscriptionResolveError(err error) bool {
+	return errors.Is(err, service.ErrSubscriptionNotFound) ||
+		errors.Is(err, service.ErrSubscriptionInvalid) ||
+		errors.Is(err, service.ErrSubscriptionExpired) ||
+		errors.Is(err, service.ErrSubscriptionSuspended) ||
+		errors.Is(err, service.ErrSubscriptionRepositoryUnavailable)
 }
 
 // Usage handles getting account balance and usage statistics for CC Switch integration

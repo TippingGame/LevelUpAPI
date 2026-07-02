@@ -113,6 +113,7 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 	sameAccountRetryCount := make(map[int64]int)
 	var lastFailoverErr *service.UpstreamFailoverError
 
+routeLoop:
 	for {
 		routeCandidate, ok := routeCursor.current()
 		if !ok {
@@ -125,6 +126,10 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 		}
 		currentSubscription, subErr := h.gatewayService.ResolveRouteSubscription(c.Request.Context(), currentAPIKey, subscription)
 		if subErr != nil {
+			if shouldSkipRouteOnSubscriptionResolveError(subErr) &&
+				routeCursor.skipToNext("route_subscription_resolve_failed", reqLog, zap.Error(subErr), zap.Int64p("group_id", currentAPIKey.GroupID)) {
+				continue routeLoop
+			}
 			status, code, message, retryAfter := billingErrorDetails(subErr)
 			if retryAfter > 0 {
 				c.Header("Retry-After", strconv.Itoa(retryAfter))

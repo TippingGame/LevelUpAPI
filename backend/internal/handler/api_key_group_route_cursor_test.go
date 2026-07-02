@@ -3,6 +3,7 @@ package handler
 import (
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/stretchr/testify/require"
@@ -120,6 +121,29 @@ func TestBuildAPIKeyGroupRouteCandidates_SkipsUnavailableRoutes(t *testing.T) {
 	require.Len(t, candidates, 1)
 	require.Equal(t, int64(2), candidates[0].Route.GroupID)
 	require.Equal(t, group2, candidates[0].APIKey.Group)
+}
+
+func TestShouldSkipRouteOnSubscriptionResolveError(t *testing.T) {
+	require.True(t, shouldSkipRouteOnSubscriptionResolveError(service.ErrSubscriptionNotFound))
+	require.True(t, shouldSkipRouteOnSubscriptionResolveError(service.ErrSubscriptionInvalid))
+	require.True(t, shouldSkipRouteOnSubscriptionResolveError(service.ErrSubscriptionExpired))
+	require.True(t, shouldSkipRouteOnSubscriptionResolveError(service.ErrSubscriptionSuspended))
+	require.True(t, shouldSkipRouteOnSubscriptionResolveError(service.ErrSubscriptionRepositoryUnavailable))
+	require.False(t, shouldSkipRouteOnSubscriptionResolveError(service.ErrInsufficientBalance))
+}
+
+func TestRouteSubscriptionSkipDoesNotCooldownRoute(t *testing.T) {
+	resetAPIKeyGroupRouteBreakerForTest(t)
+	cursor := newAPIKeyGroupRouteCursorFromCandidates([]apiKeyGroupRouteCandidate{
+		testAPIKeyGroupRouteCandidate(1),
+		testAPIKeyGroupRouteCandidate(2),
+	}, true)
+
+	require.True(t, cursor.skipToNext("route_subscription_resolve_failed", nil))
+	require.True(t, apiKeyGroupRouteBreaker.available(10, 1, time.Now()))
+	current, ok := cursor.current()
+	require.True(t, ok)
+	require.Equal(t, int64(2), current.Route.GroupID)
 }
 
 func TestShouldSwitchAPIKeyGroupRoute_SkipsReplayUnsafeTimeouts(t *testing.T) {
