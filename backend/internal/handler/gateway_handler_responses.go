@@ -172,7 +172,8 @@ routeLoop:
 		if sessionHash != "" {
 			currentSessionBoundAccountID, _ = h.gatewayService.GetCachedSessionAccountID(c.Request.Context(), currentAPIKey.GroupID, sessionHash)
 		}
-		currentHasBoundSession := currentSessionBoundAccountID > 0
+		stickyBoundAccountID := currentSessionBoundAccountID
+		currentHasBoundSession := stickyBoundAccountID > 0
 		fs := NewFailoverState(h.maxAccountSwitches, currentHasBoundSession)
 
 		for {
@@ -213,6 +214,8 @@ routeLoop:
 			}
 			account := selection.Account
 			setOpsSelectedAccount(c, account.ID, account.Platform)
+			currentHasBoundSession = stickySelectionHonored(sessionHash, stickyBoundAccountID, account.ID)
+			fs.SetHasBoundSession(currentHasBoundSession)
 
 			// 4. Acquire account concurrency slot
 			accountReleaseFunc := selection.ReleaseFunc
@@ -262,6 +265,7 @@ routeLoop:
 					if _, failed := fs.FailedAccountIDs[account.ID]; failed {
 						if h.clearStickySessionIfBoundTo(c.Request.Context(), currentAPIKey.GroupID, sessionHash, account.ID, reqLog, "upstream_failover") {
 							currentSessionBoundAccountID = 0
+							stickyBoundAccountID = 0
 							currentHasBoundSession = false
 						}
 					}

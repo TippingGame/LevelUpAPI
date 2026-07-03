@@ -320,7 +320,8 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 					routeContext = service.WithPrefetchedStickySession(routeContext, currentSessionBoundAccountID, apiKeyGroupIDValue(currentAPIKey), h.metadataBridgeEnabled())
 				}
 			}
-			currentHasBoundSession := sessionKey != "" && currentSessionBoundAccountID > 0
+			stickyBoundAccountID := currentSessionBoundAccountID
+			currentHasBoundSession := sessionKey != "" && stickyBoundAccountID > 0
 
 			// 单账号分组提前设置 SingleAccountRetry 标记，让 Service 层首次 503 就不设模型限流标记。
 			// 避免单账号分组收到 503 (MODEL_CAPACITY_EXHAUSTED) 时设 29s 限流，导致后续请求连续快速失败。
@@ -404,6 +405,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 				}
 				account := selection.Account
 				setOpsSelectedAccount(c, account.ID, account.Platform)
+				selectionHasBoundSession := stickySelectionHonored(sessionKey, stickyBoundAccountID, account.ID)
 				currentSessionBoundAccountID = h.refreshStickyBoundAccountAfterSelection(
 					c.Request.Context(),
 					reqLog,
@@ -412,6 +414,8 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 					currentSessionBoundAccountID,
 					account.ID,
 				)
+				currentHasBoundSession = selectionHasBoundSession
+				fs.SetHasBoundSession(currentHasBoundSession)
 
 				// 检查请求拦截（预热请求、SUGGESTION MODE等）
 				if account.IsInterceptWarmupEnabled() {
@@ -516,6 +520,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 						if _, failed := fs.FailedAccountIDs[account.ID]; failed {
 							if h.clearStickySessionIfBoundTo(c.Request.Context(), currentAPIKey.GroupID, sessionKey, account.ID, reqLog, "upstream_failover") {
 								currentSessionBoundAccountID = 0
+								stickyBoundAccountID = 0
 								currentHasBoundSession = false
 							}
 						}
@@ -711,7 +716,8 @@ routeLoop:
 				currentSessionBoundAccountID, _ = h.gatewayService.GetCachedSessionAccountID(c.Request.Context(), currentAPIKey.GroupID, sessionKey)
 			}
 		}
-		currentHasBoundSession := sessionKey != "" && currentSessionBoundAccountID > 0
+		stickyBoundAccountID := currentSessionBoundAccountID
+		currentHasBoundSession := sessionKey != "" && stickyBoundAccountID > 0
 		fs := NewFailoverState(h.maxAccountSwitches, currentHasBoundSession)
 		retryWithFallback := false
 
@@ -775,6 +781,7 @@ routeLoop:
 			}
 			account := selection.Account
 			setOpsSelectedAccount(c, account.ID, account.Platform)
+			selectionHasBoundSession := stickySelectionHonored(sessionKey, stickyBoundAccountID, account.ID)
 			currentSessionBoundAccountID = h.refreshStickyBoundAccountAfterSelection(
 				c.Request.Context(),
 				reqLog,
@@ -783,6 +790,8 @@ routeLoop:
 				currentSessionBoundAccountID,
 				account.ID,
 			)
+			currentHasBoundSession = selectionHasBoundSession
+			fs.SetHasBoundSession(currentHasBoundSession)
 
 			// [DEBUG-STICKY] 打印账号选择结果
 			reqLog.Info("sticky.account_selected",
@@ -791,7 +800,7 @@ routeLoop:
 				zap.Bool("slot_acquired", selection.Acquired),
 				zap.Bool("has_wait_plan", selection.WaitPlan != nil),
 				zap.Int64("sticky_bound_account_id", currentSessionBoundAccountID),
-				zap.Bool("sticky_honored", currentSessionBoundAccountID > 0 && currentSessionBoundAccountID == account.ID),
+				zap.Bool("sticky_honored", currentHasBoundSession),
 			)
 
 			// 检查请求拦截（预热请求、SUGGESTION MODE等）
@@ -1085,6 +1094,7 @@ routeLoop:
 					if _, failed := fs.FailedAccountIDs[account.ID]; failed {
 						if h.clearStickySessionIfBoundTo(c.Request.Context(), currentAPIKey.GroupID, sessionKey, account.ID, reqLog, "upstream_failover") {
 							currentSessionBoundAccountID = 0
+							stickyBoundAccountID = 0
 							currentHasBoundSession = false
 						}
 						h.clearClientAffinityIfBoundTo(c.Request.Context(), currentAPIKey.GroupID, parsedReq.MetadataUserID, subject.UserID, account.ID, reqLog, "upstream_failover")

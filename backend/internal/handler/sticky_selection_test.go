@@ -73,3 +73,26 @@ func TestReconcileStickyBoundAccount(t *testing.T) {
 		})
 	}
 }
+
+func TestStickySelectionHonored(t *testing.T) {
+	tests := []struct {
+		name              string
+		sessionKey        string
+		boundAccountID    int64
+		selectedAccountID int64
+		want              bool
+	}{
+		{name: "selected account matches bound account", sessionKey: "sticky", boundAccountID: 1, selectedAccountID: 1, want: true},
+		{name: "selected account differs from stale binding", sessionKey: "sticky", boundAccountID: 1, selectedAccountID: 2, want: false},
+		{name: "missing session key is not sticky", sessionKey: "", boundAccountID: 1, selectedAccountID: 1, want: false},
+		{name: "missing binding is not sticky", sessionKey: "sticky", boundAccountID: 0, selectedAccountID: 1, want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := stickySelectionHonored(tt.sessionKey, tt.boundAccountID, tt.selectedAccountID); got != tt.want {
+				t.Fatalf("stickySelectionHonored() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}

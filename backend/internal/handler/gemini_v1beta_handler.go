@@ -419,7 +419,8 @@ geminiRouteLoop:
 			}
 		}
 
-		currentHasBoundSession := routeSessionKey != "" && currentSessionBoundAccountID > 0
+		stickyBoundAccountID := currentSessionBoundAccountID
+		currentHasBoundSession := routeSessionKey != "" && stickyBoundAccountID > 0
 		cleanedForUnknownBinding := false
 		fs := NewFailoverState(h.maxAccountSwitchesGemini, currentHasBoundSession)
 
@@ -467,6 +468,7 @@ geminiRouteLoop:
 			}
 			account := selection.Account
 			setOpsSelectedAccount(c, account.ID, account.Platform)
+			selectionHasBoundSession := stickySelectionHonored(routeSessionKey, stickyBoundAccountID, account.ID)
 
 			// 检测账号切换：如果粘性会话绑定的账号与当前选择的账号不同，清除 thoughtSignature。
 			// 注意：Gemini 原生 API 的 thoughtSignature 与具体上游账号强相关；跨账号透传会导致 400。
@@ -491,6 +493,8 @@ geminiRouteLoop:
 				// 记录本次请求中首次选择到的账号，便于同一请求内 failover 时检测切换。
 				currentSessionBoundAccountID = account.ID
 			}
+			currentHasBoundSession = selectionHasBoundSession
+			fs.SetHasBoundSession(currentHasBoundSession)
 
 			// 4) account concurrency slot
 			accountReleaseFunc := selection.ReleaseFunc
@@ -566,6 +570,7 @@ geminiRouteLoop:
 					if _, failed := fs.FailedAccountIDs[account.ID]; failed {
 						if h.clearStickySessionIfBoundTo(c.Request.Context(), currentAPIKey.GroupID, routeSessionKey, account.ID, reqLog, "upstream_failover") {
 							currentSessionBoundAccountID = 0
+							stickyBoundAccountID = 0
 							currentHasBoundSession = false
 						}
 					}

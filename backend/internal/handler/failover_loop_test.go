@@ -70,6 +70,21 @@ func TestNewFailoverState(t *testing.T) {
 	})
 }
 
+func TestFailoverState_SetHasBoundSession(t *testing.T) {
+	fs := NewFailoverState(3, false)
+	fs.SetHasBoundSession(true)
+	require.True(t, fs.hasBoundSession)
+
+	err := newTestFailoverErr(500, false, false)
+	action := fs.HandleFailoverError(context.Background(), &mockTempUnscheduler{}, 1, service.PlatformAntigravity, err)
+	require.Equal(t, FailoverContinue, action)
+	require.True(t, fs.ForceCacheBilling)
+
+	fs.SetHasBoundSession(false)
+	require.False(t, fs.hasBoundSession)
+	require.True(t, fs.ForceCacheBilling, "ForceCacheBilling should remain enabled once a sticky switch was observed")
+}
+
 // ---------------------------------------------------------------------------
 // sleepWithContext 测试
 // ---------------------------------------------------------------------------

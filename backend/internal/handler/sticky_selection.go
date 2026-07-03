@@ -31,6 +31,10 @@ func reconcileStickyBoundAccount(previousBoundID, selectedAccountID, latestCache
 	}
 }
 
+func stickySelectionHonored(sessionKey string, boundAccountID, selectedAccountID int64) bool {
+	return sessionKey != "" && boundAccountID > 0 && boundAccountID == selectedAccountID
+}
+
 func (h *GatewayHandler) refreshStickyBoundAccountAfterSelection(
 	ctx context.Context,
 	reqLog *zap.Logger,
