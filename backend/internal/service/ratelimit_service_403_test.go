@@ -186,7 +186,7 @@ func TestRateLimitService_HandleUpstreamError_AnthropicOAuthSecond403KeepsTempUn
 	require.Contains(t, state.ErrorMessage, "(2/3)")
 }
 
-func TestRateLimitService_HandleUpstreamError_AnthropicOAuthThird403Disables(t *testing.T) {
+func TestRateLimitService_HandleUpstreamError_AnthropicOAuthThird403LongCooldown(t *testing.T) {
 	repo := &rateLimitAccountRepoStub{}
 	service := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
 	previousReason, err := json.Marshal(&TempUnschedState{
@@ -213,10 +213,53 @@ func TestRateLimitService_HandleUpstreamError_AnthropicOAuthThird403Disables(t *
 	)
 
 	require.True(t, shouldDisable)
-	require.Equal(t, 1, repo.setErrorCalls)
-	require.Equal(t, 0, repo.tempCalls)
-	require.Contains(t, repo.lastErrorMsg, "threshold reached (3/3)")
-	require.Contains(t, repo.lastErrorMsg, "still forbidden")
+	require.Equal(t, 0, repo.setErrorCalls)
+	require.Equal(t, 1, repo.tempCalls)
+	require.WithinDuration(t, time.Now().Add(2*time.Hour), repo.lastTempUntil, 3*time.Second)
+
+	var state TempUnschedState
+	require.NoError(t, json.Unmarshal([]byte(repo.lastTempReason), &state))
+	require.Equal(t, "anthropic_oauth_403_long_cooldown", state.MatchedKeyword)
+	require.Equal(t, 3, state.ConsecutiveCount)
+	require.Contains(t, state.ErrorMessage, "(3/3)")
+	require.Contains(t, state.ErrorMessage, "still forbidden")
+}
+
+func TestRateLimitService_HandleUpstreamError_AnthropicOAuthFourth403MaxCooldown(t *testing.T) {
+	repo := &rateLimitAccountRepoStub{}
+	service := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+	previousReason, err := json.Marshal(&TempUnschedState{
+		TriggeredAtUnix:  time.Now().Add(-time.Minute).Unix(),
+		StatusCode:       http.StatusForbidden,
+		MatchedKeyword:   "anthropic_oauth_403_long_cooldown",
+		ConsecutiveCount: 3,
+	})
+	require.NoError(t, err)
+	account := &Account{
+		ID:                      3063,
+		Platform:                PlatformAnthropic,
+		Type:                    AccountTypeOAuth,
+		TempUnschedulableReason: string(previousReason),
+		TempUnschedulableUntil:  ptrTime(time.Now().Add(-time.Minute)),
+	}
+
+	shouldDisable := service.HandleUpstreamError(
+		context.Background(),
+		account,
+		http.StatusForbidden,
+		http.Header{},
+		[]byte(`{"error":{"message":"still forbidden"}}`),
+	)
+
+	require.True(t, shouldDisable)
+	require.Equal(t, 0, repo.setErrorCalls)
+	require.Equal(t, 1, repo.tempCalls)
+	require.WithinDuration(t, time.Now().Add(12*time.Hour), repo.lastTempUntil, 3*time.Second)
+
+	var state TempUnschedState
+	require.NoError(t, json.Unmarshal([]byte(repo.lastTempReason), &state))
+	require.Equal(t, "anthropic_oauth_403_long_cooldown", state.MatchedKeyword)
+	require.Equal(t, 4, state.ConsecutiveCount)
 }
 
 func TestRateLimitService_HandleUpstreamError_AnthropicOAuthStale403ReasonResetsCount(t *testing.T) {

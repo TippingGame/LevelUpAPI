@@ -64,16 +64,16 @@ const (
 )
 
 const (
-	openAI403CooldownMinutesDefault   = 10
-	openAI403DisableThreshold         = 3
-	openAI403CounterWindowMinutes     = 180
-	anthropicOAuth403DisableThreshold = 3
-	openAIModelCapacityCooldown       = time.Minute
-	upstreamModelNotFoundCooldown     = 30 * time.Minute
-	oAuth401CooldownMinutesDefault    = 10
-	overloadCooldownMinutesDefault    = 10
-	runtimeAccountErrorEvictionTTL    = 24 * time.Hour
-	rateLimitStateUpdateTimeout       = 3 * time.Second
+	openAI403CooldownMinutesDefault      = 10
+	openAI403DisableThreshold            = 3
+	openAI403CounterWindowMinutes        = 180
+	anthropicOAuth403EscalationThreshold = 3
+	openAIModelCapacityCooldown          = time.Minute
+	upstreamModelNotFoundCooldown        = 30 * time.Minute
+	oAuth401CooldownMinutesDefault       = 10
+	overloadCooldownMinutesDefault       = 10
+	runtimeAccountErrorEvictionTTL       = 24 * time.Hour
+	rateLimitStateUpdateTimeout          = 3 * time.Second
 )
 
 var cloudflareChallengeCooldownSteps = []time.Duration{
@@ -81,6 +81,13 @@ var cloudflareChallengeCooldownSteps = []time.Duration{
 	time.Minute,
 	2 * time.Minute,
 	5 * time.Minute,
+}
+
+var anthropicOAuth403CooldownSteps = []time.Duration{
+	time.Duration(anthropicOAuthDefaultCooldownMinutes) * time.Minute,
+	time.Duration(anthropicOAuthDefaultCooldownMinutes) * time.Minute,
+	2 * time.Hour,
+	12 * time.Hour,
 }
 
 func rateLimitStateContext(ctx context.Context) (context.Context, context.CancelFunc) {
@@ -1229,20 +1236,20 @@ func (s *RateLimitService) handleAnthropicOAuth403(ctx context.Context, account 
 		"anthropic_oauth_403",
 		time.Duration(openAI403CounterWindowMinutes)*time.Minute,
 	)
-	if count >= anthropicOAuth403DisableThreshold {
-		msg = fmt.Sprintf("Claude OAuth repeated 403 threshold reached (%d/%d): %s", count, anthropicOAuth403DisableThreshold, msg)
-		s.handleAuthError(ctx, account, msg)
-		return true
-	}
 
-	until := now.Add(time.Duration(anthropicOAuthDefaultCooldownMinutes) * time.Minute)
+	cooldown := anthropicOAuth403CooldownForCount(count)
+	until := now.Add(cooldown)
+	matchedKeyword := "anthropic_oauth_403"
+	if count >= anthropicOAuth403EscalationThreshold {
+		matchedKeyword = "anthropic_oauth_403_long_cooldown"
+	}
 	state := &TempUnschedState{
 		UntilUnix:        until.Unix(),
 		TriggeredAtUnix:  now.Unix(),
 		StatusCode:       http.StatusForbidden,
-		MatchedKeyword:   "anthropic_oauth_403",
+		MatchedKeyword:   matchedKeyword,
 		RuleIndex:        -1,
-		ErrorMessage:     fmt.Sprintf("Claude OAuth 403 temporary cooldown (%d/%d): %s", count, anthropicOAuth403DisableThreshold, msg),
+		ErrorMessage:     fmt.Sprintf("Claude OAuth 403 temporary cooldown (%d/%d): %s", count, anthropicOAuth403EscalationThreshold, msg),
 		ConsecutiveCount: count,
 	}
 	reason := state.ErrorMessage
@@ -1256,8 +1263,26 @@ func (s *RateLimitService) handleAnthropicOAuth403(ctx context.Context, account 
 		return true
 	}
 
-	slog.Warn("anthropic_oauth_403_temp_unschedulable", "account_id", account.ID, "until", until, "count", count, "threshold", anthropicOAuth403DisableThreshold)
+	slog.Warn(
+		"anthropic_oauth_403_temp_unschedulable",
+		"account_id", account.ID,
+		"until", until,
+		"count", count,
+		"threshold", anthropicOAuth403EscalationThreshold,
+		"cooldown", cooldown.String(),
+	)
 	return true
+}
+
+func anthropicOAuth403CooldownForCount(count int) time.Duration {
+	if count <= 0 {
+		count = 1
+	}
+	index := count - 1
+	if index >= len(anthropicOAuth403CooldownSteps) {
+		index = len(anthropicOAuth403CooldownSteps) - 1
+	}
+	return anthropicOAuth403CooldownSteps[index]
 }
 
 func (s *RateLimitService) handleOpenAI403(ctx context.Context, account *Account, upstreamMsg string, responseBody []byte) (shouldDisable bool) {
