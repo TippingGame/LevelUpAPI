@@ -2045,10 +2045,20 @@ func (s *RateLimitService) handle429(ctx context.Context, account *Account, head
 		return
 	}
 
-	// 4. 尝试从响应头解析重置时间（Anthropic 聚合头，向后兼容）
+	// 4. 通用 RateLimit-Reset / X-RateLimit-Reset：许多中转和云厂商用它表达限流恢复时间。
+	if resetAt := parseGenericRateLimitResetTime(headers, time.Now(), time.Duration(maxRateLimit429CooldownSeconds)*time.Second); resetAt != nil {
+		if err := s.persistRateLimitedState(ctx, account, *resetAt); err != nil {
+			slog.Warn("rate_limit_generic_reset_set_failed", "account_id", account.ID, "error", err)
+			return
+		}
+		slog.Info("account_rate_limited_generic_reset", "account_id", account.ID, "platform", account.Platform, "reset_at", *resetAt, "reset_in", time.Until(*resetAt).Truncate(time.Second))
+		return
+	}
+
+	// 5. 尝试从响应头解析重置时间（Anthropic 聚合头，向后兼容）
 	resetTimestamp := headers.Get("anthropic-ratelimit-unified-reset")
 
-	// 5. 如果响应头没有，尝试从响应体解析（OpenAI usage_limit_reached, Gemini）
+	// 6. 如果响应头没有，尝试从响应体解析（OpenAI usage_limit_reached, Gemini）
 	if resetTimestamp == "" {
 		switch account.Platform {
 		case PlatformOpenAI:
@@ -2191,6 +2201,60 @@ func parseRetryAfterResetTime(headers http.Header, now time.Time, maxAge time.Du
 		return nil
 	}
 	if resetAt.After(now.Add(maxAge)) {
+		return nil
+	}
+	return &resetAt
+}
+
+var genericRateLimitResetHeaderNames = []string{
+	"RateLimit-Reset",
+	"X-RateLimit-Reset",
+	"X-Rate-Limit-Reset",
+	"X-RateLimit-Reset-After",
+	"X-Rate-Limit-Reset-After",
+}
+
+func parseGenericRateLimitResetTime(headers http.Header, now time.Time, maxAge time.Duration) *time.Time {
+	if maxAge <= 0 {
+		return nil
+	}
+	for _, name := range genericRateLimitResetHeaderNames {
+		raw := strings.TrimSpace(headers.Get(name))
+		if raw == "" {
+			continue
+		}
+		if resetAt := parseGenericRateLimitResetValue(raw, now, maxAge); resetAt != nil {
+			return resetAt
+		}
+	}
+	return nil
+}
+
+func parseGenericRateLimitResetValue(raw string, now time.Time, maxAge time.Duration) *time.Time {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || maxAge <= 0 {
+		return nil
+	}
+	if seconds, err := strconv.ParseInt(raw, 10, 64); err == nil {
+		if seconds > 0 && seconds <= int64(maxAge/time.Second) {
+			resetAt := now.Add(time.Duration(seconds) * time.Second)
+			return &resetAt
+		}
+		ts := seconds
+		if ts > 1e11 {
+			ts /= 1000
+		}
+		resetAt := time.Unix(ts, 0)
+		if resetAt.After(now) && !resetAt.After(now.Add(maxAge)) {
+			return &resetAt
+		}
+		return nil
+	}
+	resetAt, err := http.ParseTime(raw)
+	if err != nil {
+		return nil
+	}
+	if !resetAt.After(now) || resetAt.After(now.Add(maxAge)) {
 		return nil
 	}
 	return &resetAt
