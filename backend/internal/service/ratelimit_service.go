@@ -2299,6 +2299,9 @@ func parseGenericRateLimitResetTime(headers http.Header, now time.Time, maxAge t
 			return resetAt
 		}
 	}
+	if resetAt := parseBucketedRateLimitResetTime(headers, now, maxAge); resetAt != nil {
+		return resetAt
+	}
 	for _, name := range genericRateLimitResetMillisecondsHeaderNames {
 		raw := strings.TrimSpace(headers.Get(name))
 		if raw == "" {
@@ -2309,6 +2312,95 @@ func parseGenericRateLimitResetTime(headers http.Header, now time.Time, maxAge t
 		}
 	}
 	return nil
+}
+
+type bucketedRateLimitResetHeaders struct {
+	resetNames     []string
+	remainingNames []string
+}
+
+var bucketedRateLimitResetHeaderGroups = []bucketedRateLimitResetHeaders{
+	{
+		resetNames: []string{
+			"X-RateLimit-Reset-Requests",
+			"X-Rate-Limit-Reset-Requests",
+		},
+		remainingNames: []string{
+			"X-RateLimit-Remaining-Requests",
+			"X-Rate-Limit-Remaining-Requests",
+		},
+	},
+	{
+		resetNames: []string{
+			"X-RateLimit-Reset-Tokens",
+			"X-Rate-Limit-Reset-Tokens",
+		},
+		remainingNames: []string{
+			"X-RateLimit-Remaining-Tokens",
+			"X-Rate-Limit-Remaining-Tokens",
+		},
+	},
+}
+
+func parseBucketedRateLimitResetTime(headers http.Header, now time.Time, maxAge time.Duration) *time.Time {
+	if maxAge <= 0 {
+		return nil
+	}
+	var exhaustedBest *time.Time
+	var fallbackBest *time.Time
+	for _, group := range bucketedRateLimitResetHeaderGroups {
+		resetAt := firstParsedGenericRateLimitResetHeader(headers, group.resetNames, now, maxAge)
+		if resetAt == nil {
+			continue
+		}
+		remaining, hasRemaining := firstParsedRateLimitRemainingHeader(headers, group.remainingNames)
+		if hasRemaining {
+			if remaining > 0 {
+				continue
+			}
+			if exhaustedBest == nil || resetAt.After(*exhaustedBest) {
+				candidate := *resetAt
+				exhaustedBest = &candidate
+			}
+			continue
+		}
+		if fallbackBest == nil || resetAt.After(*fallbackBest) {
+			candidate := *resetAt
+			fallbackBest = &candidate
+		}
+	}
+	if exhaustedBest != nil {
+		return exhaustedBest
+	}
+	return fallbackBest
+}
+
+func firstParsedGenericRateLimitResetHeader(headers http.Header, names []string, now time.Time, maxAge time.Duration) *time.Time {
+	for _, name := range names {
+		raw := strings.TrimSpace(headers.Get(name))
+		if raw == "" {
+			continue
+		}
+		if resetAt := parseGenericRateLimitResetValue(raw, now, maxAge); resetAt != nil {
+			return resetAt
+		}
+	}
+	return nil
+}
+
+func firstParsedRateLimitRemainingHeader(headers http.Header, names []string) (float64, bool) {
+	for _, name := range names {
+		raw := strings.TrimSpace(headers.Get(name))
+		if raw == "" {
+			continue
+		}
+		remaining, err := strconv.ParseFloat(raw, 64)
+		if err != nil || math.IsNaN(remaining) || math.IsInf(remaining, 0) {
+			continue
+		}
+		return remaining, true
+	}
+	return 0, false
 }
 
 func parseGenericRateLimitResetValue(raw string, now time.Time, maxAge time.Duration) *time.Time {

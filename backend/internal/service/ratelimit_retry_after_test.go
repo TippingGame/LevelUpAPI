@@ -373,6 +373,82 @@ func TestHandle429RateLimitResetPrefersStandardHeaderOverMs(t *testing.T) {
 	require.False(t, repo.lastRateReset.After(after.Add(3*time.Second)))
 }
 
+func TestHandle429BucketedRateLimitResetUsesExhaustedBucket(t *testing.T) {
+	repo := &permanentKeywordAccountRepoStub{}
+	svc := &RateLimitService{accountRepo: repo}
+	account := &Account{
+		ID:          7325,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeOAuth,
+		Status:      StatusActive,
+		Schedulable: true,
+	}
+	headers := http.Header{}
+	headers.Set("X-RateLimit-Remaining-Requests", "0")
+	headers.Set("X-RateLimit-Reset-Requests", "2s")
+	headers.Set("X-RateLimit-Remaining-Tokens", "100")
+	headers.Set("X-RateLimit-Reset-Tokens", "45s")
+
+	before := time.Now()
+	svc.handle429(context.Background(), account, headers, []byte(`{"error":{"type":"rate_limit_error","message":"slow down"}}`))
+	after := time.Now()
+
+	require.Equal(t, 1, repo.rateLimitCalls)
+	require.Equal(t, account.ID, repo.lastRateLimitID)
+	require.False(t, repo.lastRateReset.Before(before.Add(2*time.Second)))
+	require.False(t, repo.lastRateReset.After(after.Add(2*time.Second)))
+}
+
+func TestHandle429BucketedRateLimitResetUsesLatestExhaustedBucket(t *testing.T) {
+	repo := &permanentKeywordAccountRepoStub{}
+	svc := &RateLimitService{accountRepo: repo}
+	account := &Account{
+		ID:          7326,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeOAuth,
+		Status:      StatusActive,
+		Schedulable: true,
+	}
+	headers := http.Header{}
+	headers.Set("X-RateLimit-Remaining-Requests", "0")
+	headers.Set("X-RateLimit-Reset-Requests", "2s")
+	headers.Set("X-RateLimit-Remaining-Tokens", "0")
+	headers.Set("X-RateLimit-Reset-Tokens", "6s")
+
+	before := time.Now()
+	svc.handle429(context.Background(), account, headers, []byte(`{"error":{"type":"rate_limit_error","message":"slow down"}}`))
+	after := time.Now()
+
+	require.Equal(t, 1, repo.rateLimitCalls)
+	require.Equal(t, account.ID, repo.lastRateLimitID)
+	require.False(t, repo.lastRateReset.Before(before.Add(6*time.Second)))
+	require.False(t, repo.lastRateReset.After(after.Add(6*time.Second)))
+}
+
+func TestHandle429BucketedRateLimitResetFallbackWithoutRemainingUsesLatest(t *testing.T) {
+	repo := &permanentKeywordAccountRepoStub{}
+	svc := &RateLimitService{accountRepo: repo}
+	account := &Account{
+		ID:          7327,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeOAuth,
+		Status:      StatusActive,
+		Schedulable: true,
+	}
+	headers := http.Header{}
+	headers.Set("X-RateLimit-Reset-Requests", "2s")
+	headers.Set("X-RateLimit-Reset-Tokens", "7s")
+
+	before := time.Now()
+	svc.handle429(context.Background(), account, headers, []byte(`{"error":{"type":"rate_limit_error","message":"slow down"}}`))
+	after := time.Now()
+
+	require.Equal(t, 1, repo.rateLimitCalls)
+	require.Equal(t, account.ID, repo.lastRateLimitID)
+	require.False(t, repo.lastRateReset.Before(before.Add(7*time.Second)))
+	require.False(t, repo.lastRateReset.After(after.Add(7*time.Second)))
+}
+
 func TestHandle429RateLimitResetTooLargeFallsBackToDefault(t *testing.T) {
 	repo := &permanentKeywordAccountRepoStub{}
 	svc := &RateLimitService{accountRepo: repo}
