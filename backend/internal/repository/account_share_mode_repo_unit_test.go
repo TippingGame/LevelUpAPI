@@ -855,7 +855,46 @@ func TestAccountShareModeSettlementRatiosClampPlatformOverflow(t *testing.T) {
 	}
 }
 
+func TestScanAccountShareListingUsesEffectiveOpenAISharedPoolLevel(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer func() {
+		_ = db.Close()
+	}()
+
+	mock.ExpectQuery("SELECT listing").WillReturnRows(accountShareListingRowsWithPlan(7, 99, 42, "", time.Time{}, service.AccountLevelPlus, `{"plan_type":"chatgpt_pro"}`, `{}`))
+	rows, err := db.Query("SELECT listing")
+	if err != nil {
+		t.Fatalf("query listing row: %v", err)
+	}
+	defer func() {
+		_ = rows.Close()
+	}()
+	if !rows.Next() {
+		t.Fatal("expected one listing row")
+	}
+	listing, err := scanAccountShareListing(rows)
+	if err != nil {
+		t.Fatalf("scan listing: %v", err)
+	}
+	if listing.AccountLevel != service.AccountLevelPro {
+		t.Fatalf("account level = %q, want %q", listing.AccountLevel, service.AccountLevelPro)
+	}
+	if listing.AccountPlanType != "chatgpt_pro" {
+		t.Fatalf("account plan type = %q, want chatgpt_pro", listing.AccountPlanType)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet expectations: %v", err)
+	}
+}
+
 func accountShareListingRows(listingID, accountID, ownerUserID int64, editSessionID string, editingExpiresAt time.Time) *sqlmock.Rows {
+	return accountShareListingRowsWithPlan(listingID, accountID, ownerUserID, editSessionID, editingExpiresAt, service.AccountLevelPro, `{}`, `{}`)
+}
+
+func accountShareListingRowsWithPlan(listingID, accountID, ownerUserID int64, editSessionID string, editingExpiresAt time.Time, accountLevel, credentialsJSON, extraJSON string) *sqlmock.Rows {
 	now := time.Now().UTC()
 	return sqlmock.NewRows([]string{
 		"id",
@@ -930,7 +969,7 @@ func accountShareListingRows(listingID, accountID, ownerUserID int64, editSessio
 		99.0,
 		service.PlatformOpenAI,
 		service.AccountTypeOAuth,
-		"pro",
+		accountLevel,
 		service.StatusActive,
 		true,
 		nil,
@@ -940,8 +979,8 @@ func accountShareListingRows(listingID, accountID, ownerUserID int64, editSessio
 		nil,
 		nil,
 		nil,
-		[]byte(`{}`),
-		[]byte(`{}`),
+		[]byte(credentialsJSON),
+		[]byte(extraJSON),
 		nil,
 		nil,
 		nil,

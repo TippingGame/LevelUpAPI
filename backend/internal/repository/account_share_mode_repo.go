@@ -3098,7 +3098,7 @@ func scanAccountShareListing(scanner accountShareListingScanner) (*service.Accou
 		Schedulable:             accountSchedulable,
 	}
 	now := time.Now()
-	listing.AccountLevel = service.NormalizeOpenAIAccountLevel(account.Platform, account.AccountLevel, account.Credentials, account.Extra)
+	listing.AccountLevel = service.EffectiveOpenAISharedPoolAccountLevel(account.Platform, account.AccountLevel, account.Credentials, account.Extra)
 	listing.AccountPlanType = service.OpenAIAccountPlanType(account.Credentials, account.Extra)
 	listing.AccountPlatform = account.Platform
 	listing.AccountType = account.Type

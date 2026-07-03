@@ -618,10 +618,7 @@ func (a *accountQuotaSummaryAccumulator) addAccountWithSchedulability(account Ac
 }
 
 func isAccountTemporarilyUnschedulable(account Account, now time.Time) bool {
-	if !shouldApplyLocalSystemErrorState(&account) {
-		return false
-	}
-	return account.TempUnschedulableUntil != nil && now.Before(*account.TempUnschedulableUntil)
+	return (&account).IsTemporarilyUnschedulableAt(now)
 }
 
 func accountSchedulableInQuotaGroup(account Account, now time.Time, groupStatus, groupPlatform, requiredAccountLevel string, requireOAuthOnly, requirePrivacySet bool) bool {

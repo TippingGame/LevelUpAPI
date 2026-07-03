@@ -51,9 +51,51 @@ func TestMigration203RebindsApprovedObservedProOAuthAccounts(t *testing.T) {
 	require.False(t, migration203AccountHasGroup(t, tx, apiKeyID, proGroupID), "OpenAI API key should not be moved to Pro pool")
 }
 
+func TestMigration204CreatesMissingProPoolAndRebindsObservedProOAuthAccounts(t *testing.T) {
+	tx := testTx(t)
+	suffix := time.Now().UnixNano()
+
+	_, err := tx.ExecContext(context.Background(), `
+UPDATE groups
+SET deleted_at = NOW()
+WHERE deleted_at IS NULL
+  AND platform = 'openai'
+  AND owner_user_id IS NULL
+  AND scope = 'public'
+  AND lower(btrim(COALESCE(required_account_level, ''))) = 'pro'
+`)
+	require.NoError(t, err)
+
+	ownerID := insertMigration203User(t, tx, suffix)
+	privateGroupID := insertMigration203Group(t, tx, fmt.Sprintf("migration204-private-%d", suffix), service.PlatformOpenAI, service.GroupScopeUserPrivate, service.SubscriptionTypeStandard, "", &ownerID)
+	plusGroupID := insertMigration203Group(t, tx, fmt.Sprintf("migration204-plus-%d", suffix), service.PlatformOpenAI, service.GroupScopePublic, service.SubscriptionTypeStandard, service.AccountLevelPlus, nil)
+	observedProID := insertMigration203PublicAccount(t, tx, ownerID, fmt.Sprintf("migration204-observed-pro-%d", suffix), service.AccountTypeOAuth, service.AccountLevelPlus, `{"plan_type":"chatgpt_pro"}`)
+
+	insertMigration203AccountGroup(t, tx, observedProID, privateGroupID, 7)
+	insertMigration203AccountGroup(t, tx, observedProID, plusGroupID, 9)
+
+	runMigration204(t, tx)
+	runMigration204(t, tx)
+
+	proGroupID, err := selectMigration203ProPool(context.Background(), tx)
+	require.NoError(t, err)
+	require.True(t, migration203AccountHasGroup(t, tx, observedProID, privateGroupID), "observed Pro account should keep owner private group")
+	require.True(t, migration203AccountHasGroup(t, tx, observedProID, proGroupID), "observed Pro account should be in the repaired Pro shared pool")
+	require.False(t, migration203AccountHasGroup(t, tx, observedProID, plusGroupID), "observed Pro account should leave stale Plus shared pool")
+	require.Equal(t, 1, migration203PublicOpenAIStandardGroupCount(t, tx, observedProID), "observed Pro account should have one public standard pool binding")
+}
+
 func runMigration203(t *testing.T, tx *sql.Tx) {
 	t.Helper()
 	sqlBytes, err := os.ReadFile(filepath.Join("..", "..", "migrations", "203_rebind_openai_pro_shared_pool.sql"))
+	require.NoError(t, err)
+	_, err = tx.ExecContext(context.Background(), string(sqlBytes))
+	require.NoError(t, err)
+}
+
+func runMigration204(t *testing.T, tx *sql.Tx) {
+	t.Helper()
+	sqlBytes, err := os.ReadFile(filepath.Join("..", "..", "migrations", "204_harden_openai_pro_shared_pool_repair.sql"))
 	require.NoError(t, err)
 	_, err = tx.ExecContext(context.Background(), string(sqlBytes))
 	require.NoError(t, err)
