@@ -1509,9 +1509,10 @@ func (s *RateLimitService) handleUpstreamRelayPoolUnavailable(ctx context.Contex
 	}
 	msg = fmt.Sprintf("Upstream relay pool unavailable (%d): %s", statusCode, msg)
 
-	until := time.Now().Add(upstreamRelayPoolUnavailableCooldown)
-	if retryAfterUntil := parseRetryAfterResetTime(headers, time.Now(), time.Duration(maxRateLimit429CooldownSeconds)*time.Second); retryAfterUntil != nil {
-		until = *retryAfterUntil
+	now := time.Now()
+	until := now.Add(upstreamRelayPoolUnavailableCooldown)
+	if headerUntil := parseUpstreamBackoffResetTime(headers, now, time.Duration(maxRateLimit429CooldownSeconds)*time.Second); headerUntil != nil {
+		until = *headerUntil
 	}
 	state := newTempUnschedState(until, statusCode, "upstream_relay_pool_unavailable", msg)
 	if bodyMsg := truncateTempUnschedMessage(responseBody, tempUnschedMessageMaxBytes); bodyMsg != "" {
@@ -2204,6 +2205,13 @@ func parseRetryAfterResetTime(headers http.Header, now time.Time, maxAge time.Du
 		return nil
 	}
 	return &resetAt
+}
+
+func parseUpstreamBackoffResetTime(headers http.Header, now time.Time, maxAge time.Duration) *time.Time {
+	if resetAt := parseRetryAfterResetTime(headers, now, maxAge); resetAt != nil {
+		return resetAt
+	}
+	return parseGenericRateLimitResetTime(headers, now, maxAge)
 }
 
 var genericRateLimitResetHeaderNames = []string{

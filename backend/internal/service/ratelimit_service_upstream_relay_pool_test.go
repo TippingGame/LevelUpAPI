@@ -112,6 +112,67 @@ func TestHandleUpstreamErrorRelayNoAvailableAccountsHonorsRetryAfter(t *testing.
 	require.Equal(t, repo.lastTempUntil.Unix(), account.TempUnschedulableUntil.Unix())
 }
 
+func TestHandleUpstreamErrorRelayNoAvailableAccountsHonorsGenericRateLimitReset(t *testing.T) {
+	repo := &permanentKeywordAccountRepoStub{}
+	svc := &RateLimitService{accountRepo: repo}
+	account := &Account{
+		ID:          7207,
+		Platform:    PlatformAnthropic,
+		Type:        AccountTypeAPIKey,
+		Status:      StatusActive,
+		Schedulable: true,
+	}
+	headers := http.Header{}
+	headers.Set("X-RateLimit-Reset", "43")
+
+	before := time.Now()
+	shouldDisable := svc.HandleUpstreamError(
+		context.Background(),
+		account,
+		http.StatusTooManyRequests,
+		headers,
+		[]byte(`{"error":{"message":"No available accounts: no available accounts"}}`),
+	)
+	after := time.Now()
+
+	require.True(t, shouldDisable)
+	require.Equal(t, 1, repo.tempCalls)
+	require.False(t, repo.lastTempUntil.Before(before.Add(43*time.Second)))
+	require.False(t, repo.lastTempUntil.After(after.Add(43*time.Second)))
+	require.NotNil(t, account.TempUnschedulableUntil)
+	require.Equal(t, repo.lastTempUntil.Unix(), account.TempUnschedulableUntil.Unix())
+}
+
+func TestHandleUpstreamErrorRelayNoAvailableAccountsPrefersRetryAfterOverGenericReset(t *testing.T) {
+	repo := &permanentKeywordAccountRepoStub{}
+	svc := &RateLimitService{accountRepo: repo}
+	account := &Account{
+		ID:          7208,
+		Platform:    PlatformAnthropic,
+		Type:        AccountTypeAPIKey,
+		Status:      StatusActive,
+		Schedulable: true,
+	}
+	headers := http.Header{}
+	headers.Set("Retry-After", "17")
+	headers.Set("RateLimit-Reset", "61")
+
+	before := time.Now()
+	shouldDisable := svc.HandleUpstreamError(
+		context.Background(),
+		account,
+		http.StatusTooManyRequests,
+		headers,
+		[]byte(`{"error":{"message":"No available accounts: no available accounts"}}`),
+	)
+	after := time.Now()
+
+	require.True(t, shouldDisable)
+	require.Equal(t, 1, repo.tempCalls)
+	require.False(t, repo.lastTempUntil.Before(before.Add(17*time.Second)))
+	require.False(t, repo.lastTempUntil.After(after.Add(17*time.Second)))
+}
+
 func TestHandleUpstreamErrorRelayClaudeCodeOnlyIsNotPoolUnavailable(t *testing.T) {
 	repo := &permanentKeywordAccountRepoStub{}
 	svc := &RateLimitService{accountRepo: repo}
