@@ -78,8 +78,7 @@ func firstNonEmptyTrimmed(values ...string) string {
 }
 
 func openAIResponsesStreamErrorSideEffectStatus(codeRaw, errTypeRaw, msgRaw string, body []byte) int {
-	combined := strings.ToLower(strings.Join([]string{codeRaw, errTypeRaw, msgRaw, string(body)}, " "))
-	combined = strings.Join(strings.Fields(strings.NewReplacer("_", " ", "-", " ").Replace(combined)), " ")
+	combined := normalizeLooseErrorText(strings.Join([]string{codeRaw, errTypeRaw, msgRaw, string(body)}, " "))
 	code := strings.ToLower(strings.TrimSpace(codeRaw))
 	errType := strings.ToLower(strings.TrimSpace(errTypeRaw))
 
@@ -88,9 +87,7 @@ func openAIResponsesStreamErrorSideEffectStatus(codeRaw, errTypeRaw, msgRaw stri
 		(strings.Contains(combined, "usage limit") && strings.Contains(combined, "reached")) {
 		return http.StatusTooManyRequests
 	}
-	if strings.Contains(combined, "credit balance") ||
-		strings.Contains(combined, "billing issue") ||
-		strings.Contains(combined, "payment required") {
+	if isRecoverableBillingQuotaText(combined) {
 		return http.StatusPaymentRequired
 	}
 	if strings.Contains(errType, "auth") ||

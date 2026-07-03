@@ -260,6 +260,74 @@ func TestRateLimitServiceHandleUpstreamErrorBillingQuotaSetsTempUnschedulable(t 
 	}
 }
 
+func TestRecoverableBillingQuotaTextIsConservative(t *testing.T) {
+	for _, text := range []string{
+		"Your credit balance is too low",
+		"billing_error",
+		"Payment required",
+		"You exceeded your current quota",
+		"Cloud Billing is not enabled for this project",
+		"insufficient credit balance",
+	} {
+		require.True(t, isRecoverableBillingQuotaText(text), "text should be treated as billing/quota: %s", text)
+	}
+
+	for _, text := range []string{
+		"Please include the credit balance field in the report",
+		"Credit balance documentation is unavailable",
+		"billing disabled flag is ignored by this endpoint",
+	} {
+		require.False(t, isRecoverableBillingQuotaText(text), "text should stay ambiguous: %s", text)
+	}
+}
+
+func TestRateLimitServiceHandleUpstreamErrorAmbiguousBillingTextDoesNotTempUnschedulable(t *testing.T) {
+	tests := []struct {
+		name string
+		body []byte
+	}{
+		{
+			name: "credit balance mention only",
+			body: []byte(`{"error":{"message":"Please include the credit balance field in the report"}}`),
+		},
+		{
+			name: "billing disabled mention only",
+			body: []byte(`{"error":{"message":"The billing disabled flag is ignored by this endpoint"}}`),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := &permanentKeywordAccountRepoStub{}
+			cache := &runtimeTempUnschedCacheStub{}
+			svc := NewRateLimitService(repo, nil, nil, nil, cache)
+			account := &Account{
+				ID:          20741,
+				Platform:    PlatformAnthropic,
+				Type:        AccountTypeAPIKey,
+				Status:      StatusActive,
+				Schedulable: true,
+			}
+
+			shouldDisable := svc.HandleUpstreamError(
+				context.Background(),
+				account,
+				http.StatusBadRequest,
+				http.Header{},
+				tt.body,
+			)
+
+			require.False(t, shouldDisable)
+			require.Equal(t, 0, repo.setErrorCalls)
+			require.Equal(t, 0, repo.tempCalls)
+			require.Equal(t, StatusActive, account.Status)
+			require.True(t, account.Schedulable)
+			require.Nil(t, account.TempUnschedulableUntil)
+			require.Empty(t, cache.states)
+		})
+	}
+}
+
 func TestRateLimitServiceHandleUpstreamErrorWorkspaceDeactivatedKeepsPermanentError(t *testing.T) {
 	repo := &permanentKeywordAccountRepoStub{}
 	svc := &RateLimitService{accountRepo: repo}

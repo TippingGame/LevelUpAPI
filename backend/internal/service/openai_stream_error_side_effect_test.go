@@ -109,3 +109,25 @@ func TestOpenAIResponsesStreamErrorSideEffect_RequestPolicyDoesNotTouchAccount(t
 	require.Empty(t, repo.tempCalls)
 	require.Empty(t, repo.rateLimitCalls)
 }
+
+func TestOpenAIResponsesStreamErrorSideEffect_AmbiguousBillingTextDoesNotTouchAccount(t *testing.T) {
+	repo := &openAIPassthroughFailoverRepo{}
+	svc := &OpenAIGatewayService{
+		rateLimitService: &RateLimitService{
+			accountRepo: repo,
+			cfg:         &config.Config{},
+		},
+	}
+	account := &Account{
+		ID:       70704,
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeOAuth,
+	}
+	payload := []byte(`{"type":"response.failed","response":{"status":"failed","error":{"type":"invalid_request_error","message":"Please summarize the credit balance documentation section"}}}`)
+
+	handled := svc.handleOpenAIResponsesStreamErrorSideEffect(context.Background(), account, http.Header{}, payload, "", false)
+
+	require.False(t, handled)
+	require.Empty(t, repo.tempCalls)
+	require.Empty(t, repo.rateLimitCalls)
+}

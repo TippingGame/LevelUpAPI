@@ -51,8 +51,7 @@ func anthropicStreamErrorStatusAndMessage(body []byte) (int, string) {
 		gjson.GetBytes(body, "message").String(),
 	)
 
-	combined := strings.ToLower(strings.Join([]string{errType, code, message, string(body)}, " "))
-	combined = strings.Join(strings.Fields(strings.NewReplacer("_", " ", "-", " ").Replace(combined)), " ")
+	combined := normalizeLooseErrorText(strings.Join([]string{errType, code, message, string(body)}, " "))
 	errType = strings.ToLower(strings.TrimSpace(errType))
 	code = strings.ToLower(strings.TrimSpace(code))
 
@@ -80,9 +79,8 @@ func anthropicStreamErrorStatusAndMessage(body []byte) (int, string) {
 		strings.Contains(combined, "forbidden"):
 		return http.StatusForbidden, message
 	case errType == "billing_error" ||
-		strings.Contains(combined, "credit balance") ||
-		strings.Contains(combined, "payment required") ||
-		strings.Contains(combined, "billing issue"):
+		errType == "billing error" ||
+		isRecoverableBillingQuotaText(combined):
 		return http.StatusPaymentRequired, message
 	case errType == "not_found_error" ||
 		strings.Contains(code, "not_found") ||

@@ -464,7 +464,7 @@ func (s *RateLimitService) HandleUpstreamError(ctx context.Context, account *Acc
 			msg := "Organization disabled (400): " + upstreamMsg
 			s.handleAuthError(ctx, account, msg)
 			shouldDisable = true
-		} else if account.Platform == PlatformAnthropic && strings.Contains(strings.ToLower(upstreamMsg), "credit balance") {
+		} else if account.Platform == PlatformAnthropic && isRecoverableBillingQuotaText(upstreamMsg) {
 			// Anthropic API key 余额不足（语义等同 402），临时停止调度；正常情况下已由 recoverableBillingQuotaErrorMessage 提前处理。
 			msg := "Credit balance exhausted (400): " + upstreamMsg
 			s.handleBillingQuotaTempUnschedulable(ctx, account, statusCode, msg)
@@ -1339,8 +1339,7 @@ func normalizedUpstreamErrorText(upstreamMsg string, responseBody []byte) string
 		}
 		parts = append(parts, string(responseBody))
 	}
-	normalized := strings.ToLower(strings.Join(parts, " "))
-	return strings.Join(strings.Fields(strings.NewReplacer("_", " ", "-", " ").Replace(normalized)), " ")
+	return normalizeLooseErrorText(strings.Join(parts, " "))
 }
 
 func recoverableBillingQuotaErrorMessage(account *Account, statusCode int, upstreamMsg string, responseBody []byte) (string, bool) {
@@ -1356,27 +1355,7 @@ func recoverableBillingQuotaErrorMessage(account *Account, statusCode int, upstr
 		return "", false
 	}
 
-	keywords := []string{
-		"your credit balance is too low",
-		"credit balance is too low",
-		"credit balance",
-		"billing hard limit has been reached",
-		"billing account is not active",
-		"billing account has been disabled",
-		"you exceeded your current quota",
-		"exceeded your current quota",
-		"insufficient quota",
-		"billing is not enabled",
-		"billing not enabled",
-		"billing disabled",
-	}
-	matched := statusCode == http.StatusPaymentRequired
-	for _, keyword := range keywords {
-		if strings.Contains(normalized, keyword) {
-			matched = true
-			break
-		}
-	}
+	matched := statusCode == http.StatusPaymentRequired || isRecoverableBillingQuotaText(normalized)
 	if !matched {
 		return "", false
 	}
