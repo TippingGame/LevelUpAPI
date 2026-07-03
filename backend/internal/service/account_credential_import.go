@@ -410,6 +410,12 @@ func accountCredentialImportSourceFromCodexManagerExport(item map[string]any) (A
 	if chatgptAccountID := importStringField(meta, "chatgpt_account_id", "chatgptAccountId"); chatgptAccountID != "" {
 		credentials["chatgpt_account_id"] = chatgptAccountID
 	}
+	if chatgptUserID := importStringField(meta, "chatgpt_user_id", "chatgptUserId"); chatgptUserID != "" {
+		credentials["chatgpt_user_id"] = chatgptUserID
+	}
+	if organizationID := importStringField(meta, "organization_id", "organizationId"); organizationID != "" {
+		credentials["organization_id"] = organizationID
+	}
 	if workspaceID := importStringField(meta, "workspace_id", "workspaceId"); workspaceID != "" {
 		credentials["workspace_id"] = workspaceID
 	}
