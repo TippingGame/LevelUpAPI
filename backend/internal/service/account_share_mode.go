@@ -1661,9 +1661,6 @@ func accountShareListingAccountUnavailableAt(listing *AccountShareListing, now t
 			return true
 		}
 	}
-	if listing.CodexQuotaProtectionReason != nil && strings.TrimSpace(*listing.CodexQuotaProtectionReason) != "" {
-		return listing.CodexQuotaProtectionResetAt == nil || now.Before(*listing.CodexQuotaProtectionResetAt)
-	}
 	return false
 }
 

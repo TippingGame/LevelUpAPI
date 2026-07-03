@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"html"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -952,8 +953,22 @@ func (s *APIKeyService) GetAvailableGroups(ctx context.Context, userID int64) ([
 			availableGroups = append(availableGroups, group)
 		}
 	}
+	sortAvailableAPIKeyGroups(availableGroups)
 
 	return availableGroups, nil
+}
+
+func sortAvailableAPIKeyGroups(groups []Group) {
+	sort.SliceStable(groups, func(i, j int) bool {
+		return apiKeyGroupScopeRank(groups[i]) < apiKeyGroupScopeRank(groups[j])
+	})
+}
+
+func apiKeyGroupScopeRank(group Group) int {
+	if NormalizeGroupScope(group.Scope) == GroupScopeUserPrivate {
+		return 1
+	}
+	return 0
 }
 
 // canUserBindGroupInternal 内部方法，检查用户是否可以绑定分组（使用预加载的订阅数据）

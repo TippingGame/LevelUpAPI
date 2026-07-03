@@ -2775,19 +2775,6 @@ func accountShareMembershipIdleDeadline(membership *service.AccountShareMembersh
 
 func accountShareAccountUnavailableConditionSQL(nowExpr string) string {
 	respectLocalStateSQL := accountShareAccountRespectsLocalSystemErrorStateSQL()
-	codexProtectedSQL := fmt.Sprintf(`(
-		a.platform = '%s'
-		AND a.type = '%s'
-		AND (
-			%s
-			OR %s
-		)
-	)`,
-		service.PlatformOpenAI,
-		service.AccountTypeOAuth,
-		accountShareCodexQuotaProtectedSQL("codex_5h_used_percent", "codex_5h_reset_at", "codex_5h_limit_percent", nowExpr),
-		accountShareCodexQuotaProtectedSQL("codex_7d_used_percent", "codex_7d_reset_at", "codex_7d_limit_percent", nowExpr),
-	)
 	return fmt.Sprintf(`(
 		a.status <> '%s'
 		OR a.schedulable = FALSE
@@ -2795,7 +2782,6 @@ func accountShareAccountUnavailableConditionSQL(nowExpr string) string {
 		OR (%s AND a.overload_until IS NOT NULL AND a.overload_until > %s)
 		OR (%s AND a.rate_limit_reset_at IS NOT NULL AND a.rate_limit_reset_at > %s)
 		OR (%s AND a.temp_unschedulable_until IS NOT NULL AND a.temp_unschedulable_until > %s AND NOT %s)
-		OR %s
 	)`,
 		service.StatusActive,
 		nowExpr,
@@ -2806,7 +2792,6 @@ func accountShareAccountUnavailableConditionSQL(nowExpr string) string {
 		respectLocalStateSQL,
 		nowExpr,
 		accountShareOpenAIOAuthRelayPoolTempUnschedIgnoredSQL("a"),
-		codexProtectedSQL,
 	)
 }
 

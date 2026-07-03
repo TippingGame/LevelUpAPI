@@ -1112,6 +1112,24 @@ func TestAccountShareListingUnavailableIgnoresOpenAIOAuthRelayPoolTempState(t *t
 	}
 }
 
+func TestAccountShareListingUnavailableKeepsCodexQuotaProtectedListingAvailable(t *testing.T) {
+	now := time.Now().UTC()
+	future := now.Add(time.Hour)
+	reason := CodexQuotaWindow5h
+	listing := &AccountShareListing{
+		AccountPlatform:             PlatformOpenAI,
+		AccountType:                 AccountTypeOAuth,
+		AccountStatus:               StatusActive,
+		AccountSchedulable:          true,
+		CodexQuotaProtectionReason:  &reason,
+		CodexQuotaProtectionResetAt: &future,
+	}
+
+	if accountShareListingAccountUnavailableAt(listing, now) {
+		t.Fatal("Codex quota protection should remain a warning for shared listings, not make the account unavailable")
+	}
+}
+
 func TestAccountShareModeResolveBindingCachesNonModeGroup(t *testing.T) {
 	repo := &accountShareModeRepoStub{modeGroup: accountShareModeBoolPtr(false)}
 	svc := &AccountShareModeService{repo: repo}

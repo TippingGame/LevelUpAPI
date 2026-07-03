@@ -568,7 +568,7 @@ func isPlatformQuotaPoolAccount(account Account) bool {
 }
 
 func (a *accountQuotaSummaryAccumulator) addAccount(account Account, now time.Time) {
-	a.addAccountWithSchedulability(account, now, account.IsSchedulableAt(now))
+	a.addAccountWithSchedulability(account, now, account.isSchedulableAt(now, false))
 }
 
 func (a *accountQuotaSummaryAccumulator) addAccountWithSchedulability(account Account, now time.Time, schedulable bool) {
@@ -625,7 +625,7 @@ func isAccountTemporarilyUnschedulable(account Account, now time.Time) bool {
 }
 
 func accountSchedulableInQuotaGroup(account Account, now time.Time, groupStatus, groupPlatform, requiredAccountLevel string, requireOAuthOnly, requirePrivacySet bool) bool {
-	if !account.IsSchedulableAt(now) {
+	if !account.isSchedulableAt(now, false) {
 		return false
 	}
 	if groupStatus != "" && groupStatus != StatusActive {

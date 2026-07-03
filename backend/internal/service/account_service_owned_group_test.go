@@ -2040,16 +2040,44 @@ func TestAccountQuotaDashboardWindowCapacityUsesOnlySchedulableAccounts(t *testi
 	dashboard := builder.finalize()
 
 	require.Equal(t, 6, dashboard.Totals.AccountCount)
-	require.Equal(t, 1, dashboard.Totals.SchedulableAccountCount)
+	require.Equal(t, 2, dashboard.Totals.SchedulableAccountCount)
 	require.Equal(t, 1, dashboard.Totals.RateLimitedAccountCount)
 	require.Equal(t, 1, dashboard.Totals.CodexQuotaProtectedCount)
 	require.Equal(t, 2, dashboard.Totals.ErrorAccountCount)
 	require.Equal(t, 1, dashboard.Totals.DisabledAccountCount)
 	require.Len(t, dashboard.Totals.UsageWindows, 2)
 	for _, window := range dashboard.Totals.UsageWindows {
-		require.Equal(t, 1, window.AccountCount)
-		require.Equal(t, 1, window.KnownAccountCount)
+		require.Equal(t, 2, window.AccountCount)
+		if window.Window == CodexQuotaWindow5h {
+			require.Equal(t, 2, window.KnownAccountCount)
+		} else {
+			require.Equal(t, 1, window.KnownAccountCount)
+		}
 	}
+}
+
+func TestAccountQuotaDashboardCountsCodexProtectedOpenAIAsSchedulable(t *testing.T) {
+	now := time.Date(2026, 5, 13, 10, 0, 0, 0, time.UTC)
+	usageReset := now.Add(2 * time.Hour).Format(time.RFC3339)
+
+	builder := newAccountQuotaDashboardBuilder(now)
+	builder.addAccount(Account{
+		ID:           1,
+		Platform:     PlatformOpenAI,
+		Type:         AccountTypeOAuth,
+		AccountLevel: AccountLevelPro,
+		Status:       StatusActive,
+		Schedulable:  true,
+		Extra: map[string]any{
+			"codex_5h_limit_percent": 80.0,
+			"codex_5h_used_percent":  81.0,
+			"codex_5h_reset_at":      usageReset,
+		},
+	})
+
+	dashboard := builder.finalize()
+	require.Equal(t, 1, dashboard.Totals.SchedulableAccountCount)
+	require.Equal(t, 1, dashboard.Totals.CodexQuotaProtectedCount)
 }
 
 func TestAccountQuotaGroupDashboardUsesGeneratedAtForSchedulability(t *testing.T) {
@@ -2079,6 +2107,40 @@ func TestAccountQuotaGroupDashboardUsesGeneratedAtForSchedulability(t *testing.T
 	require.Equal(t, 1, summaries[0].AccountCount)
 	require.Equal(t, 0, summaries[0].SchedulableAccountCount)
 	require.Equal(t, 1, summaries[0].RateLimitedAccountCount)
+}
+
+func TestAccountQuotaGroupDashboardCountsCodexProtectedOpenAIAsSchedulable(t *testing.T) {
+	now := time.Date(2026, 5, 13, 10, 0, 0, 0, time.UTC)
+	usageReset := now.Add(2 * time.Hour).Format(time.RFC3339)
+	group := &Group{
+		ID:                   102,
+		Name:                 "OpenAI pro pool",
+		Platform:             PlatformOpenAI,
+		Status:               StatusActive,
+		Scope:                GroupScopePublic,
+		RequiredAccountLevel: AccountLevelPro,
+	}
+
+	builder := newAccountQuotaGroupDashboardBuilder(now)
+	builder.addAccount(Account{
+		ID:           1,
+		Platform:     PlatformOpenAI,
+		Type:         AccountTypeOAuth,
+		AccountLevel: AccountLevelPro,
+		Status:       StatusActive,
+		Schedulable:  true,
+		Groups:       []*Group{group},
+		Extra: map[string]any{
+			"codex_5h_limit_percent": 80.0,
+			"codex_5h_used_percent":  81.0,
+			"codex_5h_reset_at":      usageReset,
+		},
+	})
+
+	summaries := builder.finalize()
+	require.Len(t, summaries, 1)
+	require.Equal(t, 1, summaries[0].SchedulableAccountCount)
+	require.Equal(t, 1, summaries[0].CodexQuotaProtectedCount)
 }
 
 func TestAccountQuotaGroupDashboardRequiredLevelAllowsOpenAIAPIKey(t *testing.T) {

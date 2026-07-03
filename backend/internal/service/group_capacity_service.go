@@ -113,7 +113,7 @@ func (s *GroupCapacityService) getGroupCapacity(ctx context.Context, groupID int
 	now := time.Now()
 	schedulableAccounts := accounts[:0]
 	for i := range accounts {
-		if accounts[i].IsSchedulableAt(now) {
+		if accounts[i].isSchedulableAt(now, false) {
 			schedulableAccounts = append(schedulableAccounts, accounts[i])
 		}
 	}

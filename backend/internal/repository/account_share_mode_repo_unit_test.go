@@ -738,6 +738,20 @@ func TestAccountShareUnavailableConditionGatesLocalStateForDefaultPoolMode(t *te
 	}
 }
 
+func TestAccountShareUnavailableConditionDoesNotTreatCodexQuotaAsUnavailable(t *testing.T) {
+	sql := strings.ToLower(accountShareAccountUnavailableConditionSQL("now()"))
+	for _, unexpected := range []string{
+		"codex_5h_used_percent",
+		"codex_7d_used_percent",
+		"codex_5h_reset_at",
+		"codex_7d_reset_at",
+	} {
+		if strings.Contains(sql, unexpected) {
+			t.Fatalf("unavailable condition should not include Codex quota protection %q:\n%s", unexpected, sql)
+		}
+	}
+}
+
 func TestAccountShareListingUsesApproximatePagination(t *testing.T) {
 	if accountShareListingUsesApproximatePagination(service.AccountShareListingFilters{}) {
 		t.Fatal("default listing filters should keep exact pagination")

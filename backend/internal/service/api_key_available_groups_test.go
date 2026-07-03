@@ -264,3 +264,31 @@ func TestAPIKeyService_GetAvailableGroups_OwnPrivateSubscriptionRequiresActiveSu
 	require.Len(t, available, 1)
 	require.Equal(t, int64(20), available[0].ID)
 }
+
+func TestAPIKeyService_GetAvailableGroups_SortsPrivateGroupsAfterPublicGroups(t *testing.T) {
+	userID := int64(7)
+	groups := []Group{
+		{ID: 30, Name: "private openai", Status: StatusActive, Scope: GroupScopeUserPrivate, SubscriptionType: SubscriptionTypeSubscription, IsExclusive: true, OwnerUserID: &userID},
+		{ID: 10, Name: "public openai", Status: StatusActive, Scope: GroupScopePublic, SubscriptionType: SubscriptionTypeStandard},
+		{ID: 31, Name: "private anthropic", Status: StatusActive, Scope: GroupScopeUserPrivate, SubscriptionType: SubscriptionTypeSubscription, IsExclusive: true, OwnerUserID: &userID},
+		{ID: 11, Name: "public anthropic", Status: StatusActive, Scope: GroupScopePublic, SubscriptionType: SubscriptionTypeStandard},
+	}
+	svc := NewAPIKeyService(
+		nil,
+		&apiKeyAvailableGroupsUserRepoStub{user: &User{ID: userID}},
+		&apiKeyAvailableGroupsGroupRepoStub{groups: groups},
+		&apiKeyAvailableGroupsSubRepoStub{active: []UserSubscription{
+			{UserID: userID, GroupID: 30, Status: SubscriptionStatusActive},
+			{UserID: userID, GroupID: 31, Status: SubscriptionStatusActive},
+		}},
+		nil,
+		nil,
+		nil,
+	)
+
+	available, err := svc.GetAvailableGroups(context.Background(), userID)
+
+	require.NoError(t, err)
+	require.Len(t, available, 4)
+	require.Equal(t, []int64{10, 11, 30, 31}, []int64{available[0].ID, available[1].ID, available[2].ID, available[3].ID})
+}
