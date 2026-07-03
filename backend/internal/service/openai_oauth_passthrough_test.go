@@ -971,6 +971,48 @@ func TestShouldFailoverOpenAIPassthroughResponse_PoolMode403Retryable(t *testing
 	))
 }
 
+func TestOpenAIGatewayService_FailoverPassthroughRequestPolicyDoesNotRetryOrTouchAccount(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(nil))
+	originalBody := []byte(`{"model":"gpt-5.2","stream":false,"input":[{"type":"text","text":"hi"}]}`)
+	repo := &openAIPassthroughFailoverRepo{}
+	svc := &OpenAIGatewayService{
+		cfg: &config.Config{},
+		rateLimitService: &RateLimitService{
+			accountRepo: repo,
+			cfg:         &config.Config{},
+		},
+	}
+	account := &Account{
+		ID:       124,
+		Name:     "pool-policy",
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeAPIKey,
+		Credentials: map[string]any{
+			"api_key":   "sk-test",
+			"pool_mode": true,
+		},
+	}
+	resp := &http.Response{
+		StatusCode: http.StatusForbidden,
+		Header:     http.Header{"x-request-id": []string{"rid-policy"}},
+		Body:       io.NopCloser(strings.NewReader(`{"error":{"type":"invalid_request_error","code":"content_policy_violation","message":"access denied by content policy"}}`)),
+	}
+
+	err := svc.handleFailoverErrorResponsePassthrough(context.Background(), resp, c, account, originalBody)
+
+	require.Error(t, err)
+	var failoverErr *UpstreamFailoverError
+	require.ErrorAs(t, err, &failoverErr)
+	require.Equal(t, http.StatusForbidden, failoverErr.StatusCode)
+	require.False(t, failoverErr.RetryableOnSameAccount)
+	require.Empty(t, repo.rateLimitCalls)
+	require.Empty(t, repo.tempCalls)
+}
+
 func TestOpenAIGatewayService_OpenAIPassthroughPoolMode403TriggerSameAccountRetry(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 

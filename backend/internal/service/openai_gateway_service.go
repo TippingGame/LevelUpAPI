@@ -3752,7 +3752,8 @@ func (s *OpenAIGatewayService) handleFailoverErrorResponsePassthrough(
 	}
 	setOpsUpstreamError(c, resp.StatusCode, upstreamMsg, upstreamDetail)
 	logOpenAIInstructionsRequiredDebug(ctx, c, account, resp.StatusCode, upstreamMsg, requestBody, body)
-	if s.rateLimitService != nil {
+	requestPolicyHit := isOpenAIRequestPolicyError(body, upstreamMsg)
+	if s.rateLimitService != nil && !requestPolicyHit {
 		requestedModel := extractOpenAIModelFromRequestBody(requestBody)
 		_ = s.rateLimitService.HandleUpstreamErrorForModel(ctx, account, requestedModel, resp.StatusCode, resp.Header, body)
 	}
@@ -3770,6 +3771,7 @@ func (s *OpenAIGatewayService) handleFailoverErrorResponsePassthrough(
 	})
 	retryableOnSameAccount := account != nil &&
 		account.IsPoolMode() &&
+		!requestPolicyHit &&
 		(account.IsPoolModeRetryableStatus(resp.StatusCode) || isOpenAITransientProcessingError(resp.StatusCode, upstreamMsg, body))
 	return &UpstreamFailoverError{
 		StatusCode:             resp.StatusCode,
@@ -3809,7 +3811,7 @@ func (s *OpenAIGatewayService) handleErrorResponsePassthrough(
 		})
 	}
 	logOpenAIInstructionsRequiredDebug(ctx, c, account, resp.StatusCode, upstreamMsg, requestBody, body)
-	if s.rateLimitService != nil && !cyberHit {
+	if s.rateLimitService != nil && !cyberHit && !isOpenAIRequestPolicyError(body, upstreamMsg) {
 		// Passthrough mode preserves the raw upstream error response, but runtime
 		// account state still needs to be updated so sticky routing can stop
 		// reusing a freshly rate-limited account.
