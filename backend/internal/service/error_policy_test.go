@@ -320,28 +320,52 @@ func TestCheckErrorPolicy_PoolModeEmptyCustomPolicySkipsPermanentKeyword(t *test
 }
 
 func TestCheckErrorPolicy_OpenAIRequestPolicyBypassesCustomErrorCodeFilter(t *testing.T) {
-	repo := &errorPolicyRepoStub{}
-	svc := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
-	account := &Account{
-		ID:       17,
-		Type:     AccountTypeAPIKey,
-		Platform: PlatformOpenAI,
-		Credentials: map[string]any{
-			"custom_error_codes_enabled": true,
-			"custom_error_codes":         []any{float64(http.StatusForbidden)},
+	tests := []struct {
+		name   string
+		status int
+		body   []byte
+	}{
+		{
+			name:   "content policy",
+			status: http.StatusForbidden,
+			body:   []byte(`{"error":{"code":"content_policy_violation","message":"This request violates the content policy"}}`),
+		},
+		{
+			name:   "image moderation",
+			status: http.StatusBadRequest,
+			body:   []byte(`{"error":{"type":"image_generation_user_error","code":"moderation_blocked","message":"Prompt was blocked."}}`),
 		},
 	}
 
-	result := svc.CheckErrorPolicy(
-		context.Background(),
-		account,
-		http.StatusForbidden,
-		[]byte(`{"error":{"code":"content_policy_violation","message":"This request violates the content policy"}}`),
-	)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := &errorPolicyRepoStub{}
+			svc := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+			account := &Account{
+				ID:       17,
+				Type:     AccountTypeAPIKey,
+				Platform: PlatformOpenAI,
+				Credentials: map[string]any{
+					"custom_error_codes_enabled": true,
+					"custom_error_codes": []any{
+						float64(http.StatusBadRequest),
+						float64(http.StatusForbidden),
+					},
+				},
+			}
 
-	require.Equal(t, ErrorPolicyNone, result)
-	require.Equal(t, 0, repo.setErrCalls)
-	require.Equal(t, 0, repo.tempCalls)
+			result := svc.CheckErrorPolicy(
+				context.Background(),
+				account,
+				tt.status,
+				tt.body,
+			)
+
+			require.Equal(t, ErrorPolicyNone, result)
+			require.Equal(t, 0, repo.setErrCalls)
+			require.Equal(t, 0, repo.tempCalls)
+		})
+	}
 }
 
 func TestCheckErrorPolicy_GeminiRequestPolicyBypassesCustomErrorCodeFilter(t *testing.T) {

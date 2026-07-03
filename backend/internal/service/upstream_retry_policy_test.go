@@ -123,6 +123,11 @@ func TestOpenAIRequestStateErrorsDoNotFailoverOrMatchCustomPolicy(t *testing.T) 
 			status: http.StatusNotFound,
 			body:   []byte(`{"type":"response.failed","response":{"status":"failed","error":{"code":"previous_response_not_found","type":"invalid_request_error","message":"previous response not found"}}}`),
 		},
+		{
+			name:   "image moderation blocked",
+			status: http.StatusBadRequest,
+			body:   []byte(`{"type":"response.failed","response":{"status":"failed","error":{"code":"moderation_blocked","type":"image_generation_user_error","message":"Prompt was blocked."}}}`),
+		},
 	}
 
 	for _, tc := range cases {
