@@ -2258,6 +2258,13 @@ func parseGenericRateLimitResetValue(raw string, now time.Time, maxAge time.Dura
 		}
 		return nil
 	}
+	if duration, err := time.ParseDuration(raw); err == nil {
+		if duration <= 0 || duration > maxAge {
+			return nil
+		}
+		resetAt := now.Add(duration)
+		return &resetAt
+	}
 	resetAt, err := http.ParseTime(raw)
 	if err != nil {
 		return nil
