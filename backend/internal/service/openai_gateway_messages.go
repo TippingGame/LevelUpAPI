@@ -570,14 +570,21 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 ) (*OpenAIForwardResult, error) {
 	requestID := resp.Header.Get("x-request-id")
 
-	if s.responseHeaderFilter != nil {
-		responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
+	headersWritten := false
+	writeStreamHeaders := func() {
+		if headersWritten {
+			return
+		}
+		headersWritten = true
+		if s.responseHeaderFilter != nil {
+			responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
+		}
+		c.Writer.Header().Set("Content-Type", "text/event-stream")
+		c.Writer.Header().Set("Cache-Control", "no-cache")
+		c.Writer.Header().Set("Connection", "keep-alive")
+		c.Writer.Header().Set("X-Accel-Buffering", "no")
+		c.Writer.WriteHeader(http.StatusOK)
 	}
-	c.Writer.Header().Set("Content-Type", "text/event-stream")
-	c.Writer.Header().Set("Cache-Control", "no-cache")
-	c.Writer.Header().Set("Connection", "keep-alive")
-	c.Writer.Header().Set("X-Accel-Buffering", "no")
-	c.Writer.WriteHeader(http.StatusOK)
 
 	state := apicompat.NewResponsesEventToAnthropicState()
 	state.Model = originalModel
@@ -587,7 +594,10 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 	var responseServiceTier string
 	firstChunk := true
 	var terminalErr error
+	var streamFailoverErr *UpstreamFailoverError
 	clientDisconnected := false
+	clientOutputStarted := false
+	pendingSSE := make([]string, 0, 4)
 
 	scanner := bufio.NewScanner(resp.Body)
 	maxLineSize := defaultMaxLineSize
@@ -610,6 +620,24 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 			Duration:            time.Since(startTime),
 			FirstTokenMs:        firstTokenMs,
 		}
+	}
+	flushPendingSSE := func() bool {
+		if clientDisconnected {
+			return false
+		}
+		writeStreamHeaders()
+		for _, pending := range pendingSSE {
+			if _, err := fmt.Fprint(c.Writer, pending); err != nil {
+				clientDisconnected = true
+				logger.L().Info("openai messages stream: client disconnected while flushing pending events",
+					zap.String("request_id", requestID),
+				)
+				break
+			}
+		}
+		pendingSSE = pendingSSE[:0]
+		clientOutputStarted = !clientDisconnected
+		return !clientDisconnected
 	}
 
 	// processDataLine handles a single "data: ..." SSE line from upstream.
@@ -658,17 +686,40 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 					UpstreamOutTok: usage.OutputTokens,
 				})
 				terminalErr = fmt.Errorf("openai cyber_policy: %s", clientMsg)
+				writeStreamHeaders()
 				if writeAnthropicStreamError(c, "invalid_request_error", clientMsg) {
+					clientDisconnected = true
 					return true
 				}
+				clientOutputStarted = true
 				return true
 			}
 			payloadBytes := []byte(payload)
-			s.handleOpenAIResponsesStreamErrorSideEffect(ctx, account, resp.Header, payloadBytes, extractOpenAISSEErrorMessage(payloadBytes), true)
+			message := extractOpenAISSEErrorMessage(payloadBytes)
+			if message == "" {
+				message = "Upstream response failed"
+			}
+			s.handleOpenAIResponsesStreamErrorSideEffect(ctx, account, resp.Header, payloadBytes, message, true)
+			shouldFailover := openAIStreamFailedEventShouldFailover(payloadBytes, message)
+			if !clientOutputStarted && shouldFailover {
+				streamFailoverErr = s.newOpenAIStreamFailoverError(c, account, false, requestID, payloadBytes, message)
+				return true
+			}
+			if !shouldFailover {
+				terminalErr = fmt.Errorf("openai request failed: %s", message)
+				writeStreamHeaders()
+				if writeAnthropicStreamError(c, "invalid_request_error", message) {
+					clientDisconnected = true
+					return true
+				}
+				clientOutputStarted = true
+				return true
+			}
 		}
 
 		// Convert to Anthropic events
 		events := apicompat.ResponsesEventToAnthropicEvents(&event, state)
+		eventStartsClientOutput := len(events) > 0 && event.Type != "response.created"
 		if !clientDisconnected {
 			for _, evt := range events {
 				sse, err := apicompat.ResponsesAnthropicEventToSSE(evt)
@@ -679,6 +730,13 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 					)
 					continue
 				}
+				if !clientOutputStarted && !eventStartsClientOutput {
+					pendingSSE = append(pendingSSE, sse)
+					continue
+				}
+				if !clientOutputStarted && !flushPendingSSE() {
+					break
+				}
 				if _, err := fmt.Fprint(c.Writer, sse); err != nil {
 					clientDisconnected = true
 					logger.L().Info("openai messages stream: client disconnected, continuing to drain upstream for billing",
@@ -688,7 +746,7 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 				}
 			}
 		}
-		if len(events) > 0 && !clientDisconnected {
+		if len(events) > 0 && !clientDisconnected && clientOutputStarted {
 			c.Writer.Flush()
 		}
 		return isTerminalEvent
@@ -703,11 +761,20 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 
 	// finalizeStream sends any remaining Anthropic events and returns the result.
 	finalizeStream := func() (*OpenAIForwardResult, error) {
+		if streamFailoverErr != nil {
+			if !clientOutputStarted {
+				return nil, streamFailoverErr
+			}
+			return resultWithUsage(), streamFailoverErr
+		}
 		if finalEvents := apicompat.FinalizeResponsesAnthropicStream(state); len(finalEvents) > 0 && !clientDisconnected {
 			for _, evt := range finalEvents {
 				sse, err := apicompat.ResponsesAnthropicEventToSSE(evt)
 				if err != nil {
 					continue
+				}
+				if !clientOutputStarted && !flushPendingSSE() {
+					break
 				}
 				if _, err := fmt.Fprint(c.Writer, sse); err != nil {
 					clientDisconnected = true
@@ -717,7 +784,7 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 					break
 				}
 			}
-			if !clientDisconnected {
+			if !clientDisconnected && clientOutputStarted {
 				c.Writer.Flush()
 			}
 		}
@@ -831,6 +898,9 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 
 		case <-keepaliveTicker.C:
 			if clientDisconnected {
+				continue
+			}
+			if !clientOutputStarted {
 				continue
 			}
 			if time.Since(lastDataAt) < keepaliveInterval {
