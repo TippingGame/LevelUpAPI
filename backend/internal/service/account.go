@@ -530,6 +530,16 @@ func (a *Account) IsOverloadedAt(now time.Time) bool {
 	return now.Before(*a.OverloadUntil)
 }
 
+func (a *Account) IsTemporarilyUnschedulableAt(now time.Time) bool {
+	if !shouldApplyLocalSystemErrorState(a) {
+		return false
+	}
+	if a.TempUnschedulableUntil == nil || !now.Before(*a.TempUnschedulableUntil) {
+		return false
+	}
+	return !shouldIgnoreTempUnschedulableForAccount(a, nil, a.TempUnschedulableReason)
+}
+
 func (a *Account) RespectsLocalSystemErrorState() bool {
 	return shouldApplyLocalSystemErrorState(a)
 }

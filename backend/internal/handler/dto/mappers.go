@@ -292,15 +292,23 @@ func AccountFromServiceShallow(a *service.Account) *Account {
 		CreatedAt:                 a.CreatedAt,
 		UpdatedAt:                 a.UpdatedAt,
 		Schedulable:               a.Schedulable,
-		RateLimitedAt:             a.RateLimitedAt,
-		RateLimitResetAt:          a.RateLimitResetAt,
-		OverloadUntil:             a.OverloadUntil,
-		TempUnschedulableUntil:    a.TempUnschedulableUntil,
-		TempUnschedulableReason:   a.TempUnschedulableReason,
 		SessionWindowStart:        a.SessionWindowStart,
 		SessionWindowEnd:          a.SessionWindowEnd,
 		SessionWindowStatus:       a.SessionWindowStatus,
 		GroupIDs:                  a.GroupIDs,
+	}
+
+	now := time.Now()
+	if a.IsRateLimitedAt(now) {
+		out.RateLimitedAt = a.RateLimitedAt
+		out.RateLimitResetAt = a.RateLimitResetAt
+	}
+	if a.IsOverloadedAt(now) {
+		out.OverloadUntil = a.OverloadUntil
+	}
+	if a.IsTemporarilyUnschedulableAt(now) {
+		out.TempUnschedulableUntil = a.TempUnschedulableUntil
+		out.TempUnschedulableReason = a.TempUnschedulableReason
 	}
 
 	if a.IsOpenAIOAuth() {
@@ -308,7 +316,6 @@ func AccountFromServiceShallow(a *service.Account) *Account {
 		limit7d := a.GetCodex7dLimitPercent()
 		out.Codex5hLimitPercent = &limit5h
 		out.Codex7dLimitPercent = &limit7d
-		now := time.Now()
 		if reason := a.CodexQuotaProtectionReasonAt(now); reason != "" {
 			out.CodexQuotaProtectionReason = &reason
 			out.CodexQuotaProtectionResetAt = a.CodexQuotaProtectionResetAt(now)
