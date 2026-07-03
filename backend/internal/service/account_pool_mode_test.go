@@ -5,6 +5,7 @@ package service
 import (
 	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -285,4 +286,93 @@ func TestIsPoolModeRetryableStatus_Account(t *testing.T) {
 			require.Equal(t, tt.expected, tt.account.IsPoolModeRetryableStatus(tt.statusCode))
 		})
 	}
+}
+
+func TestDefaultPoolModeIgnoresLocalSchedulabilityState(t *testing.T) {
+	now := time.Now()
+	future := now.Add(10 * time.Minute)
+
+	basePoolAccount := func() *Account {
+		return &Account{
+			Type:        AccountTypeAPIKey,
+			Platform:    PlatformOpenAI,
+			Status:      StatusActive,
+			Schedulable: true,
+			Credentials: map[string]any{
+				"pool_mode": true,
+			},
+		}
+	}
+
+	t.Run("rate limit", func(t *testing.T) {
+		account := basePoolAccount()
+		account.RateLimitResetAt = &future
+
+		require.True(t, account.IsSchedulableAt(now))
+		require.False(t, account.IsRateLimitedAt(now))
+	})
+
+	t.Run("overload", func(t *testing.T) {
+		account := basePoolAccount()
+		account.OverloadUntil = &future
+
+		require.True(t, account.IsSchedulableAt(now))
+		require.False(t, account.IsOverloadedAt(now))
+	})
+
+	t.Run("temp unschedulable", func(t *testing.T) {
+		account := basePoolAccount()
+		account.TempUnschedulableUntil = &future
+
+		require.True(t, account.IsSchedulableAt(now))
+	})
+
+	t.Run("manual status still blocks", func(t *testing.T) {
+		account := basePoolAccount()
+		account.Status = StatusError
+
+		require.False(t, account.IsSchedulableAt(now))
+	})
+
+	t.Run("manual schedulable flag still blocks", func(t *testing.T) {
+		account := basePoolAccount()
+		account.Schedulable = false
+
+		require.False(t, account.IsSchedulableAt(now))
+	})
+}
+
+func TestLocalSchedulabilityStateStillAppliesOutsideDefaultPoolMode(t *testing.T) {
+	now := time.Now()
+	future := now.Add(10 * time.Minute)
+
+	t.Run("non pool mode", func(t *testing.T) {
+		account := &Account{
+			Type:             AccountTypeAPIKey,
+			Platform:         PlatformOpenAI,
+			Status:           StatusActive,
+			Schedulable:      true,
+			RateLimitResetAt: &future,
+		}
+
+		require.False(t, account.IsSchedulableAt(now))
+		require.True(t, account.IsRateLimitedAt(now))
+	})
+
+	t.Run("pool mode custom error policy", func(t *testing.T) {
+		account := &Account{
+			Type:             AccountTypeAPIKey,
+			Platform:         PlatformOpenAI,
+			Status:           StatusActive,
+			Schedulable:      true,
+			RateLimitResetAt: &future,
+			Credentials: map[string]any{
+				"pool_mode":                  true,
+				"custom_error_codes_enabled": true,
+			},
+		}
+
+		require.False(t, account.IsSchedulableAt(now))
+		require.True(t, account.IsRateLimitedAt(now))
+	})
 }

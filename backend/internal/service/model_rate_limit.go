@@ -81,6 +81,9 @@ func (a *Account) modelRateLimitResetAt(scope string) *time.Time {
 	if a == nil || a.Extra == nil || scope == "" {
 		return nil
 	}
+	if !shouldApplyLocalSystemErrorState(a) {
+		return nil
+	}
 	rawLimits, ok := a.Extra[modelRateLimitsKey].(map[string]any)
 	if !ok {
 		return nil

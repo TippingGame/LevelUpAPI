@@ -456,17 +456,21 @@ func (a *Account) isSchedulableAt(now time.Time, includeCodexQuotaProtection boo
 	if a.AutoPauseOnExpired && a.ExpiresAt != nil && !now.Before(*a.ExpiresAt) {
 		return false
 	}
-	if a.OverloadUntil != nil && now.Before(*a.OverloadUntil) {
-		return false
-	}
-	if a.RateLimitResetAt != nil && now.Before(*a.RateLimitResetAt) {
-		return false
+	if shouldApplyLocalSystemErrorState(a) {
+		if a.OverloadUntil != nil && now.Before(*a.OverloadUntil) {
+			return false
+		}
+		if a.RateLimitResetAt != nil && now.Before(*a.RateLimitResetAt) {
+			return false
+		}
 	}
 	if includeCodexQuotaProtection && a.IsCodexQuotaProtectionActiveAt(now) {
 		return false
 	}
-	if a.TempUnschedulableUntil != nil && now.Before(*a.TempUnschedulableUntil) {
-		return false
+	if shouldApplyLocalSystemErrorState(a) {
+		if a.TempUnschedulableUntil != nil && now.Before(*a.TempUnschedulableUntil) {
+			return false
+		}
 	}
 	if a.IsAPIKeyOrBedrock() && a.IsQuotaExceededAt(now) {
 		return false
@@ -502,6 +506,9 @@ func (a *Account) IsRateLimited() bool {
 }
 
 func (a *Account) IsRateLimitedAt(now time.Time) bool {
+	if !shouldApplyLocalSystemErrorState(a) {
+		return false
+	}
 	if a.RateLimitResetAt == nil {
 		return false
 	}
@@ -513,6 +520,9 @@ func (a *Account) IsOverloaded() bool {
 }
 
 func (a *Account) IsOverloadedAt(now time.Time) bool {
+	if !shouldApplyLocalSystemErrorState(a) {
+		return false
+	}
 	if a.OverloadUntil == nil {
 		return false
 	}

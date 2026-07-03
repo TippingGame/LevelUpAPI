@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
+	"github.com/stretchr/testify/require"
 )
 
 func TestIsModelRateLimited(t *testing.T) {
@@ -388,4 +389,56 @@ func TestGetRateLimitRemainingTime(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestModelRateLimitRespectsPoolModePolicy(t *testing.T) {
+	future := time.Now().Add(10 * time.Minute).Format(time.RFC3339)
+	newLimitedAccount := func(credentials map[string]any) *Account {
+		return &Account{
+			Type:        AccountTypeAPIKey,
+			Platform:    PlatformAntigravity,
+			Status:      StatusActive,
+			Schedulable: true,
+			Credentials: credentials,
+			Extra: map[string]any{
+				modelRateLimitsKey: map[string]any{
+					"claude-sonnet-4-5": map[string]any{
+						"rate_limit_reset_at": future,
+					},
+				},
+			},
+		}
+	}
+
+	t.Run("default pool mode ignores stale model limit", func(t *testing.T) {
+		account := newLimitedAccount(map[string]any{
+			"pool_mode": true,
+		})
+
+		require.False(t, account.isModelRateLimitedWithContext(context.Background(), "claude-sonnet-4-5"))
+		require.Zero(t, account.GetRateLimitRemainingTimeWithContext(context.Background(), "claude-sonnet-4-5"))
+		require.True(t, account.IsSchedulableForModelWithContext(context.Background(), "claude-sonnet-4-5"))
+		require.False(t, shouldClearStickySession(account, "claude-sonnet-4-5"))
+	})
+
+	t.Run("pool mode custom policy keeps model limit", func(t *testing.T) {
+		account := newLimitedAccount(map[string]any{
+			"pool_mode":                  true,
+			"custom_error_codes_enabled": true,
+		})
+
+		require.True(t, account.isModelRateLimitedWithContext(context.Background(), "claude-sonnet-4-5"))
+		require.Greater(t, account.GetRateLimitRemainingTimeWithContext(context.Background(), "claude-sonnet-4-5"), time.Duration(0))
+		require.False(t, account.IsSchedulableForModelWithContext(context.Background(), "claude-sonnet-4-5"))
+		require.True(t, shouldClearStickySession(account, "claude-sonnet-4-5"))
+	})
+
+	t.Run("non pool mode keeps model limit", func(t *testing.T) {
+		account := newLimitedAccount(nil)
+
+		require.True(t, account.isModelRateLimitedWithContext(context.Background(), "claude-sonnet-4-5"))
+		require.Greater(t, account.GetRateLimitRemainingTimeWithContext(context.Background(), "claude-sonnet-4-5"), time.Duration(0))
+		require.False(t, account.IsSchedulableForModelWithContext(context.Background(), "claude-sonnet-4-5"))
+		require.True(t, shouldClearStickySession(account, "claude-sonnet-4-5"))
+	})
 }
