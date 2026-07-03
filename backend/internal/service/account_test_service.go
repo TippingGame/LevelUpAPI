@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"regexp"
@@ -111,12 +112,25 @@ func (s *AccountTestService) markAccountErrorFromTest(ctx context.Context, accou
 	writeCtx, cancel := rateLimitStateContext(ctx)
 	defer cancel()
 
+	var cache TempUnschedCache
+	if s.rateLimitService != nil {
+		cache = s.rateLimitService.tempUnschedCache
+	}
+	evictSource := strings.TrimSpace(source)
+	if evictSource == "" {
+		evictSource = "account_test_account_error"
+	}
+
 	if err := s.accountRepo.SetError(writeCtx, account.ID, errorMsg); err != nil {
+		slog.Warn("account_test.set_error_failed",
+			"account_id", account.ID,
+			"source", evictSource,
+			"error", err,
+		)
+		markAccountErrorRuntimeEvicted(writeCtx, cache, account, errorMsg, evictSource+"_runtime_fallback")
 		return
 	}
-	if s.rateLimitService != nil {
-		s.rateLimitService.EvictAccountErrorFromRuntimeCache(writeCtx, account.ID, errorMsg, source)
-	}
+	markAccountErrorRuntimeEvicted(writeCtx, cache, account, errorMsg, evictSource)
 }
 
 func (s *AccountTestService) handleAccountTestUpstreamError(ctx context.Context, account *Account, requestedModel string, statusCode int, headers http.Header, body []byte, fallbackErrorMsg string, fallbackSource string) {

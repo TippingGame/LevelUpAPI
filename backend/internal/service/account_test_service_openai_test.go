@@ -5,6 +5,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -82,6 +83,7 @@ type openAIAccountTestRepo struct {
 	clearedErrorID        int64
 	clearErrorContextErr  error
 	setErrorID            int64
+	setErrorErr           error
 	setErrorContextErr    error
 	setErrorMsg           string
 	tempUnschedID         int64
@@ -120,7 +122,7 @@ func (r *openAIAccountTestRepo) SetError(ctx context.Context, id int64, errorMsg
 	r.setErrorID = id
 	r.setErrorContextErr = ctx.Err()
 	r.setErrorMsg = errorMsg
-	return nil
+	return r.setErrorErr
 }
 
 func (r *openAIAccountTestRepo) SetTempUnschedulable(ctx context.Context, id int64, until time.Time, reason string) error {
@@ -129,6 +131,36 @@ func (r *openAIAccountTestRepo) SetTempUnschedulable(ctx context.Context, id int
 	r.tempUnschedReason = reason
 	r.tempUnschedContextErr = ctx.Err()
 	return nil
+}
+
+func TestAccountTestService_MarkAccountErrorRuntimeFallbackOnSetErrorFailure(t *testing.T) {
+	ctx, _ := newTestContext()
+	cancelTestRequest(ctx)
+
+	repo := &openAIAccountTestRepo{setErrorErr: errors.New("db timeout")}
+	cache := &runtimeTempUnschedCacheStub{}
+	svc := &AccountTestService{
+		accountRepo:      repo,
+		rateLimitService: NewRateLimitService(repo, nil, nil, nil, cache),
+	}
+	account := &Account{
+		ID:          82,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeOAuth,
+		Status:      StatusActive,
+		Schedulable: true,
+	}
+
+	svc.markAccountErrorFromTest(ctx.Request.Context(), account, "Authentication failed (401): bad token", "account_test_openai_401")
+
+	require.Equal(t, account.ID, repo.setErrorID)
+	require.NoError(t, repo.setErrorContextErr)
+	require.Equal(t, StatusError, account.Status)
+	require.False(t, account.Schedulable)
+	require.Contains(t, account.ErrorMessage, "bad token")
+	require.NotNil(t, cache.states[82])
+	require.Equal(t, "account_error", cache.states[82].MatchedKeyword)
+	require.Contains(t, cache.states[82].ErrorMessage, "bad token")
 }
 
 func TestAccountTestService_OpenAISuccessPersistsSnapshotFromHeaders(t *testing.T) {
