@@ -3947,12 +3947,19 @@ func openAIStreamFailedEventShouldFailover(payload []byte, message string) bool 
 		return true
 	}
 	nonRetryableMarkers := []string{
+		"context length",
+		"context window",
 		"invalid_request",
+		"maximum context",
+		"maximum token",
+		"prompt is too long",
+		"request too large",
 		"content_policy",
 		"policy",
 		"safety",
 		"high-risk cyber",
 		"not allowed",
+		"too many tokens",
 		"violat",
 	}
 	for _, marker := range nonRetryableMarkers {

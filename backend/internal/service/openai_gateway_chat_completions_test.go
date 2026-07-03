@@ -485,7 +485,7 @@ func TestForwardAsChatCompletions_RawChatSilentRefusalTriggersFailover(t *testin
 	require.Empty(t, rec.Body.String())
 }
 
-func TestForwardAsChatCompletions_BufferedResponseFailedTriggersFailover(t *testing.T) {
+func TestForwardAsChatCompletions_BufferedContextWindowFailureDoesNotFailover(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	rec := httptest.NewRecorder()
@@ -517,15 +517,15 @@ func TestForwardAsChatCompletions_BufferedResponseFailedTriggersFailover(t *test
 
 	result, err := svc.ForwardAsChatCompletions(context.Background(), c, account, []byte(`{"model":"gpt-5.5","stream":false,"messages":[{"role":"user","content":"large prompt"}]}`), "", "")
 	require.Error(t, err)
-	require.Nil(t, result)
+	require.NotNil(t, result)
 	var failoverErr *UpstreamFailoverError
-	require.ErrorAs(t, err, &failoverErr)
-	require.Equal(t, http.StatusBadGateway, failoverErr.StatusCode)
-	require.Contains(t, string(failoverErr.ResponseBody), "input exceeds the context window")
-	require.False(t, c.Writer.Written())
+	require.False(t, errors.As(err, &failoverErr))
+	require.True(t, c.Writer.Written())
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	require.Contains(t, rec.Body.String(), "input exceeds the context window")
 }
 
-func TestForwardAsChatCompletions_StreamResponseFailedTriggersFailoverBeforeFlush(t *testing.T) {
+func TestForwardAsChatCompletions_StreamContextWindowFailureDoesNotFailover(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	rec := httptest.NewRecorder()
@@ -560,12 +560,13 @@ func TestForwardAsChatCompletions_StreamResponseFailedTriggersFailoverBeforeFlus
 	body := []byte(`{"model":"gpt-5.5","stream":true,"messages":[{"role":"user","content":"` + strings.Repeat("large prompt ", 6000) + `"}]}`)
 	result, err := svc.ForwardAsChatCompletions(context.Background(), c, account, body, "", "")
 	require.Error(t, err)
-	require.Nil(t, result)
+	require.NotNil(t, result)
 	var failoverErr *UpstreamFailoverError
-	require.ErrorAs(t, err, &failoverErr)
-	require.Equal(t, http.StatusBadGateway, failoverErr.StatusCode)
-	require.Contains(t, string(failoverErr.ResponseBody), "input exceeds the context window")
-	require.False(t, c.Writer.Written())
+	require.False(t, errors.As(err, &failoverErr))
+	require.True(t, c.Writer.Written())
+	require.Contains(t, rec.Body.String(), "event: error")
+	require.Contains(t, rec.Body.String(), "input exceeds the context window")
+	require.Contains(t, rec.Body.String(), "data: [DONE]")
 }
 
 func TestForwardAsChatCompletions_StreamsUsageWithoutClientStreamOptions(t *testing.T) {

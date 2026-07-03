@@ -479,7 +479,15 @@ func (s *OpenAIGatewayService) handleChatBufferedStreamingResponse(
 	if strings.EqualFold(strings.TrimSpace(finalResponse.Status), "failed") {
 		payload, _ := json.Marshal(gin.H{"type": "response.failed", "response": finalResponse})
 		message := openAICompatFailedResponseMessage(finalResponse)
+		if message == "" {
+			message = "Upstream response failed"
+		}
 		s.handleOpenAIResponsesStreamErrorSideEffect(c.Request.Context(), account, resp.Header, payload, message, false)
+		if !openAIStreamFailedEventShouldFailover(payload, message) {
+			writeChatCompletionsError(c, http.StatusBadRequest, "invalid_request_error", message)
+			return resultForOpenAICompatFailure(requestID, usage, originalModel, billingModel, upstreamModel, finalResponse.ServiceTier, false, startTime),
+				fmt.Errorf("openai request failed: %s", message)
+		}
 		return nil, s.newOpenAIStreamFailoverError(c, account, false, requestID, payload, message)
 	}
 
@@ -623,7 +631,17 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 			}
 			payloadBytes := []byte(payload)
 			message := extractOpenAISSEErrorMessage(payloadBytes)
+			if message == "" {
+				message = "Upstream response failed"
+			}
 			s.handleOpenAIResponsesStreamErrorSideEffect(c.Request.Context(), account, resp.Header, payloadBytes, message, false)
+			if !openAIStreamFailedEventShouldFailover(payloadBytes, message) {
+				terminalErr = fmt.Errorf("openai request failed: %s", message)
+				if writeChatCompletionsStreamError(c, "invalid_request_error", message) {
+					return true
+				}
+				return true
+			}
 			streamFailoverErr = s.newOpenAIStreamFailoverError(c, account, false, requestID, payloadBytes, message)
 			return true
 		}
