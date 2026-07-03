@@ -68,6 +68,13 @@ function clearPendingAuthSessionStorage(): void {
   localStorage.removeItem(PENDING_AUTH_SESSION_KEY)
 }
 
+function getAuthErrorStatus(error: unknown): number | undefined {
+  const err = (error || {}) as { status?: unknown; response?: { status?: unknown } }
+  if (typeof err.status === 'number') return err.status
+  if (typeof err.response?.status === 'number') return err.response.status
+  return undefined
+}
+
 export const useAuthStore = defineStore('auth', () => {
   // ==================== State ====================
 
@@ -441,7 +448,7 @@ export const useAuthStore = defineStore('auth', () => {
       return userData
     } catch (error) {
       // If refresh fails with 401, clear auth state
-      if ((error as { status?: number }).status === 401) {
+      if (getAuthErrorStatus(error) === 401) {
         clearAuth({ preservePendingAuthSession: pendingAuthSession.value !== null })
       }
       throw error

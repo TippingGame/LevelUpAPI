@@ -364,6 +364,34 @@ describe('useAuthStore', () => {
       const store = useAuthStore()
       await expect(store.refreshUser()).rejects.toThrow('Not authenticated')
     })
+
+    it('原始 Axios 401 错误会清除认证状态', async () => {
+      mockLogin.mockResolvedValue(fakeAuthResponse)
+      const store = useAuthStore()
+      await store.login({ email: 'test@example.com', password: '123456' })
+
+      mockGetCurrentUser.mockRejectedValue({ response: { status: 401 } })
+
+      await expect(store.refreshUser()).rejects.toMatchObject({ response: { status: 401 } })
+      expect(store.token).toBeNull()
+      expect(store.user).toBeNull()
+      expect(localStorage.getItem('auth_token')).toBeNull()
+      expect(localStorage.getItem('auth_user')).toBeNull()
+    })
+
+    it('非 401 刷新错误不会清除认证状态', async () => {
+      mockLogin.mockResolvedValue(fakeAuthResponse)
+      const store = useAuthStore()
+      await store.login({ email: 'test@example.com', password: '123456' })
+
+      mockGetCurrentUser.mockRejectedValue({ response: { status: 500 } })
+
+      await expect(store.refreshUser()).rejects.toMatchObject({ response: { status: 500 } })
+      expect(store.token).toBe('test-token-123')
+      expect(store.user).toEqual(fakeUser)
+      expect(localStorage.getItem('auth_token')).toBe('test-token-123')
+      expect(JSON.parse(localStorage.getItem('auth_user')!)).toEqual(fakeUser)
+    })
   })
 
   // --- isSimpleMode ---
