@@ -155,6 +155,7 @@ type openAI429SnapshotRepo struct {
 	updateExtraContextErr error
 	bulkUpdatedIDs        []int64
 	bulkUpdatedPayload    AccountBulkUpdate
+	bulkUpdateContextErr  error
 }
 
 func (r *openAI429SnapshotRepo) SetRateLimited(ctx context.Context, id int64, _ time.Time) error {
@@ -169,9 +170,10 @@ func (r *openAI429SnapshotRepo) UpdateExtra(ctx context.Context, _ int64, update
 	return nil
 }
 
-func (r *openAI429SnapshotRepo) BulkUpdate(_ context.Context, ids []int64, updates AccountBulkUpdate) (int64, error) {
+func (r *openAI429SnapshotRepo) BulkUpdate(ctx context.Context, ids []int64, updates AccountBulkUpdate) (int64, error) {
 	r.bulkUpdatedIDs = append([]int64(nil), ids...)
 	r.bulkUpdatedPayload = updates
+	r.bulkUpdateContextErr = ctx.Err()
 	return int64(len(ids)), nil
 }
 
@@ -220,9 +222,13 @@ func TestHandle429_OpenAISyncsObservedPlanType(t *testing.T) {
 	}
 	body := []byte(`{"error":{"type":"usage_limit_reached","message":"limit reached","plan_type":"free","resets_at":1777283883}}`)
 
-	svc.handle429(context.Background(), account, http.Header{}, body)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	svc.handle429(ctx, account, http.Header{}, body)
 
 	require.Equal(t, []int64{account.ID}, repo.bulkUpdatedIDs)
+	require.NoError(t, repo.bulkUpdateContextErr)
 	require.Equal(t, "free", repo.bulkUpdatedPayload.Credentials["plan_type"])
 	require.Equal(t, "free", account.Credentials["plan_type"])
 	require.Equal(t, account.ID, repo.rateLimitedID)

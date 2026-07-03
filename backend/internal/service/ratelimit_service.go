@@ -1626,7 +1626,9 @@ func persistOpenAI429PlanType(ctx context.Context, repo AccountRepository, accou
 	if strings.EqualFold(current, planType) {
 		return
 	}
-	if _, err := repo.BulkUpdate(ctx, []int64{account.ID}, AccountBulkUpdate{
+	writeCtx, cancel := rateLimitStateContext(ctx)
+	defer cancel()
+	if _, err := repo.BulkUpdate(writeCtx, []int64{account.ID}, AccountBulkUpdate{
 		Credentials: map[string]any{"plan_type": planType},
 	}); err != nil {
 		slog.Warn("openai_429_plan_type_sync_failed", "account_id", account.ID, "plan_type", planType, "error", err)
@@ -2134,7 +2136,10 @@ func (s *RateLimitService) RecoverAccountState(ctx context.Context, accountID in
 
 	result := &SuccessfulTestRecoveryResult{}
 	if account.Status == StatusError {
-		if err := s.accountRepo.ClearError(ctx, accountID); err != nil {
+		writeCtx, cancel := rateLimitStateContext(ctx)
+		err := s.accountRepo.ClearError(writeCtx, accountID)
+		cancel()
+		if err != nil {
 			return nil, err
 		}
 		result.ClearedError = true

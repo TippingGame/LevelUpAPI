@@ -12,6 +12,23 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+type privacyModeUpdateRepo struct {
+	mockAccountRepoForGemini
+	updateExtraCalls      int
+	updateExtraContextErr error
+	lastExtraUpdates      map[string]any
+}
+
+func (r *privacyModeUpdateRepo) UpdateExtra(ctx context.Context, id int64, updates map[string]any) error {
+	r.updateExtraCalls++
+	r.updateExtraContextErr = ctx.Err()
+	r.lastExtraUpdates = make(map[string]any, len(updates))
+	for k, v := range updates {
+		r.lastExtraUpdates[k] = v
+	}
+	return nil
+}
+
 func TestAdminService_EnsureOpenAIPrivacy_RetriesNonSuccessModes(t *testing.T) {
 	t.Parallel()
 
@@ -46,6 +63,93 @@ func TestAdminService_EnsureOpenAIPrivacy_RetriesNonSuccessModes(t *testing.T) {
 			require.Equal(t, 1, privacyCalls)
 		})
 	}
+}
+
+func TestAdminService_EnsureOpenAIPrivacy_PersistsPrivacyModeAfterRequestCancel(t *testing.T) {
+	t.Parallel()
+
+	repo := &privacyModeUpdateRepo{}
+	svc := &adminServiceImpl{
+		accountRepo: repo,
+		privacyClientFactory: func(proxyURL string) (*req.Client, error) {
+			return nil, errors.New("factory failed")
+		},
+	}
+
+	account := &Account{
+		ID:       101,
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeOAuth,
+		Credentials: map[string]any{
+			"access_token": "token-1",
+		},
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	got := svc.EnsureOpenAIPrivacy(ctx, account)
+
+	require.Equal(t, PrivacyModeFailed, got)
+	require.Equal(t, 1, repo.updateExtraCalls)
+	require.NoError(t, repo.updateExtraContextErr)
+	require.Equal(t, PrivacyModeFailed, repo.lastExtraUpdates["privacy_mode"])
+	require.Equal(t, PrivacyModeFailed, account.Extra["privacy_mode"])
+}
+
+func TestAdminService_ForceOpenAIPrivacy_PersistsPrivacyModeAfterRequestCancel(t *testing.T) {
+	t.Parallel()
+
+	repo := &privacyModeUpdateRepo{}
+	svc := &adminServiceImpl{
+		accountRepo: repo,
+		privacyClientFactory: func(proxyURL string) (*req.Client, error) {
+			return nil, errors.New("factory failed")
+		},
+	}
+
+	account := &Account{
+		ID:       102,
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeOAuth,
+		Credentials: map[string]any{
+			"access_token": "token-2",
+		},
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	got := svc.ForceOpenAIPrivacy(ctx, account)
+
+	require.Equal(t, PrivacyModeFailed, got)
+	require.Equal(t, 1, repo.updateExtraCalls)
+	require.NoError(t, repo.updateExtraContextErr)
+	require.Equal(t, PrivacyModeFailed, repo.lastExtraUpdates["privacy_mode"])
+	require.Equal(t, PrivacyModeFailed, account.Extra["privacy_mode"])
+}
+
+func TestAdminService_PersistAccountPrivacyMode_UpdatesAntigravityExtraAfterRequestCancel(t *testing.T) {
+	t.Parallel()
+
+	repo := &privacyModeUpdateRepo{}
+	svc := &adminServiceImpl{accountRepo: repo}
+	account := &Account{
+		ID:       103,
+		Platform: PlatformAntigravity,
+		Extra: map[string]any{
+			"kept": "yes",
+		},
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err := svc.persistAccountPrivacyMode(ctx, account, AntigravityPrivacySet)
+
+	require.NoError(t, err)
+	require.Equal(t, 1, repo.updateExtraCalls)
+	require.NoError(t, repo.updateExtraContextErr)
+	require.Equal(t, AntigravityPrivacySet, repo.lastExtraUpdates["privacy_mode"])
+	require.Equal(t, "yes", account.Extra["kept"])
+	require.Equal(t, AntigravityPrivacySet, account.Extra["privacy_mode"])
 }
 
 func TestTokenRefreshService_ensureOpenAIPrivacy_RetriesNonSuccessModes(t *testing.T) {

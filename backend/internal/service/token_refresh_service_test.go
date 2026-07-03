@@ -20,6 +20,7 @@ type tokenRefreshAccountRepo struct {
 	updateCredentialsCalls   int
 	updateExtraCalls         int
 	setErrorCalls            int
+	clearErrorCalls          int
 	clearTempCalls           int
 	setTempUnschedCalls      int
 	lastAccount              *Account
@@ -27,6 +28,7 @@ type tokenRefreshAccountRepo struct {
 	updateErr                error
 	updateExtraContextErr    error
 	setErrorContextErr       error
+	clearErrorContextErr     error
 	clearTempContextErr      error
 	setTempUnschedContextErr error
 }
@@ -69,6 +71,12 @@ func (r *tokenRefreshAccountRepo) UpdateExtra(ctx context.Context, id int64, upd
 func (r *tokenRefreshAccountRepo) SetError(ctx context.Context, id int64, errorMsg string) error {
 	r.setErrorCalls++
 	r.setErrorContextErr = ctx.Err()
+	return nil
+}
+
+func (r *tokenRefreshAccountRepo) ClearError(ctx context.Context, id int64) error {
+	r.clearErrorCalls++
+	r.clearErrorContextErr = ctx.Err()
 	return nil
 }
 
@@ -738,6 +746,32 @@ func TestTokenRefreshService_PostRefreshActionsResyncsSchedulerAfterPrivacyUpdat
 	require.NoError(t, scheduler.contextErrs[1])
 	require.NotContains(t, scheduler.setAccounts[0].Extra, "privacy_mode")
 	require.Equal(t, PrivacyModeFailed, scheduler.setAccounts[1].Extra["privacy_mode"])
+}
+
+func TestTokenRefreshService_PostRefreshActionsClearsMissingProjectIDAfterRequestCancel(t *testing.T) {
+	repo := &tokenRefreshAccountRepo{}
+	cfg := &config.Config{
+		TokenRefresh: config.TokenRefreshConfig{
+			MaxRetries:          1,
+			RetryBackoffSeconds: 0,
+		},
+	}
+	service := NewTokenRefreshService(repo, nil, nil, nil, nil, nil, nil, cfg, nil)
+	account := &Account{
+		ID:           125,
+		Platform:     PlatformAntigravity,
+		Type:         AccountTypeOAuth,
+		Status:       StatusError,
+		ErrorMessage: "missing_project_id: project id unavailable",
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	service.postRefreshActions(ctx, account)
+
+	require.Equal(t, 1, repo.clearErrorCalls)
+	require.NoError(t, repo.clearErrorContextErr)
 }
 
 // TestTokenRefreshService_RefreshWithRetry_NonRetryableErrorAllPlatforms 测试所有平台不可重试错误都 SetError

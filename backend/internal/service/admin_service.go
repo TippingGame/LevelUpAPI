@@ -4619,7 +4619,9 @@ func (s *adminServiceImpl) EnsureOpenAIPrivacy(ctx context.Context, account *Acc
 		return ""
 	}
 
-	_ = s.accountRepo.UpdateExtra(ctx, account.ID, map[string]any{"privacy_mode": mode})
+	if err := s.persistAccountPrivacyMode(ctx, account, mode); err != nil {
+		logger.LegacyPrintf("service.admin", "update_openai_privacy_mode_failed: account_id=%d err=%v", account.ID, err)
+	}
 	return mode
 }
 
@@ -4649,14 +4651,10 @@ func (s *adminServiceImpl) ForceOpenAIPrivacy(ctx context.Context, account *Acco
 		return ""
 	}
 
-	if err := s.accountRepo.UpdateExtra(ctx, account.ID, map[string]any{"privacy_mode": mode}); err != nil {
+	if err := s.persistAccountPrivacyMode(ctx, account, mode); err != nil {
 		logger.LegacyPrintf("service.admin", "force_update_openai_privacy_mode_failed: account_id=%d err=%v", account.ID, err)
 		return mode
 	}
-	if account.Extra == nil {
-		account.Extra = make(map[string]any)
-	}
-	account.Extra["privacy_mode"] = mode
 	return mode
 }
 
@@ -4692,11 +4690,10 @@ func (s *adminServiceImpl) EnsureAntigravityPrivacy(ctx context.Context, account
 		return ""
 	}
 
-	if err := s.accountRepo.UpdateExtra(ctx, account.ID, map[string]any{"privacy_mode": mode}); err != nil {
+	if err := s.persistAccountPrivacyMode(ctx, account, mode); err != nil {
 		logger.LegacyPrintf("service.admin", "update_antigravity_privacy_mode_failed: account_id=%d err=%v", account.ID, err)
 		return mode
 	}
-	applyAntigravityPrivacyMode(account, mode)
 	return mode
 }
 
@@ -4725,10 +4722,31 @@ func (s *adminServiceImpl) ForceAntigravityPrivacy(ctx context.Context, account 
 		return ""
 	}
 
-	if err := s.accountRepo.UpdateExtra(ctx, account.ID, map[string]any{"privacy_mode": mode}); err != nil {
+	if err := s.persistAccountPrivacyMode(ctx, account, mode); err != nil {
 		logger.LegacyPrintf("service.admin", "force_update_antigravity_privacy_mode_failed: account_id=%d err=%v", account.ID, err)
 		return mode
 	}
-	applyAntigravityPrivacyMode(account, mode)
 	return mode
+}
+
+func (s *adminServiceImpl) persistAccountPrivacyMode(ctx context.Context, account *Account, mode string) error {
+	if s == nil || s.accountRepo == nil || account == nil || strings.TrimSpace(mode) == "" {
+		return nil
+	}
+
+	writeCtx, cancel := rateLimitStateContext(ctx)
+	defer cancel()
+
+	if err := s.accountRepo.UpdateExtra(writeCtx, account.ID, map[string]any{"privacy_mode": mode}); err != nil {
+		return err
+	}
+	if account.Platform == PlatformAntigravity {
+		applyAntigravityPrivacyMode(account, mode)
+		return nil
+	}
+	if account.Extra == nil {
+		account.Extra = make(map[string]any)
+	}
+	account.Extra["privacy_mode"] = mode
+	return nil
 }

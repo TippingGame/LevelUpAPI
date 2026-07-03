@@ -360,7 +360,10 @@ func (s *TokenRefreshService) postRefreshActions(ctx context.Context, account *A
 	if account.Platform == PlatformAntigravity &&
 		account.Status == StatusError &&
 		strings.Contains(account.ErrorMessage, "missing_project_id:") {
-		if clearErr := s.accountRepo.ClearError(ctx, account.ID); clearErr != nil {
+		writeCtx, cancel := rateLimitStateContext(ctx)
+		clearErr := s.accountRepo.ClearError(writeCtx, account.ID)
+		cancel()
+		if clearErr != nil {
 			slog.Warn("token_refresh.clear_account_error_failed",
 				"account_id", account.ID,
 				"error", clearErr,

@@ -63,42 +63,58 @@ func newTestContext() (*gin.Context, *httptest.ResponseRecorder) {
 	return c, rec
 }
 
-type openAIAccountTestRepo struct {
-	mockAccountRepoForGemini
-	updatedExtra       map[string]any
-	bulkUpdatedIDs     []int64
-	bulkUpdatedPayload AccountBulkUpdate
-	rateLimitedID      int64
-	rateLimitedAt      *time.Time
-	clearedErrorID     int64
-	setErrorID         int64
-	setErrorMsg        string
+func cancelTestRequest(c *gin.Context) {
+	ctx, cancel := context.WithCancel(c.Request.Context())
+	c.Request = c.Request.WithContext(ctx)
+	cancel()
 }
 
-func (r *openAIAccountTestRepo) UpdateExtra(_ context.Context, _ int64, updates map[string]any) error {
+type openAIAccountTestRepo struct {
+	mockAccountRepoForGemini
+	updatedExtra          map[string]any
+	updateExtraContextErr error
+	bulkUpdatedIDs        []int64
+	bulkUpdatedPayload    AccountBulkUpdate
+	bulkUpdateContextErr  error
+	rateLimitedID         int64
+	rateLimitedAt         *time.Time
+	rateLimitedContextErr error
+	clearedErrorID        int64
+	clearErrorContextErr  error
+	setErrorID            int64
+	setErrorContextErr    error
+	setErrorMsg           string
+}
+
+func (r *openAIAccountTestRepo) UpdateExtra(ctx context.Context, _ int64, updates map[string]any) error {
 	r.updatedExtra = updates
+	r.updateExtraContextErr = ctx.Err()
 	return nil
 }
 
-func (r *openAIAccountTestRepo) BulkUpdate(_ context.Context, ids []int64, updates AccountBulkUpdate) (int64, error) {
+func (r *openAIAccountTestRepo) BulkUpdate(ctx context.Context, ids []int64, updates AccountBulkUpdate) (int64, error) {
 	r.bulkUpdatedIDs = append([]int64(nil), ids...)
 	r.bulkUpdatedPayload = updates
+	r.bulkUpdateContextErr = ctx.Err()
 	return int64(len(ids)), nil
 }
 
-func (r *openAIAccountTestRepo) SetRateLimited(_ context.Context, id int64, resetAt time.Time) error {
+func (r *openAIAccountTestRepo) SetRateLimited(ctx context.Context, id int64, resetAt time.Time) error {
 	r.rateLimitedID = id
 	r.rateLimitedAt = &resetAt
+	r.rateLimitedContextErr = ctx.Err()
 	return nil
 }
 
-func (r *openAIAccountTestRepo) ClearError(_ context.Context, id int64) error {
+func (r *openAIAccountTestRepo) ClearError(ctx context.Context, id int64) error {
 	r.clearedErrorID = id
+	r.clearErrorContextErr = ctx.Err()
 	return nil
 }
 
-func (r *openAIAccountTestRepo) SetError(_ context.Context, id int64, errorMsg string) error {
+func (r *openAIAccountTestRepo) SetError(ctx context.Context, id int64, errorMsg string) error {
 	r.setErrorID = id
+	r.setErrorContextErr = ctx.Err()
 	r.setErrorMsg = errorMsg
 	return nil
 }
@@ -331,6 +347,7 @@ func TestAccountTestService_OpenAIStreamEOFBeforeCompletedFails(t *testing.T) {
 func TestAccountTestService_OpenAI429PersistsSnapshotAndRateLimitState(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	ctx, _ := newTestContext()
+	cancelTestRequest(ctx)
 
 	resp := newJSONResponse(http.StatusTooManyRequests, `{"error":{"type":"usage_limit_reached","message":"limit reached","resets_at":1777283883}}`)
 	resp.Header.Set("x-codex-primary-used-percent", "100")
@@ -355,10 +372,13 @@ func TestAccountTestService_OpenAI429PersistsSnapshotAndRateLimitState(t *testin
 	err := svc.testOpenAIAccountConnection(ctx, account, "gpt-5.4", "", "")
 	require.Error(t, err)
 	require.NotEmpty(t, repo.updatedExtra)
+	require.NoError(t, repo.updateExtraContextErr)
 	require.Equal(t, 100.0, repo.updatedExtra["codex_5h_used_percent"])
 	require.Equal(t, account.ID, repo.rateLimitedID)
+	require.NoError(t, repo.rateLimitedContextErr)
 	require.NotNil(t, repo.rateLimitedAt)
 	require.Equal(t, account.ID, repo.clearedErrorID)
+	require.NoError(t, repo.clearErrorContextErr)
 	require.Equal(t, StatusActive, account.Status)
 	require.Empty(t, account.ErrorMessage)
 	require.NotNil(t, account.RateLimitResetAt)
@@ -367,6 +387,7 @@ func TestAccountTestService_OpenAI429PersistsSnapshotAndRateLimitState(t *testin
 func TestAccountTestService_OpenAI429BodyOnlyPersistsRateLimitAndClearsStaleError(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	ctx, _ := newTestContext()
+	cancelTestRequest(ctx)
 
 	resp := newJSONResponse(http.StatusTooManyRequests, `{"error":{"type":"usage_limit_reached","message":"limit reached","resets_at":"1777283883"}}`)
 
@@ -386,8 +407,10 @@ func TestAccountTestService_OpenAI429BodyOnlyPersistsRateLimitAndClearsStaleErro
 	err := svc.testOpenAIAccountConnection(ctx, account, "gpt-5.4", "", "")
 	require.Error(t, err)
 	require.Equal(t, account.ID, repo.rateLimitedID)
+	require.NoError(t, repo.rateLimitedContextErr)
 	require.NotNil(t, repo.rateLimitedAt)
 	require.Equal(t, account.ID, repo.clearedErrorID)
+	require.NoError(t, repo.clearErrorContextErr)
 	require.Equal(t, StatusActive, account.Status)
 	require.Empty(t, account.ErrorMessage)
 	require.NotNil(t, account.RateLimitResetAt)
@@ -397,6 +420,7 @@ func TestAccountTestService_OpenAI429BodyOnlyPersistsRateLimitAndClearsStaleErro
 func TestAccountTestService_OpenAI429SyncsObservedPlanType(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	ctx, _ := newTestContext()
+	cancelTestRequest(ctx)
 
 	resp := newJSONResponse(http.StatusTooManyRequests, `{"error":{"type":"usage_limit_reached","message":"limit reached","plan_type":"free","resets_at":1777283883}}`)
 
@@ -415,9 +439,11 @@ func TestAccountTestService_OpenAI429SyncsObservedPlanType(t *testing.T) {
 	err := svc.testOpenAIAccountConnection(ctx, account, "gpt-5.4", "", "")
 	require.Error(t, err)
 	require.Equal(t, []int64{account.ID}, repo.bulkUpdatedIDs)
+	require.NoError(t, repo.bulkUpdateContextErr)
 	require.Equal(t, "free", repo.bulkUpdatedPayload.Credentials["plan_type"])
 	require.Equal(t, "free", account.Credentials["plan_type"])
 	require.Equal(t, account.ID, repo.rateLimitedID)
+	require.NoError(t, repo.rateLimitedContextErr)
 	require.NotNil(t, account.RateLimitResetAt)
 }
 
@@ -480,6 +506,7 @@ func TestAccountTestService_OpenAI429WithoutResetSignalDoesNotMutateRuntimeState
 func TestAccountTestService_OpenAI401SetsPermanentErrorAndRuntimeEviction(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	ctx, _ := newTestContext()
+	cancelTestRequest(ctx)
 
 	resp := newJSONResponse(http.StatusUnauthorized, `{"error":"bad token"}`)
 
@@ -499,6 +526,7 @@ func TestAccountTestService_OpenAI401SetsPermanentErrorAndRuntimeEviction(t *tes
 	err := svc.testOpenAIAccountConnection(ctx, account, "gpt-5.4", "", "")
 	require.Error(t, err)
 	require.Equal(t, account.ID, repo.setErrorID)
+	require.NoError(t, repo.setErrorContextErr)
 	require.Contains(t, repo.setErrorMsg, "Authentication failed (401)")
 	require.Zero(t, repo.rateLimitedID)
 	require.Zero(t, repo.clearedErrorID)

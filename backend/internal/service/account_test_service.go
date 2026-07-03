@@ -108,12 +108,28 @@ func (s *AccountTestService) markAccountErrorFromTest(ctx context.Context, accou
 	if s == nil || s.accountRepo == nil || account == nil {
 		return
 	}
-	if err := s.accountRepo.SetError(ctx, account.ID, errorMsg); err != nil {
+	writeCtx, cancel := rateLimitStateContext(ctx)
+	defer cancel()
+
+	if err := s.accountRepo.SetError(writeCtx, account.ID, errorMsg); err != nil {
 		return
 	}
 	if s.rateLimitService != nil {
-		s.rateLimitService.EvictAccountErrorFromRuntimeCache(ctx, account.ID, errorMsg, source)
+		s.rateLimitService.EvictAccountErrorFromRuntimeCache(writeCtx, account.ID, errorMsg, source)
 	}
+}
+
+func (s *AccountTestService) persistAccountExtraFromTest(ctx context.Context, account *Account, updates map[string]any) {
+	if s == nil || s.accountRepo == nil || account == nil || len(updates) == 0 {
+		return
+	}
+	writeCtx, cancel := rateLimitStateContext(ctx)
+	defer cancel()
+
+	if err := s.accountRepo.UpdateExtra(writeCtx, account.ID, updates); err != nil {
+		return
+	}
+	mergeAccountExtra(account, updates)
 }
 
 func (s *AccountTestService) validateUpstreamBaseURL(raw string) (string, error) {
@@ -663,8 +679,7 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 
 	if isOAuth && s.accountRepo != nil {
 		if updates, err := extractOpenAICodexProbeUpdates(resp); err == nil && len(updates) > 0 {
-			_ = s.accountRepo.UpdateExtra(ctx, account.ID, updates)
-			mergeAccountExtra(account, updates)
+			s.persistAccountExtraFromTest(ctx, account, updates)
 		}
 	}
 
@@ -822,8 +837,7 @@ func (s *AccountTestService) testOpenAICompactConnection(c *gin.Context, account
 	if err != nil {
 		if s.accountRepo != nil {
 			updates := buildOpenAICompactProbeExtraUpdates(nil, nil, err, time.Now())
-			_ = s.accountRepo.UpdateExtra(ctx, account.ID, updates)
-			mergeAccountExtra(account, updates)
+			s.persistAccountExtraFromTest(ctx, account, updates)
 		}
 		return s.sendErrorAndEnd(c, fmt.Sprintf("Request failed: %s", err.Error()))
 	}
@@ -837,8 +851,7 @@ func (s *AccountTestService) testOpenAICompactConnection(c *gin.Context, account
 			updates = mergeExtraUpdates(updates, codexUpdates)
 		}
 		if len(updates) > 0 {
-			_ = s.accountRepo.UpdateExtra(ctx, account.ID, updates)
-			mergeAccountExtra(account, updates)
+			s.persistAccountExtraFromTest(ctx, account, updates)
 		}
 		// 探测如返回 429,主动同步限流状态,避免后续短时间内继续选中。
 		if resp.StatusCode == http.StatusTooManyRequests {
@@ -877,7 +890,10 @@ func (s *AccountTestService) reconcileOpenAI429State(ctx context.Context, accoun
 		return
 	}
 
-	if err := s.accountRepo.SetRateLimited(ctx, account.ID, *resetAt); err != nil {
+	writeCtx, cancel := rateLimitStateContext(ctx)
+	defer cancel()
+
+	if err := s.accountRepo.SetRateLimited(writeCtx, account.ID, *resetAt); err != nil {
 		return
 	}
 
@@ -886,7 +902,7 @@ func (s *AccountTestService) reconcileOpenAI429State(ctx context.Context, accoun
 	account.RateLimitResetAt = resetAt
 
 	if account.Status == StatusError {
-		if err := s.accountRepo.ClearError(ctx, account.ID); err != nil {
+		if err := s.accountRepo.ClearError(writeCtx, account.ID); err != nil {
 			return
 		}
 		account.Status = StatusActive

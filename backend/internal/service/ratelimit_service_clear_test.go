@@ -27,6 +27,7 @@ type rateLimitClearRepoStub struct {
 	clearAntigravityErr        error
 	clearModelRateLimitErr     error
 	clearTempUnschedulableErr  error
+	clearErrorContextErr       error
 	clearRateLimitContextErr   error
 	clearAntigravityContextErr error
 	clearModelContextErr       error
@@ -43,6 +44,7 @@ func (r *rateLimitClearRepoStub) GetByID(ctx context.Context, id int64) (*Accoun
 
 func (r *rateLimitClearRepoStub) ClearError(ctx context.Context, id int64) error {
 	r.clearErrorCalls++
+	r.clearErrorContextErr = ctx.Err()
 	return r.clearErrorErr
 }
 
@@ -265,7 +267,10 @@ func TestRateLimitService_RecoverAccountAfterSuccessfulTest_ClearsErrorAndRateLi
 	cache := &tempUnschedCacheRecorder{}
 	svc := NewRateLimitService(repo, nil, &config.Config{}, nil, cache)
 
-	result, err := svc.RecoverAccountAfterSuccessfulTest(context.Background(), 42)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	result, err := svc.RecoverAccountAfterSuccessfulTest(ctx, 42)
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	require.True(t, result.ClearedError)
@@ -273,6 +278,7 @@ func TestRateLimitService_RecoverAccountAfterSuccessfulTest_ClearsErrorAndRateLi
 
 	require.Equal(t, 1, repo.getByIDCalls)
 	require.Equal(t, 1, repo.clearErrorCalls)
+	require.NoError(t, repo.clearErrorContextErr)
 	require.Equal(t, 1, repo.clearRateLimitCalls)
 	require.Equal(t, 1, repo.clearAntigravityCalls)
 	require.Equal(t, 1, repo.clearModelRateLimitCalls)
