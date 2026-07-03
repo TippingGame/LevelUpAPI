@@ -2805,11 +2805,7 @@ func accountShareAccountUnavailableConditionSQL(nowExpr string) string {
 }
 
 func accountShareAccountRespectsLocalSystemErrorStateSQL() string {
-	return fmt.Sprintf(`NOT (
-		a.type IN ('%s', '%s')
-		AND LOWER(COALESCE(a.credentials->>'pool_mode', '')) = 'true'
-		AND LOWER(COALESCE(a.credentials->>'custom_error_codes_enabled', '')) <> 'true'
-	)`, service.AccountTypeAPIKey, service.AccountTypeBedrock)
+	return accountRespectsLocalSystemErrorStateSQL("a")
 }
 
 func accountShareListingAvailableConditionSQL(nowExpr string) string {

@@ -578,6 +578,93 @@ func (s *GroupRepoSuite) TestListWithFilters_RateLimitedAccountCount() {
 	s.Assert().Equal(found.RateLimitedAccountCount, detail.RateLimitedAccountCount, "GetByID RateLimitedAccountCount must match ListWithFilters")
 }
 
+func (s *GroupRepoSuite) TestListWithFilters_AccountCountIgnoresDefaultPoolModeLocalState() {
+	g := &service.Group{
+		Name:             "g-pool-counts",
+		Platform:         service.PlatformOpenAI,
+		RateMultiplier:   1.0,
+		IsExclusive:      false,
+		Status:           service.StatusActive,
+		SubscriptionType: service.SubscriptionTypeStandard,
+	}
+	s.Require().NoError(s.repo.Create(s.ctx, g))
+
+	insertAccount := func(query string, args []any) int64 {
+		var id int64
+		s.Require().NoError(scanSingleRow(s.ctx, s.tx, query, args, &id))
+		return id
+	}
+
+	normalID := insertAccount(
+		"INSERT INTO accounts (name, platform, type) VALUES ($1, $2, $3) RETURNING id",
+		[]any{"acc-normal-pool-count", service.PlatformOpenAI, service.AccountTypeAPIKey},
+	)
+	poolDefaultID := insertAccount(
+		`INSERT INTO accounts (
+			name, platform, type, credentials,
+			rate_limit_reset_at, overload_until, temp_unschedulable_until
+		) VALUES ($1, $2, $3, $4::jsonb, NOW() + INTERVAL '1 hour', NOW() + INTERVAL '1 hour', NOW() + INTERVAL '1 hour') RETURNING id`,
+		[]any{"acc-pool-default-count", service.PlatformOpenAI, service.AccountTypeAPIKey, `{"pool_mode": true}`},
+	)
+	poolCustomID := insertAccount(
+		`INSERT INTO accounts (
+			name, platform, type, credentials,
+			rate_limit_reset_at, overload_until, temp_unschedulable_until
+		) VALUES ($1, $2, $3, $4::jsonb, NOW() + INTERVAL '1 hour', NOW() + INTERVAL '1 hour', NOW() + INTERVAL '1 hour') RETURNING id`,
+		[]any{"acc-pool-custom-count", service.PlatformOpenAI, service.AccountTypeAPIKey, `{"pool_mode": true, "custom_error_codes_enabled": true}`},
+	)
+	nonPoolID := insertAccount(
+		`INSERT INTO accounts (
+			name, platform, type, credentials,
+			rate_limit_reset_at, overload_until, temp_unschedulable_until
+		) VALUES ($1, $2, $3, $4::jsonb, NOW() + INTERVAL '1 hour', NOW() + INTERVAL '1 hour', NOW() + INTERVAL '1 hour') RETURNING id`,
+		[]any{"acc-non-pool-count", service.PlatformOpenAI, service.AccountTypeAPIKey, `{}`},
+	)
+
+	for priority, accountID := range []int64{normalID, poolDefaultID, poolCustomID, nonPoolID} {
+		_, err := s.tx.ExecContext(
+			s.ctx,
+			"INSERT INTO account_groups (account_id, group_id, priority, created_at) VALUES ($1, $2, $3, NOW())",
+			accountID, g.ID, priority+1,
+		)
+		s.Require().NoError(err)
+	}
+
+	isExclusive := false
+	groups, _, err := s.repo.ListWithFilters(
+		s.ctx,
+		pagination.PaginationParams{Page: 1, PageSize: 100},
+		service.PlatformOpenAI,
+		service.StatusActive,
+		"",
+		&isExclusive,
+	)
+	s.Require().NoError(err)
+
+	var found *service.Group
+	for i := range groups {
+		if groups[i].ID == g.ID {
+			found = &groups[i]
+			break
+		}
+	}
+	s.Require().NotNil(found, "created group must appear in ListWithFilters result")
+	s.Assert().Equal(int64(4), found.AccountCount, "AccountCount must include all linked accounts")
+	s.Assert().Equal(int64(2), found.ActiveAccountCount, "default pool mode local state should not reduce active count")
+	s.Assert().Equal(int64(2), found.RateLimitedAccountCount, "only non-pool and custom-error pool accounts should be counted as locally limited")
+
+	total, active, err := s.repo.GetAccountCount(s.ctx, g.ID)
+	s.Require().NoError(err)
+	s.Assert().Equal(found.AccountCount, total)
+	s.Assert().Equal(found.ActiveAccountCount, active)
+
+	detail, err := s.repo.GetByID(s.ctx, g.ID)
+	s.Require().NoError(err)
+	s.Assert().Equal(found.AccountCount, detail.AccountCount)
+	s.Assert().Equal(found.ActiveAccountCount, detail.ActiveAccountCount)
+	s.Assert().Equal(found.RateLimitedAccountCount, detail.RateLimitedAccountCount)
+}
+
 // --- ListActive / ListActiveByPlatform ---
 
 func (s *GroupRepoSuite) TestListActive() {

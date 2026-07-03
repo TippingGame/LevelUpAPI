@@ -707,24 +707,30 @@ type groupAccountCounts struct {
 	RateLimited int64
 }
 
-const (
-	groupAccountAvailableSQL = `a.deleted_at IS NULL
-				AND a.status = 'active'
-				AND a.schedulable = true
-				AND (a.expires_at IS NULL OR a.expires_at > NOW() OR a.auto_pause_on_expired = FALSE)
-				AND (a.rate_limit_reset_at IS NULL OR a.rate_limit_reset_at <= NOW())
-				AND (a.overload_until IS NULL OR a.overload_until <= NOW())
-				AND (a.temp_unschedulable_until IS NULL OR a.temp_unschedulable_until <= NOW())`
-
-	groupAccountTemporarilyLimitedSQL = `a.deleted_at IS NULL
+var (
+	groupAccountAvailableSQL = fmt.Sprintf(`a.deleted_at IS NULL
 				AND a.status = 'active'
 				AND a.schedulable = true
 				AND (a.expires_at IS NULL OR a.expires_at > NOW() OR a.auto_pause_on_expired = FALSE)
 				AND (
+					NOT (%[1]s)
+					OR (
+						(a.rate_limit_reset_at IS NULL OR a.rate_limit_reset_at <= NOW())
+						AND (a.overload_until IS NULL OR a.overload_until <= NOW())
+						AND (a.temp_unschedulable_until IS NULL OR a.temp_unschedulable_until <= NOW())
+					)
+				)`, accountRespectsLocalSystemErrorStateSQL("a"))
+
+	groupAccountTemporarilyLimitedSQL = fmt.Sprintf(`a.deleted_at IS NULL
+				AND a.status = 'active'
+				AND a.schedulable = true
+				AND (a.expires_at IS NULL OR a.expires_at > NOW() OR a.auto_pause_on_expired = FALSE)
+				AND (%[1]s)
+				AND (
 					a.rate_limit_reset_at > NOW() OR
 					a.overload_until > NOW() OR
 					a.temp_unschedulable_until > NOW()
-				)`
+				)`, accountRespectsLocalSystemErrorStateSQL("a"))
 )
 
 func (r *groupRepository) loadAccountCounts(ctx context.Context, groupIDs []int64) (counts map[int64]groupAccountCounts, err error) {
