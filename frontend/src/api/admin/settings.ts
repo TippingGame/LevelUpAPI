@@ -497,6 +497,7 @@ export interface SystemSettings {
   openai_clean_relay_enabled: boolean;
   enable_anthropic_cache_ttl_1h_injection: boolean;
   rewrite_message_cache_control: boolean;
+  enable_client_dateline_normalization: boolean;
   web_search_emulation_enabled?: boolean;
 
   // Payment configuration
@@ -733,6 +734,7 @@ export interface UpdateSettingsRequest {
   openai_clean_relay_enabled?: boolean;
   enable_anthropic_cache_ttl_1h_injection?: boolean;
   rewrite_message_cache_control?: boolean;
+  enable_client_dateline_normalization?: boolean;
   // Payment configuration
   payment_enabled?: boolean;
   payment_min_amount?: number;

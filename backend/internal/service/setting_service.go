@@ -93,6 +93,7 @@ type cachedGatewayForwardingSettings struct {
 	openAICleanRelay                 bool
 	anthropicCacheTTL1hInjection     bool
 	rewriteMessageCacheControl       bool
+	clientDatelineNormalization      bool
 	expiresAt                        int64 // unix nano
 }
 
@@ -1841,6 +1842,7 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 	updates[SettingKeyOpenAICleanRelayEnabled] = strconv.FormatBool(settings.OpenAICleanRelayEnabled)
 	updates[SettingKeyEnableAnthropicCacheTTL1hInjection] = strconv.FormatBool(settings.EnableAnthropicCacheTTL1hInjection)
 	updates[SettingKeyRewriteMessageCacheControl] = strconv.FormatBool(settings.RewriteMessageCacheControl)
+	updates[SettingKeyEnableClientDatelineNormalization] = strconv.FormatBool(settings.EnableClientDatelineNormalization)
 	updates[SettingPaymentVisibleMethodAlipaySource] = settings.PaymentVisibleMethodAlipaySource
 	updates[SettingPaymentVisibleMethodWxpaySource] = settings.PaymentVisibleMethodWxpaySource
 	updates[SettingPaymentVisibleMethodAlipayEnabled] = strconv.FormatBool(settings.PaymentVisibleMethodAlipayEnabled)
@@ -1925,6 +1927,7 @@ func (s *SettingService) refreshCachedSettings(settings *SystemSettings) {
 		openAICleanRelay:                 settings.OpenAICleanRelayEnabled,
 		anthropicCacheTTL1hInjection:     settings.EnableAnthropicCacheTTL1hInjection,
 		rewriteMessageCacheControl:       settings.RewriteMessageCacheControl,
+		clientDatelineNormalization:      settings.EnableClientDatelineNormalization,
 		expiresAt:                        time.Now().Add(gatewayForwardingCacheTTL).UnixNano(),
 	})
 	cyberSessionBlockRuntimeSF.Forget("cyber_session_block_runtime")
@@ -2043,6 +2046,7 @@ func (s *SettingService) IsBackendModeEnabled(ctx context.Context) bool {
 
 type gatewayForwardingSettingsResult struct {
 	fp, mp, cch, claudeOAuthSystemPromptInjection, cleanRelay, cacheTTL1h, rewriteMessageCacheControl bool
+	clientDatelineNormalization                                                                       bool
 	claudeOAuthSystemPrompt, claudeOAuthSystemPromptBlocks                                            string
 }
 
@@ -2059,6 +2063,7 @@ func (s *SettingService) getGatewayForwardingSettingsCached(ctx context.Context)
 				cleanRelay:                       cached.openAICleanRelay,
 				cacheTTL1h:                       cached.anthropicCacheTTL1hInjection,
 				rewriteMessageCacheControl:       cached.rewriteMessageCacheControl,
+				clientDatelineNormalization:      cached.clientDatelineNormalization,
 			}
 		}
 	}
@@ -2075,6 +2080,7 @@ func (s *SettingService) getGatewayForwardingSettingsCached(ctx context.Context)
 					cleanRelay:                       cached.openAICleanRelay,
 					cacheTTL1h:                       cached.anthropicCacheTTL1hInjection,
 					rewriteMessageCacheControl:       cached.rewriteMessageCacheControl,
+					clientDatelineNormalization:      cached.clientDatelineNormalization,
 				}, nil
 			}
 		}
@@ -2090,6 +2096,7 @@ func (s *SettingService) getGatewayForwardingSettingsCached(ctx context.Context)
 			SettingKeyOpenAICleanRelayEnabled,
 			SettingKeyEnableAnthropicCacheTTL1hInjection,
 			SettingKeyRewriteMessageCacheControl,
+			SettingKeyEnableClientDatelineNormalization,
 		})
 		if err != nil {
 			slog.Warn("failed to get gateway forwarding settings", "error", err)
@@ -2101,9 +2108,10 @@ func (s *SettingService) getGatewayForwardingSettingsCached(ctx context.Context)
 				openAICleanRelay:                 false,
 				anthropicCacheTTL1hInjection:     false,
 				rewriteMessageCacheControl:       false,
+				clientDatelineNormalization:      true,
 				expiresAt:                        time.Now().Add(gatewayForwardingErrorTTL).UnixNano(),
 			})
-			return gatewayForwardingSettingsResult{fp: true, claudeOAuthSystemPromptInjection: true}, nil
+			return gatewayForwardingSettingsResult{fp: true, claudeOAuthSystemPromptInjection: true, clientDatelineNormalization: true}, nil
 		}
 		fp := true
 		if v, ok := values[SettingKeyEnableFingerprintUnification]; ok && v != "" {
@@ -2120,6 +2128,10 @@ func (s *SettingService) getGatewayForwardingSettingsCached(ctx context.Context)
 		cleanRelay := values[SettingKeyOpenAICleanRelayEnabled] == "true"
 		cacheTTL1h := values[SettingKeyEnableAnthropicCacheTTL1hInjection] == "true"
 		rewriteMessageCacheControl := values[SettingKeyRewriteMessageCacheControl] == "true"
+		clientDatelineNormalization := true
+		if v, ok := values[SettingKeyEnableClientDatelineNormalization]; ok && v != "" {
+			clientDatelineNormalization = v == "true"
+		}
 		gatewayForwardingCache.Store(&cachedGatewayForwardingSettings{
 			fingerprintUnification:           fp,
 			metadataPassthrough:              mp,
@@ -2130,6 +2142,7 @@ func (s *SettingService) getGatewayForwardingSettingsCached(ctx context.Context)
 			openAICleanRelay:                 cleanRelay,
 			anthropicCacheTTL1hInjection:     cacheTTL1h,
 			rewriteMessageCacheControl:       rewriteMessageCacheControl,
+			clientDatelineNormalization:      clientDatelineNormalization,
 			expiresAt:                        time.Now().Add(gatewayForwardingCacheTTL).UnixNano(),
 		})
 		return gatewayForwardingSettingsResult{
@@ -2142,12 +2155,13 @@ func (s *SettingService) getGatewayForwardingSettingsCached(ctx context.Context)
 			cleanRelay:                       cleanRelay,
 			cacheTTL1h:                       cacheTTL1h,
 			rewriteMessageCacheControl:       rewriteMessageCacheControl,
+			clientDatelineNormalization:      clientDatelineNormalization,
 		}, nil
 	})
 	if r, ok := val.(gatewayForwardingSettingsResult); ok {
 		return r
 	}
-	return gatewayForwardingSettingsResult{fp: true, claudeOAuthSystemPromptInjection: true}
+	return gatewayForwardingSettingsResult{fp: true, claudeOAuthSystemPromptInjection: true, clientDatelineNormalization: true}
 }
 
 // GetGatewayForwardingSettings returns cached gateway forwarding settings.
@@ -2171,6 +2185,12 @@ func (s *SettingService) IsRewriteMessageCacheControlEnabled(ctx context.Context
 // IsOpenAICleanRelayEnabled 检查是否启用 OpenAI 洁净中继模式。
 func (s *SettingService) IsOpenAICleanRelayEnabled(ctx context.Context) bool {
 	return s.getGatewayForwardingSettingsCached(ctx).cleanRelay
+}
+
+// IsClientDatelineNormalizationEnabled 检查是否启用 Anthropic OAuth/SetupToken 请求体
+// 的客户端 dateline 归一化。默认开启。
+func (s *SettingService) IsClientDatelineNormalizationEnabled(ctx context.Context) bool {
+	return s.getGatewayForwardingSettingsCached(ctx).clientDatelineNormalization
 }
 
 func (s *SettingService) GetClaudeOAuthSystemPromptInjectionSettings(ctx context.Context) (enabled bool, prompt string, blocks string) {
@@ -2726,6 +2746,7 @@ func (s *SettingService) InitializeDefaultSettings(ctx context.Context) error {
 		SettingKeyOpenAICleanRelayEnabled:                   "false",
 		SettingKeyEnableAnthropicCacheTTL1hInjection:        "false",
 		SettingKeyRewriteMessageCacheControl:                "false",
+		SettingKeyEnableClientDatelineNormalization:         "true",
 		SettingKeyUserPrivateGroupDailyLimitUSD:             "0",
 		SettingKeyUserPrivateGroupWeeklyLimitUSD:            "0",
 		SettingKeyUserPrivateGroupMonthlyLimitUSD:           "0",
@@ -3160,6 +3181,11 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 	result.OpenAICleanRelayEnabled = settings[SettingKeyOpenAICleanRelayEnabled] == "true"
 	result.EnableAnthropicCacheTTL1hInjection = settings[SettingKeyEnableAnthropicCacheTTL1hInjection] == "true"
 	result.RewriteMessageCacheControl = settings[SettingKeyRewriteMessageCacheControl] == "true"
+	if v, ok := settings[SettingKeyEnableClientDatelineNormalization]; ok && v != "" {
+		result.EnableClientDatelineNormalization = v == "true"
+	} else {
+		result.EnableClientDatelineNormalization = true
+	}
 
 	// Web search emulation: quick enabled check from the JSON config
 	if raw := settings[SettingKeyWebSearchEmulationConfig]; raw != "" {
