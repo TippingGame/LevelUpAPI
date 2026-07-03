@@ -76,6 +76,7 @@ const (
 	overloadCooldownMinutesDefault       = 10
 	runtimeAccountErrorEvictionTTL       = 24 * time.Hour
 	customErrorCodeCooldown              = 24 * time.Hour
+	billingQuotaCooldown                 = 24 * time.Hour
 	rateLimitStateUpdateTimeout          = 3 * time.Second
 )
 
@@ -364,6 +365,11 @@ func (s *RateLimitService) HandleUpstreamError(ctx context.Context, account *Acc
 		return false
 	}
 
+	if msg, ok := recoverableBillingQuotaErrorMessage(account, statusCode, upstreamMsg, responseBody); ok {
+		s.handleBillingQuotaTempUnschedulable(ctx, account, statusCode, msg)
+		return true
+	}
+
 	if msg, ok := permanentAccountKeywordErrorMessage(account, statusCode, upstreamMsg, responseBody); ok {
 		s.handleAuthError(ctx, account, msg)
 		return true
@@ -404,9 +410,9 @@ func (s *RateLimitService) HandleUpstreamError(ctx context.Context, account *Acc
 			s.handleAuthError(ctx, account, msg)
 			shouldDisable = true
 		} else if account.Platform == PlatformAnthropic && strings.Contains(strings.ToLower(upstreamMsg), "credit balance") {
-			// Anthropic API key 余额不足（语义等同 402），停止调度
+			// Anthropic API key 余额不足（语义等同 402），临时停止调度；正常情况下已由 recoverableBillingQuotaErrorMessage 提前处理。
 			msg := "Credit balance exhausted (400): " + upstreamMsg
-			s.handleAuthError(ctx, account, msg)
+			s.handleBillingQuotaTempUnschedulable(ctx, account, statusCode, msg)
 			shouldDisable = true
 		} else if strings.Contains(strings.ToLower(upstreamMsg), "identity verification is required") {
 			// KYC 身份验证要求 → 永久禁用，账号需完成身份验证后才能恢复
@@ -490,7 +496,7 @@ func (s *RateLimitService) HandleUpstreamError(ctx context.Context, account *Acc
 		if upstreamMsg != "" {
 			msg = "Payment required (402): " + upstreamMsg
 		}
-		s.handleAuthError(ctx, account, msg)
+		s.handleBillingQuotaTempUnschedulable(ctx, account, statusCode, msg)
 		shouldDisable = true
 	case 403:
 		logger.LegacyPrintf(
@@ -1014,6 +1020,23 @@ func (s *RateLimitService) handleAuthError(ctx context.Context, account *Account
 	slog.Warn("account_disabled_auth_error", "account_id", account.ID, "error", errorMsg)
 }
 
+func (s *RateLimitService) handleBillingQuotaTempUnschedulable(ctx context.Context, account *Account, statusCode int, msg string) {
+	if account == nil {
+		return
+	}
+	until := time.Now().Add(billingQuotaCooldown)
+	state := newTempUnschedState(until, statusCode, "billing_quota", msg)
+	reason := msg
+	if raw, err := json.Marshal(state); err == nil {
+		reason = string(raw)
+	}
+	if err := s.persistTempUnschedulableState(ctx, account, until, reason, state, "billing_quota"); err != nil {
+		slog.Warn("billing_quota_temp_unschedulable_failed", "account_id", account.ID, "status_code", statusCode, "error", err)
+		return
+	}
+	slog.Warn("billing_quota_temp_unschedulable", "account_id", account.ID, "status_code", statusCode, "until", until, "error", msg)
+}
+
 func (s *RateLimitService) handleCloudflareChallenge(ctx context.Context, account *Account, statusCode int, headers http.Header, responseBody []byte) bool {
 	now := time.Now()
 	consecutiveCount := nextCloudflareChallengeCount(account, now)
@@ -1112,6 +1135,60 @@ func permanentAccountKeywordErrorMessage(account *Account, statusCode int, upstr
 		return "", false
 	}
 
+	normalized := normalizedUpstreamErrorText(upstreamMsg, responseBody)
+	if normalized == "" {
+		return "", false
+	}
+
+	keywords := []string{
+		"this organization has been disabled",
+		"organization has been disabled",
+		"organization disabled",
+		"this account has been disabled",
+		"account has been disabled",
+		"account disabled",
+		"this account has been suspended",
+		"account has been suspended",
+		"account suspended",
+		"this account has been deactivated",
+		"account has been deactivated",
+		"account deactivated",
+		"workspace has been deactivated",
+		"api key has been disabled",
+		"api key is disabled",
+		"api key disabled",
+		"api key has been revoked",
+		"api key revoked",
+		"api key has expired",
+		"api key expired",
+		"api key not valid",
+		"invalid api key",
+		"key has been revoked",
+		"key revoked",
+		"key has expired",
+		"project has been disabled",
+		"project disabled",
+		"consumer has been suspended",
+		"consumer suspended",
+		"service has been disabled",
+		"service disabled",
+		"the security token included in the request is invalid",
+		"identity verification is required",
+		"deactivated workspace",
+	}
+	for _, keyword := range keywords {
+		if strings.Contains(normalized, keyword) {
+			msg := strings.TrimSpace(upstreamMsg)
+			if msg == "" {
+				msg = keyword
+			}
+			return fmt.Sprintf("Permanent account error (%d): %s", statusCode, msg), true
+		}
+	}
+	return "", false
+}
+
+func normalizedUpstreamErrorText(upstreamMsg string, responseBody []byte) string {
 	parts := make([]string, 0, 8)
 	if upstreamMsg != "" {
 		parts = append(parts, upstreamMsg)
@@ -1135,8 +1212,19 @@ func permanentAccountKeywordErrorMessage(account *Account, statusCode int, upstr
 		parts = append(parts, string(responseBody))
 	}
 	normalized := strings.ToLower(strings.Join(parts, " "))
-	normalized = strings.Join(strings.Fields(strings.NewReplacer("_", " ", "-", " ").Replace(normalized)), " ")
-	if normalized == "" {
+	return strings.Join(strings.Fields(strings.NewReplacer("_", " ", "-", " ").Replace(normalized)), " ")
+}
+
+func recoverableBillingQuotaErrorMessage(account *Account, statusCode int, upstreamMsg string, responseBody []byte) (string, bool) {
+	if account == nil || account.IsPoolMode() || statusCode >= http.StatusInternalServerError {
+		return "", false
+	}
+	if account.Platform == PlatformOpenAI && gjson.GetBytes(responseBody, "detail.code").String() == "deactivated_workspace" {
+		return "", false
+	}
+
+	normalized := normalizedUpstreamErrorText(upstreamMsg, responseBody)
+	if normalized == "" && statusCode != http.StatusPaymentRequired {
 		return "", false
 	}
 
@@ -1144,60 +1232,32 @@ func permanentAccountKeywordErrorMessage(account *Account, statusCode int, upstr
 		"your credit balance is too low",
 		"credit balance is too low",
 		"credit balance",
-		"this organization has been disabled",
-		"organization has been disabled",
-		"organization disabled",
-		"this account has been disabled",
-		"account has been disabled",
-		"account disabled",
-		"this account has been suspended",
-		"account has been suspended",
-		"account suspended",
-		"this account has been deactivated",
-		"account has been deactivated",
-		"account deactivated",
-		"workspace has been deactivated",
 		"billing hard limit has been reached",
 		"billing account is not active",
 		"billing account has been disabled",
-		"api key has been disabled",
-		"api key is disabled",
-		"api key disabled",
-		"api key has been revoked",
-		"api key revoked",
-		"api key has expired",
-		"api key expired",
-		"api key not valid",
-		"invalid api key",
-		"key has been revoked",
-		"key revoked",
-		"key has expired",
 		"you exceeded your current quota",
 		"exceeded your current quota",
 		"insufficient quota",
-		"project has been disabled",
-		"project disabled",
-		"consumer has been suspended",
-		"consumer suspended",
-		"service has been disabled",
-		"service disabled",
 		"billing is not enabled",
 		"billing not enabled",
 		"billing disabled",
-		"the security token included in the request is invalid",
-		"identity verification is required",
-		"deactivated workspace",
 	}
+	matched := statusCode == http.StatusPaymentRequired
 	for _, keyword := range keywords {
 		if strings.Contains(normalized, keyword) {
-			msg := strings.TrimSpace(upstreamMsg)
-			if msg == "" {
-				msg = keyword
-			}
-			return fmt.Sprintf("Permanent account error (%d): %s", statusCode, msg), true
+			matched = true
+			break
 		}
 	}
-	return "", false
+	if !matched {
+		return "", false
+	}
+
+	msg := strings.TrimSpace(upstreamMsg)
+	if msg == "" {
+		msg = "recoverable billing/quota state"
+	}
+	return fmt.Sprintf("Billing/quota cooldown (%d): %s", statusCode, msg), true
 }
 
 func permanentAccountKeywordErrorMessageFromBody(account *Account, statusCode int, responseBody []byte) (string, bool) {

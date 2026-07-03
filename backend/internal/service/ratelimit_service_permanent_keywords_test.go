@@ -93,13 +93,6 @@ func TestRateLimitServiceHandleUpstreamErrorAPIKeyPermanentKeywordsDisable(t *te
 		want       string
 	}{
 		{
-			name:       "openai quota exhausted",
-			platform:   PlatformOpenAI,
-			statusCode: http.StatusTooManyRequests,
-			body:       []byte(`{"error":{"message":"You exceeded your current quota, please check your plan and billing details.","code":"insufficient_quota"}}`),
-			want:       "You exceeded your current quota",
-		},
-		{
 			name:       "openai account suspended",
 			platform:   PlatformOpenAI,
 			statusCode: http.StatusForbidden,
@@ -128,20 +121,6 @@ func TestRateLimitServiceHandleUpstreamErrorAPIKeyPermanentKeywordsDisable(t *te
 			want:       "API key expired",
 		},
 		{
-			name:       "openai billing hard limit",
-			platform:   PlatformOpenAI,
-			statusCode: http.StatusTooManyRequests,
-			body:       []byte(`{"error":{"message":"Billing hard limit has been reached"}}`),
-			want:       "Billing hard limit",
-		},
-		{
-			name:       "gemini billing not enabled",
-			platform:   PlatformGemini,
-			statusCode: http.StatusForbidden,
-			body:       []byte(`{"error":{"message":"Cloud Billing is not enabled for this project."}}`),
-			want:       "Billing is not enabled",
-		},
-		{
 			name:       "gemini project disabled",
 			platform:   PlatformGemini,
 			statusCode: http.StatusForbidden,
@@ -155,13 +134,6 @@ func TestRateLimitServiceHandleUpstreamErrorAPIKeyPermanentKeywordsDisable(t *te
 			statusCode: http.StatusForbidden,
 			body:       []byte(`{"message":"The service has been disabled for this account."}`),
 			want:       "service has been disabled",
-		},
-		{
-			name:       "anthropic credit balance",
-			platform:   PlatformAnthropic,
-			statusCode: http.StatusBadRequest,
-			body:       []byte(`{"error":{"message":"Your credit balance is too low"}}`),
-			want:       "Your credit balance is too low",
 		},
 		{
 			name:       "security token invalid",
@@ -200,6 +172,116 @@ func TestRateLimitServiceHandleUpstreamErrorAPIKeyPermanentKeywordsDisable(t *te
 			require.Contains(t, repo.lastErrorMsg, tt.want)
 		})
 	}
+}
+
+func TestRateLimitServiceHandleUpstreamErrorBillingQuotaSetsTempUnschedulable(t *testing.T) {
+	tests := []struct {
+		name       string
+		platform   string
+		statusCode int
+		body       []byte
+		want       string
+	}{
+		{
+			name:       "openai quota exhausted",
+			platform:   PlatformOpenAI,
+			statusCode: http.StatusTooManyRequests,
+			body:       []byte(`{"error":{"message":"You exceeded your current quota, please check your plan and billing details.","code":"insufficient_quota"}}`),
+			want:       "You exceeded your current quota",
+		},
+		{
+			name:       "openai billing hard limit",
+			platform:   PlatformOpenAI,
+			statusCode: http.StatusTooManyRequests,
+			body:       []byte(`{"error":{"message":"Billing hard limit has been reached"}}`),
+			want:       "Billing hard limit",
+		},
+		{
+			name:       "gemini billing not enabled",
+			platform:   PlatformGemini,
+			statusCode: http.StatusForbidden,
+			body:       []byte(`{"error":{"message":"Cloud Billing is not enabled for this project."}}`),
+			want:       "Billing is not enabled",
+		},
+		{
+			name:       "anthropic credit balance",
+			platform:   PlatformAnthropic,
+			statusCode: http.StatusBadRequest,
+			body:       []byte(`{"error":{"message":"Your credit balance is too low"}}`),
+			want:       "Your credit balance is too low",
+		},
+		{
+			name:       "generic payment required",
+			platform:   PlatformOpenAI,
+			statusCode: http.StatusPaymentRequired,
+			body:       []byte(`{"error":{"message":"Payment required"}}`),
+			want:       "Payment required",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := &permanentKeywordAccountRepoStub{}
+			cache := &runtimeTempUnschedCacheStub{}
+			svc := NewRateLimitService(repo, nil, nil, nil, cache)
+			account := &Account{
+				ID:          2074,
+				Platform:    tt.platform,
+				Type:        AccountTypeAPIKey,
+				Status:      StatusActive,
+				Schedulable: true,
+			}
+
+			shouldDisable := svc.HandleUpstreamError(
+				context.Background(),
+				account,
+				tt.statusCode,
+				http.Header{},
+				tt.body,
+			)
+
+			require.True(t, shouldDisable)
+			require.Equal(t, 0, repo.setErrorCalls)
+			require.Equal(t, 1, repo.tempCalls)
+			require.Equal(t, StatusActive, account.Status)
+			require.True(t, account.Schedulable)
+			require.NotNil(t, account.TempUnschedulableUntil)
+			require.Contains(t, repo.lastTempReason, `"matched_keyword":"billing_quota"`)
+			require.Contains(t, repo.lastTempReason, tt.want)
+			require.NotNil(t, cache.states[2074])
+			require.Equal(t, "billing_quota", cache.states[2074].MatchedKeyword)
+			require.Equal(t, tt.statusCode, cache.states[2074].StatusCode)
+			require.Contains(t, cache.states[2074].ErrorMessage, tt.want)
+			require.True(t, cache.states[2074].UntilUnix > time.Now().Add(23*time.Hour).Unix())
+		})
+	}
+}
+
+func TestRateLimitServiceHandleUpstreamErrorWorkspaceDeactivatedKeepsPermanentError(t *testing.T) {
+	repo := &permanentKeywordAccountRepoStub{}
+	svc := &RateLimitService{accountRepo: repo}
+	account := &Account{
+		ID:          2075,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Status:      StatusActive,
+		Schedulable: true,
+	}
+
+	shouldDisable := svc.HandleUpstreamError(
+		context.Background(),
+		account,
+		http.StatusPaymentRequired,
+		http.Header{},
+		[]byte(`{"detail":{"code":"deactivated_workspace","message":"Workspace has been deactivated"}}`),
+	)
+
+	require.True(t, shouldDisable)
+	require.Equal(t, 1, repo.setErrorCalls)
+	require.Equal(t, 0, repo.tempCalls)
+	require.Equal(t, StatusError, account.Status)
+	require.False(t, account.Schedulable)
+	require.Contains(t, repo.lastErrorMsg, "Workspace has been deactivated")
 }
 
 func TestRateLimitServiceHandleUpstreamErrorAmbiguousPermissionDoesNotSetPermanentError(t *testing.T) {
