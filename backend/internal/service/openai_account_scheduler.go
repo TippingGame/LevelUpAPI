@@ -1429,6 +1429,9 @@ func (s *OpenAIGatewayService) selectAccountShareModeBoundAccount(
 	if !s.isOpenAIAccountProxyHealthSchedulable(ctx, account) {
 		return nil, decision, true, ErrNoAvailableAccounts
 	}
+	if !s.isOpenAIAccountProxyExitIPStable(ctx, account) {
+		return nil, decision, true, ErrNoAvailableAccounts
+	}
 	if !accountSupportsOpenAICapabilities(account, requiredCapability, requiredImageCapability) {
 		return nil, decision, true, ErrNoAvailableAccounts
 	}
@@ -1485,6 +1488,9 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 ) (*AccountSelectionResult, OpenAIAccountScheduleDecision, error) {
 	decision := OpenAIAccountScheduleDecision{}
 	if selection, accountModeDecision, handled, err := s.selectAccountShareModeBoundAccount(ctx, groupID, requestedModel, excludedIDs, requiredTransport, requiredCapability, requiredImageCapability, requireCompact); handled {
+		if err == nil && selection != nil && selection.Account != nil {
+			s.bindOpenAIAccountProxyExitIP(ctx, selection.Account)
+		}
 		return selection, accountModeDecision, err
 	}
 	scheduler := s.getOpenAIAccountScheduler(ctx)
@@ -1549,7 +1555,7 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 		}
 	}
 
-	return scheduler.Select(ctx, OpenAIAccountScheduleRequest{
+	selection, decision, err := scheduler.Select(ctx, OpenAIAccountScheduleRequest{
 		GroupID:                 groupID,
 		SessionHash:             sessionHash,
 		StickyAccountID:         stickyAccountID,
@@ -1561,6 +1567,10 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 		RequireCompact:          requireCompact,
 		ExcludedIDs:             excludedIDs,
 	})
+	if err == nil && selection != nil && selection.Account != nil {
+		s.bindOpenAIAccountProxyExitIP(ctx, selection.Account)
+	}
+	return selection, decision, err
 }
 
 func accountSupportsOpenAICapabilities(account *Account, requiredCapability OpenAIEndpointCapability, requiredImageCapability OpenAIImagesCapability) bool {

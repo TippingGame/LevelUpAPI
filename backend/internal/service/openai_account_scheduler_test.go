@@ -852,6 +852,117 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_SkipsProxyFailedProAcco
 	require.Equal(t, openAIAccountScheduleLayerLoadBalance, decision.Layer)
 }
 
+func TestOpenAIGatewayService_SelectAccountWithScheduler_BindsProxyExitIPForProAccount(t *testing.T) {
+	groupID := int64(10114)
+	ownerID := int64(43)
+	ctx := context.WithValue(context.Background(), ctxkey.AuthenticatedUserID, ownerID)
+	proxyID := int64(713)
+	account := &Account{
+		ID:           32203,
+		Platform:     PlatformOpenAI,
+		Type:         AccountTypeOAuth,
+		AccountLevel: AccountLevelPro,
+		OwnerUserID:  &ownerID,
+		ProxyID:      &proxyID,
+		Proxy:        &Proxy{ID: proxyID, Status: StatusActive},
+		Status:       StatusActive,
+		Schedulable:  true,
+		Concurrency:  1,
+		Priority:     5,
+	}
+	account = openAITestAccountPtrWithGroupIfUnset(account, groupID)
+	snapshotCache := &openAISnapshotCacheStub{
+		snapshotAccounts: []*Account{account},
+		accountsByID:     map[int64]*Account{account.ID: account},
+	}
+	cache := &schedulerTestGatewayCache{}
+	svc := &OpenAIGatewayService{
+		accountRepo:        schedulerTestOpenAIAccountRepo{accounts: []Account{*account}},
+		cache:              cache,
+		cfg:                &config.Config{},
+		rateLimitService:   newOpenAIAdvancedSchedulerRateLimitService("true"),
+		schedulerSnapshot:  &SchedulerSnapshotService{cache: snapshotCache},
+		concurrencyService: NewConcurrencyService(schedulerTestConcurrencyCache{}),
+		proxyLatencyCache: &openAIProxyLatencyCacheStub{infos: map[int64]*ProxyLatencyInfo{
+			proxyID: &ProxyLatencyInfo{Success: true, IPAddress: "203.0.113.13", CountryCode: "US", UpdatedAt: time.Now()},
+		}},
+	}
+
+	selection, decision, err := svc.SelectAccountWithScheduler(ctx, &groupID, "", "", "", nil, OpenAIUpstreamTransportAny, false)
+
+	require.NoError(t, err)
+	require.NotNil(t, selection)
+	require.NotNil(t, selection.Account)
+	require.Equal(t, account.ID, selection.Account.ID)
+	require.Equal(t, openAIAccountScheduleLayerLoadBalance, decision.Layer)
+	require.Equal(t, "203.0.113.13", cache.stringBindings[accountProxyExitIPKey(account.ID)])
+}
+
+func TestOpenAIGatewayService_SelectAccountWithScheduler_SkipsProxyExitIPChangedProAccount(t *testing.T) {
+	groupID := int64(10115)
+	ownerID := int64(43)
+	ctx := context.WithValue(context.Background(), ctxkey.AuthenticatedUserID, ownerID)
+	badProxyID := int64(714)
+	goodProxyID := int64(715)
+	bad := &Account{
+		ID:           32204,
+		Platform:     PlatformOpenAI,
+		Type:         AccountTypeOAuth,
+		AccountLevel: AccountLevelPro,
+		OwnerUserID:  &ownerID,
+		ProxyID:      &badProxyID,
+		Proxy:        &Proxy{ID: badProxyID, Status: StatusActive},
+		Status:       StatusActive,
+		Schedulable:  true,
+		Concurrency:  1,
+		Priority:     0,
+	}
+	good := &Account{
+		ID:           32205,
+		Platform:     PlatformOpenAI,
+		Type:         AccountTypeOAuth,
+		AccountLevel: AccountLevelPro,
+		OwnerUserID:  &ownerID,
+		ProxyID:      &goodProxyID,
+		Proxy:        &Proxy{ID: goodProxyID, Status: StatusActive},
+		Status:       StatusActive,
+		Schedulable:  true,
+		Concurrency:  1,
+		Priority:     5,
+	}
+	bad = openAITestAccountPtrWithGroupIfUnset(bad, groupID)
+	good = openAITestAccountPtrWithGroupIfUnset(good, groupID)
+	snapshotCache := &openAISnapshotCacheStub{
+		snapshotAccounts: []*Account{bad, good},
+		accountsByID:     map[int64]*Account{bad.ID: bad, good.ID: good},
+	}
+	cache := &schedulerTestGatewayCache{stringBindings: map[string]string{
+		accountProxyExitIPKey(bad.ID): "198.51.100.14",
+	}}
+	svc := &OpenAIGatewayService{
+		accountRepo:        schedulerTestOpenAIAccountRepo{accounts: []Account{*bad, *good}},
+		cache:              cache,
+		cfg:                &config.Config{},
+		rateLimitService:   newOpenAIAdvancedSchedulerRateLimitService("true"),
+		schedulerSnapshot:  &SchedulerSnapshotService{cache: snapshotCache},
+		concurrencyService: NewConcurrencyService(schedulerTestConcurrencyCache{}),
+		proxyLatencyCache: &openAIProxyLatencyCacheStub{infos: map[int64]*ProxyLatencyInfo{
+			badProxyID:  &ProxyLatencyInfo{Success: true, IPAddress: "203.0.113.14", CountryCode: "US", UpdatedAt: time.Now()},
+			goodProxyID: &ProxyLatencyInfo{Success: true, IPAddress: "203.0.113.15", CountryCode: "US", UpdatedAt: time.Now()},
+		}},
+	}
+
+	selection, decision, err := svc.SelectAccountWithScheduler(ctx, &groupID, "", "", "", nil, OpenAIUpstreamTransportAny, false)
+
+	require.NoError(t, err)
+	require.NotNil(t, selection)
+	require.NotNil(t, selection.Account)
+	require.Equal(t, good.ID, selection.Account.ID)
+	require.Equal(t, openAIAccountScheduleLayerLoadBalance, decision.Layer)
+	require.Equal(t, "198.51.100.14", cache.stringBindings[accountProxyExitIPKey(bad.ID)])
+	require.Equal(t, "203.0.113.15", cache.stringBindings[accountProxyExitIPKey(good.ID)])
+}
+
 func TestOpenAIGatewayService_SelectAccountWithScheduler_SessionStickyDBRuntimeRecheckSkipsStaleCachedAccount(t *testing.T) {
 	ctx := context.Background()
 	groupID := int64(10103)

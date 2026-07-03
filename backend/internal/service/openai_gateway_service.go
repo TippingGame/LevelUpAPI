@@ -1562,6 +1562,77 @@ func (s *OpenAIGatewayService) isOpenAIAccountProxyHealthSchedulable(ctx context
 	return !proxyHealthBlocksProtectedProxyScheduling(latencies[proxyID])
 }
 
+func (s *OpenAIGatewayService) observedProxyExitIP(ctx context.Context, account *Account) string {
+	if s == nil || !accountNeedsProxyExitIPStability(account) {
+		return ""
+	}
+	proxyID := *account.ProxyID
+	if info, ok := proxyHealthFromPrefetchContext(ctx, proxyID); ok && info != nil {
+		return normalizeProxyExitIP(info.IPAddress)
+	}
+	if s.proxyLatencyCache == nil {
+		return ""
+	}
+	latencies, err := s.proxyLatencyCache.GetProxyLatencies(ctx, []int64{proxyID})
+	if err != nil {
+		return ""
+	}
+	if info := latencies[proxyID]; info != nil {
+		return normalizeProxyExitIP(info.IPAddress)
+	}
+	return ""
+}
+
+func (s *OpenAIGatewayService) boundAccountProxyExitIP(ctx context.Context, accountID int64) string {
+	if s == nil || s.cache == nil || accountID <= 0 {
+		return ""
+	}
+	key := accountProxyExitIPKey(accountID)
+	if key == "" {
+		return ""
+	}
+	raw, err := s.cache.GetSessionString(ctx, 0, key)
+	if err != nil {
+		return ""
+	}
+	normalized := normalizeProxyExitIP(raw)
+	if normalized == "" {
+		writeCtx, cancel := rateLimitStateContext(ctx)
+		defer cancel()
+		_ = s.cache.DeleteSessionString(writeCtx, 0, key)
+	}
+	return normalized
+}
+
+func (s *OpenAIGatewayService) isOpenAIAccountProxyExitIPStable(ctx context.Context, account *Account) bool {
+	if s == nil || !accountNeedsProxyExitIPStability(account) || s.cache == nil {
+		return true
+	}
+	observed := s.observedProxyExitIP(ctx, account)
+	if observed == "" {
+		return true
+	}
+	bound := s.boundAccountProxyExitIP(ctx, account.ID)
+	return bound == "" || bound == observed
+}
+
+func (s *OpenAIGatewayService) bindOpenAIAccountProxyExitIP(ctx context.Context, account *Account) {
+	if s == nil || s.cache == nil || !accountNeedsProxyExitIPStability(account) {
+		return
+	}
+	observed := s.observedProxyExitIP(ctx, account)
+	if observed == "" {
+		return
+	}
+	key := accountProxyExitIPKey(account.ID)
+	if key == "" {
+		return
+	}
+	writeCtx, cancel := rateLimitStateContext(ctx)
+	defer cancel()
+	_ = s.cache.SetSessionString(writeCtx, 0, key, observed, accountProxyExitIPTTL)
+}
+
 // prioritizeOpenAICompactAccounts re-orders a slice so that accounts with known
 // compact support are tried first, followed by unknown, then explicitly unsupported.
 // The relative order within each tier is preserved.
@@ -1831,11 +1902,13 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 		}
 		result, err := s.tryAcquireAccountSlot(ctx, account.ID, account.Concurrency)
 		if err == nil && result.Acquired {
+			s.bindOpenAIAccountProxyExitIP(ctx, account)
 			return newAccountShareModeSelectionResult(account, true, result.ReleaseFunc, nil), nil
 		}
 		if stickyAccountID > 0 && stickyAccountID == account.ID && s.concurrencyService != nil {
 			waitingCount, _ := s.concurrencyService.GetAccountWaitingCount(ctx, account.ID)
 			if waitingCount < cfg.StickySessionMaxWaiting {
+				s.bindOpenAIAccountProxyExitIP(ctx, account)
 				return newAccountShareModeSelectionResult(account, false, nil, &AccountWaitPlan{
 					AccountID:      account.ID,
 					MaxConcurrency: account.Concurrency,
@@ -1844,6 +1917,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 				}), nil
 			}
 		}
+		s.bindOpenAIAccountProxyExitIP(ctx, account)
 		return newAccountShareModeSelectionResult(account, false, nil, &AccountWaitPlan{
 			AccountID:      account.ID,
 			MaxConcurrency: account.Concurrency,
@@ -2168,6 +2242,9 @@ func (s *OpenAIGatewayService) resolveAccountShareModeBoundAccount(ctx context.C
 	if !s.isOpenAIAccountProxyHealthSchedulable(ctx, account) {
 		return nil, true, noAvailableOpenAISelectionError(requestedModel, false)
 	}
+	if !s.isOpenAIAccountProxyExitIPStable(ctx, account) {
+		return nil, true, noAvailableOpenAISelectionError(requestedModel, false)
+	}
 	if s.needsUpstreamChannelRestrictionCheck(ctx, groupID) && s.isUpstreamModelRestrictedByChannel(ctx, *groupID, account, requestedModel, requireCompact) {
 		return nil, true, noAvailableOpenAISelectionError(requestedModel, false)
 	}
@@ -2205,6 +2282,9 @@ func (s *OpenAIGatewayService) resolveFreshSchedulableOpenAIAccount(ctx context.
 		return nil
 	}
 	if !s.isOpenAIAccountProxyHealthSchedulable(ctx, fresh) {
+		return nil
+	}
+	if !s.isOpenAIAccountProxyExitIPStable(ctx, fresh) {
 		return nil
 	}
 	if !IsAccountVisibleToRequestUser(ctx, fresh) {
@@ -2250,6 +2330,9 @@ func (s *OpenAIGatewayService) recheckSelectedOpenAIAccountFromDB(ctx context.Co
 		if !s.isOpenAIAccountProxyHealthSchedulable(ctx, account) {
 			return nil
 		}
+		if !s.isOpenAIAccountProxyExitIPStable(ctx, account) {
+			return nil
+		}
 		if !s.isOpenAIAccountInRequestGroup(account, groupID) {
 			return nil
 		}
@@ -2267,6 +2350,9 @@ func (s *OpenAIGatewayService) recheckSelectedOpenAIAccountFromDB(ctx context.Co
 		return nil
 	}
 	if !s.isOpenAIAccountProxyHealthSchedulable(ctx, latest) {
+		return nil
+	}
+	if !s.isOpenAIAccountProxyExitIPStable(ctx, latest) {
 		return nil
 	}
 	if !IsAccountVisibleToRequestUser(ctx, latest) {
@@ -2308,7 +2394,7 @@ func (s *OpenAIGatewayService) hydrateSelectedAccount(ctx context.Context, accou
 		if !IsAccountVisibleToRequestUser(ctx, account) {
 			return nil, ErrAccountNotFound
 		}
-		if !s.isOpenAIAccountProxyHealthSchedulable(ctx, account) || !account.IsSchedulable() || !account.IsOpenAI() {
+		if !s.isOpenAIAccountProxyHealthSchedulable(ctx, account) || !s.isOpenAIAccountProxyExitIPStable(ctx, account) || !account.IsSchedulable() || !account.IsOpenAI() {
 			return nil, ErrNoAvailableAccounts
 		}
 		return account, nil
@@ -2326,7 +2412,7 @@ func (s *OpenAIGatewayService) hydrateSelectedAccount(ctx context.Context, accou
 	if s.isAccountTempUnschedulableCached(ctx, hydrated) {
 		return nil, ErrNoAvailableAccounts
 	}
-	if !s.isOpenAIAccountProxyHealthSchedulable(ctx, hydrated) || !hydrated.IsSchedulable() || !hydrated.IsOpenAI() {
+	if !s.isOpenAIAccountProxyHealthSchedulable(ctx, hydrated) || !s.isOpenAIAccountProxyExitIPStable(ctx, hydrated) || !hydrated.IsSchedulable() || !hydrated.IsOpenAI() {
 		return nil, ErrNoAvailableAccounts
 	}
 	return hydrated, nil
@@ -2347,6 +2433,7 @@ func (s *OpenAIGatewayService) newSelectionResult(ctx context.Context, account *
 		}
 		return nil, err
 	}
+	s.bindOpenAIAccountProxyExitIP(ctx, hydrated)
 	return &AccountSelectionResult{
 		Account:     hydrated,
 		Acquired:    acquired,

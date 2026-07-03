@@ -1175,8 +1175,12 @@ func normalizeProxyExitIP(raw string) string {
 	return raw
 }
 
+func accountNeedsProxyExitIPStability(account *Account) bool {
+	return account != nil && account.RequiresProxyForScheduling() && account.ProxyID != nil && *account.ProxyID > 0
+}
+
 func (s *GatewayService) observedProxyExitIP(ctx context.Context, account *Account) string {
-	if s == nil || account == nil || !account.IsAnthropicOAuthOrSetupToken() || account.ProxyID == nil || *account.ProxyID <= 0 {
+	if s == nil || !accountNeedsProxyExitIPStability(account) {
 		return ""
 	}
 	proxyID := *account.ProxyID
@@ -1216,7 +1220,7 @@ func (s *GatewayService) boundAccountProxyExitIP(ctx context.Context, accountID 
 }
 
 func (s *GatewayService) isAccountProxyExitIPStable(ctx context.Context, account *Account) bool {
-	if s == nil || account == nil || !account.IsAnthropicOAuthOrSetupToken() || s.cache == nil {
+	if s == nil || !accountNeedsProxyExitIPStability(account) || s.cache == nil {
 		return true
 	}
 	observed := s.observedProxyExitIP(ctx, account)
@@ -1228,7 +1232,7 @@ func (s *GatewayService) isAccountProxyExitIPStable(ctx context.Context, account
 }
 
 func (s *GatewayService) bindAccountProxyExitIP(ctx context.Context, account *Account) {
-	if s == nil || s.cache == nil || account == nil || !account.IsAnthropicOAuthOrSetupToken() {
+	if s == nil || s.cache == nil || !accountNeedsProxyExitIPStability(account) {
 		return
 	}
 	observed := s.observedProxyExitIP(ctx, account)
