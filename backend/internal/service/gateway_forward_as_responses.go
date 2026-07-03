@@ -175,9 +175,9 @@ func (s *GatewayService) ForwardAsResponses(
 	var result *ForwardResult
 	var handleErr error
 	if clientStream {
-		result, handleErr = s.handleResponsesStreamingResponse(resp, c, originalModel, mappedModel, reasoningEffort, startTime)
+		result, handleErr = s.handleResponsesStreamingResponse(ctx, account, resp, c, originalModel, mappedModel, reasoningEffort, startTime)
 	} else {
-		result, handleErr = s.handleResponsesBufferedStreamingResponse(resp, c, originalModel, mappedModel, reasoningEffort, startTime)
+		result, handleErr = s.handleResponsesBufferedStreamingResponse(ctx, account, resp, c, originalModel, mappedModel, reasoningEffort, startTime)
 	}
 
 	return result, handleErr
@@ -219,6 +219,8 @@ func mergeAnthropicUsage(dst *ClaudeUsage, src apicompat.AnthropicUsage) {
 // the upstream streaming response, assembles them into a complete Anthropic
 // response, converts to Responses API JSON format, and writes it to the client.
 func (s *GatewayService) handleResponsesBufferedStreamingResponse(
+	ctx context.Context,
+	account *Account,
 	resp *http.Response,
 	c *gin.Context,
 	originalModel string,
@@ -255,6 +257,19 @@ func (s *GatewayService) handleResponsesBufferedStreamingResponse(
 			continue
 		}
 		payload := dataLine[6:]
+
+		if sseErr := anthropicBridgeStreamErrorFromPayload(eventType, payload); sseErr != nil {
+			info := s.handleAnthropicBridgeStreamError(ctx, account, resp, mappedModel, sseErr)
+			if s.shouldFailoverAnthropicBridgeStreamError(info.StatusCode, &usage, c) {
+				return nil, &UpstreamFailoverError{
+					StatusCode:      info.StatusCode,
+					ResponseBody:    info.Body,
+					ResponseHeaders: resp.Header.Clone(),
+				}
+			}
+			writeResponsesError(c, mapUpstreamStatusCode(info.StatusCode), info.ErrorType, info.Message)
+			return nil, fmt.Errorf("upstream stream error: %d message=%s", info.StatusCode, info.Message)
+		}
 
 		var event apicompat.AnthropicStreamEvent
 		if err := json.Unmarshal([]byte(payload), &event); err != nil {
@@ -353,6 +368,8 @@ func (s *GatewayService) handleResponsesBufferedStreamingResponse(
 // handleResponsesStreamingResponse reads Anthropic SSE events from upstream,
 // converts each to Responses SSE events, and writes them to the client.
 func (s *GatewayService) handleResponsesStreamingResponse(
+	ctx context.Context,
+	account *Account,
 	resp *http.Response,
 	c *gin.Context,
 	originalModel string,
@@ -362,20 +379,27 @@ func (s *GatewayService) handleResponsesStreamingResponse(
 ) (*ForwardResult, error) {
 	requestID := resp.Header.Get("x-request-id")
 
-	if s.responseHeaderFilter != nil {
-		responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
-	}
-	c.Writer.Header().Set("Content-Type", "text/event-stream")
-	c.Writer.Header().Set("Cache-Control", "no-cache")
-	c.Writer.Header().Set("Connection", "keep-alive")
-	c.Writer.Header().Set("X-Accel-Buffering", "no")
-	c.Writer.WriteHeader(http.StatusOK)
-
 	state := apicompat.NewAnthropicEventToResponsesState()
 	state.Model = originalModel
 	var usage ClaudeUsage
 	var firstTokenMs *int
 	firstChunk := true
+	streamStarted := false
+
+	startStream := func() {
+		if streamStarted {
+			return
+		}
+		if s.responseHeaderFilter != nil {
+			responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
+		}
+		c.Writer.Header().Set("Content-Type", "text/event-stream")
+		c.Writer.Header().Set("Cache-Control", "no-cache")
+		c.Writer.Header().Set("Connection", "keep-alive")
+		c.Writer.Header().Set("X-Accel-Buffering", "no")
+		c.Writer.WriteHeader(http.StatusOK)
+		streamStarted = true
+	}
 
 	scanner := bufio.NewScanner(resp.Body)
 	maxLineSize := defaultMaxLineSize
@@ -425,6 +449,7 @@ func (s *GatewayService) handleResponsesStreamingResponse(
 				)
 				continue
 			}
+			startStream()
 			out := string(reverseToolNamesIfPresent(c, []byte(sse)))
 			if _, err := fmt.Fprint(c.Writer, out); err != nil {
 				logger.L().Info("forward_as_responses stream: client disconnected",
@@ -441,6 +466,7 @@ func (s *GatewayService) handleResponsesStreamingResponse(
 
 	finalizeStream := func() (*ForwardResult, error) {
 		if finalEvents := apicompat.FinalizeAnthropicResponsesStream(state); len(finalEvents) > 0 {
+			startStream()
 			for _, evt := range finalEvents {
 				sse, err := apicompat.ResponsesEventToSSE(evt)
 				if err != nil {
@@ -450,6 +476,9 @@ func (s *GatewayService) handleResponsesStreamingResponse(
 				fmt.Fprint(c.Writer, out) //nolint:errcheck
 			}
 			c.Writer.Flush()
+		}
+		if !streamStarted {
+			startStream()
 		}
 		return resultWithUsage(), nil
 	}
@@ -471,6 +500,23 @@ func (s *GatewayService) handleResponsesStreamingResponse(
 			continue
 		}
 		payload := dataLine[6:]
+
+		if sseErr := anthropicBridgeStreamErrorFromPayload(eventType, payload); sseErr != nil {
+			info := s.handleAnthropicBridgeStreamError(ctx, account, resp, mappedModel, sseErr)
+			if !streamStarted && s.shouldFailoverAnthropicBridgeStreamError(info.StatusCode, &usage, c) {
+				return nil, &UpstreamFailoverError{
+					StatusCode:      info.StatusCode,
+					ResponseBody:    info.Body,
+					ResponseHeaders: resp.Header.Clone(),
+				}
+			}
+			startStream()
+			writeResponsesStreamError(c, info.ErrorType, info.Message)
+			if claudeUsageHasBillableTokens(&usage) {
+				return resultWithUsage(), &BillableStreamUsageError{Err: sseErr}
+			}
+			return resultWithUsage(), sseErr
+		}
 
 		var event apicompat.AnthropicStreamEvent
 		if err := json.Unmarshal([]byte(payload), &event); err != nil {
@@ -515,6 +561,133 @@ func writeResponsesError(c *gin.Context, statusCode int, code, message string) {
 			"message": message,
 		},
 	})
+}
+
+type anthropicBridgeStreamErrorInfo struct {
+	StatusCode int
+	ErrorType  string
+	Message    string
+	Body       []byte
+}
+
+func anthropicBridgeStreamErrorFromPayload(eventType, payload string) *sseStreamErrorEventError {
+	if !isAnthropicPassthroughStreamErrorData(eventType, payload) {
+		return nil
+	}
+	return newSSEStreamErrorEventError(payload)
+}
+
+func (s *GatewayService) handleAnthropicBridgeStreamError(
+	ctx context.Context,
+	account *Account,
+	resp *http.Response,
+	requestedModel string,
+	sseErr *sseStreamErrorEventError,
+) anthropicBridgeStreamErrorInfo {
+	body := []byte(nil)
+	statusCode := http.StatusBadGateway
+	message := "Anthropic stream error"
+	if sseErr != nil {
+		body = sseErr.ResponseBody
+		if len(body) == 0 {
+			body = normalizeAnthropicStreamErrorBody(sseErr.RawData)
+		}
+		if sseErr.StatusCode > 0 {
+			statusCode = sseErr.StatusCode
+		} else if parsedStatus, parsedMessage := anthropicStreamErrorStatusAndMessage(body); parsedStatus > 0 {
+			statusCode = parsedStatus
+			if parsedMessage != "" {
+				message = parsedMessage
+			}
+		}
+		if sseErr.Message != "" {
+			message = sseErr.Message
+		}
+	}
+	if len(body) == 0 {
+		body = normalizeAnthropicStreamErrorBody(message)
+	}
+	if parsedStatus, parsedMessage := anthropicStreamErrorStatusAndMessage(body); parsedStatus > 0 {
+		statusCode = parsedStatus
+		if parsedMessage != "" {
+			message = parsedMessage
+		}
+	}
+	errType := firstNonEmptyTrimmed(
+		gjson.GetBytes(body, "error.type").String(),
+		gjson.GetBytes(body, "type").String(),
+		anthropicBridgeDefaultErrorType(statusCode),
+	)
+	message = firstNonEmptyTrimmed(
+		gjson.GetBytes(body, "error.message").String(),
+		gjson.GetBytes(body, "message").String(),
+		message,
+		"Anthropic stream error",
+	)
+
+	if s != nil && s.rateLimitService != nil && account != nil {
+		headers := http.Header(nil)
+		if resp != nil {
+			headers = resp.Header
+		}
+		s.rateLimitService.HandleUpstreamErrorForModel(ctx, account, requestedModel, statusCode, headers, body)
+	}
+
+	return anthropicBridgeStreamErrorInfo{
+		StatusCode: statusCode,
+		ErrorType:  errType,
+		Message:    sanitizeUpstreamErrorMessage(message),
+		Body:       body,
+	}
+}
+
+func (s *GatewayService) shouldFailoverAnthropicBridgeStreamError(statusCode int, usage *ClaudeUsage, c *gin.Context) bool {
+	if IsUpstreamReplayUnsafeTimeoutStatus(statusCode) || claudeUsageHasBillableTokens(usage) {
+		return false
+	}
+	if c != nil && c.Writer != nil && c.Writer.Written() {
+		return false
+	}
+	return s.shouldFailoverAnthropicStreamError(statusCode)
+}
+
+func anthropicBridgeDefaultErrorType(statusCode int) string {
+	switch statusCode {
+	case http.StatusBadRequest, http.StatusRequestEntityTooLarge, http.StatusUnprocessableEntity:
+		return "invalid_request_error"
+	case http.StatusUnauthorized:
+		return "authentication_error"
+	case http.StatusPaymentRequired:
+		return "billing_error"
+	case http.StatusForbidden:
+		return "permission_error"
+	case http.StatusTooManyRequests:
+		return "rate_limit_error"
+	case 529:
+		return "overloaded_error"
+	default:
+		return "server_error"
+	}
+}
+
+func writeResponsesStreamError(c *gin.Context, errType, message string) bool {
+	payload, err := json.Marshal(gin.H{
+		"type": "error",
+		"error": gin.H{
+			"type":    errType,
+			"code":    errType,
+			"message": message,
+		},
+	})
+	if err != nil {
+		logger.L().Warn("forward_as_responses stream: failed to marshal error event", zap.Error(err))
+		return false
+	}
+	if _, err := fmt.Fprintf(c.Writer, "event: error\ndata: %s\n\n", payload); err != nil {
+		return true
+	}
+	c.Writer.Flush()
+	return false
 }
 
 // mapUpstreamStatusCode maps upstream HTTP status codes to appropriate client-facing codes.

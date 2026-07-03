@@ -181,9 +181,9 @@ func (s *GatewayService) ForwardAsChatCompletions(
 	var result *ForwardResult
 	var handleErr error
 	if clientStream {
-		result, handleErr = s.handleCCStreamingFromAnthropic(resp, c, originalModel, mappedModel, reasoningEffort, startTime, includeUsage)
+		result, handleErr = s.handleCCStreamingFromAnthropic(ctx, account, resp, c, originalModel, mappedModel, reasoningEffort, startTime, includeUsage)
 	} else {
-		result, handleErr = s.handleCCBufferedFromAnthropic(resp, c, originalModel, mappedModel, reasoningEffort, startTime)
+		result, handleErr = s.handleCCBufferedFromAnthropic(ctx, account, resp, c, originalModel, mappedModel, reasoningEffort, startTime)
 	}
 
 	return result, handleErr
@@ -210,6 +210,8 @@ func extractCCReasoningEffortFromBody(body []byte) *string {
 // handleCCBufferedFromAnthropic reads Anthropic SSE events, assembles the full
 // response, then converts Anthropic → Responses → Chat Completions.
 func (s *GatewayService) handleCCBufferedFromAnthropic(
+	ctx context.Context,
+	account *Account,
 	resp *http.Response,
 	c *gin.Context,
 	originalModel string,
@@ -243,6 +245,19 @@ func (s *GatewayService) handleCCBufferedFromAnthropic(
 			continue
 		}
 		payload := dataLine[6:]
+
+		if sseErr := anthropicBridgeStreamErrorFromPayload(strings.TrimPrefix(line, "event: "), payload); sseErr != nil {
+			info := s.handleAnthropicBridgeStreamError(ctx, account, resp, mappedModel, sseErr)
+			if s.shouldFailoverAnthropicBridgeStreamError(info.StatusCode, &usage, c) {
+				return nil, &UpstreamFailoverError{
+					StatusCode:      info.StatusCode,
+					ResponseBody:    info.Body,
+					ResponseHeaders: resp.Header.Clone(),
+				}
+			}
+			writeGatewayCCError(c, mapUpstreamStatusCode(info.StatusCode), info.ErrorType, info.Message)
+			return nil, fmt.Errorf("upstream stream error: %d message=%s", info.StatusCode, info.Message)
+		}
 
 		var event apicompat.AnthropicStreamEvent
 		if err := json.Unmarshal([]byte(payload), &event); err != nil {
@@ -336,6 +351,8 @@ func (s *GatewayService) handleCCBufferedFromAnthropic(
 // handleCCStreamingFromAnthropic reads Anthropic SSE events, converts each
 // to Responses events, then to Chat Completions chunks, and writes them.
 func (s *GatewayService) handleCCStreamingFromAnthropic(
+	ctx context.Context,
+	account *Account,
 	resp *http.Response,
 	c *gin.Context,
 	originalModel string,
@@ -345,15 +362,6 @@ func (s *GatewayService) handleCCStreamingFromAnthropic(
 	includeUsage bool,
 ) (*ForwardResult, error) {
 	requestID := resp.Header.Get("x-request-id")
-
-	if s.responseHeaderFilter != nil {
-		responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
-	}
-	c.Writer.Header().Set("Content-Type", "text/event-stream")
-	c.Writer.Header().Set("Cache-Control", "no-cache")
-	c.Writer.Header().Set("Connection", "keep-alive")
-	c.Writer.Header().Set("X-Accel-Buffering", "no")
-	c.Writer.WriteHeader(http.StatusOK)
 
 	// Use Anthropic→Responses state machine, then convert Responses→CC
 	anthState := apicompat.NewAnthropicEventToResponsesState()
@@ -365,6 +373,22 @@ func (s *GatewayService) handleCCStreamingFromAnthropic(
 	var usage ClaudeUsage
 	var firstTokenMs *int
 	firstChunk := true
+	streamStarted := false
+
+	startStream := func() {
+		if streamStarted {
+			return
+		}
+		if s.responseHeaderFilter != nil {
+			responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
+		}
+		c.Writer.Header().Set("Content-Type", "text/event-stream")
+		c.Writer.Header().Set("Cache-Control", "no-cache")
+		c.Writer.Header().Set("Connection", "keep-alive")
+		c.Writer.Header().Set("X-Accel-Buffering", "no")
+		c.Writer.WriteHeader(http.StatusOK)
+		streamStarted = true
+	}
 
 	scanner := bufio.NewScanner(resp.Body)
 	maxLineSize := defaultMaxLineSize
@@ -391,6 +415,7 @@ func (s *GatewayService) handleCCStreamingFromAnthropic(
 		if err != nil {
 			return false
 		}
+		startStream()
 		// Reverse tool name mapping: fake → real, per-chunk bytes.Replace.
 		// c 可能持有请求侧注入的 ToolNameRewrite；无则仅做静态前缀还原。
 		out := string(reverseToolNamesIfPresent(c, []byte(sse)))
@@ -445,6 +470,23 @@ func (s *GatewayService) handleCCStreamingFromAnthropic(
 		}
 		payload := dataLine[6:]
 
+		if sseErr := anthropicBridgeStreamErrorFromPayload(strings.TrimPrefix(line, "event: "), payload); sseErr != nil {
+			info := s.handleAnthropicBridgeStreamError(ctx, account, resp, mappedModel, sseErr)
+			if !streamStarted && s.shouldFailoverAnthropicBridgeStreamError(info.StatusCode, &usage, c) {
+				return nil, &UpstreamFailoverError{
+					StatusCode:      info.StatusCode,
+					ResponseBody:    info.Body,
+					ResponseHeaders: resp.Header.Clone(),
+				}
+			}
+			startStream()
+			writeChatCompletionsStreamError(c, info.ErrorType, info.Message)
+			if claudeUsageHasBillableTokens(&usage) {
+				return resultWithUsage(), &BillableStreamUsageError{Err: sseErr}
+			}
+			return resultWithUsage(), sseErr
+		}
+
 		var event apicompat.AnthropicStreamEvent
 		if err := json.Unmarshal([]byte(payload), &event); err != nil {
 			continue
@@ -478,6 +520,7 @@ func (s *GatewayService) handleCCStreamingFromAnthropic(
 	}
 
 	// Write [DONE] marker
+	startStream()
 	fmt.Fprint(c.Writer, "data: [DONE]\n\n") //nolint:errcheck
 	c.Writer.Flush()
 
