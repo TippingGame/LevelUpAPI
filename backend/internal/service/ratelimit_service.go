@@ -276,6 +276,15 @@ func (s *RateLimitService) persistModelRateLimitedState(ctx context.Context, acc
 	if err := s.accountRepo.SetModelRateLimit(writeCtx, account.ID, modelKey, resetAt); err != nil {
 		return err
 	}
+	markModelRateLimitRuntimeState(account, modelKey, resetAt)
+	return nil
+}
+
+func markModelRateLimitRuntimeState(account *Account, modelKey string, resetAt time.Time) {
+	modelKey = strings.TrimSpace(modelKey)
+	if account == nil || modelKey == "" {
+		return
+	}
 	if account.Extra == nil {
 		account.Extra = make(map[string]any)
 	}
@@ -288,7 +297,6 @@ func (s *RateLimitService) persistModelRateLimitedState(ctx context.Context, acc
 		"rate_limited_at":     time.Now().UTC().Format(time.RFC3339),
 		"rate_limit_reset_at": resetAt.UTC().Format(time.RFC3339),
 	}
-	return nil
 }
 
 func (s *RateLimitService) persistAccountExtraState(ctx context.Context, accountID int64, updates map[string]any) error {
@@ -569,6 +577,7 @@ func (s *RateLimitService) handleUpstreamModelNotFound(ctx context.Context, acco
 	resetAt := time.Now().Add(upstreamModelNotFoundCooldown)
 	if err := s.persistModelRateLimitedState(ctx, account, modelKey, resetAt); err != nil {
 		slog.Warn("upstream_model_not_found_set_model_rate_limit_failed", "account_id", account.ID, "model", modelKey, "error", err)
+		markModelRateLimitRuntimeState(account, modelKey, resetAt)
 		return true
 	}
 	slog.Info("upstream_model_not_found_model_rate_limited", "account_id", account.ID, "model", modelKey, "reset_at", resetAt)
