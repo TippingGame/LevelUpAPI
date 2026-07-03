@@ -119,6 +119,29 @@ func (s *AccountTestService) markAccountErrorFromTest(ctx context.Context, accou
 	}
 }
 
+func (s *AccountTestService) handleAccountTestUpstreamError(ctx context.Context, account *Account, requestedModel string, statusCode int, headers http.Header, body []byte, fallbackErrorMsg string, fallbackSource string) {
+	if s == nil || account == nil {
+		return
+	}
+	if s.rateLimitService != nil && s.rateLimitService.accountRepo != nil {
+		if strings.TrimSpace(requestedModel) != "" {
+			s.rateLimitService.HandleUpstreamErrorForModel(ctx, account, requestedModel, statusCode, headers, body)
+			return
+		}
+		s.rateLimitService.HandleUpstreamError(ctx, account, statusCode, headers, body)
+		return
+	}
+	if s.accountRepo == nil {
+		return
+	}
+	switch statusCode {
+	case http.StatusUnauthorized:
+		s.markAccountErrorFromTest(ctx, account, fallbackErrorMsg, fallbackSource)
+	case http.StatusForbidden:
+		s.markAccountErrorFromTest(ctx, account, fallbackErrorMsg, fallbackSource)
+	}
+}
+
 func (s *AccountTestService) persistAccountExtraFromTest(ctx context.Context, account *Account, updates map[string]any) {
 	if s == nil || s.accountRepo == nil || account == nil || len(updates) == 0 {
 		return
@@ -381,9 +404,8 @@ func (s *AccountTestService) testClaudeAccountConnection(c *gin.Context, account
 		body, _ := io.ReadAll(resp.Body)
 		errMsg := fmt.Sprintf("API returned %d: %s", resp.StatusCode, string(body))
 
-		// 403 表示账号被上游封禁，标记为 error 状态
 		if resp.StatusCode == http.StatusForbidden {
-			s.markAccountErrorFromTest(ctx, account, errMsg, "account_test_claude_403")
+			s.handleAccountTestUpstreamError(ctx, account, testModelID, resp.StatusCode, resp.Header, body, errMsg, "account_test_claude_403")
 		}
 
 		return s.sendErrorAndEnd(c, errMsg)
@@ -450,7 +472,7 @@ func (s *AccountTestService) testClaudeVertexServiceAccountConnection(c *gin.Con
 		body, _ := io.ReadAll(resp.Body)
 		errMsg := fmt.Sprintf("API returned %d: %s", resp.StatusCode, string(body))
 		if resp.StatusCode == http.StatusForbidden {
-			s.markAccountErrorFromTest(ctx, account, errMsg, "account_test_claude_vertex_403")
+			s.handleAccountTestUpstreamError(ctx, account, testModelID, resp.StatusCode, resp.Header, body, errMsg, "account_test_claude_vertex_403")
 		}
 		return s.sendErrorAndEnd(c, errMsg)
 	}
@@ -688,10 +710,9 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 		if resp.StatusCode == http.StatusTooManyRequests {
 			s.reconcileOpenAI429State(ctx, account, resp.Header, body)
 		}
-		// 401 Unauthorized: 标记账号为永久错误
 		if resp.StatusCode == http.StatusUnauthorized && s.accountRepo != nil {
 			errMsg := fmt.Sprintf("Authentication failed (401): %s", string(body))
-			s.markAccountErrorFromTest(ctx, account, errMsg, "account_test_openai_401")
+			s.handleAccountTestUpstreamError(ctx, account, testModelID, resp.StatusCode, resp.Header, body, errMsg, "account_test_openai_401")
 		}
 		return s.sendErrorAndEnd(c, fmt.Sprintf("API returned %d: %s", resp.StatusCode, string(body)))
 	}
@@ -750,7 +771,7 @@ func (s *AccountTestService) testOpenAIChatCompletionsConnection(
 		}
 		if resp.StatusCode == http.StatusUnauthorized && s.accountRepo != nil {
 			errMsg := fmt.Sprintf("Chat Completions authentication failed (401): %s", string(body))
-			s.markAccountErrorFromTest(ctx, account, errMsg, "account_test_openai_chat_401")
+			s.handleAccountTestUpstreamError(ctx, account, testModelID, resp.StatusCode, resp.Header, body, errMsg, "account_test_openai_chat_401")
 		}
 		return s.sendErrorAndEnd(c, fmt.Sprintf("Chat Completions API (/v1/chat/completions) returned %d: %s", resp.StatusCode, string(body)))
 	}
@@ -862,7 +883,7 @@ func (s *AccountTestService) testOpenAICompactConnection(c *gin.Context, account
 	if resp.StatusCode != http.StatusOK {
 		if resp.StatusCode == http.StatusUnauthorized && s.accountRepo != nil {
 			errMsg := fmt.Sprintf("Authentication failed (401): %s", string(body))
-			s.markAccountErrorFromTest(ctx, account, errMsg, "account_test_openai_compact_401")
+			s.handleAccountTestUpstreamError(ctx, account, testModelID, resp.StatusCode, resp.Header, body, errMsg, "account_test_openai_compact_401")
 		}
 		return s.sendErrorAndEnd(c, fmt.Sprintf("API returned %d: %s", resp.StatusCode, string(body)))
 	}

@@ -84,6 +84,10 @@ type openAIAccountTestRepo struct {
 	setErrorID            int64
 	setErrorContextErr    error
 	setErrorMsg           string
+	tempUnschedID         int64
+	tempUnschedUntil      *time.Time
+	tempUnschedReason     string
+	tempUnschedContextErr error
 }
 
 func (r *openAIAccountTestRepo) UpdateExtra(ctx context.Context, _ int64, updates map[string]any) error {
@@ -116,6 +120,14 @@ func (r *openAIAccountTestRepo) SetError(ctx context.Context, id int64, errorMsg
 	r.setErrorID = id
 	r.setErrorContextErr = ctx.Err()
 	r.setErrorMsg = errorMsg
+	return nil
+}
+
+func (r *openAIAccountTestRepo) SetTempUnschedulable(ctx context.Context, id int64, until time.Time, reason string) error {
+	r.tempUnschedID = id
+	r.tempUnschedUntil = &until
+	r.tempUnschedReason = reason
+	r.tempUnschedContextErr = ctx.Err()
 	return nil
 }
 
@@ -503,7 +515,7 @@ func TestAccountTestService_OpenAI429WithoutResetSignalDoesNotMutateRuntimeState
 	require.Nil(t, account.RateLimitResetAt)
 }
 
-func TestAccountTestService_OpenAI401SetsPermanentErrorAndRuntimeEviction(t *testing.T) {
+func TestAccountTestService_OpenAIOAuth401UsesTempUnschedulableWhenRefreshable(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	ctx, _ := newTestContext()
 	cancelTestRequest(ctx)
@@ -513,9 +525,44 @@ func TestAccountTestService_OpenAI401SetsPermanentErrorAndRuntimeEviction(t *tes
 	repo := &openAIAccountTestRepo{}
 	cache := &runtimeTempUnschedCacheStub{}
 	upstream := &queuedHTTPUpstream{responses: []*http.Response{resp}}
-	svc := &AccountTestService{accountRepo: repo, httpUpstream: upstream, rateLimitService: NewRateLimitService(nil, nil, nil, nil, cache)}
+	svc := &AccountTestService{accountRepo: repo, httpUpstream: upstream, rateLimitService: NewRateLimitService(repo, nil, nil, nil, cache)}
 	account := &Account{
 		ID:          80,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeOAuth,
+		Status:      StatusActive,
+		Concurrency: 1,
+		Credentials: map[string]any{"access_token": "test-token", "refresh_token": "refresh-token"},
+	}
+
+	err := svc.testOpenAIAccountConnection(ctx, account, "gpt-5.4", "", "")
+	require.Error(t, err)
+	require.Zero(t, repo.setErrorID)
+	require.Equal(t, account.ID, repo.tempUnschedID)
+	require.NoError(t, repo.tempUnschedContextErr)
+	require.NotNil(t, repo.tempUnschedUntil)
+	require.Contains(t, repo.tempUnschedReason, "Authentication failed (401)")
+	require.Zero(t, repo.rateLimitedID)
+	require.Zero(t, repo.clearedErrorID)
+	require.Nil(t, account.RateLimitResetAt)
+	require.NotNil(t, cache.states[80])
+	require.Equal(t, "oauth_401", cache.states[80].MatchedKeyword)
+	require.Contains(t, cache.states[80].ErrorMessage, "Authentication failed (401)")
+}
+
+func TestAccountTestService_OpenAI401WithoutRefreshTokenSetsPermanentErrorAndRuntimeEviction(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	ctx, _ := newTestContext()
+	cancelTestRequest(ctx)
+
+	resp := newJSONResponse(http.StatusUnauthorized, `{"error":"bad token"}`)
+
+	repo := &openAIAccountTestRepo{}
+	cache := &runtimeTempUnschedCacheStub{}
+	upstream := &queuedHTTPUpstream{responses: []*http.Response{resp}}
+	svc := &AccountTestService{accountRepo: repo, httpUpstream: upstream, rateLimitService: NewRateLimitService(repo, nil, nil, nil, cache)}
+	account := &Account{
+		ID:          81,
 		Platform:    PlatformOpenAI,
 		Type:        AccountTypeOAuth,
 		Status:      StatusActive,
@@ -527,13 +574,14 @@ func TestAccountTestService_OpenAI401SetsPermanentErrorAndRuntimeEviction(t *tes
 	require.Error(t, err)
 	require.Equal(t, account.ID, repo.setErrorID)
 	require.NoError(t, repo.setErrorContextErr)
-	require.Contains(t, repo.setErrorMsg, "Authentication failed (401)")
+	require.Contains(t, repo.setErrorMsg, "refresh_token missing")
+	require.Zero(t, repo.tempUnschedID)
 	require.Zero(t, repo.rateLimitedID)
 	require.Zero(t, repo.clearedErrorID)
 	require.Nil(t, account.RateLimitResetAt)
-	require.NotNil(t, cache.states[80])
-	require.Equal(t, "account_error", cache.states[80].MatchedKeyword)
-	require.Contains(t, cache.states[80].ErrorMessage, "Authentication failed (401)")
+	require.NotNil(t, cache.states[81])
+	require.Equal(t, "account_error", cache.states[81].MatchedKeyword)
+	require.Contains(t, cache.states[81].ErrorMessage, "refresh_token missing")
 }
 
 func TestAccountTestService_OpenAIAPIKeyResponsesUnsupportedUsesChatCompletionsPath(t *testing.T) {
