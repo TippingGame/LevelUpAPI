@@ -1115,12 +1115,65 @@ const (
 )
 
 func accountTempUnschedulableInactivePredicate() dbpredicate.Account {
+	return accountLocalSystemStateInactivePredicate(dbaccount.FieldTempUnschedulableUntil)
+}
+
+func accountRateLimitInactivePredicate() dbpredicate.Account {
+	return accountLocalSystemStateInactivePredicate(dbaccount.FieldRateLimitResetAt)
+}
+
+func accountOverloadInactivePredicate() dbpredicate.Account {
+	return accountLocalSystemStateInactivePredicate(dbaccount.FieldOverloadUntil)
+}
+
+func accountRateLimitActivePredicate() dbpredicate.Account {
+	return accountLocalSystemStateActivePredicate(dbaccount.FieldRateLimitResetAt)
+}
+
+func accountTempUnschedulableActivePredicate() dbpredicate.Account {
+	return accountLocalSystemStateActivePredicate(dbaccount.FieldTempUnschedulableUntil)
+}
+
+func accountLocalSystemStateInactivePredicate(field string) dbpredicate.Account {
 	return dbpredicate.Account(func(s *entsql.Selector) {
-		col := s.C("temp_unschedulable_until")
+		col := s.C(field)
 		s.Where(entsql.Or(
+			accountIgnoresLocalSystemErrorStateSQL(s),
 			entsql.IsNull(col),
 			entsql.LTE(col, entsql.Expr("NOW()")),
 		))
+	})
+}
+
+func accountLocalSystemStateActivePredicate(field string) dbpredicate.Account {
+	return dbpredicate.Account(func(s *entsql.Selector) {
+		col := s.C(field)
+		s.Where(entsql.And(
+			entsql.Not(accountIgnoresLocalSystemErrorStateSQL(s)),
+			entsql.Not(entsql.IsNull(col)),
+			entsql.GT(col, entsql.Expr("NOW()")),
+		))
+	})
+}
+
+func accountIgnoresLocalSystemErrorStateSQL(s *entsql.Selector) *entsql.Predicate {
+	return entsql.P(func(b *entsql.Builder) {
+		typeCol := s.C(dbaccount.FieldType)
+		credentialsCol := s.C(dbaccount.FieldCredentials)
+		b.WriteString("(")
+		b.Ident(typeCol).
+			WriteString(" IN (").
+			Arg(service.AccountTypeAPIKey).
+			WriteString(", ").
+			Arg(service.AccountTypeBedrock).
+			WriteString(")")
+		b.WriteString(" AND LOWER(COALESCE(")
+		b.Ident(credentialsCol).WriteString(" ->> ").Arg("pool_mode")
+		b.WriteString(", ").Arg("").WriteString(")) = ").Arg("true")
+		b.WriteString(" AND LOWER(COALESCE(")
+		b.Ident(credentialsCol).WriteString(" ->> ").Arg("custom_error_codes_enabled")
+		b.WriteString(", ").Arg("").WriteString(")) <> ").Arg("true")
+		b.WriteString(")")
 	})
 }
 
@@ -1195,30 +1248,22 @@ func (r *accountRepository) listWithFilters(ctx context.Context, params paginati
 			q = q.Where(
 				dbaccount.StatusEQ(status),
 				dbaccount.SchedulableEQ(true),
-				dbaccount.Or(
-					dbaccount.RateLimitResetAtIsNil(),
-					dbaccount.RateLimitResetAtLTE(time.Now()),
-				),
+				accountRateLimitInactivePredicate(),
+				accountOverloadInactivePredicate(),
 				accountTempUnschedulableInactivePredicate(),
 				dbaccount.Not(accountCodexQuotaProtectedPredicate()),
 			)
 		case service.AccountListStatusRateLimited:
 			q = q.Where(
 				dbaccount.StatusEQ(service.StatusActive),
-				dbaccount.RateLimitResetAtGT(time.Now()),
+				accountRateLimitActivePredicate(),
 				accountTempUnschedulableInactivePredicate(),
 			)
 		case service.AccountListStatusTempUnschedulable:
 			q = q.Where(
 				dbaccount.StatusEQ(service.StatusActive),
 				dbaccount.Not(accountCodexQuotaProtectedPredicate()),
-				dbpredicate.Account(func(s *entsql.Selector) {
-					col := s.C("temp_unschedulable_until")
-					s.Where(entsql.And(
-						entsql.Not(entsql.IsNull(col)),
-						entsql.GT(col, entsql.Expr("NOW()")),
-					))
-				}),
+				accountTempUnschedulableActivePredicate(),
 			)
 		case service.AccountListStatusCodexQuotaProtected:
 			q = q.Where(
@@ -1235,10 +1280,8 @@ func (r *accountRepository) listWithFilters(ctx context.Context, params paginati
 			q = q.Where(
 				dbaccount.StatusEQ(service.StatusActive),
 				dbaccount.SchedulableEQ(false),
-				dbaccount.Or(
-					dbaccount.RateLimitResetAtIsNil(),
-					dbaccount.RateLimitResetAtLTE(time.Now()),
-				),
+				accountRateLimitInactivePredicate(),
+				accountOverloadInactivePredicate(),
 				accountTempUnschedulableInactivePredicate(),
 				dbaccount.Not(accountCodexQuotaProtectedPredicate()),
 			)
@@ -1827,8 +1870,8 @@ func (r *accountRepository) ListSchedulable(ctx context.Context) ([]service.Acco
 			dbaccount.SchedulableEQ(true),
 			tempUnschedulablePredicate(),
 			notExpiredPredicate(now),
-			dbaccount.Or(dbaccount.OverloadUntilIsNil(), dbaccount.OverloadUntilLTE(now)),
-			dbaccount.Or(dbaccount.RateLimitResetAtIsNil(), dbaccount.RateLimitResetAtLTE(now)),
+			accountOverloadInactivePredicate(),
+			accountRateLimitInactivePredicate(),
 		).
 		Order(dbent.Asc(dbaccount.FieldPriority)).
 		All(ctx)
@@ -1854,8 +1897,8 @@ func (r *accountRepository) ListSchedulableByPlatform(ctx context.Context, platf
 			dbaccount.SchedulableEQ(true),
 			tempUnschedulablePredicate(),
 			notExpiredPredicate(now),
-			dbaccount.Or(dbaccount.OverloadUntilIsNil(), dbaccount.OverloadUntilLTE(now)),
-			dbaccount.Or(dbaccount.RateLimitResetAtIsNil(), dbaccount.RateLimitResetAtLTE(now)),
+			accountOverloadInactivePredicate(),
+			accountRateLimitInactivePredicate(),
 		).
 		Order(dbent.Asc(dbaccount.FieldPriority)).
 		All(ctx)
@@ -1888,8 +1931,8 @@ func (r *accountRepository) ListSchedulableByPlatforms(ctx context.Context, plat
 			dbaccount.SchedulableEQ(true),
 			tempUnschedulablePredicate(),
 			notExpiredPredicate(now),
-			dbaccount.Or(dbaccount.OverloadUntilIsNil(), dbaccount.OverloadUntilLTE(now)),
-			dbaccount.Or(dbaccount.RateLimitResetAtIsNil(), dbaccount.RateLimitResetAtLTE(now)),
+			accountOverloadInactivePredicate(),
+			accountRateLimitInactivePredicate(),
 		).
 		Order(dbent.Asc(dbaccount.FieldPriority)).
 		All(ctx)
@@ -1909,8 +1952,8 @@ func (r *accountRepository) ListSchedulableUngroupedByPlatform(ctx context.Conte
 			dbaccount.Not(dbaccount.HasAccountGroups()),
 			tempUnschedulablePredicate(),
 			notExpiredPredicate(now),
-			dbaccount.Or(dbaccount.OverloadUntilIsNil(), dbaccount.OverloadUntilLTE(now)),
-			dbaccount.Or(dbaccount.RateLimitResetAtIsNil(), dbaccount.RateLimitResetAtLTE(now)),
+			accountOverloadInactivePredicate(),
+			accountRateLimitInactivePredicate(),
 		).
 		Order(dbent.Asc(dbaccount.FieldPriority)).
 		All(ctx)
@@ -1933,8 +1976,8 @@ func (r *accountRepository) ListSchedulableUngroupedByPlatforms(ctx context.Cont
 			dbaccount.Not(dbaccount.HasAccountGroups()),
 			tempUnschedulablePredicate(),
 			notExpiredPredicate(now),
-			dbaccount.Or(dbaccount.OverloadUntilIsNil(), dbaccount.OverloadUntilLTE(now)),
-			dbaccount.Or(dbaccount.RateLimitResetAtIsNil(), dbaccount.RateLimitResetAtLTE(now)),
+			accountOverloadInactivePredicate(),
+			accountRateLimitInactivePredicate(),
 		).
 		Order(dbent.Asc(dbaccount.FieldPriority)).
 		All(ctx)
@@ -2513,8 +2556,8 @@ func (r *accountRepository) queryAccountsByGroup(ctx context.Context, groupID in
 			dbaccount.SchedulableEQ(true),
 			tempUnschedulablePredicate(),
 			notExpiredPredicate(now),
-			dbaccount.Or(dbaccount.OverloadUntilIsNil(), dbaccount.OverloadUntilLTE(now)),
-			dbaccount.Or(dbaccount.RateLimitResetAtIsNil(), dbaccount.RateLimitResetAtLTE(now)),
+			accountOverloadInactivePredicate(),
+			accountRateLimitInactivePredicate(),
 		)
 	}
 
@@ -2684,13 +2727,7 @@ func (r *accountRepository) loadAccountErrorSince(ctx context.Context, accountID
 }
 
 func tempUnschedulablePredicate() dbpredicate.Account {
-	return dbpredicate.Account(func(s *entsql.Selector) {
-		col := s.C("temp_unschedulable_until")
-		s.Where(entsql.Or(
-			entsql.IsNull(col),
-			entsql.LTE(col, entsql.Expr("NOW()")),
-		))
-	})
+	return accountTempUnschedulableInactivePredicate()
 }
 
 func notExpiredPredicate(now time.Time) dbpredicate.Account {

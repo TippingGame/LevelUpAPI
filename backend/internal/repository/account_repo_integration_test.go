@@ -672,6 +672,71 @@ func (s *AccountRepoSuite) TestListSchedulable() {
 	s.Require().NotContains(ids, overloaded.ID)
 }
 
+func (s *AccountRepoSuite) TestListSchedulableIgnoresDefaultPoolModeLocalState() {
+	now := time.Now()
+	future := now.Add(10 * time.Minute)
+	group := mustCreateGroup(s.T(), s.client, &service.Group{Name: "g-pool-sched"})
+
+	poolDefault := mustCreateAccount(s.T(), s.client, &service.Account{
+		Name:             "pool-default",
+		Platform:         service.PlatformOpenAI,
+		Type:             service.AccountTypeAPIKey,
+		Schedulable:      true,
+		RateLimitResetAt: &future,
+		OverloadUntil:    &future,
+		Credentials:      map[string]any{"pool_mode": true},
+	})
+	mustBindAccountToGroup(s.T(), s.client, poolDefault.ID, group.ID, 1)
+	s.Require().NoError(s.client.Account.UpdateOneID(poolDefault.ID).
+		SetTempUnschedulableUntil(future).
+		Exec(s.ctx))
+
+	poolCustom := mustCreateAccount(s.T(), s.client, &service.Account{
+		Name:             "pool-custom",
+		Platform:         service.PlatformOpenAI,
+		Type:             service.AccountTypeAPIKey,
+		Schedulable:      true,
+		RateLimitResetAt: &future,
+		OverloadUntil:    &future,
+		Credentials: map[string]any{
+			"pool_mode":                  true,
+			"custom_error_codes_enabled": true,
+		},
+	})
+	mustBindAccountToGroup(s.T(), s.client, poolCustom.ID, group.ID, 1)
+	s.Require().NoError(s.client.Account.UpdateOneID(poolCustom.ID).
+		SetTempUnschedulableUntil(future).
+		Exec(s.ctx))
+
+	nonPool := mustCreateAccount(s.T(), s.client, &service.Account{
+		Name:             "non-pool",
+		Platform:         service.PlatformOpenAI,
+		Type:             service.AccountTypeAPIKey,
+		Schedulable:      true,
+		RateLimitResetAt: &future,
+		OverloadUntil:    &future,
+		Credentials:      map[string]any{},
+	})
+	mustBindAccountToGroup(s.T(), s.client, nonPool.ID, group.ID, 1)
+	s.Require().NoError(s.client.Account.UpdateOneID(nonPool.ID).
+		SetTempUnschedulableUntil(future).
+		Exec(s.ctx))
+
+	all, err := s.repo.ListSchedulable(s.ctx)
+	s.Require().NoError(err)
+	allIDs := idsOfAccounts(all)
+	s.Require().Contains(allIDs, poolDefault.ID)
+	s.Require().NotContains(allIDs, poolCustom.ID)
+	s.Require().NotContains(allIDs, nonPool.ID)
+
+	groupAccounts, err := s.repo.ListSchedulableByGroupID(s.ctx, group.ID)
+	s.Require().NoError(err)
+	groupIDs := idsOfAccounts(groupAccounts)
+	s.Require().Contains(groupIDs, poolDefault.ID)
+	s.Require().NotContains(groupIDs, poolCustom.ID)
+	s.Require().NotContains(groupIDs, nonPool.ID)
+}
+
 func (s *AccountRepoSuite) TestListSchedulableByGroupID_TimeBoundaries_And_StatusUpdates() {
 	now := time.Now()
 	group := mustCreateGroup(s.T(), s.client, &service.Group{Name: "g-sched"})
