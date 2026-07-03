@@ -74,6 +74,7 @@ const (
 	generic403CooldownMinutesDefault     = 10
 	overloadCooldownMinutesDefault       = 10
 	runtimeAccountErrorEvictionTTL       = 24 * time.Hour
+	customErrorCodeCooldown              = 24 * time.Hour
 	rateLimitStateUpdateTimeout          = 3 * time.Second
 )
 
@@ -1536,14 +1537,20 @@ func (s *RateLimitService) handleAntigravity403(ctx context.Context, account *Ac
 	}
 }
 
-// handleCustomErrorCode 处理自定义错误码，停止账号调度
+// handleCustomErrorCode 处理自定义错误码，临时停止账号调度
 func (s *RateLimitService) handleCustomErrorCode(ctx context.Context, account *Account, statusCode int, errorMsg string) {
 	msg := "Custom error code " + strconv.Itoa(statusCode) + ": " + errorMsg
-	if err := s.persistAccountError(ctx, account, msg, "custom_error_code"); err != nil {
-		slog.Warn("account_set_error_failed", "account_id", account.ID, "status_code", statusCode, "error", err)
+	until := time.Now().Add(customErrorCodeCooldown)
+	state := newTempUnschedState(until, statusCode, "custom_error_code", msg)
+	reason := msg
+	if raw, err := json.Marshal(state); err == nil {
+		reason = string(raw)
+	}
+	if err := s.persistTempUnschedulableState(ctx, account, until, reason, state, "custom_error_code"); err != nil {
+		slog.Warn("custom_error_code_temp_unschedulable_failed", "account_id", account.ID, "status_code", statusCode, "error", err)
 		return
 	}
-	slog.Warn("account_disabled_custom_error", "account_id", account.ID, "status_code", statusCode, "error", errorMsg)
+	slog.Warn("custom_error_code_temp_unschedulable", "account_id", account.ID, "status_code", statusCode, "until", until, "error", errorMsg)
 }
 
 // handle429 处理429限流错误

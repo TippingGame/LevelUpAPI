@@ -283,7 +283,7 @@ func TestRateLimitServiceHandleUpstreamErrorPermanentErrorWritesRuntimeEvictionC
 	require.True(t, cache.states[55].UntilUnix > time.Now().Add(time.Hour).Unix())
 }
 
-func TestRateLimitServiceHandleUpstreamErrorCustomErrorWritesRuntimeEvictionCache(t *testing.T) {
+func TestRateLimitServiceHandleUpstreamErrorCustomErrorSetsTempUnschedulable(t *testing.T) {
 	repo := &permanentKeywordAccountRepoStub{}
 	cache := &runtimeTempUnschedCacheStub{}
 	svc := NewRateLimitService(repo, nil, nil, nil, cache)
@@ -308,13 +308,18 @@ func TestRateLimitServiceHandleUpstreamErrorCustomErrorWritesRuntimeEvictionCach
 	)
 
 	require.True(t, shouldDisable)
-	require.Equal(t, 1, repo.setErrorCalls)
-	require.Equal(t, StatusError, account.Status)
-	require.False(t, account.Schedulable)
-	require.Contains(t, account.ErrorMessage, "Custom error code")
+	require.Equal(t, 0, repo.setErrorCalls)
+	require.Equal(t, 1, repo.tempCalls)
+	require.NoError(t, repo.lastTempCtxErr)
+	require.Equal(t, StatusActive, account.Status)
+	require.True(t, account.Schedulable)
+	require.NotNil(t, account.TempUnschedulableUntil)
+	require.Contains(t, account.TempUnschedulableReason, `"matched_keyword":"custom_error_code"`)
 	require.NotNil(t, cache.states[56])
-	require.Equal(t, "account_error", cache.states[56].MatchedKeyword)
-	require.True(t, cache.states[56].UntilUnix > time.Now().Add(time.Hour).Unix())
+	require.Equal(t, "custom_error_code", cache.states[56].MatchedKeyword)
+	require.Equal(t, http.StatusServiceUnavailable, cache.states[56].StatusCode)
+	require.Contains(t, cache.states[56].ErrorMessage, "Custom error code")
+	require.True(t, cache.states[56].UntilUnix > time.Now().Add(23*time.Hour).Unix())
 }
 
 func TestRateLimitServiceHandleStreamTimeoutErrorActionDowngradesOAuthToTempUnsched(t *testing.T) {

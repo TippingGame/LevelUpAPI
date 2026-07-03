@@ -4357,9 +4357,9 @@ export default {
       customErrorCodesWarning:
         'Only selected error codes or ranges will stop scheduling. Other errors will return 500.',
       customErrorCodes429Warning:
-        '429 already has built-in rate limit handling. Adding it to custom error codes will disable the account instead of temporary rate limiting. Are you sure?',
+        '429 already has built-in rate limit handling. Adding it to custom error codes will temporarily stop scheduling instead of using rate-limit state. Are you sure?',
       customErrorCodes529Warning:
-        '529 already has built-in overload handling. Adding it to custom error codes will disable the account instead of temporary overload marking. Are you sure?',
+        '529 already has built-in overload handling. Adding it to custom error codes will temporarily stop scheduling instead of using overload state. Are you sure?',
       selectedErrorCodes: 'Selected',
       noneSelectedUsesDefault: 'None selected (uses default policy)',
       enterErrorCode: 'Enter code or range, e.g. 401,500-503',
