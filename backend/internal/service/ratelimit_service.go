@@ -607,6 +607,10 @@ func (s *RateLimitService) handleUpstreamModelNotFound(ctx context.Context, acco
 	if s == nil || s.accountRepo == nil || account == nil {
 		return false
 	}
+	if account.IsPoolMode() && !account.IsCustomErrorCodesEnabled() {
+		slog.Info("pool_mode_model_error_skipped", "account_id", account.ID, "status_code", statusCode, "model", requestedModel)
+		return false
+	}
 	if !account.ShouldHandleErrorCode(statusCode) {
 		return false
 	}
