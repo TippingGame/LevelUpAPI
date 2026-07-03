@@ -84,7 +84,7 @@ func (g *Group) IsActive() bool {
 }
 
 func (g *Group) IsSubscriptionType() bool {
-	return g.SubscriptionType == SubscriptionTypeSubscription
+	return NormalizeSubscriptionType(g.SubscriptionType) == SubscriptionTypeSubscription
 }
 
 func (g *Group) IsUserPrivateScope() bool {
@@ -184,6 +184,19 @@ func NormalizeGroupScope(scope string) string {
 	default:
 		return GroupScopePublic
 	}
+}
+
+func NormalizeSubscriptionType(subscriptionType string) string {
+	switch strings.ToLower(strings.TrimSpace(subscriptionType)) {
+	case SubscriptionTypeSubscription:
+		return SubscriptionTypeSubscription
+	default:
+		return SubscriptionTypeStandard
+	}
+}
+
+func IsStandardSubscriptionType(subscriptionType string) bool {
+	return NormalizeSubscriptionType(subscriptionType) == SubscriptionTypeStandard
 }
 
 func NormalizeRequiredAccountLevel(level string) string {

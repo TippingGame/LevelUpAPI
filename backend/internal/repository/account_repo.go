@@ -939,9 +939,13 @@ func (r *accountRepository) repairQuotaPoolVisibleOpenAISharedPoolBindings(ctx c
 						AND g.deleted_at IS NULL
 						AND g.platform = 'openai'
 						AND g.owner_user_id IS NULL
-						AND g.scope = 'public'
+						AND lower(btrim(COALESCE(g.scope, ''))) = 'public'
 						AND g.is_exclusive = FALSE
-						AND COALESCE(g.subscription_type, '') IN ('', 'standard')
+						AND (
+							lower(btrim(COALESCE(g.subscription_type, ''))) IN ('', 'standard')
+							OR lower(btrim(COALESCE(g.required_account_level, ''))) = 'pro'
+							OR btrim(g.name) IN ('PRO共享号池', 'OpenAI PRO共享号池', 'OpenAI PRO共享号池(公共)')
+						)
 				)
 			)
 	`, ownerUserID)
@@ -983,8 +987,8 @@ func (r *accountRepository) listQuotaPoolAccountRows(ctx context.Context, ownerU
 				AND g.deleted_at IS NULL
 				AND g.is_exclusive = false
 				AND g.owner_user_id IS NULL
-				AND g.scope = 'public'
-				AND COALESCE(g.subscription_type, '') IN ('', 'standard')
+				AND lower(btrim(COALESCE(g.scope, ''))) = 'public'
+				AND lower(btrim(COALESCE(g.subscription_type, ''))) IN ('', 'standard')
 				AND (
 					a.owner_user_id IS NULL
 					OR (
@@ -1250,6 +1254,7 @@ func (r *accountRepository) loadQuotaPoolAccountGroupRows(ctx context.Context, o
 		}
 		group.Hydrated = true
 		group.Scope = service.NormalizeGroupScope(group.Scope)
+		group.SubscriptionType = service.NormalizeSubscriptionType(group.SubscriptionType)
 		group.RequiredAccountLevel = service.NormalizeRequiredAccountLevel(group.RequiredAccountLevel)
 
 		account, ok := byID[accountID]
@@ -2975,9 +2980,9 @@ func repairOpenAISharedPoolBindingsForAccounts(ctx context.Context, exec sqlExec
 				AND g.platform = 'openai'
 				AND g.status = 'active'
 				AND g.owner_user_id IS NULL
-				AND g.scope = 'public'
+				AND lower(btrim(COALESCE(g.scope, ''))) = 'public'
 				AND g.is_exclusive = FALSE
-				AND COALESCE(g.subscription_type, '') IN ('', 'standard')
+				AND lower(btrim(COALESCE(g.subscription_type, ''))) IN ('', 'standard')
 				AND lower(btrim(COALESCE(g.required_account_level, ''))) IN ('free', 'plus', 'pro', 'team')
 		),
 		target_groups AS (
@@ -3010,9 +3015,9 @@ func repairOpenAISharedPoolBindingsForAccounts(ctx context.Context, exec sqlExec
 				AND g.deleted_at IS NULL
 				AND g.platform = 'openai'
 				AND g.owner_user_id IS NULL
-				AND g.scope = 'public'
+				AND lower(btrim(COALESCE(g.scope, ''))) = 'public'
 				AND g.is_exclusive = FALSE
-				AND COALESCE(g.subscription_type, '') IN ('', 'standard')
+				AND lower(btrim(COALESCE(g.subscription_type, ''))) IN ('', 'standard')
 				AND g.id <> ma.target_group_id
 			RETURNING ag.account_id, ag.group_id, ag.priority
 		),
@@ -3101,16 +3106,16 @@ func ensureOpenAIProSharedPoolForAccounts(ctx context.Context, exec sqlExecutor,
 			WHERE deleted_at IS NULL
 				AND status = 'active'
 				AND platform = 'openai'
-				AND (owner_user_id IS NULL OR scope = 'public')
+				AND (owner_user_id IS NULL OR lower(btrim(COALESCE(scope, ''))) = 'public')
 				AND (
 					lower(btrim(COALESCE(required_account_level, ''))) = 'pro'
 					OR btrim(name) = 'PRO共享号池'
 				)
 				AND (
-					scope <> 'public'
+					lower(btrim(COALESCE(scope, ''))) <> 'public'
 					OR owner_user_id IS NOT NULL
-					OR COALESCE(subscription_type, '') <> 'standard'
-					OR required_account_level <> 'pro'
+					OR lower(btrim(COALESCE(subscription_type, ''))) <> 'standard'
+					OR lower(btrim(COALESCE(required_account_level, ''))) <> 'pro'
 					OR is_exclusive = TRUE
 				)
 			RETURNING id
@@ -3122,9 +3127,9 @@ func ensureOpenAIProSharedPoolForAccounts(ctx context.Context, exec sqlExecutor,
 				AND platform = 'openai'
 				AND status = 'active'
 				AND owner_user_id IS NULL
-				AND scope = 'public'
+				AND lower(btrim(COALESCE(scope, ''))) = 'public'
 				AND is_exclusive = FALSE
-				AND COALESCE(subscription_type, '') IN ('', 'standard')
+				AND lower(btrim(COALESCE(subscription_type, ''))) IN ('', 'standard')
 				AND lower(btrim(COALESCE(required_account_level, ''))) = 'pro'
 			LIMIT 1
 		),
@@ -3153,9 +3158,9 @@ func ensureOpenAIProSharedPoolForAccounts(ctx context.Context, exec sqlExecutor,
 				AND platform = 'openai'
 				AND status = 'active'
 				AND owner_user_id IS NULL
-				AND scope = 'public'
+				AND lower(btrim(COALESCE(scope, ''))) = 'public'
 				AND is_exclusive = FALSE
-				AND COALESCE(subscription_type, '') IN ('', 'standard')
+				AND lower(btrim(COALESCE(subscription_type, ''))) IN ('', 'standard')
 				AND lower(btrim(COALESCE(required_account_level, ''))) IN ('plus', 'free', '')
 			ORDER BY CASE lower(btrim(COALESCE(required_account_level, '')))
 				WHEN 'plus' THEN 0
@@ -3405,7 +3410,7 @@ func isPublicStandardSharedPoolGroupEntity(group *dbent.Group) bool {
 	if service.NormalizeGroupScope(group.Scope) != service.GroupScopePublic {
 		return false
 	}
-	return group.SubscriptionType == "" || group.SubscriptionType == service.SubscriptionTypeStandard
+	return service.IsStandardSubscriptionType(group.SubscriptionType)
 }
 
 func sharedPoolSchedulableAccountVisibilityPredicate() dbpredicate.Account {

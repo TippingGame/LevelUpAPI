@@ -1453,6 +1453,76 @@ func (s *AccountRepoSuite) TestListQuotaPoolAccountsRepairsVisibleOtherOwnerOpen
 	s.Require().True(hasProSharedGroup, "quota pool account rows should include the repaired Pro shared group")
 }
 
+func (s *AccountRepoSuite) TestListQuotaPoolAccountsRepairsVisibleOtherOwnerOpenAIProShareFromLegacySubscriptionGroup() {
+	viewer := mustCreateUser(s.T(), s.client, &service.User{Email: "quota-pool-visible-pro-legacy-viewer@example.com"})
+	owner := mustCreateUser(s.T(), s.client, &service.User{Email: "quota-pool-visible-pro-legacy-owner@example.com"})
+	proxy := mustCreateProxy(s.T(), s.client, &service.Proxy{
+		Name:   "quota-pool-visible-pro-legacy-proxy",
+		Status: service.StatusActive,
+	})
+	legacyProGroup := mustCreateGroup(s.T(), s.client, &service.Group{
+		Name:                 "quota-pool-visible-pro-legacy-subscription",
+		Platform:             service.PlatformOpenAI,
+		Scope:                service.GroupScopePublic,
+		SubscriptionType:     service.SubscriptionTypeSubscription,
+		RequiredAccountLevel: service.AccountLevelPro,
+	})
+	account := mustCreateAccount(s.T(), s.client, &service.Account{
+		Name:         "quota-pool-visible-other-owner-pro-legacy-subscription",
+		Platform:     service.PlatformOpenAI,
+		Type:         service.AccountTypeOAuth,
+		AccountLevel: service.AccountLevelPlus,
+		OwnerUserID:  &owner.ID,
+		Credentials:  map[string]any{"plan_type": "chatgpt_pro"},
+		ProxyID:      &proxy.ID,
+		Schedulable:  true,
+		Concurrency:  3,
+	})
+	mustBindAccountToGroup(s.T(), s.client, account.ID, legacyProGroup.ID, 1)
+	s.Require().NoError(s.client.Account.UpdateOneID(account.ID).
+		SetShareMode(service.AccountShareModePublic).
+		SetShareStatus(service.AccountShareStatusApproved).
+		Exec(s.ctx))
+
+	accounts, err := s.repo.ListQuotaPoolAccounts(s.ctx, viewer.ID)
+
+	s.Require().NoError(err)
+	s.Require().True(s.accountHasOpenAIStandardPoolLevel(account.ID, service.AccountLevelPro), "visible repair should recover Pro shares from legacy subscription-type public pools")
+	updatedLegacyGroup, err := s.client.Group.Get(s.ctx, legacyProGroup.ID)
+	s.Require().NoError(err)
+	s.Require().Equal(service.SubscriptionTypeStandard, updatedLegacyGroup.SubscriptionType, "legacy Pro shared pool metadata should be normalized")
+	s.Require().Equal(service.GroupScopePublic, updatedLegacyGroup.Scope)
+	s.Require().False(updatedLegacyGroup.IsExclusive)
+	s.Require().Nil(updatedLegacyGroup.OwnerUserID)
+
+	var found *service.Account
+	for i := range accounts {
+		if accounts[i].ID == account.ID {
+			found = &accounts[i]
+			break
+		}
+	}
+	s.Require().NotNil(found, "platform quota pool should include repaired Pro shares from legacy subscription-type public pools")
+	s.Require().True(found.IsPublicShareApproved())
+	s.Require().True(found.IsSchedulableWithoutCodexQuotaProtection())
+	var hasStandardProGroup bool
+	for _, group := range found.Groups {
+		if group == nil {
+			continue
+		}
+		if group.Platform == service.PlatformOpenAI &&
+			group.OwnerUserID == nil &&
+			service.NormalizeGroupScope(group.Scope) == service.GroupScopePublic &&
+			!group.IsExclusive &&
+			service.IsStandardSubscriptionType(group.SubscriptionType) &&
+			service.NormalizeRequiredAccountLevel(group.RequiredAccountLevel) == service.AccountLevelPro {
+			hasStandardProGroup = true
+			break
+		}
+	}
+	s.Require().True(hasStandardProGroup, "quota pool account rows should include a standard Pro shared group after repair")
+}
+
 func (s *AccountRepoSuite) TestListOwnedWithFiltersRepairsApprovedOpenAIProShareBinding() {
 	owner := mustCreateUser(s.T(), s.client, &service.User{Email: "owned-list-pro-repair-owner@example.com"})
 	privateGroup := mustCreateGroup(s.T(), s.client, &service.Group{

@@ -49,7 +49,7 @@ func (r *groupRepository) Create(ctx context.Context, groupIn *service.Group) er
 		SetStatus(groupIn.Status).
 		SetNillableOwnerUserID(groupIn.OwnerUserID).
 		SetScope(service.NormalizeGroupScope(groupIn.Scope)).
-		SetSubscriptionType(groupIn.SubscriptionType).
+		SetSubscriptionType(service.NormalizeSubscriptionType(groupIn.SubscriptionType)).
 		SetRequiredAccountLevel(service.NormalizeRequiredAccountLevel(groupIn.RequiredAccountLevel)).
 		SetNillableDailyLimitUsd(groupIn.DailyLimitUSD).
 		SetNillableWeeklyLimitUsd(groupIn.WeeklyLimitUSD).
@@ -142,7 +142,7 @@ func (r *groupRepository) Update(ctx context.Context, groupIn *service.Group) er
 		SetIsExclusive(groupIn.IsExclusive).
 		SetStatus(groupIn.Status).
 		SetScope(service.NormalizeGroupScope(groupIn.Scope)).
-		SetSubscriptionType(groupIn.SubscriptionType).
+		SetSubscriptionType(service.NormalizeSubscriptionType(groupIn.SubscriptionType)).
 		SetRequiredAccountLevel(service.NormalizeRequiredAccountLevel(groupIn.RequiredAccountLevel)).
 		SetNillableDailyLimitUsd(groupIn.DailyLimitUSD).
 		SetNillableWeeklyLimitUsd(groupIn.WeeklyLimitUSD).

@@ -468,7 +468,7 @@ func isPlatformSharedQuotaGroup(group *Group) bool {
 	if group.IsExclusive || group.OwnerUserID != nil || NormalizeGroupScope(group.Scope) != GroupScopePublic {
 		return false
 	}
-	return group.SubscriptionType == "" || group.SubscriptionType == SubscriptionTypeStandard
+	return IsStandardSubscriptionType(group.SubscriptionType)
 }
 
 func accountHasPlatformSharedQuotaGroup(account Account) bool {
