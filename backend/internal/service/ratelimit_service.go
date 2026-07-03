@@ -2828,27 +2828,47 @@ func (s *RateLimitService) GetTempUnschedStatus(ctx context.Context, accountID i
 }
 
 func (s *RateLimitService) IsTempUnschedulableCached(ctx context.Context, accountID int64) bool {
-	if s == nil || s.tempUnschedCache == nil || accountID <= 0 {
+	_, active := s.activeTempUnschedStateFromCache(ctx, accountID)
+	return active
+}
+
+func (s *RateLimitService) IsAccountTempUnschedulableCached(ctx context.Context, account *Account) bool {
+	if account == nil {
 		return false
+	}
+	state, active := s.activeTempUnschedStateFromCache(ctx, account.ID)
+	if !active {
+		return false
+	}
+	if shouldApplyRuntimeTempUnschedState(account, state) {
+		return true
+	}
+	deleteTempUnschedCacheBestEffort(ctx, s.tempUnschedCache, account.ID, "temp_unsched_policy_skipped")
+	return false
+}
+
+func (s *RateLimitService) activeTempUnschedStateFromCache(ctx context.Context, accountID int64) (*TempUnschedState, bool) {
+	if s == nil || s.tempUnschedCache == nil || accountID <= 0 {
+		return nil, false
 	}
 	state, err := s.tempUnschedCache.GetTempUnsched(ctx, accountID)
 	if err != nil {
 		slog.Warn("temp_unsched_cache_get_failed", "account_id", accountID, "error", err)
-		return false
+		return nil, false
 	}
 	if state == nil {
-		return false
+		return nil, false
 	}
 	now := time.Now().Unix()
 	if state.UntilUnix > now {
-		return true
+		return state, true
 	}
 	if state.UntilUnix > 0 {
 		if err := s.tempUnschedCache.DeleteTempUnsched(ctx, accountID); err != nil {
 			slog.Warn("temp_unsched_cache_delete_expired_failed", "account_id", accountID, "error", err)
 		}
 	}
-	return false
+	return nil, false
 }
 
 func (s *RateLimitService) HandleTempUnschedulable(ctx context.Context, account *Account, statusCode int, responseBody []byte) bool {

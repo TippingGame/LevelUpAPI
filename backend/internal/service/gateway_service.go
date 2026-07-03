@@ -2998,7 +2998,7 @@ func (s *GatewayService) isAccountTempUnschedulableCached(ctx context.Context, a
 	if s == nil || s.rateLimitService == nil || account == nil {
 		return false
 	}
-	return s.rateLimitService.IsTempUnschedulableCached(ctx, account.ID)
+	return s.rateLimitService.IsAccountTempUnschedulableCached(ctx, account)
 }
 
 func (s *GatewayService) isAccountSchedulableForModelSelection(ctx context.Context, account *Account, requestedModel string) bool {

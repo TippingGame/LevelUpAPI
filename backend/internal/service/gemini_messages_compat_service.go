@@ -527,7 +527,7 @@ func (s *GeminiMessagesCompatService) isAccountTempUnschedulableCached(ctx conte
 	if s == nil || s.rateLimitService == nil || account == nil {
 		return false
 	}
-	return s.rateLimitService.IsTempUnschedulableCached(ctx, account.ID)
+	return s.rateLimitService.IsAccountTempUnschedulableCached(ctx, account)
 }
 
 func (s *GeminiMessagesCompatService) validateUpstreamBaseURL(raw string) (string, error) {

@@ -2437,7 +2437,7 @@ func (s *OpenAIGatewayService) isAccountTempUnschedulableCached(ctx context.Cont
 	if s == nil || s.rateLimitService == nil || account == nil {
 		return false
 	}
-	return s.rateLimitService.IsTempUnschedulableCached(ctx, account.ID)
+	return s.rateLimitService.IsAccountTempUnschedulableCached(ctx, account)
 }
 
 func (s *OpenAIGatewayService) newSelectionResult(ctx context.Context, account *Account, acquired bool, release func(), waitPlan *AccountWaitPlan) (*AccountSelectionResult, error) {
