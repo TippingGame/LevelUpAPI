@@ -564,16 +564,13 @@ func TestRateLimitService_HandleUpstreamError_OpenAI403CounterUnavailableEscalat
 	require.Contains(t, repo.lastTempReason, "counter_unavailable, 4/3")
 }
 
-func TestRateLimitService_HandleUpstreamError_OpenAICapacityTempUnschedsPoolMode(t *testing.T) {
+func TestRateLimitService_HandleUpstreamError_OpenAICapacityTempUnschedsOAuth(t *testing.T) {
 	repo := &rateLimitAccountRepoStub{}
 	service := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
 	account := &Account{
 		ID:       203,
 		Platform: PlatformOpenAI,
 		Type:     AccountTypeOAuth,
-		Extra: map[string]any{
-			"pool_mode": true,
-		},
 	}
 
 	shouldDisable := service.HandleUpstreamError(
@@ -588,6 +585,31 @@ func TestRateLimitService_HandleUpstreamError_OpenAICapacityTempUnschedsPoolMode
 	require.Equal(t, 1, repo.tempCalls)
 	require.Equal(t, 0, repo.setErrorCalls)
 	require.Contains(t, repo.lastTempReason, "openai_model_capacity")
+}
+
+func TestRateLimitService_HandleUpstreamError_OpenAICapacitySkipsPoolMode(t *testing.T) {
+	repo := &rateLimitAccountRepoStub{}
+	service := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+	account := &Account{
+		ID:       2031,
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeAPIKey,
+		Credentials: map[string]any{
+			"pool_mode": true,
+		},
+	}
+
+	shouldDisable := service.HandleUpstreamError(
+		context.Background(),
+		account,
+		http.StatusBadRequest,
+		http.Header{},
+		[]byte(`{"error":{"message":"Selected model is at capacity. Please try a different model.","code":"model_capacity_exhausted","type":"server_error"}}`),
+	)
+
+	require.False(t, shouldDisable)
+	require.Equal(t, 0, repo.tempCalls)
+	require.Equal(t, 0, repo.setErrorCalls)
 }
 
 func TestRateLimitService_HandleUpstreamErrorForModel_OpenAI404SetsModelCooldown(t *testing.T) {
