@@ -890,11 +890,93 @@ func TestScanAccountShareListingUsesEffectiveOpenAISharedPoolLevel(t *testing.T)
 	}
 }
 
+func TestScanAccountShareListingSuppressesIgnoredOpenAIOAuthRelayPoolTempState(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer func() {
+		_ = db.Close()
+	}()
+
+	future := time.Now().UTC().Add(time.Hour)
+	reason := `{"matched_keyword":"upstream_relay_pool_unavailable","error_message":"No available accounts"}`
+	mock.ExpectQuery("SELECT listing").WillReturnRows(accountShareListingRowsWithTempState(7, 99, 42, future, reason))
+	rows, err := db.Query("SELECT listing")
+	if err != nil {
+		t.Fatalf("query listing row: %v", err)
+	}
+	defer func() {
+		_ = rows.Close()
+	}()
+	if !rows.Next() {
+		t.Fatal("expected one listing row")
+	}
+	listing, err := scanAccountShareListing(rows)
+	if err != nil {
+		t.Fatalf("scan listing: %v", err)
+	}
+	if listing.TempUnschedulableUntil != nil {
+		t.Fatalf("ignored relay-pool temp state should be hidden from listing output, got %v", listing.TempUnschedulableUntil)
+	}
+	if listing.TempUnschedulableReason != "" {
+		t.Fatalf("ignored relay-pool temp reason should be hidden from listing output, got %q", listing.TempUnschedulableReason)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet expectations: %v", err)
+	}
+}
+
+func TestScanAccountShareListingKeepsActionableTempState(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer func() {
+		_ = db.Close()
+	}()
+
+	future := time.Now().UTC().Add(time.Hour)
+	reason := "upstream account temporarily unavailable"
+	mock.ExpectQuery("SELECT listing").WillReturnRows(accountShareListingRowsWithTempState(7, 99, 42, future, reason))
+	rows, err := db.Query("SELECT listing")
+	if err != nil {
+		t.Fatalf("query listing row: %v", err)
+	}
+	defer func() {
+		_ = rows.Close()
+	}()
+	if !rows.Next() {
+		t.Fatal("expected one listing row")
+	}
+	listing, err := scanAccountShareListing(rows)
+	if err != nil {
+		t.Fatalf("scan listing: %v", err)
+	}
+	if listing.TempUnschedulableUntil == nil {
+		t.Fatal("actionable temp state should remain visible in listing output")
+	}
+	if listing.TempUnschedulableReason != reason {
+		t.Fatalf("temp reason = %q, want %q", listing.TempUnschedulableReason, reason)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet expectations: %v", err)
+	}
+}
+
 func accountShareListingRows(listingID, accountID, ownerUserID int64, editSessionID string, editingExpiresAt time.Time) *sqlmock.Rows {
 	return accountShareListingRowsWithPlan(listingID, accountID, ownerUserID, editSessionID, editingExpiresAt, service.AccountLevelPro, `{}`, `{}`)
 }
 
 func accountShareListingRowsWithPlan(listingID, accountID, ownerUserID int64, editSessionID string, editingExpiresAt time.Time, accountLevel, credentialsJSON, extraJSON string) *sqlmock.Rows {
+	return accountShareListingRowsWithRuntimeState(listingID, accountID, ownerUserID, editSessionID, editingExpiresAt, accountLevel, credentialsJSON, extraJSON, nil, nil)
+}
+
+func accountShareListingRowsWithTempState(listingID, accountID, ownerUserID int64, tempUntil time.Time, tempReason string) *sqlmock.Rows {
+	return accountShareListingRowsWithRuntimeState(listingID, accountID, ownerUserID, "", time.Time{}, service.AccountLevelPro, `{}`, `{}`, tempUntil, tempReason)
+}
+
+func accountShareListingRowsWithRuntimeState(listingID, accountID, ownerUserID int64, editSessionID string, editingExpiresAt time.Time, accountLevel, credentialsJSON, extraJSON string, tempUntil any, tempReason any) *sqlmock.Rows {
 	now := time.Now().UTC()
 	return sqlmock.NewRows([]string{
 		"id",
@@ -977,8 +1059,8 @@ func accountShareListingRowsWithPlan(listingID, accountID, ownerUserID int64, ed
 		nil,
 		nil,
 		nil,
-		nil,
-		nil,
+		tempUntil,
+		tempReason,
 		[]byte(credentialsJSON),
 		[]byte(extraJSON),
 		nil,

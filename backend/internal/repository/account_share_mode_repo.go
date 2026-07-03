@@ -3113,8 +3113,10 @@ func scanAccountShareListing(scanner accountShareListingScanner) (*service.Accou
 		listing.RateLimitedAt = account.RateLimitedAt
 		listing.RateLimitResetAt = account.RateLimitResetAt
 		listing.OverloadUntil = account.OverloadUntil
-		listing.TempUnschedulableUntil = account.TempUnschedulableUntil
-		listing.TempUnschedulableReason = account.TempUnschedulableReason
+		if account.TempUnschedulableUntil == nil || !now.Before(*account.TempUnschedulableUntil) || account.IsTemporarilyUnschedulableAt(now) {
+			listing.TempUnschedulableUntil = account.TempUnschedulableUntil
+			listing.TempUnschedulableReason = account.TempUnschedulableReason
+		}
 	}
 	if reason := account.CodexQuotaProtectionReasonAt(now); reason != "" {
 		listing.CodexQuotaProtectionReason = &reason
