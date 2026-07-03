@@ -927,7 +927,8 @@ func (r *accountRepository) listQuotaPoolAccountRows(ctx context.Context, ownerU
 			a.schedulable,
 			a.rate_limit_reset_at,
 			a.overload_until,
-			a.temp_unschedulable_until
+			a.temp_unschedulable_until,
+			a.temp_unschedulable_reason
 		FROM accounts a
 		JOIN quota_pool_account_ids q ON q.id = a.id
 		ORDER BY a.id
@@ -950,6 +951,7 @@ func (r *accountRepository) listQuotaPoolAccountRows(ctx context.Context, ownerU
 		var codexUsageUpdatedAt, privacyMode sql.NullString
 		var credentialPlanType, credentialChatGPTPlanType, credentialSubscriptionPlan sql.NullString
 		var extraPlanType, extraChatGPTPlanType, extraSubscriptionPlan sql.NullString
+		var tempUnschedulableReason sql.NullString
 		if err := rows.Scan(
 			&account.ID,
 			&account.Name,
@@ -995,6 +997,7 @@ func (r *accountRepository) listQuotaPoolAccountRows(ctx context.Context, ownerU
 			&account.RateLimitResetAt,
 			&account.OverloadUntil,
 			&account.TempUnschedulableUntil,
+			&tempUnschedulableReason,
 		); err != nil {
 			return nil, err
 		}
@@ -1003,6 +1006,7 @@ func (r *accountRepository) listQuotaPoolAccountRows(ctx context.Context, ownerU
 		}
 		account.ShareMode = service.NormalizeAccountShareMode(account.ShareMode)
 		account.ShareStatus = service.NormalizeAccountShareStatus(account.ShareStatus)
+		account.TempUnschedulableReason = tempUnschedulableReason.String
 		account.Credentials = map[string]any{}
 		account.Extra = map[string]any{}
 		setNullStringExtra(account.Credentials, "plan_type", credentialPlanType)

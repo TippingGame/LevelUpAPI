@@ -898,6 +898,42 @@ func (s *AccountRepoSuite) TestListSchedulableByGroupIDAndPlatform_OpenAIRequire
 	s.Require().Equal(plusAcc.ID, accounts[2].ID)
 }
 
+func (s *AccountRepoSuite) TestListQuotaPoolAccountsLoadsTempUnschedulableReason() {
+	owner := mustCreateUser(s.T(), s.client, &service.User{Email: "quota-pool-owner@example.com"})
+	group := mustCreateGroup(s.T(), s.client, &service.Group{
+		Name:                 "quota-pool-pro",
+		Platform:             service.PlatformOpenAI,
+		Scope:                service.GroupScopePublic,
+		SubscriptionType:     service.SubscriptionTypeStandard,
+		RequiredAccountLevel: service.AccountLevelPro,
+	})
+	account := mustCreateAccount(s.T(), s.client, &service.Account{
+		Name:         "quota-pool-observed-pro",
+		Platform:     service.PlatformOpenAI,
+		Type:         service.AccountTypeOAuth,
+		AccountLevel: service.AccountLevelPro,
+		OwnerUserID:  &owner.ID,
+		Schedulable:  true,
+	})
+	mustBindAccountToGroup(s.T(), s.client, account.ID, group.ID, 1)
+
+	future := time.Now().Add(time.Hour)
+	reason := `{"matched_keyword":"upstream_relay_pool_unavailable","error_message":"No available accounts"}`
+	s.Require().NoError(s.client.Account.UpdateOneID(account.ID).
+		SetShareMode(service.AccountShareModePublic).
+		SetShareStatus(service.AccountShareStatusApproved).
+		SetTempUnschedulableUntil(future).
+		SetTempUnschedulableReason(reason).
+		Exec(s.ctx))
+
+	accounts, err := s.repo.ListQuotaPoolAccounts(s.ctx, owner.ID)
+
+	s.Require().NoError(err)
+	s.Require().Len(accounts, 1)
+	s.Require().Equal(reason, accounts[0].TempUnschedulableReason)
+	s.Require().False((&accounts[0]).IsTemporarilyUnschedulableAt(time.Now()))
+}
+
 func (s *AccountRepoSuite) TestListSchedulableByGroupIDAndPlatform_RequireOAuthOnlyExcludesAPIKey() {
 	group := mustCreateGroup(s.T(), s.client, &service.Group{
 		Name:             "g-openai-oauth-only",
