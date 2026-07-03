@@ -299,6 +299,23 @@ func TestOpenAIGatewayService_WSv2PoolModeRateLimitTempUnschedules(t *testing.T)
 	require.Contains(t, repo.tempReasons[0], "retryable upstream status 429 exhausted")
 }
 
+func TestOpenAIGatewayService_WSv2AmbiguousUsageLimitTextDoesNotPersistRateLimit(t *testing.T) {
+	repo := &openAIWSRateLimitSignalRepo{}
+	rateSvc := &RateLimitService{accountRepo: repo}
+	svc := &OpenAIGatewayService{rateLimitService: rateSvc}
+	account := &Account{
+		ID:       509,
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeOAuth,
+	}
+	body := []byte(`{"type":"error","error":{"type":"invalid_request_error","message":"Please summarize the usage limit reached documentation field."}}`)
+
+	svc.persistOpenAIWSRateLimitSignal(context.Background(), account, http.Header{}, body, "", "invalid_request_error", "Please summarize the usage limit reached documentation field.")
+
+	require.Empty(t, repo.rateLimitCalls)
+	require.Empty(t, repo.tempCalls)
+}
+
 func TestOpenAIGatewayService_WSv2PoolModeAuthErrorEventTempUnschedules(t *testing.T) {
 	repo := &openAIWSRateLimitSignalRepo{}
 	rateSvc := &RateLimitService{accountRepo: repo}

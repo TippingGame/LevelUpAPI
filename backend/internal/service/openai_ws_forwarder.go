@@ -4430,13 +4430,29 @@ func isOpenAIWSRateLimitError(codeRaw, errTypeRaw, msgRaw string) bool {
 	if strings.Contains(code, "rate_limit") || strings.Contains(code, "usage_limit") || strings.Contains(code, "insufficient_quota") {
 		return true
 	}
-	if strings.Contains(msg, "usage limit") && strings.Contains(msg, "reached") {
+	if openAIUsageLimitReachedTextIsAccountScoped(code, errType, msg) {
 		return true
 	}
 	if strings.Contains(msg, "rate limit") && (strings.Contains(msg, "reached") || strings.Contains(msg, "exceeded")) {
 		return true
 	}
 	return false
+}
+
+func openAIUsageLimitReachedTextIsAccountScoped(code, errType, msg string) bool {
+	if !strings.Contains(msg, "usage limit") || !strings.Contains(msg, "reached") {
+		return false
+	}
+	combined := normalizeLooseErrorText(strings.Join([]string{code, errType, msg}, " "))
+	if strings.Contains(combined, "invalid request") ||
+		strings.Contains(combined, "request") ||
+		strings.Contains(combined, "prompt") ||
+		strings.Contains(combined, "message") ||
+		strings.Contains(combined, "documentation") ||
+		strings.Contains(combined, "field") {
+		return false
+	}
+	return true
 }
 
 func (s *OpenAIGatewayService) persistOpenAIWSRateLimitSignal(ctx context.Context, account *Account, headers http.Header, responseBody []byte, codeRaw, errTypeRaw, msgRaw string) {

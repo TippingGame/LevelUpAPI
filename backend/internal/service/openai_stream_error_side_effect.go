@@ -84,7 +84,7 @@ func openAIResponsesStreamErrorSideEffectStatus(codeRaw, errTypeRaw, msgRaw stri
 
 	if isOpenAIWSRateLimitError(codeRaw, errTypeRaw, msgRaw) ||
 		strings.Contains(combined, "insufficient quota") ||
-		(strings.Contains(combined, "usage limit") && strings.Contains(combined, "reached")) {
+		openAIUsageLimitReachedTextIsAccountScoped(code, errType, strings.ToLower(strings.TrimSpace(msgRaw))) {
 		return http.StatusTooManyRequests
 	}
 	if isRecoverableBillingQuotaText(combined) {

@@ -131,3 +131,25 @@ func TestOpenAIResponsesStreamErrorSideEffect_AmbiguousBillingTextDoesNotTouchAc
 	require.Empty(t, repo.tempCalls)
 	require.Empty(t, repo.rateLimitCalls)
 }
+
+func TestOpenAIResponsesStreamErrorSideEffect_AmbiguousUsageLimitTextDoesNotTouchAccount(t *testing.T) {
+	repo := &openAIPassthroughFailoverRepo{}
+	svc := &OpenAIGatewayService{
+		rateLimitService: &RateLimitService{
+			accountRepo: repo,
+			cfg:         &config.Config{},
+		},
+	}
+	account := &Account{
+		ID:       70705,
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeOAuth,
+	}
+	payload := []byte(`{"type":"response.failed","response":{"status":"failed","error":{"type":"invalid_request_error","message":"Please summarize the usage limit reached documentation field."}}}`)
+
+	handled := svc.handleOpenAIResponsesStreamErrorSideEffect(context.Background(), account, http.Header{}, payload, "", false)
+
+	require.False(t, handled)
+	require.Empty(t, repo.tempCalls)
+	require.Empty(t, repo.rateLimitCalls)
+}
