@@ -955,6 +955,105 @@ func (s *AccountRepoSuite) TestListSchedulableByGroupIDAndPlatform_OpenAIRequire
 	s.Require().Equal(plusAcc.ID, accounts[2].ID)
 }
 
+func (s *AccountRepoSuite) TestListSchedulableByGroupIDAndPlatform_PublicSharedPoolRequiresApprovedUserShare() {
+	owner := mustCreateUser(s.T(), s.client, &service.User{Email: "schedulable-share-status-owner@example.com"})
+	group := mustCreateGroup(s.T(), s.client, &service.Group{
+		Name:                 "schedulable-share-status-pro",
+		Platform:             service.PlatformOpenAI,
+		Scope:                service.GroupScopePublic,
+		SubscriptionType:     service.SubscriptionTypeStandard,
+		RequiredAccountLevel: service.AccountLevelPro,
+	})
+	newProShareAccount := func(name string) *service.Account {
+		return mustCreateAccount(s.T(), s.client, &service.Account{
+			Name:         name,
+			Platform:     service.PlatformOpenAI,
+			Type:         service.AccountTypeOAuth,
+			AccountLevel: service.AccountLevelPlus,
+			OwnerUserID:  &owner.ID,
+			Credentials:  map[string]any{"plan_type": "chatgpt_pro"},
+			Schedulable:  true,
+		})
+	}
+	systemAccount := mustCreateAccount(s.T(), s.client, &service.Account{
+		Name:         "schedulable-share-status-system",
+		Platform:     service.PlatformOpenAI,
+		Type:         service.AccountTypeOAuth,
+		AccountLevel: service.AccountLevelPlus,
+		Credentials:  map[string]any{"plan_type": "chatgpt_pro"},
+		Schedulable:  true,
+	})
+	approvedAccount := newProShareAccount("schedulable-share-status-approved")
+	legacyBlankAccount := newProShareAccount("schedulable-share-status-legacy-blank")
+	pendingAccount := newProShareAccount("schedulable-share-status-pending")
+	suspendedAccount := newProShareAccount("schedulable-share-status-suspended")
+	privateAccount := newProShareAccount("schedulable-share-status-private")
+
+	for i, account := range []*service.Account{systemAccount, approvedAccount, legacyBlankAccount, pendingAccount, suspendedAccount, privateAccount} {
+		mustBindAccountToGroup(s.T(), s.client, account.ID, group.ID, i+1)
+	}
+	s.Require().NoError(s.client.Account.UpdateOneID(approvedAccount.ID).
+		SetShareMode(service.AccountShareModePublic).
+		SetShareStatus(service.AccountShareStatusApproved).
+		Exec(s.ctx))
+	_, err := s.repo.sql.ExecContext(s.ctx, `
+		UPDATE accounts
+		SET share_mode = 'public', share_status = '', updated_at = NOW()
+		WHERE id = $1
+	`, legacyBlankAccount.ID)
+	s.Require().NoError(err)
+	s.Require().NoError(s.client.Account.UpdateOneID(pendingAccount.ID).
+		SetShareMode(service.AccountShareModePublic).
+		SetShareStatus(service.AccountShareStatusPending).
+		Exec(s.ctx))
+	s.Require().NoError(s.client.Account.UpdateOneID(suspendedAccount.ID).
+		SetShareMode(service.AccountShareModePublic).
+		SetShareStatus(service.AccountShareStatusSuspended).
+		Exec(s.ctx))
+	s.Require().NoError(s.client.Account.UpdateOneID(privateAccount.ID).
+		SetShareMode(service.AccountShareModePrivate).
+		SetShareStatus(service.AccountShareStatusApproved).
+		Exec(s.ctx))
+
+	accounts, err := s.repo.ListSchedulableByGroupIDAndPlatform(s.ctx, group.ID, service.PlatformOpenAI)
+
+	s.Require().NoError(err)
+	gotIDs := make([]int64, 0, len(accounts))
+	for _, account := range accounts {
+		gotIDs = append(gotIDs, account.ID)
+	}
+	s.Require().Equal([]int64{systemAccount.ID, approvedAccount.ID, legacyBlankAccount.ID}, gotIDs)
+}
+
+func (s *AccountRepoSuite) TestListSchedulableByGroupIDAndPlatform_PrivateGroupDoesNotRequirePublicShareStatus() {
+	owner := mustCreateUser(s.T(), s.client, &service.User{Email: "schedulable-private-share-status-owner@example.com"})
+	group := mustCreateGroup(s.T(), s.client, &service.Group{
+		Name:                 "schedulable-private-share-status-pro",
+		Platform:             service.PlatformOpenAI,
+		Scope:                service.GroupScopeUserPrivate,
+		OwnerUserID:          &owner.ID,
+		RequiredAccountLevel: service.AccountLevelPro,
+	})
+	account := mustCreateAccount(s.T(), s.client, &service.Account{
+		Name:         "schedulable-private-share-status-account",
+		Platform:     service.PlatformOpenAI,
+		Type:         service.AccountTypeOAuth,
+		AccountLevel: service.AccountLevelPlus,
+		OwnerUserID:  &owner.ID,
+		Credentials:  map[string]any{"plan_type": "chatgpt_pro"},
+		ShareMode:    service.AccountShareModePrivate,
+		ShareStatus:  service.AccountShareStatusSuspended,
+		Schedulable:  true,
+	})
+	mustBindAccountToGroup(s.T(), s.client, account.ID, group.ID, 1)
+
+	accounts, err := s.repo.ListSchedulableByGroupIDAndPlatform(s.ctx, group.ID, service.PlatformOpenAI)
+
+	s.Require().NoError(err)
+	s.Require().Len(accounts, 1)
+	s.Require().Equal(account.ID, accounts[0].ID)
+}
+
 func (s *AccountRepoSuite) TestListQuotaPoolAccountsLoadsTempUnschedulableReason() {
 	owner := mustCreateUser(s.T(), s.client, &service.User{Email: "quota-pool-owner@example.com"})
 	group := mustCreateGroup(s.T(), s.client, &service.Group{

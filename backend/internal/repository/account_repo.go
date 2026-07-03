@@ -3278,6 +3278,9 @@ func (r *accountRepository) queryAccountsByGroup(ctx context.Context, groupID in
 				),
 			)
 		}
+		if isPublicStandardSharedPoolGroupEntity(group) {
+			preds = append(preds, sharedPoolSchedulableAccountVisibilityPredicate())
+		}
 		if group.RequireOauthOnly {
 			preds = append(preds, dbaccount.TypeIn(service.AccountTypeOAuth, service.AccountTypeSetupToken))
 		}
@@ -3335,6 +3338,40 @@ func (r *accountRepository) queryAccountsByGroup(ctx context.Context, groupID in
 	}
 
 	return r.accountsToService(ctx, accounts)
+}
+
+func isPublicStandardSharedPoolGroupEntity(group *dbent.Group) bool {
+	if group == nil || group.OwnerUserID != nil || group.IsExclusive {
+		return false
+	}
+	if service.NormalizeGroupScope(group.Scope) != service.GroupScopePublic {
+		return false
+	}
+	return group.SubscriptionType == "" || group.SubscriptionType == service.SubscriptionTypeStandard
+}
+
+func sharedPoolSchedulableAccountVisibilityPredicate() dbpredicate.Account {
+	return dbaccount.Or(
+		dbaccount.OwnerUserIDIsNil(),
+		dbaccount.And(
+			dbaccount.OwnerUserIDNotNil(),
+			accountPublicShareApprovedPredicate(),
+		),
+	)
+}
+
+func accountPublicShareApprovedPredicate() dbpredicate.Account {
+	return dbpredicate.Account(func(s *entsql.Selector) {
+		shareModeCol := s.C(dbaccount.FieldShareMode)
+		shareStatusCol := s.C(dbaccount.FieldShareStatus)
+		s.Where(entsql.P(func(b *entsql.Builder) {
+			b.WriteString("LOWER(BTRIM(COALESCE(")
+			b.Ident(shareModeCol).WriteString(", ").Arg("").WriteString("))) = ").Arg(service.AccountShareModePublic)
+			b.WriteString(" AND LOWER(BTRIM(COALESCE(")
+			b.Ident(shareStatusCol).WriteString(", ").Arg("").WriteString("))) NOT IN (")
+			b.Arg(service.AccountShareStatusPending).WriteString(", ").Arg(service.AccountShareStatusSuspended).WriteString(")")
+		}))
+	})
 }
 
 func (r *accountRepository) accountsToService(ctx context.Context, accounts []*dbent.Account) ([]service.Account, error) {
