@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -12,7 +13,13 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/config"
 )
 
-const tokenRefreshRetryExhaustedReasonPrefix = "token refresh retry exhausted:"
+const (
+	tokenRefreshRetryExhaustedReasonPrefix = "token refresh retry exhausted:"
+	tokenRefreshNonRetryableKeyword        = "token_refresh_non_retryable"
+	tokenRefreshNonRetryableThreshold      = 3
+	tokenRefreshNonRetryableWindow         = 3 * time.Hour
+	tokenRefreshNonRetryableStatusCode     = 401
+)
 
 type oauthRefreshCandidateLister interface {
 	ListOAuthRefreshCandidates(ctx context.Context, refreshWindow time.Duration) ([]Account, error)
@@ -286,8 +293,11 @@ func (s *TokenRefreshService) refreshWithRetry(ctx context.Context, account *Acc
 			return nil
 		}
 
-		// 不可重试错误（invalid_grant/invalid_client 等）直接标记 error 状态并返回
+		// 不可重试错误（invalid_grant/invalid_client 等）先临时摘除，连续命中阈值后才标记 error。
 		if IsNonRetryableRefreshError(err) {
+			if s.deferNonRetryableRefreshError(ctx, account, err) {
+				return err
+			}
 			errorMsg := fmt.Sprintf("Token refresh failed (non-retryable): %v", err)
 			writeCtx, cancel := rateLimitStateContext(ctx)
 			setErr := s.accountRepo.SetError(writeCtx, account.ID, errorMsg)
@@ -352,6 +362,72 @@ func (s *TokenRefreshService) refreshWithRetry(ctx context.Context, account *Acc
 	}
 
 	return lastErr
+}
+
+func (s *TokenRefreshService) deferNonRetryableRefreshError(ctx context.Context, account *Account, err error) bool {
+	if s == nil || s.accountRepo == nil || account == nil || err == nil || !account.IsOAuth() {
+		return false
+	}
+	if isMissingRefreshTokenRefreshError(err) {
+		return false
+	}
+
+	now := time.Now()
+	count := nextTempUnschedConsecutiveCount(
+		account,
+		now,
+		tokenRefreshNonRetryableStatusCode,
+		tokenRefreshNonRetryableKeyword,
+		tokenRefreshNonRetryableWindow,
+	)
+	if count >= tokenRefreshNonRetryableThreshold {
+		return false
+	}
+
+	until := now.Add(TokenRefreshTempUnschedDuration)
+	msg := fmt.Sprintf("Token refresh non-retryable cooldown (%d/%d): %v", count, tokenRefreshNonRetryableThreshold, err)
+	state := &TempUnschedState{
+		UntilUnix:        until.Unix(),
+		TriggeredAtUnix:  now.Unix(),
+		StatusCode:       tokenRefreshNonRetryableStatusCode,
+		MatchedKeyword:   tokenRefreshNonRetryableKeyword,
+		RuleIndex:        -1,
+		ErrorMessage:     msg,
+		ConsecutiveCount: count,
+	}
+	reason := msg
+	if raw, marshalErr := json.Marshal(state); marshalErr == nil {
+		reason = string(raw)
+	}
+
+	writeCtx, cancel := rateLimitStateContext(ctx)
+	defer cancel()
+	if setErr := s.accountRepo.SetTempUnschedulable(writeCtx, account.ID, until, reason); setErr != nil {
+		slog.Warn("token_refresh.non_retryable_temp_unschedulable_failed",
+			"account_id", account.ID,
+			"error", setErr,
+		)
+		return false
+	}
+	account.TempUnschedulableUntil = &until
+	account.TempUnschedulableReason = reason
+	setTempUnschedCacheBestEffort(writeCtx, s.tempUnschedCache, account.ID, state, tokenRefreshNonRetryableKeyword)
+	slog.Warn("token_refresh.non_retryable_temp_unschedulable",
+		"account_id", account.ID,
+		"count", count,
+		"threshold", tokenRefreshNonRetryableThreshold,
+		"until", until.Format(time.RFC3339),
+		"error", err,
+	)
+	return true
+}
+
+func isMissingRefreshTokenRefreshError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "no refresh token available") || strings.Contains(msg, "empty refresh_token")
 }
 
 // postRefreshActions 刷新成功后的后续动作（清除错误状态、缓存失效、调度器同步等）

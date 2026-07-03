@@ -4,6 +4,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -31,6 +32,7 @@ type tokenRefreshAccountRepo struct {
 	clearErrorContextErr     error
 	clearTempContextErr      error
 	setTempUnschedContextErr error
+	lastTempReason           string
 }
 
 func (r *tokenRefreshAccountRepo) Update(ctx context.Context, account *Account) error {
@@ -89,6 +91,7 @@ func (r *tokenRefreshAccountRepo) ClearTempUnschedulable(ctx context.Context, id
 func (r *tokenRefreshAccountRepo) SetTempUnschedulable(ctx context.Context, id int64, until time.Time, reason string) error {
 	r.setTempUnschedCalls++
 	r.setTempUnschedContextErr = ctx.Err()
+	r.lastTempReason = reason
 	return nil
 }
 
@@ -545,7 +548,7 @@ func TestTokenRefreshService_RefreshWithRetry_AntigravityRefreshFailed(t *testin
 	require.Equal(t, 0, repo.setErrorCalls) // Antigravity 可重试错误不设置错误状态
 }
 
-// TestTokenRefreshService_RefreshWithRetry_AntigravityNonRetryableError 测试 Antigravity 不可重试错误
+// TestTokenRefreshService_RefreshWithRetry_AntigravityNonRetryableError 测试 Antigravity 不可重试错误先临时摘除
 func TestTokenRefreshService_RefreshWithRetry_AntigravityNonRetryableError(t *testing.T) {
 	repo := &tokenRefreshAccountRepo{}
 	invalidator := &tokenCacheInvalidatorStub{}
@@ -572,13 +575,17 @@ func TestTokenRefreshService_RefreshWithRetry_AntigravityNonRetryableError(t *te
 	require.Error(t, err)
 	require.Equal(t, 0, repo.updateCalls)
 	require.Equal(t, 0, invalidator.calls)
-	require.Equal(t, 1, repo.setErrorCalls) // 不可重试错误应设置错误状态
-	require.Equal(t, StatusError, account.Status)
-	require.False(t, account.Schedulable)
+	require.Equal(t, 0, repo.setErrorCalls)
+	require.Equal(t, 1, repo.setTempUnschedCalls)
+	require.Contains(t, repo.lastTempReason, tokenRefreshNonRetryableKeyword)
+	require.Equal(t, StatusActive, account.Status)
+	require.True(t, account.Schedulable)
+	require.NotNil(t, account.TempUnschedulableUntil)
+	require.NotEmpty(t, account.TempUnschedulableReason)
 	require.Equal(t, 1, tempCache.setCalls)
 	require.Equal(t, int64(14), tempCache.accountID)
 	require.NotNil(t, tempCache.state)
-	require.Equal(t, "account_error", tempCache.state.MatchedKeyword)
+	require.Equal(t, tokenRefreshNonRetryableKeyword, tempCache.state.MatchedKeyword)
 }
 
 func TestTokenRefreshService_RefreshWithRetry_NonRetryableStateSurvivesCanceledContext(t *testing.T) {
@@ -607,12 +614,15 @@ func TestTokenRefreshService_RefreshWithRetry_NonRetryableStateSurvivesCanceledC
 
 	err := service.refreshWithRetry(ctx, account, refresher, refresher, time.Hour)
 	require.Error(t, err)
-	require.Equal(t, 1, repo.setErrorCalls)
-	require.NoError(t, repo.setErrorContextErr)
+	require.Equal(t, 0, repo.setErrorCalls)
+	require.Equal(t, 1, repo.setTempUnschedCalls)
+	require.NoError(t, repo.setTempUnschedContextErr)
 	require.Equal(t, 1, tempCache.setCalls)
 	require.NoError(t, tempCache.setContextErr)
-	require.Equal(t, StatusError, account.Status)
-	require.False(t, account.Schedulable)
+	require.Equal(t, StatusActive, account.Status)
+	require.True(t, account.Schedulable)
+	require.NotNil(t, account.TempUnschedulableUntil)
+	require.NotEmpty(t, account.TempUnschedulableReason)
 }
 
 // TestTokenRefreshService_RefreshWithRetry_ClearsTempUnschedulable 测试刷新成功后清除临时不可调度（DB + Redis）
@@ -774,7 +784,7 @@ func TestTokenRefreshService_PostRefreshActionsClearsMissingProjectIDAfterReques
 	require.NoError(t, repo.clearErrorContextErr)
 }
 
-// TestTokenRefreshService_RefreshWithRetry_NonRetryableErrorAllPlatforms 测试所有平台不可重试错误都 SetError
+// TestTokenRefreshService_RefreshWithRetry_NonRetryableErrorAllPlatforms 测试 OAuth 后台刷新不可重试错误先临时摘除。
 func TestTokenRefreshService_RefreshWithRetry_NonRetryableErrorAllPlatforms(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -808,9 +818,56 @@ func TestTokenRefreshService_RefreshWithRetry_NonRetryableErrorAllPlatforms(t *t
 
 			err := service.refreshWithRetry(context.Background(), account, refresher, refresher, time.Hour)
 			require.Error(t, err)
-			require.Equal(t, 1, repo.setErrorCalls) // 所有平台不可重试错误都应 SetError
+			require.Equal(t, 0, repo.setErrorCalls)
+			require.Equal(t, 1, repo.setTempUnschedCalls)
+			require.Contains(t, repo.lastTempReason, tokenRefreshNonRetryableKeyword)
+			require.NotNil(t, account.TempUnschedulableUntil)
+			require.NotEmpty(t, account.TempUnschedulableReason)
 		})
 	}
+}
+
+func TestTokenRefreshService_RefreshWithRetry_NonRetryableThresholdSetsError(t *testing.T) {
+	repo := &tokenRefreshAccountRepo{}
+	tempCache := &tempUnschedCacheStub{}
+	cfg := &config.Config{
+		TokenRefresh: config.TokenRefreshConfig{
+			MaxRetries:          3,
+			RetryBackoffSeconds: 0,
+		},
+	}
+	service := NewTokenRefreshService(repo, nil, nil, nil, nil, nil, nil, cfg, tempCache)
+	previousUntil := time.Now().Add(TokenRefreshTempUnschedDuration)
+	previous := &TempUnschedState{
+		UntilUnix:        previousUntil.Unix(),
+		TriggeredAtUnix:  time.Now().Unix(),
+		StatusCode:       tokenRefreshNonRetryableStatusCode,
+		MatchedKeyword:   tokenRefreshNonRetryableKeyword,
+		RuleIndex:        -1,
+		ErrorMessage:     "previous non-retryable refresh",
+		ConsecutiveCount: tokenRefreshNonRetryableThreshold - 1,
+	}
+	raw, err := json.Marshal(previous)
+	require.NoError(t, err)
+	account := &Account{
+		ID:                      17,
+		Platform:                PlatformOpenAI,
+		Type:                    AccountTypeOAuth,
+		TempUnschedulableUntil:  &previousUntil,
+		TempUnschedulableReason: string(raw),
+	}
+	refresher := &tokenRefresherStub{
+		err: errors.New("invalid_grant: token revoked"),
+	}
+
+	err = service.refreshWithRetry(context.Background(), account, refresher, refresher, time.Hour)
+
+	require.Error(t, err)
+	require.Equal(t, 1, repo.setErrorCalls)
+	require.Equal(t, 0, repo.setTempUnschedCalls)
+	require.Equal(t, 1, tempCache.setCalls)
+	require.NotNil(t, tempCache.state)
+	require.Equal(t, "account_error", tempCache.state.MatchedKeyword)
 }
 
 func TestTokenRefreshService_RefreshWithRetry_NoRefreshTokenDoesNotTempUnschedule(t *testing.T) {
@@ -996,7 +1053,7 @@ func (r *alwaysFreshRefresherStub) CacheKey(account *Account) string {
 	return "test:fresh:" + account.Platform
 }
 
-// TestPathA_NonRetryableError 统一 API 路径返回不可重试错误 → SetError
+// TestPathA_NonRetryableError 统一 API 路径返回不可重试错误 → 先临时摘除
 func TestPathA_NonRetryableError(t *testing.T) {
 	account := &Account{
 		ID:       103,
@@ -1016,9 +1073,13 @@ func TestPathA_NonRetryableError(t *testing.T) {
 
 	err := service.refreshWithRetry(context.Background(), account, refresher, refresher, time.Hour)
 	require.Error(t, err)
-	require.Equal(t, 1, repo.setErrorCalls) // 应标记 error 状态
-	require.Equal(t, 0, repo.updateCalls)   // 不应更新 credentials
-	require.Equal(t, 0, invalidator.calls)  // 不应触发缓存失效
+	require.Equal(t, 0, repo.setErrorCalls)
+	require.Equal(t, 1, repo.setTempUnschedCalls)
+	require.Contains(t, repo.lastTempReason, tokenRefreshNonRetryableKeyword)
+	require.NotNil(t, account.TempUnschedulableUntil)
+	require.NotEmpty(t, account.TempUnschedulableReason)
+	require.Equal(t, 0, repo.updateCalls)  // 不应更新 credentials
+	require.Equal(t, 0, invalidator.calls) // 不应触发缓存失效
 }
 
 // TestPathA_RetryableErrorExhausted 统一 API 路径可重试错误耗尽 → 不标记 error
