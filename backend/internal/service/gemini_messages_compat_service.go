@@ -2930,12 +2930,8 @@ func (s *GeminiMessagesCompatService) handleGeminiUpstreamError(ctx context.Cont
 	if account == nil || s == nil {
 		return
 	}
-	if account.IsPoolMode() && !account.IsCustomErrorCodesEnabled() {
-		slog.Info("gemini_pool_mode_error_skipped", "account_id", account.ID, "status_code", statusCode)
-		return
-	}
-	// 遵守自定义错误码策略：未命中则跳过所有限流处理
-	if !account.ShouldHandleErrorCode(statusCode) {
+	if !shouldApplyLocalErrorState(account, statusCode) {
+		slog.Info("gemini_local_error_state_skipped", "account_id", account.ID, "status_code", statusCode)
 		return
 	}
 	if s.rateLimitService != nil && (statusCode == 401 || statusCode == 403 || statusCode == 529) {

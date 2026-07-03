@@ -55,12 +55,8 @@ func (s *AntigravityGatewayService) applyInternal500Penalty(
 	if account == nil {
 		return
 	}
-	if account.IsPoolMode() && !account.IsCustomErrorCodesEnabled() {
-		slog.Info("internal500_pool_mode_penalty_skipped", "account_id", account.ID, "consecutive_count", count)
-		return
-	}
-	if account.IsCustomErrorCodesEnabled() && !account.ShouldHandleErrorCode(http.StatusInternalServerError) {
-		slog.Info("internal500_custom_error_code_skipped", "account_id", account.ID, "consecutive_count", count)
+	if !shouldApplyLocalErrorState(account, http.StatusInternalServerError) {
+		slog.Info("internal500_local_state_skipped", "account_id", account.ID, "consecutive_count", count)
 		return
 	}
 	switch {

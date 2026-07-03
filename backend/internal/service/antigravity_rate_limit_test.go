@@ -921,6 +921,37 @@ func TestHandleUpstreamError_429_PoolModeSkipsLocalRateLimit(t *testing.T) {
 	require.Nil(t, account.RateLimitResetAt)
 }
 
+func TestHandleUpstreamError_429_PoolModeEmptyCustomPolicySkipsLocalRateLimit(t *testing.T) {
+	repo := &stubAntigravityAccountRepo{}
+	svc := &AntigravityGatewayService{accountRepo: repo}
+	account := &Account{
+		ID:       931,
+		Name:     "acc-pool-empty-custom",
+		Platform: PlatformAntigravity,
+		Type:     AccountTypeAPIKey,
+		Credentials: map[string]any{
+			"pool_mode":                  true,
+			"custom_error_codes_enabled": true,
+		},
+	}
+	body := []byte(`{
+		"error": {
+			"status": "RESOURCE_EXHAUSTED",
+			"details": [
+				{"@type": "type.googleapis.com/google.rpc.ErrorInfo", "metadata": {"model": "claude-sonnet-4-5"}, "reason": "RATE_LIMIT_EXCEEDED"},
+				{"@type": "type.googleapis.com/google.rpc.RetryInfo", "retryDelay": "15s"}
+			]
+		}
+	}`)
+
+	result := svc.handleUpstreamError(context.Background(), "[test]", account, http.StatusTooManyRequests, http.Header{}, body, "claude-sonnet-4-5", 0, "", false)
+
+	require.Nil(t, result)
+	require.Empty(t, repo.modelRateLimitCalls)
+	require.Empty(t, repo.rateCalls)
+	require.Nil(t, account.RateLimitResetAt)
+}
+
 func TestHandleUpstreamError_429_PoolModeCustomPolicyStillSetsModelRateLimit(t *testing.T) {
 	repo := &stubAntigravityAccountRepo{}
 	svc := &AntigravityGatewayService{accountRepo: repo}

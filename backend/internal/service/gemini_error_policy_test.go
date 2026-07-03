@@ -477,6 +477,32 @@ func TestHandleGeminiUpstreamError_PoolMode429SkipsLocalRateLimit(t *testing.T) 
 	require.Nil(t, account.RateLimitResetAt)
 }
 
+func TestHandleGeminiUpstreamError_PoolModeEmptyCustomPolicySkipsLocalRateLimit(t *testing.T) {
+	repo := &geminiErrorPolicyRepo{}
+	rlSvc := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+	svc := &GeminiMessagesCompatService{
+		accountRepo:      repo,
+		rateLimitService: rlSvc,
+	}
+	account := &Account{
+		ID:       5131,
+		Platform: PlatformGemini,
+		Type:     AccountTypeAPIKey,
+		Credentials: map[string]any{
+			"pool_mode":                  true,
+			"custom_error_codes_enabled": true,
+		},
+	}
+	body := []byte(`{"error":{"code":429,"message":"rate limit","status":"RESOURCE_EXHAUSTED"}}`)
+
+	svc.handleGeminiUpstreamError(context.Background(), account, http.StatusTooManyRequests, http.Header{}, body)
+
+	require.Zero(t, repo.setRateLimitedCalls)
+	require.Zero(t, repo.setErrorCalls)
+	require.Zero(t, repo.setTempCalls)
+	require.Nil(t, account.RateLimitResetAt)
+}
+
 func TestSetGeminiRateLimited_PoolModeDefaultSkipsDirectRepoWrite(t *testing.T) {
 	repo := &geminiErrorPolicyRepo{}
 	svc := &GeminiMessagesCompatService{accountRepo: repo}

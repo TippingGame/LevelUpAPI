@@ -268,6 +268,32 @@ func TestApplyInternal500Penalty(t *testing.T) {
 		require.Nil(t, tempCache.states[14])
 	})
 
+	t.Run("pool_mode empty custom error policy skips penalty", func(t *testing.T) {
+		repo := &internal500AccountRepoStub{}
+		tempCache := &runtimeTempUnschedCacheStub{}
+		svc := &AntigravityGatewayService{
+			accountRepo:      repo,
+			rateLimitService: &RateLimitService{tempUnschedCache: tempCache},
+		}
+		account := &Account{
+			ID:       141,
+			Name:     "pool-empty-custom",
+			Platform: PlatformAntigravity,
+			Type:     AccountTypeAPIKey,
+			Credentials: map[string]any{
+				"pool_mode":                  true,
+				"custom_error_codes_enabled": true,
+			},
+		}
+
+		svc.applyInternal500Penalty(context.Background(), "[test]", account, 3)
+
+		require.Empty(t, repo.tempUnschedCalls)
+		require.Empty(t, repo.setErrorCalls)
+		require.Nil(t, account.TempUnschedulableUntil)
+		require.Nil(t, tempCache.states[141])
+	})
+
 	t.Run("custom error codes miss skips penalty", func(t *testing.T) {
 		repo := &internal500AccountRepoStub{}
 		svc := &AntigravityGatewayService{accountRepo: repo}

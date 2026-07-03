@@ -694,6 +694,34 @@ func TestRateLimitService_HandleUpstreamErrorForModel_OpenAI404SkipsPoolMode(t *
 	require.Equal(t, 0, repo.tempCalls)
 }
 
+func TestRateLimitService_HandleUpstreamErrorForModel_OpenAI404PoolModeEmptyCustomPolicySkips(t *testing.T) {
+	repo := &rateLimitAccountRepoStub{}
+	service := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+	account := &Account{
+		ID:       2073,
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeAPIKey,
+		Credentials: map[string]any{
+			"pool_mode":                  true,
+			"custom_error_codes_enabled": true,
+		},
+	}
+
+	shouldDisable := service.HandleUpstreamErrorForModel(
+		context.Background(),
+		account,
+		"gpt-5.4",
+		http.StatusNotFound,
+		http.Header{},
+		[]byte(`{"error":{"message":"Model not found","type":"invalid_request_error"}}`),
+	)
+
+	require.False(t, shouldDisable)
+	require.Empty(t, repo.modelRateLimitCalls)
+	require.Equal(t, 0, repo.setErrorCalls)
+	require.Equal(t, 0, repo.tempCalls)
+}
+
 func TestRateLimitService_HandleUpstreamErrorForModel_OpenAI404PoolModeCustomPolicyStillCooldowns(t *testing.T) {
 	repo := &rateLimitAccountRepoStub{}
 	service := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
