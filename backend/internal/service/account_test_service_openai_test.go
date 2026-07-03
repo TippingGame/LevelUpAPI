@@ -494,6 +494,46 @@ func TestAccountTestService_OpenAI429SyncsObservedPlanType(t *testing.T) {
 	require.NotNil(t, account.RateLimitResetAt)
 }
 
+func TestAccountTestService_OpenAI429PoolModeSkipsLocalRateLimit(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	ctx, _ := newTestContext()
+	cancelTestRequest(ctx)
+
+	resetAt := time.Now().Add(time.Hour).Unix()
+	resp := newJSONResponse(http.StatusTooManyRequests, fmt.Sprintf(`{"error":{"type":"usage_limit_reached","message":"limit reached","plan_type":"free","resets_at":%d}}`, resetAt))
+
+	repo := &openAIAccountTestRepo{}
+	upstream := &queuedHTTPUpstream{responses: []*http.Response{resp}}
+	svc := &AccountTestService{accountRepo: repo, httpUpstream: upstream, cfg: &config.Config{}}
+	account := &Account{
+		ID:           82,
+		Platform:     PlatformOpenAI,
+		Type:         AccountTypeAPIKey,
+		Status:       StatusError,
+		ErrorMessage: "stale 403",
+		Concurrency:  1,
+		Credentials: map[string]any{
+			"api_key":   "sk-test",
+			"base_url":  "https://api.openai.com",
+			"pool_mode": true,
+			"plan_type": "plus",
+		},
+	}
+
+	err := svc.testOpenAIAccountConnection(ctx, account, "gpt-5.4", "", "")
+	require.Error(t, err)
+	require.Equal(t, []int64{account.ID}, repo.bulkUpdatedIDs)
+	require.NoError(t, repo.bulkUpdateContextErr)
+	require.Equal(t, "free", repo.bulkUpdatedPayload.Credentials["plan_type"])
+	require.Equal(t, "free", account.Credentials["plan_type"])
+	require.Zero(t, repo.rateLimitedID)
+	require.Nil(t, repo.rateLimitedAt)
+	require.Zero(t, repo.clearedErrorID)
+	require.Equal(t, StatusError, account.Status)
+	require.Equal(t, "stale 403", account.ErrorMessage)
+	require.Nil(t, account.RateLimitResetAt)
+}
+
 func TestAccountTestService_OpenAI429ActiveAccountDoesNotClearError(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	ctx, _ := newTestContext()
