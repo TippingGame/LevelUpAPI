@@ -1248,37 +1248,18 @@ func openAISharedPoolEffectiveAccountLevelPredicate(requiredLevel string) dbpred
 }
 
 func writeOpenAISharedPoolEffectiveAccountLevelEntSQL(b *entsql.Builder, accountLevelCol, credentialsCol, extraCol string) {
-	b.WriteString("(CASE WHEN ")
-	b.Ident(accountLevelCol).
-		WriteString(" IN (").
-		Arg(service.AccountLevelFree).
-		WriteString(", ").
-		Arg(service.AccountLevelPlus).
-		WriteString(", ").
-		Arg(service.AccountLevelPro).
-		WriteString(", ").
-		Arg(service.AccountLevelTeam).
-		WriteString(") THEN ")
-	b.Ident(accountLevelCol)
-	b.WriteString(" WHEN ")
-	writeOpenAIPlanTokenEntSQL(b, credentialsCol, extraCol)
-	b.WriteString(" IN (").
-		Arg(service.AccountLevelFree).
-		WriteString(", ").
-		Arg("chatgptfree").
-		WriteString(") THEN ").
-		Arg(service.AccountLevelFree)
-	b.WriteString(" WHEN (")
-	writeOpenAIPlanTokenEntSQL(b, credentialsCol, extraCol)
-	b.WriteString(" = ").Arg(service.AccountLevelPlus)
+	b.WriteString("(CASE WHEN (")
+	b.Ident(accountLevelCol).WriteString(" = ").Arg(service.AccountLevelTeam)
 	b.WriteString(" OR ")
 	writeOpenAIPlanTokenEntSQL(b, credentialsCol, extraCol)
-	b.WriteString(" = ").Arg("chatgptplus")
+	b.WriteString(" IN (").Arg(service.AccountLevelTeam).WriteString(", ").Arg("chatgptteam").WriteString(")")
 	b.WriteString(" OR ")
 	writeOpenAIPlanTokenEntSQL(b, credentialsCol, extraCol)
-	b.WriteString(" LIKE ").Arg("plus%")
-	b.WriteString(") THEN ").Arg(service.AccountLevelPlus)
+	b.WriteString(" LIKE ").Arg("team%")
+	b.WriteString(") THEN ").Arg(service.AccountLevelTeam)
 	b.WriteString(" WHEN (")
+	b.Ident(accountLevelCol).WriteString(" = ").Arg(service.AccountLevelPro)
+	b.WriteString(" OR ")
 	writeOpenAIPlanTokenEntSQL(b, credentialsCol, extraCol)
 	b.WriteString(" = ").Arg(service.AccountLevelPro)
 	b.WriteString(" OR ")
@@ -1291,14 +1272,24 @@ func writeOpenAISharedPoolEffectiveAccountLevelEntSQL(b *entsql.Builder, account
 	writeOpenAIPlanTokenEntSQL(b, credentialsCol, extraCol)
 	b.WriteString(" LIKE ").Arg("chatgptpro%")
 	b.WriteString(") THEN ").Arg(service.AccountLevelPro)
-	b.WriteString(" WHEN ")
+	b.WriteString(" WHEN (")
+	b.Ident(accountLevelCol).WriteString(" = ").Arg(service.AccountLevelPlus)
+	b.WriteString(" OR ")
 	writeOpenAIPlanTokenEntSQL(b, credentialsCol, extraCol)
-	b.WriteString(" IN (").
-		Arg(service.AccountLevelTeam).
-		WriteString(", ").
-		Arg("chatgptteam").
-		WriteString(") THEN ").
-		Arg(service.AccountLevelTeam)
+	b.WriteString(" = ").Arg(service.AccountLevelPlus)
+	b.WriteString(" OR ")
+	writeOpenAIPlanTokenEntSQL(b, credentialsCol, extraCol)
+	b.WriteString(" = ").Arg("chatgptplus")
+	b.WriteString(" OR ")
+	writeOpenAIPlanTokenEntSQL(b, credentialsCol, extraCol)
+	b.WriteString(" LIKE ").Arg("plus%")
+	b.WriteString(") THEN ").Arg(service.AccountLevelPlus)
+	b.WriteString(" WHEN (")
+	b.Ident(accountLevelCol).WriteString(" = ").Arg(service.AccountLevelFree)
+	b.WriteString(" OR ")
+	writeOpenAIPlanTokenEntSQL(b, credentialsCol, extraCol)
+	b.WriteString(" IN (").Arg(service.AccountLevelFree).WriteString(", ").Arg("chatgptfree").WriteString(")")
+	b.WriteString(") THEN ").Arg(service.AccountLevelFree)
 	b.WriteString(" ELSE ").Arg(service.AccountLevelFree).WriteString(" END)")
 }
 

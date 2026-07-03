@@ -306,6 +306,44 @@ func TestAdminService_UpdateAccount_KeepsExplicitOpenAILevelForGroupBinding(t *t
 	require.Equal(t, []int64{20}, repo.boundGroupIDs[1])
 }
 
+func TestAdminService_UpdateAccount_UsesObservedProPlanForGroupBinding(t *testing.T) {
+	repo := &accountRepoStubForBulkUpdate{
+		getByIDAccounts: map[int64]*Account{
+			1: {
+				ID:           1,
+				Name:         "observed-pro-account",
+				Platform:     PlatformOpenAI,
+				AccountLevel: AccountLevelPlus,
+				Concurrency:  OpenAIPlusDefaultConcurrency,
+				Credentials:  map[string]any{"plan_type": "chatgpt_pro"},
+			},
+		},
+	}
+	svc := &adminServiceImpl{
+		accountRepo: repo,
+		groupRepo: &groupRepoStubForAdmin{
+			getByID: &Group{
+				ID:                   20,
+				Name:                 "PRO共享池",
+				Platform:             PlatformOpenAI,
+				RequiredAccountLevel: AccountLevelPro,
+			},
+		},
+	}
+
+	groupIDs := []int64{20}
+	result, err := svc.UpdateAccount(context.Background(), 1, &UpdateAccountInput{
+		GroupIDs:              &groupIDs,
+		SkipMixedChannelCheck: true,
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.NotNil(t, repo.updatedAccount)
+	require.Equal(t, AccountLevelPlus, repo.updatedAccount.AccountLevel)
+	require.Equal(t, []int64{20}, repo.boundGroupIDs[1])
+}
+
 func TestAdminService_UpdateAccount_OpenAIAPIKeyIgnoresRequiredLevelForGroupBinding(t *testing.T) {
 	repo := &accountRepoStubForBulkUpdate{
 		getByIDAccounts: map[int64]*Account{

@@ -253,7 +253,15 @@ func NormalizeOpenAISharedPoolRequiredLevel(level string) string {
 }
 
 func EffectiveOpenAISharedPoolAccountLevel(platform, accountLevel string, credentials, extra map[string]any) string {
-	return NormalizeOpenAISharedPoolAccountLevel(NormalizeOpenAIAccountLevel(platform, accountLevel, credentials, extra))
+	if platform != PlatformOpenAI {
+		return NormalizeOpenAISharedPoolAccountLevel(accountLevel)
+	}
+	level := NormalizeOpenAISharedPoolAccountLevel(accountLevel)
+	inferred := NormalizeOpenAISharedPoolAccountLevel(InferOpenAIAccountLevel(credentials, extra))
+	if OpenAISharedPoolLevelRank(inferred) > OpenAISharedPoolLevelRank(level) {
+		return inferred
+	}
+	return level
 }
 
 func OpenAISharedPoolLevelRank(level string) int {

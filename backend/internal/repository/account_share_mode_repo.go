@@ -2893,12 +2893,15 @@ func accountSharePlanTokenSQL() string {
 func accountShareEffectiveAccountLevelSQL() string {
 	token := accountSharePlanTokenSQL()
 	return fmt.Sprintf(`CASE
-		WHEN a.account_level IN ('free', 'plus', 'pro', 'team') THEN a.account_level
-		WHEN %[1]s IN ('free', 'chatgptfree') THEN 'free'
-		WHEN %[1]s = 'plus' OR %[1]s = 'chatgptplus' OR %[1]s LIKE 'plus%%' THEN 'plus'
-		WHEN %[1]s = 'team' OR %[1]s = 'chatgptteam' OR %[1]s LIKE 'team%%' THEN 'team'
-		WHEN %[1]s = 'pro' OR %[1]s = 'chatgptpro' OR %[1]s LIKE 'pro%%' OR %[1]s LIKE 'chatgptpro%%' THEN 'pro'
-		ELSE 'unknown'
+		WHEN a.platform <> 'openai' THEN CASE
+			WHEN a.account_level IN ('free', 'plus', 'pro', 'team') THEN a.account_level
+			ELSE 'unknown'
+		END
+		WHEN a.account_level = 'team' OR %[1]s IN ('team', 'chatgptteam') OR %[1]s LIKE 'team%%' THEN 'team'
+		WHEN a.account_level = 'pro' OR %[1]s = 'pro' OR %[1]s = 'chatgptpro' OR %[1]s LIKE 'pro%%' OR %[1]s LIKE 'chatgptpro%%' THEN 'pro'
+		WHEN a.account_level = 'plus' OR %[1]s = 'plus' OR %[1]s = 'chatgptplus' OR %[1]s LIKE 'plus%%' THEN 'plus'
+		WHEN a.account_level = 'free' OR %[1]s IN ('free', 'chatgptfree') THEN 'free'
+		ELSE 'free'
 	END`, token)
 }
 

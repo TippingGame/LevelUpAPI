@@ -892,9 +892,10 @@ func (s *AccountRepoSuite) TestListSchedulableByGroupIDAndPlatform_OpenAIRequire
 	accounts, err := s.repo.ListSchedulableByGroupIDAndPlatform(s.ctx, group.ID, service.PlatformOpenAI)
 
 	s.Require().NoError(err)
-	s.Require().Len(accounts, 2)
+	s.Require().Len(accounts, 3)
 	s.Require().Equal(inferredProAcc.ID, accounts[0].ID)
 	s.Require().Equal(rawProAcc.ID, accounts[1].ID)
+	s.Require().Equal(plusAcc.ID, accounts[2].ID)
 }
 
 func (s *AccountRepoSuite) TestListSchedulableByGroupIDAndPlatform_RequireOAuthOnlyExcludesAPIKey() {

@@ -64,6 +64,33 @@ func TestNormalizeOpenAIAccountLevel_ManualLevelTakesPriority(t *testing.T) {
 	))
 }
 
+func TestEffectiveOpenAISharedPoolAccountLevel_UsesHighestKnownLevel(t *testing.T) {
+	require.Equal(t, AccountLevelPro, EffectiveOpenAISharedPoolAccountLevel(
+		PlatformOpenAI,
+		AccountLevelPlus,
+		map[string]any{"plan_type": "chatgpt_pro"},
+		nil,
+	))
+	require.Equal(t, AccountLevelPro, EffectiveOpenAISharedPoolAccountLevel(
+		PlatformOpenAI,
+		AccountLevelPro,
+		map[string]any{"plan_type": "plus"},
+		nil,
+	))
+	require.Equal(t, AccountLevelPlus, EffectiveOpenAISharedPoolAccountLevel(
+		PlatformOpenAI,
+		AccountLevelPlus,
+		map[string]any{"plan_type": "free"},
+		nil,
+	))
+	require.Equal(t, AccountLevelPro, EffectiveOpenAISharedPoolAccountLevel(
+		PlatformOpenAI,
+		AccountLevelUnknown,
+		map[string]any{"plan_type": "pro5x"},
+		nil,
+	))
+}
+
 func TestValidateAccountLoadFactor_Max(t *testing.T) {
 	loadFactor := AccountMaxLoadFactor + 1
 	require.Error(t, ValidateAccountLoadFactor(&loadFactor))
