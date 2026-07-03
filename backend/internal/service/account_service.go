@@ -239,6 +239,10 @@ type accountQuotaPoolRepository interface {
 	ListQuotaPoolAccounts(ctx context.Context, ownerUserID int64) ([]Account, error)
 }
 
+type accountQuotaPoolVisibleRepairRepository interface {
+	RepairQuotaPoolVisibleOpenAISharedPoolBindings(ctx context.Context, ownerUserID int64) (bool, error)
+}
+
 type accountQuotaPoolRepairRepository interface {
 	RepairQuotaPoolOwnerOpenAISharedPoolBindings(ctx context.Context, ownerUserID int64) (bool, error)
 }

@@ -140,7 +140,13 @@ func (s *AccountService) GetQuotaPoolDashboard(ctx context.Context, ownerUserID 
 	}
 
 	repairedBindings := false
-	if repo, ok := s.accountRepo.(accountQuotaPoolRepairRepository); ok {
+	if repo, ok := s.accountRepo.(accountQuotaPoolVisibleRepairRepository); ok {
+		changed, err := repo.RepairQuotaPoolVisibleOpenAISharedPoolBindings(ctx, ownerUserID)
+		if err != nil {
+			return nil, err
+		}
+		repairedBindings = changed
+	} else if repo, ok := s.accountRepo.(accountQuotaPoolRepairRepository); ok {
 		changed, err := repo.RepairQuotaPoolOwnerOpenAISharedPoolBindings(ctx, ownerUserID)
 		if err != nil {
 			return nil, err

@@ -76,6 +76,11 @@ func (r *quotaPoolDashboardRepoStub) RepairQuotaPoolOwnerOpenAISharedPoolBinding
 	return r.repairChanged, nil
 }
 
+func (r *quotaPoolDashboardRepoStub) RepairQuotaPoolVisibleOpenAISharedPoolBindings(context.Context, int64) (bool, error) {
+	r.repairCalls++
+	return r.repairChanged, nil
+}
+
 func (r *quotaPoolDashboardRepoStub) ListQuotaPoolAccounts(context.Context, int64) ([]Account, error) {
 	r.listCalls++
 	out := make([]Account, len(r.accounts))

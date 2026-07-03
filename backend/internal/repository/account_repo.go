@@ -852,7 +852,7 @@ func (r *accountRepository) ListQuotaPoolAccounts(ctx context.Context, ownerUser
 		return nil, fmt.Errorf("account repository sql executor is unavailable")
 	}
 
-	if _, err := r.repairQuotaPoolOwnerOpenAISharedPoolBindings(ctx, ownerUserID); err != nil {
+	if _, err := r.repairQuotaPoolVisibleOpenAISharedPoolBindings(ctx, ownerUserID); err != nil {
 		return nil, err
 	}
 
@@ -876,6 +876,10 @@ func (r *accountRepository) RepairQuotaPoolOwnerOpenAISharedPoolBindings(ctx con
 	return r.repairQuotaPoolOwnerOpenAISharedPoolBindings(ctx, ownerUserID)
 }
 
+func (r *accountRepository) RepairQuotaPoolVisibleOpenAISharedPoolBindings(ctx context.Context, ownerUserID int64) (bool, error) {
+	return r.repairQuotaPoolVisibleOpenAISharedPoolBindings(ctx, ownerUserID)
+}
+
 func (r *accountRepository) repairQuotaPoolOwnerOpenAISharedPoolBindings(ctx context.Context, ownerUserID int64) (bool, error) {
 	if r == nil || r.sql == nil || ownerUserID <= 0 {
 		return false, nil
@@ -889,6 +893,57 @@ func (r *accountRepository) repairQuotaPoolOwnerOpenAISharedPoolBindings(ctx con
 			AND type = 'oauth'
 			AND lower(btrim(COALESCE(share_mode, ''))) = 'public'
 			AND lower(btrim(COALESCE(share_status, ''))) NOT IN ('pending', 'suspended')
+	`, ownerUserID)
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	accountIDs := make([]int64, 0)
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return false, err
+		}
+		accountIDs = append(accountIDs, id)
+	}
+	if err := rows.Err(); err != nil {
+		return false, err
+	}
+	if len(accountIDs) == 0 {
+		return false, nil
+	}
+	return r.repairOpenAISharedPoolBindings(ctx, accountIDs)
+}
+
+func (r *accountRepository) repairQuotaPoolVisibleOpenAISharedPoolBindings(ctx context.Context, ownerUserID int64) (bool, error) {
+	if r == nil || r.sql == nil || ownerUserID <= 0 {
+		return false, nil
+	}
+	rows, err := r.sql.QueryContext(ctx, `
+		SELECT DISTINCT a.id
+		FROM accounts a
+		WHERE a.deleted_at IS NULL
+			AND a.platform = 'openai'
+			AND a.type = 'oauth'
+			AND a.owner_user_id IS NOT NULL
+			AND lower(btrim(COALESCE(a.share_mode, ''))) = 'public'
+			AND lower(btrim(COALESCE(a.share_status, ''))) NOT IN ('pending', 'suspended')
+			AND (
+				a.owner_user_id = $1
+				OR EXISTS (
+					SELECT 1
+					FROM account_groups ag
+					JOIN groups g ON g.id = ag.group_id
+					WHERE ag.account_id = a.id
+						AND g.deleted_at IS NULL
+						AND g.platform = 'openai'
+						AND g.owner_user_id IS NULL
+						AND g.scope = 'public'
+						AND g.is_exclusive = FALSE
+						AND COALESCE(g.subscription_type, '') IN ('', 'standard')
+				)
+			)
 	`, ownerUserID)
 	if err != nil {
 		return false, err
