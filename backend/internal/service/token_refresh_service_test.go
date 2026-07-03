@@ -870,6 +870,37 @@ func TestTokenRefreshService_RefreshWithRetry_NonRetryableThresholdSetsError(t *
 	require.Equal(t, "account_error", tempCache.state.MatchedKeyword)
 }
 
+func TestTokenRefreshService_RefreshWithRetry_AccessDeniedStaysRecoverable(t *testing.T) {
+	repo := &tokenRefreshAccountRepo{}
+	tempCache := &tempUnschedCacheStub{}
+	cfg := &config.Config{
+		TokenRefresh: config.TokenRefreshConfig{
+			MaxRetries:          2,
+			RetryBackoffSeconds: 0,
+		},
+	}
+	service := NewTokenRefreshService(repo, nil, nil, nil, nil, nil, nil, cfg, tempCache)
+	account := &Account{
+		ID:       171,
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeOAuth,
+	}
+	refresher := &tokenRefresherStub{
+		err: errors.New("access_denied: temporary authorization edge rejection"),
+	}
+
+	err := service.refreshWithRetry(context.Background(), account, refresher, refresher, time.Hour)
+
+	require.Error(t, err)
+	require.Equal(t, 0, repo.setErrorCalls)
+	require.Equal(t, 1, repo.setTempUnschedCalls)
+	require.Contains(t, repo.lastTempReason, tokenRefreshRetryExhaustedReasonPrefix)
+	require.NotNil(t, tempCache.state)
+	require.Equal(t, "token_refresh_retry_exhausted", tempCache.state.MatchedKeyword)
+	require.NotNil(t, account.TempUnschedulableUntil)
+	require.Contains(t, account.TempUnschedulableReason, "access_denied")
+}
+
 func TestTokenRefreshService_RefreshWithRetry_NoRefreshTokenDoesNotTempUnschedule(t *testing.T) {
 	repo := &tokenRefreshAccountRepo{}
 	cfg := &config.Config{
@@ -907,7 +938,7 @@ func TestIsNonRetryableRefreshError(t *testing.T) {
 		{name: "invalid_grant", err: errors.New("invalid_grant"), expected: true},
 		{name: "invalid_client", err: errors.New("invalid_client"), expected: true},
 		{name: "unauthorized_client", err: errors.New("unauthorized_client"), expected: true},
-		{name: "access_denied", err: errors.New("access_denied"), expected: true},
+		{name: "access_denied", err: errors.New("access_denied"), expected: false},
 		{name: "no_refresh_token", err: errors.New("no refresh token available"), expected: true},
 		{name: "try_signing_in_again", err: errors.New("Please try signing in again"), expected: true},
 		{name: "try_signing_in_again_with_context", err: errors.New("token endpoint returned 401: Please try signing in again"), expected: true},
