@@ -743,6 +743,10 @@ func (s *RateLimitService) handleOpenAIModelCapacityError(ctx context.Context, a
 	if s == nil || s.accountRepo == nil || account == nil || account.Platform != PlatformOpenAI {
 		return false
 	}
+	if !shouldApplyLocalErrorState(account, statusCode) {
+		slog.Info("openai_model_capacity_local_state_skipped", "account_id", account.ID, "status_code", statusCode)
+		return false
+	}
 
 	now := time.Now()
 	until := now.Add(openAIModelCapacityCooldown)
@@ -1148,6 +1152,10 @@ func (s *RateLimitService) handleAuthError(ctx context.Context, account *Account
 	if s == nil || account == nil || s.accountRepo == nil {
 		return
 	}
+	if !shouldApplyLocalSystemErrorState(account) {
+		slog.Info("account_auth_error_local_state_skipped", "account_id", account.ID)
+		return
+	}
 	if err := s.persistAccountError(ctx, account, errorMsg, "account_error"); err != nil {
 		slog.Warn("account_set_error_failed", "account_id", account.ID, "error", err)
 		return
@@ -1157,6 +1165,10 @@ func (s *RateLimitService) handleAuthError(ctx context.Context, account *Account
 
 func (s *RateLimitService) handleBillingQuotaTempUnschedulable(ctx context.Context, account *Account, statusCode int, msg string) {
 	if account == nil {
+		return
+	}
+	if !shouldApplyLocalErrorState(account, statusCode) {
+		slog.Info("billing_quota_local_state_skipped", "account_id", account.ID, "status_code", statusCode)
 		return
 	}
 	until := time.Now().Add(billingQuotaCooldown)
@@ -1174,6 +1186,13 @@ func (s *RateLimitService) handleBillingQuotaTempUnschedulable(ctx context.Conte
 }
 
 func (s *RateLimitService) handleCloudflareChallenge(ctx context.Context, account *Account, statusCode int, headers http.Header, responseBody []byte) bool {
+	if account == nil {
+		return false
+	}
+	if !shouldApplyLocalErrorState(account, statusCode) {
+		slog.Info("cloudflare_challenge_local_state_skipped", "account_id", account.ID, "status_code", statusCode)
+		return false
+	}
 	now := time.Now()
 	consecutiveCount := nextCloudflareChallengeCount(account, now)
 	cooldown := cloudflareChallengeCooldownForCount(consecutiveCount)
@@ -1407,6 +1426,10 @@ func (s *RateLimitService) handleGeneric403TempUnschedulable(ctx context.Context
 	if account == nil {
 		return
 	}
+	if !shouldApplyLocalErrorState(account, http.StatusForbidden) {
+		slog.Info("generic_403_local_state_skipped", "account_id", account.ID)
+		return
+	}
 	now := time.Now()
 	count := nextTempUnschedConsecutiveCount(
 		account,
@@ -1463,6 +1486,12 @@ func generic403CooldownForCount(count int) time.Duration {
 }
 
 func (s *RateLimitService) handleAnthropicOAuth403(ctx context.Context, account *Account, upstreamMsg string, responseBody []byte) (shouldDisable bool) {
+	if !shouldApplyLocalErrorState(account, http.StatusForbidden) {
+		if account != nil {
+			slog.Info("anthropic_oauth_403_local_state_skipped", "account_id", account.ID)
+		}
+		return false
+	}
 	msg := buildForbiddenErrorMessage(
 		"Claude OAuth access forbidden (403):",
 		upstreamMsg,
@@ -1553,6 +1582,10 @@ func (s *RateLimitService) handleOpenAI403(ctx context.Context, account *Account
 
 func (s *RateLimitService) setOpenAI403TempUnschedulable(ctx context.Context, account *Account, msg string, count int64, reasonLabel string) bool {
 	if account == nil {
+		return false
+	}
+	if !shouldApplyLocalErrorState(account, http.StatusForbidden) {
+		slog.Info("openai_403_local_state_skipped", "account_id", account.ID)
 		return false
 	}
 	now := time.Now()
@@ -1709,6 +1742,10 @@ func (s *RateLimitService) handleAntigravityGeneric403TempUnschedulable(ctx cont
 	if account == nil {
 		return
 	}
+	if !shouldApplyLocalErrorState(account, http.StatusForbidden) {
+		slog.Info("antigravity_403_local_state_skipped", "account_id", account.ID)
+		return
+	}
 	now := time.Now()
 	count := nextTempUnschedConsecutiveCount(
 		account,
@@ -1754,6 +1791,12 @@ func (s *RateLimitService) handleAntigravityGeneric403TempUnschedulable(ctx cont
 
 // handleCustomErrorCode 处理自定义错误码，临时停止账号调度
 func (s *RateLimitService) handleCustomErrorCode(ctx context.Context, account *Account, statusCode int, errorMsg string) {
+	if !shouldApplyLocalErrorState(account, statusCode) {
+		if account != nil {
+			slog.Info("custom_error_code_local_state_skipped", "account_id", account.ID, "status_code", statusCode)
+		}
+		return
+	}
 	msg := "Custom error code " + strconv.Itoa(statusCode) + ": " + errorMsg
 	until := time.Now().Add(customErrorCodeCooldown)
 	state := newTempUnschedState(until, statusCode, "custom_error_code", msg)
@@ -1772,6 +1815,13 @@ func (s *RateLimitService) handleCustomErrorCode(ctx context.Context, account *A
 // handle429 处理429限流错误
 // 解析响应头获取重置时间，标记账号为限流状态
 func (s *RateLimitService) handle429(ctx context.Context, account *Account, headers http.Header, responseBody []byte) {
+	if account == nil {
+		return
+	}
+	if !shouldApplyLocalErrorState(account, http.StatusTooManyRequests) {
+		slog.Info("rate_limit_429_local_state_skipped", "account_id", account.ID)
+		return
+	}
 	// 1. OpenAI 平台：优先尝试解析 x-codex-* 响应头（用于 rate_limit_exceeded）
 	if account.Platform == PlatformOpenAI {
 		persistOpenAI429PlanType(ctx, s.accountRepo, account, responseBody)
@@ -2391,6 +2441,13 @@ func normalizeOpenAIRateLimitResetUnix(ts int64, now time.Time) (int64, bool) {
 // handle529 处理529过载错误
 // 根据配置决定是否暂停账号调度及冷却时长
 func (s *RateLimitService) handle529(ctx context.Context, account *Account) {
+	if account == nil {
+		return
+	}
+	if !shouldApplyLocalErrorState(account, 529) {
+		slog.Info("overload_529_local_state_skipped", "account_id", account.ID)
+		return
+	}
 	var settings *OverloadCooldownSettings
 	if s.settingService != nil {
 		var err error

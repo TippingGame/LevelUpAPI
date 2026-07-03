@@ -420,6 +420,64 @@ func TestHandleUpstreamError_PoolModeCustomErrorCodesOverride(t *testing.T) {
 	})
 }
 
+func TestRateLimitServiceLocalStateHelpersSkipPoolModeDefault(t *testing.T) {
+	repo := &errorPolicyRepoStub{}
+	cache := &runtimeTempUnschedCacheStub{}
+	svc := NewRateLimitService(repo, nil, &config.Config{}, nil, cache)
+	account := &Account{
+		ID:          32,
+		Type:        AccountTypeAPIKey,
+		Platform:    PlatformOpenAI,
+		Status:      StatusActive,
+		Schedulable: true,
+		Credentials: map[string]any{
+			"pool_mode": true,
+		},
+	}
+
+	require.False(t, svc.handleOpenAIModelCapacityError(context.Background(), account, http.StatusServiceUnavailable, []byte(`{"error":{"message":"capacity"}}`)))
+	svc.handleAuthError(context.Background(), account, "auth failed")
+	svc.handleBillingQuotaTempUnschedulable(context.Background(), account, http.StatusPaymentRequired, "quota exhausted")
+	require.False(t, svc.handleCloudflareChallenge(context.Background(), account, http.StatusForbidden, http.Header{}, []byte(`challenge`)))
+	svc.handleGeneric403TempUnschedulable(context.Background(), account, "forbidden")
+	require.False(t, svc.setOpenAI403TempUnschedulable(context.Background(), account, "forbidden", 1, "test"))
+	svc.handleCustomErrorCode(context.Background(), account, http.StatusInternalServerError, "custom failure")
+
+	require.Equal(t, 0, repo.setErrCalls)
+	require.Equal(t, 0, repo.tempCalls)
+	require.Nil(t, account.TempUnschedulableUntil)
+	require.Equal(t, StatusActive, account.Status)
+	require.Empty(t, cache.states)
+}
+
+func TestRateLimitServiceLocalStateHelpersPoolModeCustomPolicyStillWrites(t *testing.T) {
+	repo := &errorPolicyRepoStub{}
+	cache := &runtimeTempUnschedCacheStub{}
+	svc := NewRateLimitService(repo, nil, &config.Config{}, nil, cache)
+	account := &Account{
+		ID:          33,
+		Type:        AccountTypeAPIKey,
+		Platform:    PlatformOpenAI,
+		Status:      StatusActive,
+		Schedulable: true,
+		Credentials: map[string]any{
+			"pool_mode":                  true,
+			"custom_error_codes_enabled": true,
+			"custom_error_codes":         []any{float64(http.StatusPaymentRequired), float64(http.StatusForbidden), float64(http.StatusServiceUnavailable)},
+		},
+	}
+
+	require.True(t, svc.handleOpenAIModelCapacityError(context.Background(), account, http.StatusServiceUnavailable, []byte(`{"error":{"message":"capacity"}}`)))
+	svc.handleBillingQuotaTempUnschedulable(context.Background(), account, http.StatusPaymentRequired, "quota exhausted")
+	require.True(t, svc.setOpenAI403TempUnschedulable(context.Background(), account, "forbidden", 1, "test"))
+	svc.handleAuthError(context.Background(), account, "auth failed")
+
+	require.Equal(t, 1, repo.setErrCalls)
+	require.Equal(t, 3, repo.tempCalls)
+	require.NotNil(t, account.TempUnschedulableUntil)
+	require.NotNil(t, cache.states[33])
+}
+
 // ---------------------------------------------------------------------------
 // TestApplyErrorPolicy — 4 table-driven cases for the wrapper method
 // ---------------------------------------------------------------------------
