@@ -298,6 +298,88 @@ func TestRateLimitService_HandleUpstreamError_AnthropicOAuthStale403ReasonResets
 	require.Contains(t, state.ErrorMessage, "(1/3)")
 }
 
+func TestRateLimitService_HandleUpstreamError_Generic403TempUnschedulable(t *testing.T) {
+	tests := []struct {
+		name     string
+		platform string
+		typ      string
+	}{
+		{name: "gemini apikey", platform: PlatformGemini, typ: AccountTypeAPIKey},
+		{name: "anthropic apikey", platform: PlatformAnthropic, typ: AccountTypeAPIKey},
+		{name: "anthropic bedrock", platform: PlatformAnthropic, typ: AccountTypeBedrock},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := &rateLimitAccountRepoStub{}
+			service := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+			account := &Account{
+				ID:       307,
+				Platform: tt.platform,
+				Type:     tt.typ,
+			}
+
+			before := time.Now()
+			shouldDisable := service.HandleUpstreamError(
+				context.Background(),
+				account,
+				http.StatusForbidden,
+				http.Header{},
+				[]byte(`{"error":{"message":"Permission denied"}}`),
+			)
+
+			require.True(t, shouldDisable)
+			require.Equal(t, 0, repo.setErrorCalls)
+			require.Equal(t, 1, repo.tempCalls)
+			require.WithinDuration(t, before.Add(time.Duration(generic403CooldownMinutesDefault)*time.Minute), repo.lastTempUntil, 3*time.Second)
+
+			var state TempUnschedState
+			require.NoError(t, json.Unmarshal([]byte(repo.lastTempReason), &state))
+			require.Equal(t, "generic_403", state.MatchedKeyword)
+			require.Equal(t, http.StatusForbidden, state.StatusCode)
+			require.Equal(t, 1, state.ConsecutiveCount)
+			require.Contains(t, state.ErrorMessage, "Permission denied")
+		})
+	}
+}
+
+func TestRateLimitService_HandleUpstreamError_Generic403EscalatesCooldown(t *testing.T) {
+	repo := &rateLimitAccountRepoStub{}
+	service := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+	previousReason, err := json.Marshal(&TempUnschedState{
+		TriggeredAtUnix:  time.Now().Add(-time.Minute).Unix(),
+		StatusCode:       http.StatusForbidden,
+		MatchedKeyword:   "generic_403",
+		ConsecutiveCount: 2,
+	})
+	require.NoError(t, err)
+	account := &Account{
+		ID:                      308,
+		Platform:                PlatformGemini,
+		Type:                    AccountTypeAPIKey,
+		TempUnschedulableReason: string(previousReason),
+		TempUnschedulableUntil:  ptrTime(time.Now().Add(-time.Minute)),
+	}
+
+	shouldDisable := service.HandleUpstreamError(
+		context.Background(),
+		account,
+		http.StatusForbidden,
+		http.Header{},
+		[]byte(`{"error":{"message":"Permission denied"}}`),
+	)
+
+	require.True(t, shouldDisable)
+	require.Equal(t, 0, repo.setErrorCalls)
+	require.Equal(t, 1, repo.tempCalls)
+	require.WithinDuration(t, time.Now().Add(2*time.Hour), repo.lastTempUntil, 3*time.Second)
+
+	var state TempUnschedState
+	require.NoError(t, json.Unmarshal([]byte(repo.lastTempReason), &state))
+	require.Equal(t, "generic_403_long_cooldown", state.MatchedKeyword)
+	require.Equal(t, 3, state.ConsecutiveCount)
+}
+
 func TestRateLimitService_HandleUpstreamError_Cloudflare403TempUnschedulable(t *testing.T) {
 	repo := &rateLimitAccountRepoStub{}
 	service := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)

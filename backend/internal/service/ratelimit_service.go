@@ -71,6 +71,7 @@ const (
 	openAIModelCapacityCooldown          = time.Minute
 	upstreamModelNotFoundCooldown        = 30 * time.Minute
 	oAuth401CooldownMinutesDefault       = 10
+	generic403CooldownMinutesDefault     = 10
 	overloadCooldownMinutesDefault       = 10
 	runtimeAccountErrorEvictionTTL       = 24 * time.Hour
 	rateLimitStateUpdateTimeout          = 3 * time.Second
@@ -86,6 +87,13 @@ var cloudflareChallengeCooldownSteps = []time.Duration{
 var anthropicOAuth403CooldownSteps = []time.Duration{
 	time.Duration(anthropicOAuthDefaultCooldownMinutes) * time.Minute,
 	time.Duration(anthropicOAuthDefaultCooldownMinutes) * time.Minute,
+	2 * time.Hour,
+	12 * time.Hour,
+}
+
+var generic403CooldownSteps = []time.Duration{
+	time.Duration(generic403CooldownMinutesDefault) * time.Minute,
+	30 * time.Minute,
 	2 * time.Hour,
 	12 * time.Hour,
 }
@@ -1192,9 +1200,8 @@ func permanentAccountKeywordErrorMessageFromBody(account *Account, statusCode in
 	return permanentAccountKeywordErrorMessage(account, statusCode, upstreamMsg, responseBody)
 }
 
-// handle403 处理 403 Forbidden 错误
-// Antigravity 平台区分 validation/violation/generic 三种类型，均 SetError 永久禁用；
-// 其他平台保持原有 SetError 行为。
+// handle403 处理 403 Forbidden 错误。
+// 明确的硬失败已由 permanentAccountKeywordErrorMessage 提前处理；默认分支只临时冷却，避免泛权限/地区/风控抖动误永久禁用账号。
 func (s *RateLimitService) handle403(ctx context.Context, account *Account, upstreamMsg string, responseBody []byte) (shouldDisable bool) {
 	if account.Platform == PlatformAntigravity {
 		return s.handleAntigravity403(ctx, account, upstreamMsg, responseBody)
@@ -1205,15 +1212,72 @@ func (s *RateLimitService) handle403(ctx context.Context, account *Account, upst
 	if account.IsAnthropicOAuthOrSetupToken() {
 		return s.handleAnthropicOAuth403(ctx, account, upstreamMsg, responseBody)
 	}
-	// 非 Antigravity 平台：保持原有行为
 	msg := buildForbiddenErrorMessage(
 		"Access forbidden (403):",
 		upstreamMsg,
 		responseBody,
 		"account may be suspended or lack permissions",
 	)
-	s.handleAuthError(ctx, account, msg)
+	s.handleGeneric403TempUnschedulable(ctx, account, msg)
 	return true
+}
+
+func (s *RateLimitService) handleGeneric403TempUnschedulable(ctx context.Context, account *Account, msg string) {
+	if account == nil {
+		return
+	}
+	now := time.Now()
+	count := nextTempUnschedConsecutiveCount(
+		account,
+		now,
+		http.StatusForbidden,
+		"generic_403",
+		time.Duration(openAI403CounterWindowMinutes)*time.Minute,
+	)
+	cooldown := generic403CooldownForCount(count)
+	until := now.Add(cooldown)
+	matchedKeyword := "generic_403"
+	if count >= 3 {
+		matchedKeyword = "generic_403_long_cooldown"
+	}
+	state := &TempUnschedState{
+		UntilUnix:        until.Unix(),
+		TriggeredAtUnix:  now.Unix(),
+		StatusCode:       http.StatusForbidden,
+		MatchedKeyword:   matchedKeyword,
+		RuleIndex:        -1,
+		ErrorMessage:     fmt.Sprintf("403 temporary cooldown (%d): %s", count, msg),
+		ConsecutiveCount: count,
+	}
+	reason := state.ErrorMessage
+	if raw, err := json.Marshal(state); err == nil {
+		reason = string(raw)
+	}
+
+	if err := s.persistTempUnschedulableState(ctx, account, until, reason, state, "generic_403"); err != nil {
+		slog.Warn("generic_403_set_temp_unschedulable_failed", "account_id", account.ID, "error", err)
+		return
+	}
+
+	slog.Warn(
+		"generic_403_temp_unschedulable",
+		"account_id", account.ID,
+		"platform", account.Platform,
+		"until", until,
+		"count", count,
+		"cooldown", cooldown.String(),
+	)
+}
+
+func generic403CooldownForCount(count int) time.Duration {
+	if count <= 0 {
+		count = 1
+	}
+	index := count - 1
+	if index >= len(generic403CooldownSteps) {
+		index = len(generic403CooldownSteps) - 1
+	}
+	return generic403CooldownSteps[index]
 }
 
 func (s *RateLimitService) handleAnthropicOAuth403(ctx context.Context, account *Account, upstreamMsg string, responseBody []byte) (shouldDisable bool) {
