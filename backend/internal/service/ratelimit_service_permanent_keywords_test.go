@@ -317,30 +317,6 @@ func TestRateLimitServiceHandleUpstreamErrorCustomErrorWritesRuntimeEvictionCach
 	require.True(t, cache.states[56].UntilUnix > time.Now().Add(time.Hour).Unix())
 }
 
-func TestRateLimitServiceTriggerStreamTimeoutErrorWritesRuntimeEvictionCache(t *testing.T) {
-	repo := &permanentKeywordAccountRepoStub{}
-	cache := &runtimeTempUnschedCacheStub{}
-	svc := NewRateLimitService(repo, nil, nil, nil, cache)
-	account := &Account{
-		ID:          57,
-		Platform:    PlatformOpenAI,
-		Type:        AccountTypeOAuth,
-		Status:      StatusActive,
-		Schedulable: true,
-	}
-
-	disabled := svc.triggerStreamTimeoutError(context.Background(), account, "gpt-5")
-
-	require.True(t, disabled)
-	require.Equal(t, 1, repo.setErrorCalls)
-	require.Equal(t, StatusError, account.Status)
-	require.False(t, account.Schedulable)
-	require.Contains(t, account.ErrorMessage, "Stream data interval timeout")
-	require.NotNil(t, cache.states[57])
-	require.Equal(t, "account_error", cache.states[57].MatchedKeyword)
-	require.True(t, cache.states[57].UntilUnix > time.Now().Add(time.Hour).Unix())
-}
-
 func TestRateLimitServiceHandleStreamTimeoutErrorActionDowngradesOAuthToTempUnsched(t *testing.T) {
 	repo := &permanentKeywordAccountRepoStub{}
 	settingSvc := NewSettingService(&streamTimeoutSettingRepoStub{value: streamTimeoutSettingsValue(t, StreamTimeoutSettings{
@@ -370,7 +346,7 @@ func TestRateLimitServiceHandleStreamTimeoutErrorActionDowngradesOAuthToTempUnsc
 	require.Contains(t, repo.lastTempReason, "gpt-5")
 }
 
-func TestRateLimitServiceHandleStreamTimeoutErrorActionStillErrorsAPIKey(t *testing.T) {
+func TestRateLimitServiceHandleStreamTimeoutErrorActionDowngradesAPIKeyToTempUnsched(t *testing.T) {
 	repo := &permanentKeywordAccountRepoStub{}
 	settingSvc := NewSettingService(&streamTimeoutSettingRepoStub{value: streamTimeoutSettingsValue(t, StreamTimeoutSettings{
 		Enabled:                true,
@@ -392,10 +368,11 @@ func TestRateLimitServiceHandleStreamTimeoutErrorActionStillErrorsAPIKey(t *test
 	handled := svc.HandleStreamTimeout(context.Background(), account, "gpt-5")
 
 	require.True(t, handled)
-	require.Equal(t, 1, repo.setErrorCalls)
-	require.Equal(t, 0, repo.tempCalls)
-	require.NoError(t, repo.lastErrorCtxErr)
-	require.Contains(t, repo.lastErrorMsg, "Stream data interval timeout")
+	require.Equal(t, 0, repo.setErrorCalls)
+	require.Equal(t, 1, repo.tempCalls)
+	require.NoError(t, repo.lastTempCtxErr)
+	require.Contains(t, repo.lastTempReason, `"matched_keyword":"stream_timeout"`)
+	require.Contains(t, repo.lastTempReason, "gpt-5")
 }
 
 func TestRateLimitServiceEvictAccountErrorFromRuntimeCache(t *testing.T) {

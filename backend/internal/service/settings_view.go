@@ -375,7 +375,7 @@ func (cfg WeChatConnectOAuthConfig) AppSecretForMode(mode string) string {
 type StreamTimeoutSettings struct {
 	// Enabled 是否启用流超时处理
 	Enabled bool `json:"enabled"`
-	// Action 超时后的处理方式: "temp_unsched" | "error" | "none"
+	// Action 超时后的处理方式: "temp_unsched" | "error" | "none"；error 为兼容旧配置，运行时会降级为临时冷却
 	Action string `json:"action"`
 	// TempUnschedMinutes 临时不可调度持续时间（分钟）
 	TempUnschedMinutes int `json:"temp_unsched_minutes"`
@@ -388,7 +388,7 @@ type StreamTimeoutSettings struct {
 // StreamTimeoutAction 流超时处理方式常量
 const (
 	StreamTimeoutActionTempUnsched = "temp_unsched" // 临时不可调度
-	StreamTimeoutActionError       = "error"        // 标记为错误状态
+	StreamTimeoutActionError       = "error"        // 兼容旧配置，运行时降级为临时冷却
 	StreamTimeoutActionNone        = "none"         // 不处理
 )
 

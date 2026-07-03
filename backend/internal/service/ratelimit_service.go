@@ -2628,7 +2628,7 @@ func truncateTempUnschedMessage(body []byte, maxBytes int) string {
 }
 
 // HandleStreamTimeout 处理流数据超时
-// 根据系统设置决定是否标记账户为临时不可调度或错误状态
+// 根据系统设置决定是否标记账户为临时不可调度。即使 action=error，也降级为临时冷却，避免网络/长流抖动误永久禁用账号。
 // 返回是否应该停止该账号的调度
 func (s *RateLimitService) HandleStreamTimeout(ctx context.Context, account *Account, model string) bool {
 	if account == nil {
@@ -2678,23 +2678,16 @@ func (s *RateLimitService) HandleStreamTimeout(ctx context.Context, account *Acc
 	case StreamTimeoutActionTempUnsched:
 		return s.triggerStreamTimeoutTempUnsched(ctx, account, settings, model)
 	case StreamTimeoutActionError:
-		if shouldDowngradeStreamTimeoutError(account) {
-			slog.Warn("stream_timeout_error_action_downgraded",
-				"account_id", account.ID,
-				"platform", account.Platform,
-				"type", account.Type,
-				"model", model,
-			)
-			return s.triggerStreamTimeoutTempUnsched(ctx, account, settings, model)
-		}
-		return s.triggerStreamTimeoutError(ctx, account, model)
+		slog.Warn("stream_timeout_error_action_downgraded",
+			"account_id", account.ID,
+			"platform", account.Platform,
+			"type", account.Type,
+			"model", model,
+		)
+		return s.triggerStreamTimeoutTempUnsched(ctx, account, settings, model)
 	default:
 		return false
 	}
-}
-
-func shouldDowngradeStreamTimeoutError(account *Account) bool {
-	return account != nil && (account.IsOAuth() || account.RequiresProxyForScheduling())
 }
 
 // triggerStreamTimeoutTempUnsched 触发流超时临时不可调度
@@ -2732,25 +2725,5 @@ func (s *RateLimitService) triggerStreamTimeoutTempUnsched(ctx context.Context, 
 	}
 
 	slog.Info("stream_timeout_temp_unschedulable", "account_id", account.ID, "until", until, "model", model)
-	return true
-}
-
-// triggerStreamTimeoutError 触发流超时错误状态
-func (s *RateLimitService) triggerStreamTimeoutError(ctx context.Context, account *Account, model string) bool {
-	errorMsg := "Stream data interval timeout (repeated failures) for model: " + model
-
-	if err := s.persistAccountError(ctx, account, errorMsg, "stream_timeout_account_error"); err != nil {
-		slog.Warn("stream_timeout_set_error_failed", "account_id", account.ID, "error", err)
-		return false
-	}
-
-	// 重置超时计数
-	if s.timeoutCounterCache != nil {
-		if err := s.timeoutCounterCache.ResetTimeoutCount(ctx, account.ID); err != nil {
-			slog.Warn("stream_timeout_reset_count_failed", "account_id", account.ID, "error", err)
-		}
-	}
-
-	slog.Warn("stream_timeout_account_error", "account_id", account.ID, "model", model)
 	return true
 }
