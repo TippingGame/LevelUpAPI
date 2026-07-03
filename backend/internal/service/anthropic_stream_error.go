@@ -40,14 +40,17 @@ func normalizeAnthropicStreamErrorBody(rawData string) []byte {
 func anthropicStreamErrorStatusAndMessage(body []byte) (int, string) {
 	errType := firstNonEmptyTrimmed(
 		gjson.GetBytes(body, "error.type").String(),
+		gjson.GetBytes(body, "response.error.type").String(),
 		gjson.GetBytes(body, "type").String(),
 	)
 	code := firstNonEmptyTrimmed(
 		gjson.GetBytes(body, "error.code").String(),
+		gjson.GetBytes(body, "response.error.code").String(),
 		gjson.GetBytes(body, "code").String(),
 	)
 	message := firstNonEmptyTrimmed(
 		gjson.GetBytes(body, "error.message").String(),
+		gjson.GetBytes(body, "response.error.message").String(),
 		gjson.GetBytes(body, "message").String(),
 	)
 

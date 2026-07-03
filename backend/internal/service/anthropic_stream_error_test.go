@@ -17,3 +17,10 @@ func TestAnthropicStreamErrorStatusBillingTextIsConservative(t *testing.T) {
 	status, _ = anthropicStreamErrorStatusAndMessage([]byte(`{"type":"error","error":{"type":"invalid_request_error","message":"Your credit balance is too low"}}`))
 	require.Equal(t, http.StatusPaymentRequired, status)
 }
+
+func TestAnthropicStreamErrorStatusReadsWrappedResponseError(t *testing.T) {
+	status, message := anthropicStreamErrorStatusAndMessage([]byte(`{"response":{"error":{"type":"safety_error","message":"Your request violates Anthropic's Usage Policy."}}}`))
+
+	require.Equal(t, http.StatusBadRequest, status)
+	require.Equal(t, "Your request violates Anthropic's Usage Policy.", message)
+}

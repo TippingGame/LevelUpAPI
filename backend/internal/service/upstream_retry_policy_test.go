@@ -228,6 +228,17 @@ func TestAuthPaymentPermissionStatusesFailoverWithoutSameAccountRetry(t *testing
 		"This request has been blocked by a safety system.",
 		[]byte(`{"type":"error","error":{"type":"safety_error","message":"This request has been blocked by a safety system."}}`),
 	))
+	require.False(t, (&GatewayService{}).shouldFailoverGatewayUpstreamResponse(
+		&Account{Platform: PlatformAnthropic},
+		http.StatusForbidden,
+		"",
+		[]byte(`{"response":{"error":{"type":"safety_error","message":"Your request violates Anthropic's Usage Policy."}}}`),
+	))
+	require.False(t, (&GatewayService{}).shouldFailoverAnthropicStreamError(
+		http.StatusForbidden,
+		"",
+		[]byte(`{"response":{"error":{"type":"safety_error","message":"Your request violates Anthropic's Usage Policy."}}}`),
+	))
 	require.True(t, (&GatewayService{}).shouldFailoverGatewayUpstreamResponse(
 		&Account{Platform: PlatformAnthropic},
 		http.StatusForbidden,

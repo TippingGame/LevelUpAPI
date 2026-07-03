@@ -84,14 +84,17 @@ func anthropicErrorPolicyFields(payload []byte) (errType string, code string, ms
 	}
 	errType = firstNonEmptyTrimmed(
 		gjson.GetBytes(payload, "error.type").String(),
+		gjson.GetBytes(payload, "response.error.type").String(),
 		gjson.GetBytes(payload, "type").String(),
 	)
 	code = firstNonEmptyTrimmed(
 		gjson.GetBytes(payload, "error.code").String(),
+		gjson.GetBytes(payload, "response.error.code").String(),
 		gjson.GetBytes(payload, "code").String(),
 	)
 	msg = firstNonEmptyTrimmed(
 		gjson.GetBytes(payload, "error.message").String(),
+		gjson.GetBytes(payload, "response.error.message").String(),
 		gjson.GetBytes(payload, "message").String(),
 	)
 	return errType, code, msg

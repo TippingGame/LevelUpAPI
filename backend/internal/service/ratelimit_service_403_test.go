@@ -167,6 +167,10 @@ func TestRateLimitService_HandleUpstreamError_AnthropicRequestPolicyDoesNotTouch
 			name: "content policy",
 			body: []byte(`{"type":"error","error":{"type":"invalid_request_error","message":"This request violates the content policy."}}`),
 		},
+		{
+			name: "wrapped safety error",
+			body: []byte(`{"response":{"error":{"type":"safety_error","message":"Your request violates Anthropic's Usage Policy."}}}`),
+		},
 	}
 
 	for _, tt := range tests {
