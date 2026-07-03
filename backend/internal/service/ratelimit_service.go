@@ -2578,10 +2578,23 @@ func (s *RateLimitService) HandleStreamTimeout(ctx context.Context, account *Acc
 	case StreamTimeoutActionTempUnsched:
 		return s.triggerStreamTimeoutTempUnsched(ctx, account, settings, model)
 	case StreamTimeoutActionError:
+		if shouldDowngradeStreamTimeoutError(account) {
+			slog.Warn("stream_timeout_error_action_downgraded",
+				"account_id", account.ID,
+				"platform", account.Platform,
+				"type", account.Type,
+				"model", model,
+			)
+			return s.triggerStreamTimeoutTempUnsched(ctx, account, settings, model)
+		}
 		return s.triggerStreamTimeoutError(ctx, account, model)
 	default:
 		return false
 	}
+}
+
+func shouldDowngradeStreamTimeoutError(account *Account) bool {
+	return account != nil && (account.IsOAuth() || account.RequiresProxyForScheduling())
 }
 
 // triggerStreamTimeoutTempUnsched 触发流超时临时不可调度

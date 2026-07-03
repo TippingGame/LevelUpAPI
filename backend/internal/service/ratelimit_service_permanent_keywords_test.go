@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"testing"
 	"time"
@@ -41,6 +42,45 @@ func (s permanentKeywordOpenAI403CounterStub) IncrementOpenAI403Count(context.Co
 
 func (s permanentKeywordOpenAI403CounterStub) ResetOpenAI403Count(context.Context, int64) error {
 	return nil
+}
+
+type streamTimeoutSettingRepoStub struct {
+	value string
+}
+
+func (r *streamTimeoutSettingRepoStub) Get(context.Context, string) (*Setting, error) {
+	return nil, ErrSettingNotFound
+}
+
+func (r *streamTimeoutSettingRepoStub) GetValue(context.Context, string) (string, error) {
+	return r.value, nil
+}
+
+func (r *streamTimeoutSettingRepoStub) Set(context.Context, string, string) error {
+	return nil
+}
+
+func (r *streamTimeoutSettingRepoStub) GetMultiple(context.Context, []string) (map[string]string, error) {
+	return nil, nil
+}
+
+func (r *streamTimeoutSettingRepoStub) SetMultiple(context.Context, map[string]string) error {
+	return nil
+}
+
+func (r *streamTimeoutSettingRepoStub) GetAll(context.Context) (map[string]string, error) {
+	return nil, nil
+}
+
+func (r *streamTimeoutSettingRepoStub) Delete(context.Context, string) error {
+	return nil
+}
+
+func streamTimeoutSettingsValue(t *testing.T, settings StreamTimeoutSettings) string {
+	t.Helper()
+	data, err := json.Marshal(settings)
+	require.NoError(t, err)
+	return string(data)
 }
 
 func TestRateLimitServiceHandleUpstreamErrorAPIKeyPermanentKeywordsDisable(t *testing.T) {
@@ -255,6 +295,63 @@ func TestRateLimitServiceTriggerStreamTimeoutErrorWritesRuntimeEvictionCache(t *
 	require.NotNil(t, cache.states[57])
 	require.Equal(t, "account_error", cache.states[57].MatchedKeyword)
 	require.True(t, cache.states[57].UntilUnix > time.Now().Add(time.Hour).Unix())
+}
+
+func TestRateLimitServiceHandleStreamTimeoutErrorActionDowngradesOAuthToTempUnsched(t *testing.T) {
+	repo := &permanentKeywordAccountRepoStub{}
+	settingSvc := NewSettingService(&streamTimeoutSettingRepoStub{value: streamTimeoutSettingsValue(t, StreamTimeoutSettings{
+		Enabled:                true,
+		Action:                 StreamTimeoutActionError,
+		TempUnschedMinutes:     7,
+		ThresholdCount:         1,
+		ThresholdWindowMinutes: 10,
+	})}, nil)
+	svc := NewRateLimitService(repo, nil, nil, nil, nil)
+	svc.SetSettingService(settingSvc)
+	account := &Account{
+		ID:          59,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeOAuth,
+		Status:      StatusActive,
+		Schedulable: true,
+	}
+
+	handled := svc.HandleStreamTimeout(context.Background(), account, "gpt-5")
+
+	require.True(t, handled)
+	require.Equal(t, 0, repo.setErrorCalls)
+	require.Equal(t, 1, repo.tempCalls)
+	require.NoError(t, repo.lastTempCtxErr)
+	require.Contains(t, repo.lastTempReason, `"matched_keyword":"stream_timeout"`)
+	require.Contains(t, repo.lastTempReason, "gpt-5")
+}
+
+func TestRateLimitServiceHandleStreamTimeoutErrorActionStillErrorsAPIKey(t *testing.T) {
+	repo := &permanentKeywordAccountRepoStub{}
+	settingSvc := NewSettingService(&streamTimeoutSettingRepoStub{value: streamTimeoutSettingsValue(t, StreamTimeoutSettings{
+		Enabled:                true,
+		Action:                 StreamTimeoutActionError,
+		TempUnschedMinutes:     7,
+		ThresholdCount:         1,
+		ThresholdWindowMinutes: 10,
+	})}, nil)
+	svc := NewRateLimitService(repo, nil, nil, nil, nil)
+	svc.SetSettingService(settingSvc)
+	account := &Account{
+		ID:          60,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Status:      StatusActive,
+		Schedulable: true,
+	}
+
+	handled := svc.HandleStreamTimeout(context.Background(), account, "gpt-5")
+
+	require.True(t, handled)
+	require.Equal(t, 1, repo.setErrorCalls)
+	require.Equal(t, 0, repo.tempCalls)
+	require.NoError(t, repo.lastErrorCtxErr)
+	require.Contains(t, repo.lastErrorMsg, "Stream data interval timeout")
 }
 
 func TestRateLimitServiceEvictAccountErrorFromRuntimeCache(t *testing.T) {
