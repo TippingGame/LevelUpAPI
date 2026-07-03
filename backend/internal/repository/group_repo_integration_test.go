@@ -793,6 +793,16 @@ func (s *GroupRepoSuite) TestListActiveVisibleToUser_LimitsCandidateSet() {
 		SubscriptionType: service.SubscriptionTypeStandard,
 		IsExclusive:      true,
 	})
+	legacyPublicStandard, err := s.tx.Client().Group.Create().
+		SetName("visible-public-standard-empty-subscription").
+		SetPlatform(service.PlatformOpenAI).
+		SetRateMultiplier(1).
+		SetStatus(service.StatusActive).
+		SetScope(service.GroupScopePublic).
+		SetSubscriptionType("").
+		SetIsExclusive(false).
+		Save(s.ctx)
+	s.Require().NoError(err)
 	publicSubscription := mustCreateGroup(s.T(), s.tx.Client(), &service.Group{
 		Name:             "visible-public-subscription",
 		Platform:         service.PlatformOpenAI,
@@ -831,6 +841,7 @@ func (s *GroupRepoSuite) TestListActiveVisibleToUser_LimitsCandidateSet() {
 		ids[group.ID] = struct{}{}
 	}
 	s.Require().Contains(ids, publicStandard.ID)
+	s.Require().Contains(ids, legacyPublicStandard.ID)
 	s.Require().Contains(ids, publicSubscription.ID)
 	s.Require().Contains(ids, ownPrivate.ID)
 	s.Require().NotContains(ids, otherPrivate.ID)

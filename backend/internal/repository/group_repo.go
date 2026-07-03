@@ -464,7 +464,7 @@ func (r *groupRepository) ListActiveVisibleToUser(ctx context.Context, userID in
 	predicates := []predicate.Group{
 		group.And(
 			group.ScopeEQ(service.GroupScopePublic),
-			group.SubscriptionTypeEQ(service.SubscriptionTypeStandard),
+			publicStandardGroupSubscriptionTypePredicate(),
 		),
 		group.And(
 			group.ScopeEQ(service.GroupScopeUserPrivate),
@@ -496,6 +496,17 @@ func (r *groupRepository) ListActiveVisibleToUser(ctx context.Context, userID in
 	}
 
 	return outGroups, nil
+}
+
+func publicStandardGroupSubscriptionTypePredicate() predicate.Group {
+	return predicate.Group(func(s *entsql.Selector) {
+		col := s.C(group.FieldSubscriptionType)
+		s.Where(entsql.P(func(b *entsql.Builder) {
+			b.WriteString("COALESCE(").Ident(col).WriteString(", ").Arg("").WriteString(") IN (").
+				Arg("").WriteString(", ").
+				Arg(service.SubscriptionTypeStandard).WriteString(")")
+		}))
+	})
 }
 
 func uniquePositiveInt64s(values []int64) []int64 {
