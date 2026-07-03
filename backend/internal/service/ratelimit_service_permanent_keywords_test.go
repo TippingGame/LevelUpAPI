@@ -253,6 +253,66 @@ func TestRateLimitServiceHandleUpstreamErrorAmbiguousPermissionDoesNotSetPermane
 	}
 }
 
+func TestRateLimitServiceHandleUpstreamErrorAntigravityGeneric403SetsTempUnschedulable(t *testing.T) {
+	repo := &permanentKeywordAccountRepoStub{}
+	cache := &runtimeTempUnschedCacheStub{}
+	svc := NewRateLimitService(repo, nil, nil, nil, cache)
+	account := &Account{
+		ID:          2072,
+		Platform:    PlatformAntigravity,
+		Type:        AccountTypeOAuth,
+		Status:      StatusActive,
+		Schedulable: true,
+	}
+
+	shouldDisable := svc.HandleUpstreamError(
+		context.Background(),
+		account,
+		http.StatusForbidden,
+		http.Header{},
+		[]byte(`{"error":{"message":"Access denied by upstream edge"}}`),
+	)
+
+	require.True(t, shouldDisable)
+	require.Equal(t, 0, repo.setErrorCalls)
+	require.Equal(t, 1, repo.tempCalls)
+	require.Equal(t, StatusActive, account.Status)
+	require.True(t, account.Schedulable)
+	require.Contains(t, repo.lastTempReason, `"matched_keyword":"antigravity_403"`)
+	require.NotNil(t, cache.states[2072])
+	require.Equal(t, "antigravity_403", cache.states[2072].MatchedKeyword)
+	require.Equal(t, http.StatusForbidden, cache.states[2072].StatusCode)
+	require.Contains(t, cache.states[2072].ErrorMessage, "Antigravity 403 temporary cooldown")
+}
+
+func TestRateLimitServiceHandleUpstreamErrorAntigravityValidation403KeepsPermanentError(t *testing.T) {
+	repo := &permanentKeywordAccountRepoStub{}
+	svc := &RateLimitService{accountRepo: repo}
+	account := &Account{
+		ID:          2073,
+		Platform:    PlatformAntigravity,
+		Type:        AccountTypeOAuth,
+		Status:      StatusActive,
+		Schedulable: true,
+	}
+
+	shouldDisable := svc.HandleUpstreamError(
+		context.Background(),
+		account,
+		http.StatusForbidden,
+		http.Header{},
+		[]byte(`{"error":{"message":"validation_required","details":[{"metadata":{"validation_url":"https://example.com/verify"}}]}}`),
+	)
+
+	require.True(t, shouldDisable)
+	require.Equal(t, 1, repo.setErrorCalls)
+	require.Equal(t, 0, repo.tempCalls)
+	require.Equal(t, StatusError, account.Status)
+	require.False(t, account.Schedulable)
+	require.Contains(t, repo.lastErrorMsg, "Validation required")
+	require.Contains(t, repo.lastErrorMsg, "validation_url")
+}
+
 func TestRateLimitServiceHandleUpstreamErrorPermanentErrorWritesRuntimeEvictionCache(t *testing.T) {
 	repo := &permanentKeywordAccountRepoStub{}
 	cache := &runtimeTempUnschedCacheStub{}

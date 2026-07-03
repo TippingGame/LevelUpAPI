@@ -72,6 +72,7 @@ const (
 	upstreamModelNotFoundCooldown        = 30 * time.Minute
 	oAuth401CooldownMinutesDefault       = 10
 	generic403CooldownMinutesDefault     = 10
+	generic403LongCooldownThreshold      = 3
 	overloadCooldownMinutesDefault       = 10
 	runtimeAccountErrorEvictionTTL       = 24 * time.Hour
 	customErrorCodeCooldown              = 24 * time.Hour
@@ -1245,7 +1246,7 @@ func (s *RateLimitService) handleGeneric403TempUnschedulable(ctx context.Context
 	cooldown := generic403CooldownForCount(count)
 	until := now.Add(cooldown)
 	matchedKeyword := "generic_403"
-	if count >= 3 {
+	if count >= generic403LongCooldownThreshold {
 		matchedKeyword = "generic_403_long_cooldown"
 	}
 	state := &TempUnschedState{
@@ -1494,7 +1495,7 @@ func nextTempUnschedConsecutiveCount(account *Account, now time.Time, statusCode
 // handleAntigravity403 处理 Antigravity 平台的 403 错误
 // validation（需要验证）→ 永久 SetError（需人工去 Google 验证后恢复）
 // violation（违规封号）→ 永久 SetError（需人工处理）
-// generic（通用禁止）→ 永久 SetError
+// generic（通用禁止）→ 临时不可调度，避免把风控/地区/代理抖动误判为永久账号错误
 func (s *RateLimitService) handleAntigravity403(ctx context.Context, account *Account, upstreamMsg string, responseBody []byte) (shouldDisable bool) {
 	fbType := classifyForbiddenType(string(responseBody))
 
@@ -1525,16 +1526,61 @@ func (s *RateLimitService) handleAntigravity403(ctx context.Context, account *Ac
 		return true
 
 	default:
-		// 通用 403: 保持原有行为
 		msg := buildForbiddenErrorMessage(
-			"Access forbidden (403):",
+			"Antigravity access forbidden (403):",
 			upstreamMsg,
 			responseBody,
-			"account may be suspended or lack permissions",
+			"temporary access rejection or account permission issue",
 		)
-		s.handleAuthError(ctx, account, msg)
+		s.handleAntigravityGeneric403TempUnschedulable(ctx, account, msg)
 		return true
 	}
+}
+
+func (s *RateLimitService) handleAntigravityGeneric403TempUnschedulable(ctx context.Context, account *Account, msg string) {
+	if account == nil {
+		return
+	}
+	now := time.Now()
+	count := nextTempUnschedConsecutiveCount(
+		account,
+		now,
+		http.StatusForbidden,
+		"antigravity_403",
+		time.Duration(openAI403CounterWindowMinutes)*time.Minute,
+	)
+	cooldown := generic403CooldownForCount(count)
+	until := now.Add(cooldown)
+	matchedKeyword := "antigravity_403"
+	if count >= generic403LongCooldownThreshold {
+		matchedKeyword = "antigravity_403_long_cooldown"
+	}
+	state := &TempUnschedState{
+		UntilUnix:        until.Unix(),
+		TriggeredAtUnix:  now.Unix(),
+		StatusCode:       http.StatusForbidden,
+		MatchedKeyword:   matchedKeyword,
+		RuleIndex:        -1,
+		ErrorMessage:     fmt.Sprintf("Antigravity 403 temporary cooldown (%d): %s", count, msg),
+		ConsecutiveCount: count,
+	}
+	reason := state.ErrorMessage
+	if raw, err := json.Marshal(state); err == nil {
+		reason = string(raw)
+	}
+
+	if err := s.persistTempUnschedulableState(ctx, account, until, reason, state, "antigravity_403"); err != nil {
+		slog.Warn("antigravity_403_set_temp_unschedulable_failed", "account_id", account.ID, "error", err)
+		return
+	}
+
+	slog.Warn(
+		"antigravity_403_temp_unschedulable",
+		"account_id", account.ID,
+		"until", until,
+		"count", count,
+		"cooldown", cooldown.String(),
+	)
 }
 
 // handleCustomErrorCode 处理自定义错误码，临时停止账号调度
