@@ -302,11 +302,12 @@ func (s *TokenRefreshService) refreshWithRetry(ctx context.Context, account *Acc
 			writeCtx, cancel := rateLimitStateContext(ctx)
 			setErr := s.accountRepo.SetError(writeCtx, account.ID, errorMsg)
 			if setErr != nil {
-				cancel()
 				slog.Error("token_refresh.set_error_status_failed",
 					"account_id", account.ID,
 					"error", setErr,
 				)
+				markAccountErrorRuntimeEvicted(writeCtx, s.tempUnschedCache, account, errorMsg, "token_refresh_non_retryable_runtime_fallback")
+				cancel()
 			} else {
 				markAccountErrorRuntimeEvicted(writeCtx, s.tempUnschedCache, account, errorMsg, "token_refresh_non_retryable")
 				cancel()

@@ -28,6 +28,7 @@ type tokenRefreshAccountRepo struct {
 	lastExtraUpdates         map[string]any
 	updateErr                error
 	updateExtraContextErr    error
+	setErrorErr              error
 	setErrorContextErr       error
 	clearErrorContextErr     error
 	clearTempContextErr      error
@@ -74,7 +75,7 @@ func (r *tokenRefreshAccountRepo) UpdateExtra(ctx context.Context, id int64, upd
 func (r *tokenRefreshAccountRepo) SetError(ctx context.Context, id int64, errorMsg string) error {
 	r.setErrorCalls++
 	r.setErrorContextErr = ctx.Err()
-	return nil
+	return r.setErrorErr
 }
 
 func (r *tokenRefreshAccountRepo) ClearError(ctx context.Context, id int64) error {
@@ -931,6 +932,54 @@ func TestTokenRefreshService_RefreshWithRetry_NonRetryableThresholdSetsError(t *
 	require.Error(t, err)
 	require.Equal(t, 1, repo.setErrorCalls)
 	require.Equal(t, 0, repo.setTempUnschedCalls)
+	require.Equal(t, 1, tempCache.setCalls)
+	require.NotNil(t, tempCache.state)
+	require.Equal(t, "account_error", tempCache.state.MatchedKeyword)
+}
+
+func TestTokenRefreshService_RefreshWithRetry_NonRetryableThresholdRuntimeFallbackOnSetErrorFailure(t *testing.T) {
+	repo := &tokenRefreshAccountRepo{setErrorErr: errors.New("db timeout")}
+	tempCache := &tempUnschedCacheStub{}
+	cfg := &config.Config{
+		TokenRefresh: config.TokenRefreshConfig{
+			MaxRetries:          3,
+			RetryBackoffSeconds: 0,
+		},
+	}
+	service := NewTokenRefreshService(repo, nil, nil, nil, nil, nil, nil, cfg, tempCache)
+	previousUntil := time.Now().Add(TokenRefreshTempUnschedDuration)
+	previous := &TempUnschedState{
+		UntilUnix:        previousUntil.Unix(),
+		TriggeredAtUnix:  time.Now().Unix(),
+		StatusCode:       tokenRefreshNonRetryableStatusCode,
+		MatchedKeyword:   tokenRefreshNonRetryableKeyword,
+		RuleIndex:        -1,
+		ErrorMessage:     "previous non-retryable refresh",
+		ConsecutiveCount: tokenRefreshNonRetryableThreshold - 1,
+	}
+	raw, err := json.Marshal(previous)
+	require.NoError(t, err)
+	account := &Account{
+		ID:                      172,
+		Platform:                PlatformOpenAI,
+		Type:                    AccountTypeOAuth,
+		Status:                  StatusActive,
+		Schedulable:             true,
+		TempUnschedulableUntil:  &previousUntil,
+		TempUnschedulableReason: string(raw),
+	}
+	refresher := &tokenRefresherStub{
+		err: errors.New("invalid_grant: token revoked"),
+	}
+
+	err = service.refreshWithRetry(context.Background(), account, refresher, refresher, time.Hour)
+
+	require.Error(t, err)
+	require.Equal(t, 1, repo.setErrorCalls)
+	require.Equal(t, 0, repo.setTempUnschedCalls)
+	require.Equal(t, StatusError, account.Status)
+	require.False(t, account.Schedulable)
+	require.Contains(t, account.ErrorMessage, "invalid_grant")
 	require.Equal(t, 1, tempCache.setCalls)
 	require.NotNil(t, tempCache.state)
 	require.Equal(t, "account_error", tempCache.state.MatchedKeyword)
