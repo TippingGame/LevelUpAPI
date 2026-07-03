@@ -494,7 +494,15 @@ func (s *OpenAIGatewayService) handleAnthropicBufferedStreamingResponse(
 	if strings.EqualFold(strings.TrimSpace(finalResponse.Status), "failed") {
 		payload, _ := json.Marshal(gin.H{"type": "response.failed", "response": finalResponse})
 		message := openAICompatFailedResponseMessage(finalResponse)
+		if message == "" {
+			message = "Upstream response failed"
+		}
 		s.handleOpenAIResponsesStreamErrorSideEffect(ctx, account, resp.Header, payload, message, false)
+		if !openAIStreamFailedEventShouldFailover(payload, message) {
+			writeAnthropicError(c, http.StatusBadRequest, "invalid_request_error", message)
+			return resultForOpenAICompatFailure(requestID, usage, originalModel, billingModel, upstreamModel, finalResponse.ServiceTier, false, startTime),
+				fmt.Errorf("openai request failed: %s", message)
+		}
 		return nil, s.newOpenAIStreamFailoverError(c, account, false, requestID, payload, message)
 	}
 
