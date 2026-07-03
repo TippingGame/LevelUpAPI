@@ -946,6 +946,16 @@ func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Contex
 		if resp.StatusCode >= 400 && s.shouldRetryGeminiUpstreamError(account, resp.StatusCode) {
 			respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
 			_ = resp.Body.Close()
+			upstreamMsg := strings.TrimSpace(extractUpstreamErrorMessage(respBody))
+			upstreamMsg = sanitizeUpstreamErrorMessage(upstreamMsg)
+			if isGeminiRequestPolicyError(resp.StatusCode, respBody, upstreamMsg) {
+				resp = &http.Response{
+					StatusCode: resp.StatusCode,
+					Header:     resp.Header.Clone(),
+					Body:       io.NopCloser(bytes.NewReader(respBody)),
+				}
+				break
+			}
 			// Don't treat insufficient-scope as transient.
 			if resp.StatusCode == 403 && isGeminiInsufficientScope(resp.Header, respBody) {
 				resp = &http.Response{
@@ -964,8 +974,6 @@ func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Contex
 				if upstreamReqID == "" {
 					upstreamReqID = resp.Header.Get("x-goog-request-id")
 				}
-				upstreamMsg := strings.TrimSpace(extractUpstreamErrorMessage(respBody))
-				upstreamMsg = sanitizeUpstreamErrorMessage(upstreamMsg)
 				upstreamDetail := ""
 				if s.cfg != nil && s.cfg.Gateway.LogUpstreamErrorBody {
 					maxBytes := s.cfg.Gateway.LogUpstreamErrorBodyMaxBytes
@@ -1076,13 +1084,13 @@ func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Contex
 				return nil, &UpstreamFailoverError{StatusCode: resp.StatusCode, ResponseBody: respBody, RetryableOnSameAccount: true}
 			}
 		}
-		if s.shouldFailoverGeminiUpstreamError(resp.StatusCode) {
+		upstreamMsgForFailover := strings.TrimSpace(extractUpstreamErrorMessage(respBody))
+		upstreamMsgForFailover = sanitizeUpstreamErrorMessage(upstreamMsgForFailover)
+		if s.shouldFailoverGeminiUpstreamResponse(resp.StatusCode, upstreamMsgForFailover, respBody) {
 			upstreamReqID := resp.Header.Get(requestIDHeader)
 			if upstreamReqID == "" {
 				upstreamReqID = resp.Header.Get("x-goog-request-id")
 			}
-			upstreamMsg := strings.TrimSpace(extractUpstreamErrorMessage(respBody))
-			upstreamMsg = sanitizeUpstreamErrorMessage(upstreamMsg)
 			upstreamDetail := ""
 			if s.cfg != nil && s.cfg.Gateway.LogUpstreamErrorBody {
 				maxBytes := s.cfg.Gateway.LogUpstreamErrorBodyMaxBytes
@@ -1098,7 +1106,7 @@ func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Contex
 				UpstreamStatusCode: resp.StatusCode,
 				UpstreamRequestID:  upstreamReqID,
 				Kind:               "failover",
-				Message:            upstreamMsg,
+				Message:            upstreamMsgForFailover,
 				Detail:             upstreamDetail,
 			})
 			return nil, &UpstreamFailoverError{StatusCode: resp.StatusCode, ResponseBody: respBody}
@@ -1418,6 +1426,16 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 		if resp.StatusCode >= 400 && s.shouldRetryGeminiUpstreamError(account, resp.StatusCode) {
 			respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
 			_ = resp.Body.Close()
+			upstreamMsg := strings.TrimSpace(extractUpstreamErrorMessage(respBody))
+			upstreamMsg = sanitizeUpstreamErrorMessage(upstreamMsg)
+			if isGeminiRequestPolicyError(resp.StatusCode, respBody, upstreamMsg) {
+				resp = &http.Response{
+					StatusCode: resp.StatusCode,
+					Header:     resp.Header.Clone(),
+					Body:       io.NopCloser(bytes.NewReader(respBody)),
+				}
+				break
+			}
 			// Don't treat insufficient-scope as transient.
 			if resp.StatusCode == 403 && isGeminiInsufficientScope(resp.Header, respBody) {
 				resp = &http.Response{
@@ -1435,8 +1453,6 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 				if upstreamReqID == "" {
 					upstreamReqID = resp.Header.Get("x-goog-request-id")
 				}
-				upstreamMsg := strings.TrimSpace(extractUpstreamErrorMessage(respBody))
-				upstreamMsg = sanitizeUpstreamErrorMessage(upstreamMsg)
 				upstreamDetail := ""
 				if s.cfg != nil && s.cfg.Gateway.LogUpstreamErrorBody {
 					maxBytes := s.cfg.Gateway.LogUpstreamErrorBodyMaxBytes
@@ -1583,10 +1599,10 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 				return nil, &UpstreamFailoverError{StatusCode: resp.StatusCode, ResponseBody: evBody, RetryableOnSameAccount: true}
 			}
 		}
-		if s.shouldFailoverGeminiUpstreamError(resp.StatusCode) {
-			evBody := unwrapIfNeeded(isOAuth, respBody)
-			upstreamMsg := strings.TrimSpace(extractUpstreamErrorMessage(evBody))
-			upstreamMsg = sanitizeUpstreamErrorMessage(upstreamMsg)
+		evBody := unwrapIfNeeded(isOAuth, respBody)
+		upstreamMsgForFailover := strings.TrimSpace(extractUpstreamErrorMessage(evBody))
+		upstreamMsgForFailover = sanitizeUpstreamErrorMessage(upstreamMsgForFailover)
+		if s.shouldFailoverGeminiUpstreamResponse(resp.StatusCode, upstreamMsgForFailover, evBody) {
 			upstreamDetail := ""
 			if s.cfg != nil && s.cfg.Gateway.LogUpstreamErrorBody {
 				maxBytes := s.cfg.Gateway.LogUpstreamErrorBodyMaxBytes
@@ -1602,7 +1618,7 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 				UpstreamStatusCode: resp.StatusCode,
 				UpstreamRequestID:  requestID,
 				Kind:               "failover",
-				Message:            upstreamMsg,
+				Message:            upstreamMsgForFailover,
 				Detail:             upstreamDetail,
 			})
 			return nil, &UpstreamFailoverError{StatusCode: resp.StatusCode, ResponseBody: evBody}
@@ -1752,6 +1768,13 @@ func (s *GeminiMessagesCompatService) shouldFailoverGeminiUpstreamError(statusCo
 	default:
 		return statusCode >= 500
 	}
+}
+
+func (s *GeminiMessagesCompatService) shouldFailoverGeminiUpstreamResponse(statusCode int, upstreamMsg string, upstreamBody []byte) bool {
+	if isGeminiRequestPolicyError(statusCode, upstreamBody, upstreamMsg) {
+		return false
+	}
+	return s.shouldFailoverGeminiUpstreamError(statusCode)
 }
 
 func sleepGeminiBackoff(attempt int) {

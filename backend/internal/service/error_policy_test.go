@@ -273,6 +273,31 @@ func TestCheckErrorPolicy_OpenAIRequestPolicyBypassesCustomErrorCodeFilter(t *te
 	require.Equal(t, 0, repo.tempCalls)
 }
 
+func TestCheckErrorPolicy_GeminiRequestPolicyBypassesCustomErrorCodeFilter(t *testing.T) {
+	repo := &errorPolicyRepoStub{}
+	svc := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+	account := &Account{
+		ID:       18,
+		Type:     AccountTypeAPIKey,
+		Platform: PlatformGemini,
+		Credentials: map[string]any{
+			"custom_error_codes_enabled": true,
+			"custom_error_codes":         []any{float64(http.StatusForbidden)},
+		},
+	}
+
+	result := svc.CheckErrorPolicy(
+		context.Background(),
+		account,
+		http.StatusForbidden,
+		[]byte(`{"error":{"code":403,"message":"The prompt was blocked due to safety filters.","status":"FAILED_PRECONDITION","details":[{"@type":"type.googleapis.com/google.rpc.ErrorInfo","reason":"SAFETY"}]}}`),
+	)
+
+	require.Equal(t, ErrorPolicyNone, result)
+	require.Equal(t, 0, repo.setErrCalls)
+	require.Equal(t, 0, repo.tempCalls)
+}
+
 func TestCheckErrorPolicy_NilAccountReturnsNone(t *testing.T) {
 	svc := NewRateLimitService(&errorPolicyRepoStub{}, nil, &config.Config{}, nil, nil)
 

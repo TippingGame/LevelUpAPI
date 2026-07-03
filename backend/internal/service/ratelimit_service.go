@@ -169,6 +169,9 @@ func (s *RateLimitService) CheckErrorPolicy(ctx context.Context, account *Accoun
 	if account.Platform == PlatformAnthropic && isAnthropicRequestPolicyError(statusCode, responseBody, "") {
 		return ErrorPolicyNone
 	}
+	if account.Platform == PlatformGemini && isGeminiRequestPolicyError(statusCode, responseBody, "") {
+		return ErrorPolicyNone
+	}
 	if s.HandlePermanentAccountError(ctx, account, statusCode, responseBody) {
 		return ErrorPolicyMatched
 	}
@@ -343,6 +346,9 @@ func (s *RateLimitService) HandlePermanentAccountError(ctx context.Context, acco
 	if account.Platform == PlatformAnthropic && isAnthropicRequestPolicyError(statusCode, responseBody, "") {
 		return false
 	}
+	if account.Platform == PlatformGemini && isGeminiRequestPolicyError(statusCode, responseBody, "") {
+		return false
+	}
 	msg, ok := permanentAccountKeywordErrorMessageFromBody(account, statusCode, responseBody)
 	if !ok {
 		return false
@@ -393,6 +399,10 @@ func (s *RateLimitService) HandleUpstreamError(ctx context.Context, account *Acc
 	}
 	if account.Platform == PlatformAnthropic && isAnthropicRequestPolicyError(statusCode, responseBody, upstreamMsg) {
 		slog.Info("anthropic_request_policy_error_skipped", "account_id", account.ID, "status_code", statusCode)
+		return false
+	}
+	if account.Platform == PlatformGemini && isGeminiRequestPolicyError(statusCode, responseBody, upstreamMsg) {
+		slog.Info("gemini_request_policy_error_skipped", "account_id", account.ID, "status_code", statusCode)
 		return false
 	}
 

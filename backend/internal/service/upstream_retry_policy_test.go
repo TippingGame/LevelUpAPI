@@ -167,4 +167,14 @@ func TestAuthPaymentPermissionStatusesFailoverWithoutSameAccountRetry(t *testing
 		"Permission denied",
 		[]byte(`{"type":"error","error":{"type":"permission_error","message":"Permission denied"}}`),
 	))
+	require.False(t, (&GeminiMessagesCompatService{}).shouldFailoverGeminiUpstreamResponse(
+		http.StatusForbidden,
+		"The prompt was blocked due to safety filters.",
+		[]byte(`{"error":{"code":403,"message":"The prompt was blocked due to safety filters.","status":"FAILED_PRECONDITION","details":[{"@type":"type.googleapis.com/google.rpc.ErrorInfo","reason":"SAFETY"}]}}`),
+	))
+	require.True(t, (&GeminiMessagesCompatService{}).shouldFailoverGeminiUpstreamResponse(
+		http.StatusForbidden,
+		"Permission denied",
+		[]byte(`{"error":{"code":403,"message":"Permission denied","status":"PERMISSION_DENIED"}}`),
+	))
 }

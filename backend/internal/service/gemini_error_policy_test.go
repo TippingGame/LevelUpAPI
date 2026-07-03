@@ -47,6 +47,22 @@ func TestShouldFailoverGeminiUpstreamError(t *testing.T) {
 	}
 }
 
+func TestShouldFailoverGeminiUpstreamResponseSkipsRequestPolicy(t *testing.T) {
+	svc := &GeminiMessagesCompatService{}
+
+	require.False(t, svc.shouldFailoverGeminiUpstreamResponse(
+		http.StatusForbidden,
+		"The response was blocked due to prohibited content.",
+		[]byte(`{"error":{"code":403,"message":"The response was blocked due to prohibited content.","status":"FAILED_PRECONDITION","details":[{"@type":"type.googleapis.com/google.rpc.ErrorInfo","reason":"PROHIBITED_CONTENT"}]}}`),
+	))
+
+	require.True(t, svc.shouldFailoverGeminiUpstreamResponse(
+		http.StatusForbidden,
+		"Permission denied",
+		[]byte(`{"error":{"code":403,"message":"Permission denied","status":"PERMISSION_DENIED"}}`),
+	))
+}
+
 // ---------------------------------------------------------------------------
 // TestCheckErrorPolicy_GeminiAccounts — verifies CheckErrorPolicy works
 // correctly for Gemini platform accounts (API Key type).

@@ -196,6 +196,52 @@ func TestRateLimitService_HandleUpstreamError_AnthropicRequestPolicyDoesNotTouch
 	}
 }
 
+func TestRateLimitService_HandleUpstreamError_GeminiRequestPolicyDoesNotTouchAccount(t *testing.T) {
+	tests := []struct {
+		name string
+		body []byte
+	}{
+		{
+			name: "safety reason",
+			body: []byte(`{"error":{"code":403,"message":"The prompt was blocked due to safety filters.","status":"FAILED_PRECONDITION","details":[{"@type":"type.googleapis.com/google.rpc.ErrorInfo","reason":"SAFETY"}]}}`),
+		},
+		{
+			name: "wrapped prohibited content",
+			body: []byte(`{"response":{"error":{"code":403,"message":"The response was blocked due to prohibited content.","status":"FAILED_PRECONDITION","details":[{"@type":"type.googleapis.com/google.rpc.ErrorInfo","reason":"PROHIBITED_CONTENT"}]}}}`),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := &rateLimitAccountRepoStub{}
+			service := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+			account := &Account{
+				ID:       307,
+				Platform: PlatformGemini,
+				Type:     AccountTypeAPIKey,
+				Status:   StatusActive,
+				Credentials: map[string]any{
+					"custom_error_codes_enabled": true,
+					"custom_error_codes":         []any{float64(http.StatusForbidden)},
+				},
+			}
+
+			shouldDisable := service.HandleUpstreamError(
+				context.Background(),
+				account,
+				http.StatusForbidden,
+				http.Header{},
+				tt.body,
+			)
+
+			require.False(t, shouldDisable)
+			require.Equal(t, 0, repo.setErrorCalls)
+			require.Equal(t, 0, repo.tempCalls)
+			require.Equal(t, StatusActive, account.Status)
+		})
+	}
+}
+
 func TestRateLimitService_HandleUpstreamError_AnthropicOAuthSecond403KeepsTempUnschedulable(t *testing.T) {
 	repo := &rateLimitAccountRepoStub{}
 	service := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
