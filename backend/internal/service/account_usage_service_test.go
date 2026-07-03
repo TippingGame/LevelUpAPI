@@ -9,9 +9,11 @@ import (
 
 type accountUsageCodexProbeRepo struct {
 	stubOpenAIAccountRepo
-	updateExtraCh chan map[string]any
-	rateLimitCh   chan time.Time
-	windowCh      chan accountUsageSessionWindowUpdate
+	updateExtraCh       chan map[string]any
+	updateExtraCtxErrCh chan error
+	clearErrorCtxErrCh  chan error
+	rateLimitCh         chan time.Time
+	windowCh            chan accountUsageSessionWindowUpdate
 }
 
 type accountUsageSessionWindowUpdate struct {
@@ -19,9 +21,10 @@ type accountUsageSessionWindowUpdate struct {
 	start     *time.Time
 	end       *time.Time
 	status    string
+	ctxErr    error
 }
 
-func (r *accountUsageCodexProbeRepo) UpdateExtra(_ context.Context, _ int64, updates map[string]any) error {
+func (r *accountUsageCodexProbeRepo) UpdateExtra(ctx context.Context, _ int64, updates map[string]any) error {
 	if r.updateExtraCh != nil {
 		copied := make(map[string]any, len(updates))
 		for k, v := range updates {
@@ -29,16 +32,20 @@ func (r *accountUsageCodexProbeRepo) UpdateExtra(_ context.Context, _ int64, upd
 		}
 		r.updateExtraCh <- copied
 	}
+	if r.updateExtraCtxErrCh != nil {
+		r.updateExtraCtxErrCh <- ctx.Err()
+	}
 	return nil
 }
 
-func (r *accountUsageCodexProbeRepo) UpdateSessionWindow(_ context.Context, id int64, start, end *time.Time, status string) error {
+func (r *accountUsageCodexProbeRepo) UpdateSessionWindow(ctx context.Context, id int64, start, end *time.Time, status string) error {
 	if r.windowCh != nil {
 		r.windowCh <- accountUsageSessionWindowUpdate{
 			accountID: id,
 			start:     start,
 			end:       end,
 			status:    status,
+			ctxErr:    ctx.Err(),
 		}
 	}
 	return nil
@@ -47,6 +54,13 @@ func (r *accountUsageCodexProbeRepo) UpdateSessionWindow(_ context.Context, id i
 func (r *accountUsageCodexProbeRepo) SetRateLimited(_ context.Context, _ int64, resetAt time.Time) error {
 	if r.rateLimitCh != nil {
 		r.rateLimitCh <- resetAt
+	}
+	return nil
+}
+
+func (r *accountUsageCodexProbeRepo) ClearError(ctx context.Context, id int64) error {
+	if r.clearErrorCtxErrCh != nil {
+		r.clearErrorCtxErrCh <- ctx.Err()
 	}
 	return nil
 }
@@ -219,6 +233,102 @@ func TestAccountUsageService_SyncActiveToPassiveSyncsFiveHourReset(t *testing.T)
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("等待 session window 回写超时")
+	}
+}
+
+func TestAccountUsageService_SyncActiveToPassiveSurvivesCanceledContext(t *testing.T) {
+	t.Parallel()
+
+	resetAt := time.Now().Add(2 * time.Hour).UTC().Truncate(time.Second)
+	repo := &accountUsageCodexProbeRepo{
+		updateExtraCh:       make(chan map[string]any, 1),
+		updateExtraCtxErrCh: make(chan error, 1),
+		windowCh:            make(chan accountUsageSessionWindowUpdate, 1),
+	}
+	svc := &AccountUsageService{accountRepo: repo}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	svc.syncActiveToPassive(ctx, 322, &UsageInfo{
+		FiveHour: &UsageProgress{
+			Utilization: 55,
+			ResetsAt:    &resetAt,
+		},
+		SevenDay: &UsageProgress{
+			Utilization: 66,
+			ResetsAt:    &resetAt,
+		},
+	})
+
+	select {
+	case updates := <-repo.updateExtraCh:
+		if got := updates["session_window_utilization"]; got != 0.55 {
+			t.Fatalf("session_window_utilization = %v, want 0.55", got)
+		}
+		if got := updates["passive_usage_7d_utilization"]; got != 0.66 {
+			t.Fatalf("passive_usage_7d_utilization = %v, want 0.66", got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("等待 usage extra 回写超时")
+	}
+
+	select {
+	case err := <-repo.updateExtraCtxErrCh:
+		if err != nil {
+			t.Fatalf("expected detached UpdateExtra context, got %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("等待 usage extra ctx 记录超时")
+	}
+
+	select {
+	case update := <-repo.windowCh:
+		if update.accountID != 322 {
+			t.Fatalf("accountID = %d, want 322", update.accountID)
+		}
+		if update.ctxErr != nil {
+			t.Fatalf("expected detached UpdateSessionWindow context, got %v", update.ctxErr)
+		}
+		if update.end == nil || !update.end.Equal(resetAt) {
+			t.Fatalf("end = %v, want %v", update.end, resetAt)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("等待 session window 回写超时")
+	}
+}
+
+func TestAccountUsageService_TryClearRecoverableAccountErrorSurvivesCanceledContext(t *testing.T) {
+	t.Parallel()
+
+	repo := &accountUsageCodexProbeRepo{
+		clearErrorCtxErrCh: make(chan error, 1),
+	}
+	svc := &AccountUsageService{accountRepo: repo}
+	account := &Account{
+		ID:           323,
+		Status:       StatusError,
+		ErrorMessage: "Token refresh failed (non-retryable): invalid_client",
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	svc.tryClearRecoverableAccountError(ctx, account)
+
+	select {
+	case err := <-repo.clearErrorCtxErrCh:
+		if err != nil {
+			t.Fatalf("expected detached ClearError context, got %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("等待 ClearError ctx 记录超时")
+	}
+	if account.Status != StatusActive {
+		t.Fatalf("account.Status = %q, want %q", account.Status, StatusActive)
+	}
+	if account.ErrorMessage != "" {
+		t.Fatalf("account.ErrorMessage = %q, want empty", account.ErrorMessage)
 	}
 }
 

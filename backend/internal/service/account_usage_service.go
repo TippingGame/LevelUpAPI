@@ -487,7 +487,10 @@ func (s *AccountUsageService) syncActiveToPassive(ctx context.Context, accountID
 
 	if len(extraUpdates) > 0 {
 		extraUpdates["passive_usage_sampled_at"] = time.Now().UTC().Format(time.RFC3339)
-		if err := s.accountRepo.UpdateExtra(ctx, accountID, extraUpdates); err != nil {
+		writeCtx, cancel := rateLimitStateContext(ctx)
+		err := s.accountRepo.UpdateExtra(writeCtx, accountID, extraUpdates)
+		cancel()
+		if err != nil {
 			slog.Warn("sync_active_to_passive_failed", "account_id", accountID, "error", err)
 		}
 	}
@@ -495,7 +498,10 @@ func (s *AccountUsageService) syncActiveToPassive(ctx context.Context, accountID
 	// Keep the dedicated session-window column in sync with active 5h data.
 	// Passive views use SessionWindowEnd as their reset anchor, not only Extra.
 	if usage.FiveHour != nil && usage.FiveHour.ResetsAt != nil {
-		if err := s.accountRepo.UpdateSessionWindow(ctx, accountID, nil, usage.FiveHour.ResetsAt, ""); err != nil {
+		writeCtx, cancel := rateLimitStateContext(ctx)
+		err := s.accountRepo.UpdateSessionWindow(writeCtx, accountID, nil, usage.FiveHour.ResetsAt, "")
+		cancel()
+		if err != nil {
 			slog.Warn("sync_active_to_passive_session_window_end_failed", "account_id", accountID, "error", err)
 		}
 	}
@@ -1197,7 +1203,10 @@ func (s *AccountUsageService) tryClearRecoverableAccountError(ctx context.Contex
 		return
 	}
 
-	if err := s.accountRepo.ClearError(ctx, account.ID); err != nil {
+	writeCtx, cancel := rateLimitStateContext(ctx)
+	err := s.accountRepo.ClearError(writeCtx, account.ID)
+	cancel()
+	if err != nil {
 		log.Printf("[usage] failed to clear recoverable account error for account %d: %v", account.ID, err)
 		return
 	}
