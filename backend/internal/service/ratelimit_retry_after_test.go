@@ -147,6 +147,75 @@ func TestHandle429RetryAfterNonFiniteFallsBackToDefault(t *testing.T) {
 	require.False(t, repo.lastRateReset.After(after.Add(time.Duration(defaultRateLimit429CooldownSeconds)*time.Second)))
 }
 
+func TestHandle429RetryAfterMsSetsRateLimit(t *testing.T) {
+	repo := &permanentKeywordAccountRepoStub{}
+	svc := &RateLimitService{accountRepo: repo}
+	account := &Account{
+		ID:          7320,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeOAuth,
+		Status:      StatusActive,
+		Schedulable: true,
+	}
+	headers := http.Header{}
+	headers.Set("Retry-After-Ms", "1500")
+
+	before := time.Now()
+	svc.handle429(context.Background(), account, headers, []byte(`{"error":{"type":"rate_limit_error","message":"slow down"}}`))
+	after := time.Now()
+
+	require.Equal(t, 1, repo.rateLimitCalls)
+	require.Equal(t, account.ID, repo.lastRateLimitID)
+	require.False(t, repo.lastRateReset.Before(before.Add(1500*time.Millisecond)))
+	require.False(t, repo.lastRateReset.After(after.Add(1500*time.Millisecond)))
+}
+
+func TestHandle429RetryAfterPrefersStandardHeaderOverMs(t *testing.T) {
+	repo := &permanentKeywordAccountRepoStub{}
+	svc := &RateLimitService{accountRepo: repo}
+	account := &Account{
+		ID:          7321,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeOAuth,
+		Status:      StatusActive,
+		Schedulable: true,
+	}
+	headers := http.Header{}
+	headers.Set("Retry-After", "2")
+	headers.Set("Retry-After-Ms", "90000")
+
+	before := time.Now()
+	svc.handle429(context.Background(), account, headers, []byte(`{"error":{"type":"rate_limit_error","message":"slow down"}}`))
+	after := time.Now()
+
+	require.Equal(t, 1, repo.rateLimitCalls)
+	require.False(t, repo.lastRateReset.Before(before.Add(2*time.Second)))
+	require.False(t, repo.lastRateReset.After(after.Add(2*time.Second)))
+}
+
+func TestHandle429InvalidRetryAfterFallsBackToMsHeader(t *testing.T) {
+	repo := &permanentKeywordAccountRepoStub{}
+	svc := &RateLimitService{accountRepo: repo}
+	account := &Account{
+		ID:          7322,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeOAuth,
+		Status:      StatusActive,
+		Schedulable: true,
+	}
+	headers := http.Header{}
+	headers.Set("Retry-After", "+Inf")
+	headers.Set("X-Ms-Retry-After-Ms", "2500")
+
+	before := time.Now()
+	svc.handle429(context.Background(), account, headers, []byte(`{"error":{"type":"rate_limit_error","message":"slow down"}}`))
+	after := time.Now()
+
+	require.Equal(t, 1, repo.rateLimitCalls)
+	require.False(t, repo.lastRateReset.Before(before.Add(2500*time.Millisecond)))
+	require.False(t, repo.lastRateReset.After(after.Add(2500*time.Millisecond)))
+}
+
 func TestHandle429RateLimitResetSecondsSetsRateLimit(t *testing.T) {
 	repo := &permanentKeywordAccountRepoStub{}
 	svc := &RateLimitService{accountRepo: repo}

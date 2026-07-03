@@ -2183,10 +2183,19 @@ func parseRetryAfterResetTime(headers http.Header, now time.Time, maxAge time.Du
 		return nil
 	}
 	raw := strings.TrimSpace(headers.Get("Retry-After"))
-	if raw == "" {
+	if raw != "" {
+		if resetAt := parseRetryAfterValue(raw, now, maxAge); resetAt != nil {
+			return resetAt
+		}
+	}
+	return parseRetryAfterMillisecondsResetTime(headers, now, maxAge)
+}
+
+func parseRetryAfterValue(raw string, now time.Time, maxAge time.Duration) *time.Time {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || maxAge <= 0 {
 		return nil
 	}
-
 	if seconds, err := strconv.ParseInt(raw, 10, 64); err == nil {
 		if seconds <= 0 || seconds > int64(maxAge/time.Second) {
 			return nil
@@ -2213,6 +2222,35 @@ func parseRetryAfterResetTime(headers http.Header, now time.Time, maxAge time.Du
 		return nil
 	}
 	return &resetAt
+}
+
+var retryAfterMillisecondsHeaderNames = []string{
+	"Retry-After-Ms",
+	"X-Retry-After-Ms",
+	"X-Ms-Retry-After-Ms",
+}
+
+func parseRetryAfterMillisecondsResetTime(headers http.Header, now time.Time, maxAge time.Duration) *time.Time {
+	if maxAge <= 0 {
+		return nil
+	}
+	for _, name := range retryAfterMillisecondsHeaderNames {
+		raw := strings.TrimSpace(headers.Get(name))
+		if raw == "" {
+			continue
+		}
+		milliseconds, err := strconv.ParseFloat(raw, 64)
+		if err != nil || math.IsNaN(milliseconds) || math.IsInf(milliseconds, 0) || milliseconds <= 0 {
+			continue
+		}
+		duration := time.Duration(milliseconds * float64(time.Millisecond))
+		if duration <= 0 || duration > maxAge {
+			continue
+		}
+		resetAt := now.Add(duration)
+		return &resetAt
+	}
+	return nil
 }
 
 func parseUpstreamBackoffResetTime(headers http.Header, now time.Time, maxAge time.Duration) *time.Time {
