@@ -386,6 +386,76 @@ func TestAntigravityRetryLoop_CreditErrorMarksExhausted(t *testing.T) {
 	require.Equal(t, creditsExhaustedKey, repo.modelRateLimitCalls[0].modelKey)
 }
 
+func TestHandleCreditsRetryFailure_PoolModeDefaultSkipsExhaustedState(t *testing.T) {
+	repo := &stubAntigravityAccountRepo{}
+	svc := &AntigravityGatewayService{accountRepo: repo}
+	account := &Account{
+		ID:       106,
+		Name:     "pool-default",
+		Type:     AccountTypeAPIKey,
+		Platform: PlatformAntigravity,
+		Credentials: map[string]any{
+			"pool_mode": true,
+		},
+	}
+	resp := &http.Response{
+		StatusCode: http.StatusForbidden,
+		Body:       io.NopCloser(strings.NewReader(`{"error":{"message":"Insufficient GOOGLE_ONE_AI credits"}}`)),
+	}
+
+	svc.handleCreditsRetryFailure(context.Background(), "[test]", "claude-sonnet-4-5", account, resp, nil)
+
+	require.Empty(t, repo.modelRateLimitCalls)
+}
+
+func TestHandleCreditsRetryFailure_CustomErrorCodeMissSkipsExhaustedState(t *testing.T) {
+	repo := &stubAntigravityAccountRepo{}
+	svc := &AntigravityGatewayService{accountRepo: repo}
+	account := &Account{
+		ID:       107,
+		Name:     "custom-miss",
+		Type:     AccountTypeAPIKey,
+		Platform: PlatformAntigravity,
+		Credentials: map[string]any{
+			"custom_error_codes_enabled": true,
+			"custom_error_codes":         []any{float64(http.StatusTooManyRequests)},
+		},
+	}
+	resp := &http.Response{
+		StatusCode: http.StatusForbidden,
+		Body:       io.NopCloser(strings.NewReader(`{"error":{"message":"Insufficient GOOGLE_ONE_AI credits"}}`)),
+	}
+
+	svc.handleCreditsRetryFailure(context.Background(), "[test]", "claude-sonnet-4-5", account, resp, nil)
+
+	require.Empty(t, repo.modelRateLimitCalls)
+}
+
+func TestHandleCreditsRetryFailure_PoolModeCustomErrorCodeHitMarksExhausted(t *testing.T) {
+	repo := &stubAntigravityAccountRepo{}
+	svc := &AntigravityGatewayService{accountRepo: repo}
+	account := &Account{
+		ID:       108,
+		Name:     "pool-custom-hit",
+		Type:     AccountTypeAPIKey,
+		Platform: PlatformAntigravity,
+		Credentials: map[string]any{
+			"pool_mode":                  true,
+			"custom_error_codes_enabled": true,
+			"custom_error_codes":         []any{float64(http.StatusForbidden)},
+		},
+	}
+	resp := &http.Response{
+		StatusCode: http.StatusForbidden,
+		Body:       io.NopCloser(strings.NewReader(`{"error":{"message":"Insufficient GOOGLE_ONE_AI credits"}}`)),
+	}
+
+	svc.handleCreditsRetryFailure(context.Background(), "[test]", "claude-sonnet-4-5", account, resp, nil)
+
+	require.Len(t, repo.modelRateLimitCalls, 1)
+	require.Equal(t, creditsExhaustedKey, repo.modelRateLimitCalls[0].modelKey)
+}
+
 func TestShouldMarkCreditsExhausted(t *testing.T) {
 	t.Run("reqErr 不为 nil 时不标记", func(t *testing.T) {
 		resp := &http.Response{StatusCode: http.StatusForbidden}

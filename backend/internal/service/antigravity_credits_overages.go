@@ -167,6 +167,19 @@ func shouldMarkCreditsExhausted(resp *http.Response, respBody []byte, reqErr err
 	return false
 }
 
+func shouldApplyCreditsExhaustedState(account *Account, statusCode int) bool {
+	if account == nil {
+		return false
+	}
+	if account.IsPoolMode() && !account.IsCustomErrorCodesEnabled() {
+		return false
+	}
+	if account.IsCustomErrorCodesEnabled() && !account.ShouldHandleErrorCode(statusCode) {
+		return false
+	}
+	return true
+}
+
 type creditsOveragesRetryResult struct {
 	handled bool
 	resp    *http.Response
@@ -227,6 +240,11 @@ func (s *AntigravityGatewayService) handleCreditsRetryFailure(
 	}
 
 	if shouldMarkCreditsExhausted(creditsResp, creditsRespBody, reqErr) && account != nil {
+		if !shouldApplyCreditsExhaustedState(account, creditsStatusCode) {
+			logger.LegacyPrintf("service.antigravity_gateway", "%s credit_overages_failed model=%s account=%d marked_exhausted=false status=%d reason=policy_skipped body=%s",
+				prefix, modelKey, account.ID, creditsStatusCode, truncateForLog(creditsRespBody, 200))
+			return
+		}
 		s.setCreditsExhausted(ctx, account)
 		logger.LegacyPrintf("service.antigravity_gateway", "%s credit_overages_failed model=%s account=%d marked_exhausted=true status=%d body=%s",
 			prefix, modelKey, account.ID, creditsStatusCode, truncateForLog(creditsRespBody, 200))
