@@ -2961,6 +2961,13 @@ func (s *AntigravityGatewayService) handleUpstreamError(
 	requestedModel string,
 	groupID int64, sessionHash string, isStickySession bool,
 ) *handleModelRateLimitResult {
+	if account == nil {
+		return nil
+	}
+	if account.IsPoolMode() && !account.IsCustomErrorCodesEnabled() {
+		logger.LegacyPrintf("service.antigravity_gateway", "%s status=%d pool_mode_error_skipped account=%d", prefix, statusCode, account.ID)
+		return nil
+	}
 	// 遵守自定义错误码策略：未命中则跳过所有限流处理
 	if !account.ShouldHandleErrorCode(statusCode) {
 		return nil
