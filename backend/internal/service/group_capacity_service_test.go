@@ -10,13 +10,19 @@ import (
 
 type groupCapacityAccountRepoStub struct {
 	AccountRepository
-	accounts []Account
+	accounts      []Account
+	repairUserIDs []int64
 }
 
 func (s *groupCapacityAccountRepoStub) ListSchedulableByGroupID(context.Context, int64) ([]Account, error) {
 	out := make([]Account, len(s.accounts))
 	copy(out, s.accounts)
 	return out, nil
+}
+
+func (s *groupCapacityAccountRepoStub) RepairQuotaPoolVisibleOpenAISharedPoolBindings(_ context.Context, userID int64) (bool, error) {
+	s.repairUserIDs = append(s.repairUserIDs, userID)
+	return true, nil
 }
 
 type groupCapacityVisibleGroupRepoStub struct {
@@ -97,4 +103,24 @@ func TestGetUserVisiblePublicBalanceGroupsFiltersSharedPoolMetadata(t *testing.T
 	require.Len(t, groups, 2)
 	require.Equal(t, int64(1), groups[0].ID)
 	require.Equal(t, int64(2), groups[1].ID)
+}
+
+func TestGetUserVisiblePublicBalanceGroupsRepairsVisibleOpenAISharedPools(t *testing.T) {
+	accountRepo := &groupCapacityAccountRepoStub{}
+	groupRepo := &groupCapacityVisibleGroupRepoStub{
+		groups: []Group{
+			{ID: 1, Name: "PRO共享号池", Scope: GroupScopePublic, SubscriptionType: SubscriptionTypeStandard},
+		},
+	}
+	svc := &GroupCapacityService{
+		accountRepo: accountRepo,
+		groupRepo:   groupRepo,
+	}
+
+	groups, err := svc.GetUserVisiblePublicBalanceGroups(context.Background(), 42)
+
+	require.NoError(t, err)
+	require.Len(t, groups, 1)
+	require.Equal(t, []int64{42}, accountRepo.repairUserIDs)
+	require.Equal(t, int64(42), groupRepo.userID)
 }

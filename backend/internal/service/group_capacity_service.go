@@ -74,6 +74,9 @@ func (s *GroupCapacityService) GetUserVisiblePublicBalanceGroups(ctx context.Con
 	if userID <= 0 {
 		return nil, ErrUserNotFound
 	}
+	if err := s.repairVisibleOpenAISharedPoolBindings(ctx, userID); err != nil {
+		return nil, err
+	}
 	visibleGroupRepo, ok := s.groupRepo.(groupCapacityVisibleGroupRepository)
 	if !ok {
 		return nil, fmt.Errorf("visible group repository is unavailable")
@@ -84,6 +87,18 @@ func (s *GroupCapacityService) GetUserVisiblePublicBalanceGroups(ctx context.Con
 	}
 
 	return filterPublicBalanceGroups(groups), nil
+}
+
+func (s *GroupCapacityService) repairVisibleOpenAISharedPoolBindings(ctx context.Context, userID int64) error {
+	if s == nil || s.accountRepo == nil {
+		return nil
+	}
+	repo, ok := s.accountRepo.(accountQuotaPoolVisibleRepairRepository)
+	if !ok {
+		return nil
+	}
+	_, err := repo.RepairQuotaPoolVisibleOpenAISharedPoolBindings(ctx, userID)
+	return err
 }
 
 func filterPublicBalanceGroups(groups []Group) []Group {

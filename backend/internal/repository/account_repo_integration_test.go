@@ -1424,6 +1424,7 @@ func (s *AccountRepoSuite) TestListQuotaPoolAccountsRepairsVisibleOtherOwnerOpen
 		SetShareMode(service.AccountShareModePublic).
 		SetShareStatus(service.AccountShareStatusApproved).
 		Exec(s.ctx))
+	s.Require().False(s.accountHasGroup(account.ID, proGroup.ID), "test setup should start without a Pro public pool binding")
 
 	accounts, err := s.repo.ListQuotaPoolAccounts(s.ctx, viewer.ID)
 
@@ -1451,6 +1452,56 @@ func (s *AccountRepoSuite) TestListQuotaPoolAccountsRepairsVisibleOtherOwnerOpen
 		}
 	}
 	s.Require().True(hasProSharedGroup, "quota pool account rows should include the repaired Pro shared group")
+}
+
+func (s *AccountRepoSuite) TestListQuotaPoolAccountsRepairsUnboundOtherOwnerOpenAIProShareBinding() {
+	viewer := mustCreateUser(s.T(), s.client, &service.User{Email: "quota-pool-unbound-pro-viewer@example.com"})
+	owner := mustCreateUser(s.T(), s.client, &service.User{Email: "quota-pool-unbound-pro-owner@example.com"})
+	proxy := mustCreateProxy(s.T(), s.client, &service.Proxy{
+		Name:   "quota-pool-unbound-pro-proxy",
+		Status: service.StatusActive,
+	})
+	proGroup := mustCreateGroup(s.T(), s.client, &service.Group{
+		Name:                 "quota-pool-unbound-pro",
+		Platform:             service.PlatformOpenAI,
+		Scope:                service.GroupScopePublic,
+		SubscriptionType:     service.SubscriptionTypeStandard,
+		RequiredAccountLevel: service.AccountLevelPro,
+	})
+	account := mustCreateAccount(s.T(), s.client, &service.Account{
+		Name:         "quota-pool-unbound-other-owner-pro",
+		Platform:     service.PlatformOpenAI,
+		Type:         service.AccountTypeOAuth,
+		AccountLevel: service.AccountLevelPlus,
+		OwnerUserID:  &owner.ID,
+		Credentials:  map[string]any{"plan_type": "chatgpt_pro"},
+		ProxyID:      &proxy.ID,
+		Schedulable:  true,
+		Concurrency:  3,
+	})
+	s.Require().NoError(s.client.Account.UpdateOneID(account.ID).
+		SetShareMode(service.AccountShareModePublic).
+		SetShareStatus(service.AccountShareStatusApproved).
+		Exec(s.ctx))
+	s.Require().False(s.accountHasGroup(account.ID, proGroup.ID), "test setup should start without a Pro public pool binding")
+
+	accounts, err := s.repo.ListQuotaPoolAccounts(s.ctx, viewer.ID)
+
+	s.Require().NoError(err)
+	s.Require().True(s.accountHasGroup(account.ID, proGroup.ID), "viewer quota pool load should repair unbound public Pro shares into the Pro public pool")
+	s.Require().True(s.accountHasOpenAIStandardPoolLevel(account.ID, service.AccountLevelPro))
+	s.Require().Equal(1, s.publicOpenAIStandardGroupCount(account.ID))
+
+	var found *service.Account
+	for i := range accounts {
+		if accounts[i].ID == account.ID {
+			found = &accounts[i]
+			break
+		}
+	}
+	s.Require().NotNil(found, "platform quota pool should include unbound other owners' repaired Pro public shares")
+	s.Require().True(found.IsPublicShareApproved())
+	s.Require().True(found.IsSchedulableWithoutCodexQuotaProtection())
 }
 
 func (s *AccountRepoSuite) TestListQuotaPoolAccountsRepairsVisibleOtherOwnerOpenAIProShareFromLegacySubscriptionGroup() {

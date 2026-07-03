@@ -929,26 +929,7 @@ func (r *accountRepository) repairQuotaPoolVisibleOpenAISharedPoolBindings(ctx c
 			AND a.owner_user_id IS NOT NULL
 			AND lower(btrim(COALESCE(a.share_mode, ''))) = 'public'
 			AND lower(btrim(COALESCE(a.share_status, ''))) NOT IN ('pending', 'suspended')
-			AND (
-				a.owner_user_id = $1
-				OR EXISTS (
-					SELECT 1
-					FROM account_groups ag
-					JOIN groups g ON g.id = ag.group_id
-					WHERE ag.account_id = a.id
-						AND g.deleted_at IS NULL
-						AND g.platform = 'openai'
-						AND g.owner_user_id IS NULL
-						AND lower(btrim(COALESCE(g.scope, ''))) = 'public'
-						AND g.is_exclusive = FALSE
-						AND (
-							lower(btrim(COALESCE(g.subscription_type, ''))) IN ('', 'standard')
-							OR lower(btrim(COALESCE(g.required_account_level, ''))) = 'pro'
-							OR btrim(g.name) IN ('PRO共享号池', 'OpenAI PRO共享号池', 'OpenAI PRO共享号池(公共)')
-						)
-				)
-			)
-	`, ownerUserID)
+	`)
 	if err != nil {
 		return false, err
 	}
