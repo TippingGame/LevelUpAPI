@@ -9,19 +9,26 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/imroc/req/v3"
 	"github.com/stretchr/testify/require"
 )
 
 type tokenRefreshAccountRepo struct {
 	mockAccountRepoForGemini
-	updateCalls            int
-	fullUpdateCalls        int
-	updateCredentialsCalls int
-	setErrorCalls          int
-	clearTempCalls         int
-	setTempUnschedCalls    int
-	lastAccount            *Account
-	updateErr              error
+	updateCalls              int
+	fullUpdateCalls          int
+	updateCredentialsCalls   int
+	updateExtraCalls         int
+	setErrorCalls            int
+	clearTempCalls           int
+	setTempUnschedCalls      int
+	lastAccount              *Account
+	lastExtraUpdates         map[string]any
+	updateErr                error
+	updateExtraContextErr    error
+	setErrorContextErr       error
+	clearTempContextErr      error
+	setTempUnschedContextErr error
 }
 
 func (r *tokenRefreshAccountRepo) Update(ctx context.Context, account *Account) error {
@@ -49,18 +56,31 @@ func (r *tokenRefreshAccountRepo) UpdateCredentials(ctx context.Context, id int6
 	return nil
 }
 
+func (r *tokenRefreshAccountRepo) UpdateExtra(ctx context.Context, id int64, updates map[string]any) error {
+	r.updateExtraCalls++
+	r.updateExtraContextErr = ctx.Err()
+	r.lastExtraUpdates = make(map[string]any, len(updates))
+	for k, v := range updates {
+		r.lastExtraUpdates[k] = v
+	}
+	return nil
+}
+
 func (r *tokenRefreshAccountRepo) SetError(ctx context.Context, id int64, errorMsg string) error {
 	r.setErrorCalls++
+	r.setErrorContextErr = ctx.Err()
 	return nil
 }
 
 func (r *tokenRefreshAccountRepo) ClearTempUnschedulable(ctx context.Context, id int64) error {
 	r.clearTempCalls++
+	r.clearTempContextErr = ctx.Err()
 	return nil
 }
 
 func (r *tokenRefreshAccountRepo) SetTempUnschedulable(ctx context.Context, id int64, until time.Time, reason string) error {
 	r.setTempUnschedCalls++
+	r.setTempUnschedContextErr = ctx.Err()
 	return nil
 }
 
@@ -75,16 +95,19 @@ func (s *tokenCacheInvalidatorStub) InvalidateToken(ctx context.Context, account
 }
 
 type tempUnschedCacheStub struct {
-	deleteCalls int
-	setCalls    int
-	accountID   int64
-	state       *TempUnschedState
+	deleteCalls      int
+	setCalls         int
+	accountID        int64
+	state            *TempUnschedState
+	setContextErr    error
+	deleteContextErr error
 }
 
 func (s *tempUnschedCacheStub) SetTempUnsched(ctx context.Context, accountID int64, state *TempUnschedState) error {
 	s.setCalls++
 	s.accountID = accountID
 	s.state = state
+	s.setContextErr = ctx.Err()
 	return nil
 }
 
@@ -94,7 +117,79 @@ func (s *tempUnschedCacheStub) GetTempUnsched(ctx context.Context, accountID int
 
 func (s *tempUnschedCacheStub) DeleteTempUnsched(ctx context.Context, accountID int64) error {
 	s.deleteCalls++
+	s.deleteContextErr = ctx.Err()
 	return nil
+}
+
+type tokenRefreshSchedulerCacheStub struct {
+	setAccounts []Account
+	contextErrs []error
+}
+
+func (s *tokenRefreshSchedulerCacheStub) GetSnapshot(context.Context, SchedulerBucket) ([]*Account, bool, error) {
+	return nil, false, nil
+}
+
+func (s *tokenRefreshSchedulerCacheStub) SetSnapshot(context.Context, SchedulerBucket, []Account) error {
+	return nil
+}
+
+func (s *tokenRefreshSchedulerCacheStub) GetAccount(context.Context, int64) (*Account, error) {
+	return nil, nil
+}
+
+func (s *tokenRefreshSchedulerCacheStub) SetAccount(ctx context.Context, account *Account) error {
+	s.contextErrs = append(s.contextErrs, ctx.Err())
+	s.setAccounts = append(s.setAccounts, cloneAccountForTokenRefreshTest(account))
+	return nil
+}
+
+func (s *tokenRefreshSchedulerCacheStub) DeleteAccount(context.Context, int64) error {
+	return nil
+}
+
+func (s *tokenRefreshSchedulerCacheStub) UpdateLastUsed(context.Context, map[int64]time.Time) error {
+	return nil
+}
+
+func (s *tokenRefreshSchedulerCacheStub) TryLockBucket(context.Context, SchedulerBucket, time.Duration) (bool, error) {
+	return true, nil
+}
+
+func (s *tokenRefreshSchedulerCacheStub) UnlockBucket(context.Context, SchedulerBucket) error {
+	return nil
+}
+
+func (s *tokenRefreshSchedulerCacheStub) ListBuckets(context.Context) ([]SchedulerBucket, error) {
+	return nil, nil
+}
+
+func (s *tokenRefreshSchedulerCacheStub) GetOutboxWatermark(context.Context) (int64, error) {
+	return 0, nil
+}
+
+func (s *tokenRefreshSchedulerCacheStub) SetOutboxWatermark(context.Context, int64) error {
+	return nil
+}
+
+func cloneAccountForTokenRefreshTest(account *Account) Account {
+	if account == nil {
+		return Account{}
+	}
+	cloned := *account
+	if account.Credentials != nil {
+		cloned.Credentials = make(map[string]any, len(account.Credentials))
+		for k, v := range account.Credentials {
+			cloned.Credentials[k] = v
+		}
+	}
+	if account.Extra != nil {
+		cloned.Extra = make(map[string]any, len(account.Extra))
+		for k, v := range account.Extra {
+			cloned.Extra[k] = v
+		}
+	}
+	return cloned
 }
 
 type tokenRefresherStub struct {
@@ -384,6 +479,37 @@ func TestTokenRefreshService_RefreshWithRetry_RefreshFailed(t *testing.T) {
 	require.Equal(t, "token_refresh_retry_exhausted", tempCache.state.MatchedKeyword)
 }
 
+func TestTokenRefreshService_RefreshWithRetry_RetryExhaustedStateSurvivesCanceledContext(t *testing.T) {
+	repo := &tokenRefreshAccountRepo{}
+	tempCache := &tempUnschedCacheStub{}
+	cfg := &config.Config{
+		TokenRefresh: config.TokenRefreshConfig{
+			MaxRetries:          1,
+			RetryBackoffSeconds: 0,
+		},
+	}
+	service := NewTokenRefreshService(repo, nil, nil, nil, nil, nil, nil, cfg, tempCache)
+	account := &Account{
+		ID:       120,
+		Platform: PlatformGemini,
+		Type:     AccountTypeOAuth,
+	}
+	refresher := &tokenRefresherStub{
+		err: errors.New("network timeout"),
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err := service.refreshWithRetry(ctx, account, refresher, refresher, time.Hour)
+	require.Error(t, err)
+	require.Equal(t, 1, repo.setTempUnschedCalls)
+	require.NoError(t, repo.setTempUnschedContextErr)
+	require.Equal(t, 1, tempCache.setCalls)
+	require.NoError(t, tempCache.setContextErr)
+	require.NotNil(t, account.TempUnschedulableUntil)
+}
+
 // TestTokenRefreshService_RefreshWithRetry_AntigravityRefreshFailed 测试 Antigravity 刷新失败不设置错误状态
 func TestTokenRefreshService_RefreshWithRetry_AntigravityRefreshFailed(t *testing.T) {
 	repo := &tokenRefreshAccountRepo{}
@@ -447,6 +573,40 @@ func TestTokenRefreshService_RefreshWithRetry_AntigravityNonRetryableError(t *te
 	require.Equal(t, "account_error", tempCache.state.MatchedKeyword)
 }
 
+func TestTokenRefreshService_RefreshWithRetry_NonRetryableStateSurvivesCanceledContext(t *testing.T) {
+	repo := &tokenRefreshAccountRepo{}
+	tempCache := &tempUnschedCacheStub{}
+	cfg := &config.Config{
+		TokenRefresh: config.TokenRefreshConfig{
+			MaxRetries:          1,
+			RetryBackoffSeconds: 0,
+		},
+	}
+	service := NewTokenRefreshService(repo, nil, nil, nil, nil, nil, nil, cfg, tempCache)
+	account := &Account{
+		ID:          121,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeOAuth,
+		Status:      StatusActive,
+		Schedulable: true,
+	}
+	refresher := &tokenRefresherStub{
+		err: errors.New("invalid_grant: token revoked"),
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err := service.refreshWithRetry(ctx, account, refresher, refresher, time.Hour)
+	require.Error(t, err)
+	require.Equal(t, 1, repo.setErrorCalls)
+	require.NoError(t, repo.setErrorContextErr)
+	require.Equal(t, 1, tempCache.setCalls)
+	require.NoError(t, tempCache.setContextErr)
+	require.Equal(t, StatusError, account.Status)
+	require.False(t, account.Schedulable)
+}
+
 // TestTokenRefreshService_RefreshWithRetry_ClearsTempUnschedulable 测试刷新成功后清除临时不可调度（DB + Redis）
 func TestTokenRefreshService_RefreshWithRetry_ClearsTempUnschedulable(t *testing.T) {
 	repo := &tokenRefreshAccountRepo{}
@@ -477,6 +637,107 @@ func TestTokenRefreshService_RefreshWithRetry_ClearsTempUnschedulable(t *testing
 	require.Equal(t, 1, repo.updateCalls)
 	require.Equal(t, 1, repo.clearTempCalls)   // DB 清除
 	require.Equal(t, 1, tempCache.deleteCalls) // Redis 缓存也应清除
+}
+
+func TestTokenRefreshService_RefreshWithRetry_ClearTempUnschedSurvivesCanceledContext(t *testing.T) {
+	repo := &tokenRefreshAccountRepo{}
+	tempCache := &tempUnschedCacheStub{}
+	cfg := &config.Config{
+		TokenRefresh: config.TokenRefreshConfig{
+			MaxRetries:          1,
+			RetryBackoffSeconds: 0,
+		},
+	}
+	service := NewTokenRefreshService(repo, nil, nil, nil, nil, nil, nil, cfg, tempCache)
+	until := time.Now().Add(10 * time.Minute)
+	account := &Account{
+		ID:                     122,
+		Platform:               PlatformGemini,
+		Type:                   AccountTypeOAuth,
+		TempUnschedulableUntil: &until,
+	}
+	refresher := &tokenRefresherStub{
+		credentials: map[string]any{
+			"access_token": "new-token",
+		},
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err := service.refreshWithRetry(ctx, account, refresher, refresher, time.Hour)
+	require.NoError(t, err)
+	require.Equal(t, 1, repo.clearTempCalls)
+	require.NoError(t, repo.clearTempContextErr)
+	require.Equal(t, 1, tempCache.deleteCalls)
+	require.NoError(t, tempCache.deleteContextErr)
+}
+
+func TestTokenRefreshService_EnsureOpenAIPrivacyStateSurvivesCanceledContext(t *testing.T) {
+	repo := &tokenRefreshAccountRepo{}
+	cfg := &config.Config{
+		TokenRefresh: config.TokenRefreshConfig{
+			MaxRetries:          1,
+			RetryBackoffSeconds: 0,
+		},
+	}
+	service := NewTokenRefreshService(repo, nil, nil, nil, nil, nil, nil, cfg, nil)
+	service.SetPrivacyDeps(func(proxyURL string) (*req.Client, error) {
+		return nil, errors.New("factory failed")
+	}, nil)
+	account := &Account{
+		ID:       123,
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeOAuth,
+		Credentials: map[string]any{
+			"access_token": "token",
+		},
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	updated := service.ensureOpenAIPrivacy(ctx, account)
+
+	require.True(t, updated)
+	require.Equal(t, 1, repo.updateExtraCalls)
+	require.NoError(t, repo.updateExtraContextErr)
+	require.Equal(t, PrivacyModeFailed, repo.lastExtraUpdates["privacy_mode"])
+	require.Equal(t, PrivacyModeFailed, account.Extra["privacy_mode"])
+}
+
+func TestTokenRefreshService_PostRefreshActionsResyncsSchedulerAfterPrivacyUpdate(t *testing.T) {
+	repo := &tokenRefreshAccountRepo{}
+	scheduler := &tokenRefreshSchedulerCacheStub{}
+	cfg := &config.Config{
+		TokenRefresh: config.TokenRefreshConfig{
+			MaxRetries:          1,
+			RetryBackoffSeconds: 0,
+		},
+	}
+	service := NewTokenRefreshService(repo, nil, nil, nil, nil, nil, scheduler, cfg, nil)
+	service.SetPrivacyDeps(func(proxyURL string) (*req.Client, error) {
+		return nil, errors.New("factory failed")
+	}, nil)
+	account := &Account{
+		ID:       124,
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeOAuth,
+		Credentials: map[string]any{
+			"access_token": "token",
+		},
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	service.postRefreshActions(ctx, account)
+
+	require.Len(t, scheduler.setAccounts, 2)
+	require.NoError(t, scheduler.contextErrs[0])
+	require.NoError(t, scheduler.contextErrs[1])
+	require.NotContains(t, scheduler.setAccounts[0].Extra, "privacy_mode")
+	require.Equal(t, PrivacyModeFailed, scheduler.setAccounts[1].Extra["privacy_mode"])
 }
 
 // TestTokenRefreshService_RefreshWithRetry_NonRetryableErrorAllPlatforms 测试所有平台不可重试错误都 SetError
