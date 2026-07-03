@@ -849,6 +849,10 @@ func (r *accountRepository) ListQuotaPoolAccounts(ctx context.Context, ownerUser
 		return nil, fmt.Errorf("account repository sql executor is unavailable")
 	}
 
+	if err := r.repairQuotaPoolOwnerOpenAISharedPoolBindings(ctx, ownerUserID); err != nil {
+		return nil, err
+	}
+
 	accounts, err := r.listQuotaPoolAccountRows(ctx, ownerUserID)
 	if err != nil {
 		return nil, err
@@ -863,6 +867,42 @@ func (r *accountRepository) ListQuotaPoolAccounts(ctx context.Context, ownerUser
 		return nil, err
 	}
 	return accounts, nil
+}
+
+func (r *accountRepository) repairQuotaPoolOwnerOpenAISharedPoolBindings(ctx context.Context, ownerUserID int64) error {
+	if r == nil || r.sql == nil || ownerUserID <= 0 {
+		return nil
+	}
+	rows, err := r.sql.QueryContext(ctx, `
+		SELECT id
+		FROM accounts
+		WHERE deleted_at IS NULL
+			AND owner_user_id = $1
+			AND platform = 'openai'
+			AND type = 'oauth'
+			AND lower(btrim(COALESCE(share_mode, ''))) = 'public'
+			AND lower(btrim(COALESCE(share_status, ''))) = 'approved'
+	`, ownerUserID)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = rows.Close() }()
+
+	accountIDs := make([]int64, 0)
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return err
+		}
+		accountIDs = append(accountIDs, id)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if len(accountIDs) == 0 {
+		return nil
+	}
+	return r.repairOpenAISharedPoolBindings(ctx, accountIDs)
 }
 
 func (r *accountRepository) listQuotaPoolAccountRows(ctx context.Context, ownerUserID int64) ([]service.Account, error) {
