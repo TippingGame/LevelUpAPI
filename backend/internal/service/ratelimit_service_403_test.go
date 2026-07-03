@@ -39,7 +39,7 @@ func TestRateLimitService_HandleUpstreamError_OpenAI403FirstHitTempUnschedulable
 	require.Contains(t, repo.lastTempReason, "(1/3)")
 }
 
-func TestRateLimitService_HandleUpstreamError_OpenAI403ThresholdDisables(t *testing.T) {
+func TestRateLimitService_HandleUpstreamError_OpenAI403ThresholdLongCooldown(t *testing.T) {
 	repo := &rateLimitAccountRepoStub{}
 	counter := &openAI403CounterCacheStub{counts: []int64{3}}
 	service := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
@@ -59,10 +59,16 @@ func TestRateLimitService_HandleUpstreamError_OpenAI403ThresholdDisables(t *test
 	)
 
 	require.True(t, shouldDisable)
-	require.Equal(t, 1, repo.setErrorCalls)
-	require.Equal(t, 0, repo.tempCalls)
-	require.Contains(t, repo.lastErrorMsg, "workspace forbidden by policy")
-	require.Contains(t, repo.lastErrorMsg, "consecutive_403=3/3")
+	require.Equal(t, 0, repo.setErrorCalls)
+	require.Equal(t, 1, repo.tempCalls)
+	require.WithinDuration(t, time.Now().Add(2*time.Hour), repo.lastTempUntil, 3*time.Second)
+
+	var state TempUnschedState
+	require.NoError(t, json.Unmarshal([]byte(repo.lastTempReason), &state))
+	require.Equal(t, "openai_403_long_cooldown", state.MatchedKeyword)
+	require.Equal(t, 3, state.ConsecutiveCount)
+	require.Contains(t, state.ErrorMessage, "workspace forbidden by policy")
+	require.Contains(t, state.ErrorMessage, "(3/3)")
 }
 
 func TestRateLimitService_HandleUpstreamError_OpenAI403RequestPolicyDoesNotTouchAccount(t *testing.T) {

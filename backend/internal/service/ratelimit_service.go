@@ -65,7 +65,7 @@ const (
 
 const (
 	openAI403CooldownMinutesDefault      = 10
-	openAI403DisableThreshold            = 3
+	openAI403EscalationThreshold         = 3
 	openAI403CounterWindowMinutes        = 180
 	anthropicOAuth403EscalationThreshold = 3
 	openAIModelCapacityCooldown          = time.Minute
@@ -82,6 +82,13 @@ var cloudflareChallengeCooldownSteps = []time.Duration{
 	time.Minute,
 	2 * time.Minute,
 	5 * time.Minute,
+}
+
+var openAI403CooldownSteps = []time.Duration{
+	time.Duration(openAI403CooldownMinutesDefault) * time.Minute,
+	time.Duration(openAI403CooldownMinutesDefault) * time.Minute,
+	2 * time.Hour,
+	12 * time.Hour,
 }
 
 var anthropicOAuth403CooldownSteps = []time.Duration{
@@ -1369,12 +1376,6 @@ func (s *RateLimitService) handleOpenAI403(ctx context.Context, account *Account
 		return true
 	}
 
-	if count >= openAI403DisableThreshold {
-		msg = fmt.Sprintf("%s | consecutive_403=%d/%d", msg, count, openAI403DisableThreshold)
-		s.handleAuthError(ctx, account, msg)
-		return true
-	}
-
 	if !s.setOpenAI403TempUnschedulable(ctx, account, msg, count, "") {
 		s.handleAuthError(ctx, account, msg)
 	}
@@ -1395,13 +1396,8 @@ func (s *RateLimitService) setOpenAI403TempUnschedulable(ctx context.Context, ac
 			time.Duration(openAI403CounterWindowMinutes)*time.Minute,
 		))
 	}
-	if count >= openAI403DisableThreshold {
-		repeatedMsg := fmt.Sprintf("OpenAI repeated 403 threshold reached (%d/%d): %s", count, openAI403DisableThreshold, msg)
-		s.handleAuthError(ctx, account, repeatedMsg)
-		return true
-	}
-
-	until := now.Add(time.Duration(openAI403CooldownMinutesDefault) * time.Minute)
+	cooldown := openAI403CooldownForCount(int(count))
+	until := now.Add(cooldown)
 	state := &TempUnschedState{
 		UntilUnix:        until.Unix(),
 		TriggeredAtUnix:  now.Unix(),
@@ -1411,12 +1407,19 @@ func (s *RateLimitService) setOpenAI403TempUnschedulable(ctx context.Context, ac
 		ErrorMessage:     msg,
 		ConsecutiveCount: int(count),
 	}
-	if strings.TrimSpace(reasonLabel) != "" {
-		state.MatchedKeyword = "openai_403_" + strings.TrimSpace(reasonLabel)
-		state.ErrorMessage = fmt.Sprintf("OpenAI 403 temporary cooldown (%s, %d/%d): %s", strings.TrimSpace(reasonLabel), count, openAI403DisableThreshold, msg)
+	cleanReasonLabel := strings.TrimSpace(reasonLabel)
+	if cleanReasonLabel != "" {
+		state.MatchedKeyword = "openai_403_" + cleanReasonLabel
+		if count >= openAI403EscalationThreshold {
+			state.MatchedKeyword += "_long_cooldown"
+		}
+		state.ErrorMessage = fmt.Sprintf("OpenAI 403 temporary cooldown (%s, %d/%d): %s", cleanReasonLabel, count, openAI403EscalationThreshold, msg)
+	} else if count >= openAI403EscalationThreshold {
+		state.MatchedKeyword = "openai_403_long_cooldown"
+		state.ErrorMessage = fmt.Sprintf("OpenAI 403 long cooldown (%d/%d): %s", count, openAI403EscalationThreshold, msg)
 	} else if count > 0 {
-		state.MatchedKeyword = fmt.Sprintf("openai_403_%d_%d", count, openAI403DisableThreshold)
-		state.ErrorMessage = fmt.Sprintf("OpenAI 403 temporary cooldown (%d/%d): %s", count, openAI403DisableThreshold, msg)
+		state.MatchedKeyword = fmt.Sprintf("openai_403_%d_%d", count, openAI403EscalationThreshold)
+		state.ErrorMessage = fmt.Sprintf("OpenAI 403 temporary cooldown (%d/%d): %s", count, openAI403EscalationThreshold, msg)
 	}
 
 	reason := state.ErrorMessage
@@ -1433,10 +1436,22 @@ func (s *RateLimitService) setOpenAI403TempUnschedulable(ctx context.Context, ac
 		"account_id", account.ID,
 		"until", until,
 		"count", count,
-		"threshold", openAI403DisableThreshold,
+		"threshold", openAI403EscalationThreshold,
 		"reason_label", reasonLabel,
+		"cooldown", cooldown.String(),
 	)
 	return true
+}
+
+func openAI403CooldownForCount(count int) time.Duration {
+	if count <= 0 {
+		count = 1
+	}
+	index := count - 1
+	if index >= len(openAI403CooldownSteps) {
+		index = len(openAI403CooldownSteps) - 1
+	}
+	return openAI403CooldownSteps[index]
 }
 
 func nextTempUnschedConsecutiveCount(account *Account, now time.Time, statusCode int, matchedKeywordPrefix string, window time.Duration) int {
