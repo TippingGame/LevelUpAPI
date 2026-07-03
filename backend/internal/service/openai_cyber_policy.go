@@ -87,6 +87,8 @@ func isOpenAIRequestPolicyError(payload []byte, upstreamMsg string) bool {
 	switch normalizedCode {
 	case "content_filter", "content_policy", "content_policy_violation", "policy_violation", "safety_violation":
 		return true
+	case "invalid_encrypted_content", "previous_response_not_found":
+		return true
 	}
 	switch normalizedType {
 	case "content_filter", "content_policy", "content_policy_error", "policy_violation", "safety_error", "safety_violation":

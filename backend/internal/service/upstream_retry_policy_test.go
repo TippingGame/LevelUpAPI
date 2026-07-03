@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"net/http"
 	"testing"
 
@@ -80,6 +81,45 @@ func TestCustomErrorCodeOmittedClientStatusesDoNotRetry(t *testing.T) {
 
 	require.False(t, isDeterministicClientRequestStatus(http.StatusTooManyRequests))
 	require.True(t, (&GatewayService{}).shouldRetryUpstreamError(customRetryAccount, http.StatusServiceUnavailable))
+}
+
+func TestOpenAIRequestStateErrorsDoNotFailoverOrMatchCustomPolicy(t *testing.T) {
+	account := &Account{
+		ID:       77,
+		Type:     AccountTypeAPIKey,
+		Platform: PlatformOpenAI,
+		Credentials: map[string]any{
+			"custom_error_codes_enabled": true,
+			"custom_error_codes":         []any{float64(http.StatusBadRequest), float64(http.StatusNotFound)},
+		},
+	}
+	svc := &RateLimitService{}
+
+	cases := []struct {
+		name   string
+		status int
+		body   []byte
+	}{
+		{
+			name:   "invalid encrypted content",
+			status: http.StatusBadRequest,
+			body:   []byte(`{"error":{"code":"invalid_encrypted_content","type":"invalid_request_error","message":"The encrypted content could not be verified."}}`),
+		},
+		{
+			name:   "previous response not found",
+			status: http.StatusNotFound,
+			body:   []byte(`{"type":"response.failed","response":{"status":"failed","error":{"code":"previous_response_not_found","type":"invalid_request_error","message":"previous response not found"}}}`),
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			require.True(t, isOpenAIRequestPolicyError(tc.body, ""))
+			require.Equal(t, ErrorPolicyNone, svc.CheckErrorPolicy(context.Background(), account, tc.status, tc.body))
+			require.False(t, (&OpenAIGatewayService{}).shouldFailoverOpenAIUpstreamResponse(tc.status, "", tc.body))
+			require.False(t, openAIStreamFailedEventShouldFailover(tc.body, ""))
+		})
+	}
 }
 
 func TestAnthropicStreamClientErrorStatusesDoNotFailover(t *testing.T) {
