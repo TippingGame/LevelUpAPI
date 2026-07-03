@@ -237,6 +237,13 @@ routeLoop:
 					h.handleConcurrencyError(c, err, "account", streamStarted)
 					return
 				}
+				reqLog.Info("sticky.bind_after_wait",
+					zap.String("session_key", sessionHash),
+					zap.Int64("account_id", account.ID),
+				)
+				if err := h.gatewayService.BindStickySession(c.Request.Context(), currentAPIKey.GroupID, sessionHash, account.ID); err != nil {
+					reqLog.Warn("gateway.cc.bind_sticky_session_failed", zap.Int64("account_id", account.ID), zap.Error(err))
+				}
 			}
 			accountReleaseFunc = wrapReleaseOnDone(c.Request.Context(), accountReleaseFunc)
 
