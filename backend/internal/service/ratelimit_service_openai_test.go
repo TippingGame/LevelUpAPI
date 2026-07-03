@@ -5,6 +5,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"testing"
 	"time"
@@ -136,6 +137,79 @@ func TestCalculateOpenAI429ResetTime_ReversedWindowOrder(t *testing.T) {
 	}
 }
 
+func TestCalculateOpenAI429ResetTime_InvalidExhaustedResetUsesFallback(t *testing.T) {
+	svc := &RateLimitService{}
+
+	headers := http.Header{}
+	headers.Set("x-codex-primary-used-percent", "100")
+	headers.Set("x-codex-primary-reset-after-seconds", "999999999")
+	headers.Set("x-codex-primary-window-minutes", "10080")
+
+	resetAt := svc.calculateOpenAI429ResetTime(headers)
+
+	require.Nil(t, resetAt)
+}
+
+func TestParseOpenAIRateLimitResetTimeAtValidatesResetWindow(t *testing.T) {
+	now := time.Unix(1800000000, 0)
+	validUnix := now.Add(time.Hour).Unix()
+	validMillis := validUnix * 1000
+
+	tests := []struct {
+		name string
+		body string
+		want *int64
+	}{
+		{
+			name: "valid numeric resets_at",
+			body: fmt.Sprintf(`{"error":{"type":"usage_limit_reached","resets_at":%d}}`, validUnix),
+			want: &validUnix,
+		},
+		{
+			name: "valid millisecond resets_at",
+			body: fmt.Sprintf(`{"error":{"type":"usage_limit_reached","resets_at":%d}}`, validMillis),
+			want: &validUnix,
+		},
+		{
+			name: "valid string resets_in_seconds",
+			body: `{"error":{"type":"usage_limit_reached","resets_in_seconds":"3600"}}`,
+			want: &validUnix,
+		},
+		{
+			name: "past resets_at rejected",
+			body: fmt.Sprintf(`{"error":{"type":"usage_limit_reached","resets_at":%d}}`, now.Add(-time.Second).Unix()),
+		},
+		{
+			name: "too far resets_at rejected",
+			body: fmt.Sprintf(`{"error":{"type":"usage_limit_reached","resets_at":%d}}`, now.Add(openAI429SevenDayResetMaxAge+time.Second).Unix()),
+		},
+		{
+			name: "negative resets_in_seconds rejected",
+			body: `{"error":{"type":"usage_limit_reached","resets_in_seconds":-1}}`,
+		},
+		{
+			name: "too large resets_in_seconds rejected",
+			body: fmt.Sprintf(`{"error":{"type":"usage_limit_reached","resets_in_seconds":%d}}`, int64(openAI429SevenDayResetMaxAge/time.Second)+1),
+		},
+		{
+			name: "wrong error type rejected",
+			body: fmt.Sprintf(`{"error":{"type":"invalid_request_error","resets_at":%d}}`, validUnix),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := parseOpenAIRateLimitResetTimeAt([]byte(tt.body), now)
+			if tt.want == nil {
+				require.Nil(t, got)
+				return
+			}
+			require.NotNil(t, got)
+			require.Equal(t, *tt.want, *got)
+		})
+	}
+}
+
 type openAI429SnapshotRepo struct {
 	mockAccountRepoForGemini
 	rateLimitedID         int64
@@ -209,7 +283,8 @@ func TestHandle429_OpenAISyncsObservedPlanType(t *testing.T) {
 		Type:        AccountTypeOAuth,
 		Credentials: map[string]any{"plan_type": "plus"},
 	}
-	body := []byte(`{"error":{"type":"usage_limit_reached","message":"limit reached","plan_type":"free","resets_at":1777283883}}`)
+	resetAt := time.Now().Add(time.Hour).Unix()
+	body := []byte(fmt.Sprintf(`{"error":{"type":"usage_limit_reached","message":"limit reached","plan_type":"free","resets_at":%d}}`, resetAt))
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -251,6 +326,55 @@ func TestHandle429_OpenAICodexHeadersNotExhaustedUseFallback(t *testing.T) {
 	require.NotEmpty(t, repo.updatedExtra)
 	require.Equal(t, 80.0, repo.updatedExtra["codex_7d_used_percent"])
 	require.Equal(t, 90.0, repo.updatedExtra["codex_5h_used_percent"])
+}
+
+func TestHandle429_OpenAIInvalidCodexResetUsesFallback(t *testing.T) {
+	repo := &openAI429SnapshotRepo{}
+	settingRepo := newMockSettingRepo()
+	data, _ := json.Marshal(RateLimit429CooldownSettings{Enabled: true, CooldownSeconds: 13})
+	settingRepo.data[SettingKeyRateLimit429CooldownSettings] = string(data)
+	settingSvc := NewSettingService(settingRepo, &config.Config{})
+	svc := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+	svc.SetSettingService(settingSvc)
+	account := &Account{ID: 127, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+
+	headers := http.Header{}
+	headers.Set("x-codex-primary-used-percent", "100")
+	headers.Set("x-codex-primary-reset-after-seconds", "999999999")
+	headers.Set("x-codex-primary-window-minutes", "10080")
+
+	before := time.Now()
+	svc.handle429(context.Background(), account, headers, []byte(`{"error":{"type":"rate_limit_error","message":"slow down"}}`))
+	after := time.Now()
+
+	require.Equal(t, account.ID, repo.rateLimitedID)
+	require.False(t, account.RateLimitResetAt.Before(before.Add(13*time.Second)))
+	require.False(t, account.RateLimitResetAt.After(after.Add(13*time.Second)))
+	require.NotEmpty(t, repo.updatedExtra)
+	require.Equal(t, 100.0, repo.updatedExtra["codex_7d_used_percent"])
+}
+
+func TestHandle429_OpenAIInvalidBodyResetUsesFallback(t *testing.T) {
+	repo := &openAI429SnapshotRepo{}
+	settingRepo := newMockSettingRepo()
+	data, _ := json.Marshal(RateLimit429CooldownSettings{Enabled: true, CooldownSeconds: 11})
+	settingRepo.data[SettingKeyRateLimit429CooldownSettings] = string(data)
+	settingSvc := NewSettingService(settingRepo, &config.Config{})
+	svc := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+	svc.SetSettingService(settingSvc)
+	account := &Account{ID: 126, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+	body := []byte(fmt.Sprintf(
+		`{"error":{"type":"usage_limit_reached","message":"limit reached","resets_at":%d}}`,
+		time.Now().Add(openAI429SevenDayResetMaxAge+time.Hour).Unix(),
+	))
+
+	before := time.Now()
+	svc.handle429(context.Background(), account, http.Header{}, body)
+	after := time.Now()
+
+	require.Equal(t, account.ID, repo.rateLimitedID)
+	require.False(t, account.RateLimitResetAt.Before(before.Add(11*time.Second)))
+	require.False(t, account.RateLimitResetAt.After(after.Add(11*time.Second)))
 }
 
 func TestNormalizedCodexLimits(t *testing.T) {

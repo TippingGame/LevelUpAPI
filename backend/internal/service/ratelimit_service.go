@@ -65,6 +65,8 @@ const geminiPrecheckCacheTTL = time.Minute
 const (
 	defaultRateLimit429CooldownSeconds = 5
 	maxRateLimit429CooldownSeconds     = 7200
+	openAI429FiveHourResetMaxAge       = 6 * time.Hour
+	openAI429SevenDayResetMaxAge       = 8 * 24 * time.Hour
 )
 
 const (
@@ -1937,14 +1939,18 @@ func calculateOpenAI429ResetTime(headers http.Header) *time.Time {
 
 	// 优先使用被触发限制的重置时间
 	if is7dExhausted && normalized.Reset7dSeconds != nil {
-		resetAt := now.Add(time.Duration(*normalized.Reset7dSeconds) * time.Second)
-		slog.Info("openai_429_7d_limit_exhausted", "reset_after_seconds", *normalized.Reset7dSeconds, "reset_at", resetAt)
-		return &resetAt
+		if resetAt, ok := openAI429ResetAtFromSeconds(now, int64(*normalized.Reset7dSeconds), openAI429SevenDayResetMaxAge); ok {
+			slog.Info("openai_429_7d_limit_exhausted", "reset_after_seconds", *normalized.Reset7dSeconds, "reset_at", resetAt)
+			return &resetAt
+		}
+		slog.Warn("openai_429_invalid_7d_reset_ignored", "reset_after_seconds", *normalized.Reset7dSeconds)
 	}
 	if is5hExhausted && normalized.Reset5hSeconds != nil {
-		resetAt := now.Add(time.Duration(*normalized.Reset5hSeconds) * time.Second)
-		slog.Info("openai_429_5h_limit_exhausted", "reset_after_seconds", *normalized.Reset5hSeconds, "reset_at", resetAt)
-		return &resetAt
+		if resetAt, ok := openAI429ResetAtFromSeconds(now, int64(*normalized.Reset5hSeconds), openAI429FiveHourResetMaxAge); ok {
+			slog.Info("openai_429_5h_limit_exhausted", "reset_after_seconds", *normalized.Reset5hSeconds, "reset_at", resetAt)
+			return &resetAt
+		}
+		slog.Warn("openai_429_invalid_5h_reset_ignored", "reset_after_seconds", *normalized.Reset5hSeconds)
 	}
 
 	// If neither window is exhausted, avoid turning an ambiguous 429 into a
@@ -1961,6 +1967,20 @@ func calculateOpenAI429ResetTime(headers http.Header) *time.Time {
 
 func (s *RateLimitService) calculateOpenAI429ResetTime(headers http.Header) *time.Time {
 	return calculateOpenAI429ResetTime(headers)
+}
+
+func openAI429ResetAtFromSeconds(now time.Time, seconds int64, maxAge time.Duration) (time.Time, bool) {
+	if seconds <= 0 || maxAge <= 0 {
+		return time.Time{}, false
+	}
+	if seconds > int64(maxAge/time.Second) {
+		return time.Time{}, false
+	}
+	resetAfter := time.Duration(seconds) * time.Second
+	if resetAfter <= 0 || resetAfter > maxAge {
+		return time.Time{}, false
+	}
+	return now.Add(resetAfter), true
 }
 
 func parseOpenAIRateLimitPlanType(body []byte) string {
@@ -2262,9 +2282,16 @@ func (s *RateLimitService) persistOpenAICodexSnapshot(ctx context.Context, accou
 //	  }
 //	}
 func parseOpenAIRateLimitResetTime(body []byte) *int64 {
+	return parseOpenAIRateLimitResetTimeAt(body, time.Now())
+}
+
+func parseOpenAIRateLimitResetTimeAt(body []byte, now time.Time) *int64 {
 	var parsed map[string]any
 	if err := json.Unmarshal(body, &parsed); err != nil {
 		return nil
+	}
+	if now.IsZero() {
+		now = time.Now()
 	}
 
 	errObj, ok := parsed["error"].(map[string]any)
@@ -2280,28 +2307,56 @@ func parseOpenAIRateLimitResetTime(body []byte) *int64 {
 
 	// 优先使用 resets_at（Unix 时间戳）
 	if resetsAt, ok := errObj["resets_at"].(float64); ok {
-		ts := int64(resetsAt)
-		return &ts
+		if ts, ok := normalizeOpenAIRateLimitResetUnix(int64(resetsAt), now); ok {
+			return &ts
+		}
+		return nil
 	}
 	if resetsAt, ok := errObj["resets_at"].(string); ok {
 		if ts, err := strconv.ParseInt(resetsAt, 10, 64); err == nil {
-			return &ts
+			if normalized, ok := normalizeOpenAIRateLimitResetUnix(ts, now); ok {
+				return &normalized
+			}
+			return nil
 		}
 	}
 
 	// 如果没有 resets_at，尝试使用 resets_in_seconds
 	if resetsInSeconds, ok := errObj["resets_in_seconds"].(float64); ok {
-		ts := time.Now().Unix() + int64(resetsInSeconds)
-		return &ts
+		if resetAt, ok := openAI429ResetAtFromSeconds(now, int64(resetsInSeconds), openAI429SevenDayResetMaxAge); ok {
+			ts := resetAt.Unix()
+			return &ts
+		}
+		return nil
 	}
 	if resetsInSeconds, ok := errObj["resets_in_seconds"].(string); ok {
 		if sec, err := strconv.ParseInt(resetsInSeconds, 10, 64); err == nil {
-			ts := time.Now().Unix() + sec
-			return &ts
+			if resetAt, ok := openAI429ResetAtFromSeconds(now, sec, openAI429SevenDayResetMaxAge); ok {
+				ts := resetAt.Unix()
+				return &ts
+			}
+			return nil
 		}
 	}
 
 	return nil
+}
+
+func normalizeOpenAIRateLimitResetUnix(ts int64, now time.Time) (int64, bool) {
+	if ts <= 0 {
+		return 0, false
+	}
+	if ts > 1e11 {
+		ts /= 1000
+	}
+	resetAt := time.Unix(ts, 0)
+	if !resetAt.After(now) {
+		return 0, false
+	}
+	if resetAt.After(now.Add(openAI429SevenDayResetMaxAge)) {
+		return 0, false
+	}
+	return ts, true
 }
 
 // handle529 处理529过载错误

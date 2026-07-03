@@ -393,7 +393,8 @@ func TestAccountTestService_OpenAI429PersistsSnapshotAndRateLimitState(t *testin
 	ctx, _ := newTestContext()
 	cancelTestRequest(ctx)
 
-	resp := newJSONResponse(http.StatusTooManyRequests, `{"error":{"type":"usage_limit_reached","message":"limit reached","resets_at":1777283883}}`)
+	resetAt := time.Now().Add(time.Hour).Unix()
+	resp := newJSONResponse(http.StatusTooManyRequests, fmt.Sprintf(`{"error":{"type":"usage_limit_reached","message":"limit reached","resets_at":%d}}`, resetAt))
 	resp.Header.Set("x-codex-primary-used-percent", "100")
 	resp.Header.Set("x-codex-primary-reset-after-seconds", "604800")
 	resp.Header.Set("x-codex-primary-window-minutes", "10080")
@@ -433,7 +434,8 @@ func TestAccountTestService_OpenAI429BodyOnlyPersistsRateLimitAndClearsStaleErro
 	ctx, _ := newTestContext()
 	cancelTestRequest(ctx)
 
-	resp := newJSONResponse(http.StatusTooManyRequests, `{"error":{"type":"usage_limit_reached","message":"limit reached","resets_at":"1777283883"}}`)
+	resetAt := time.Now().Add(time.Hour).Unix()
+	resp := newJSONResponse(http.StatusTooManyRequests, fmt.Sprintf(`{"error":{"type":"usage_limit_reached","message":"limit reached","resets_at":"%d"}}`, resetAt))
 
 	repo := &openAIAccountTestRepo{}
 	upstream := &queuedHTTPUpstream{responses: []*http.Response{resp}}
@@ -466,7 +468,8 @@ func TestAccountTestService_OpenAI429SyncsObservedPlanType(t *testing.T) {
 	ctx, _ := newTestContext()
 	cancelTestRequest(ctx)
 
-	resp := newJSONResponse(http.StatusTooManyRequests, `{"error":{"type":"usage_limit_reached","message":"limit reached","plan_type":"free","resets_at":1777283883}}`)
+	resetAt := time.Now().Add(time.Hour).Unix()
+	resp := newJSONResponse(http.StatusTooManyRequests, fmt.Sprintf(`{"error":{"type":"usage_limit_reached","message":"limit reached","plan_type":"free","resets_at":%d}}`, resetAt))
 
 	repo := &openAIAccountTestRepo{}
 	upstream := &queuedHTTPUpstream{responses: []*http.Response{resp}}
