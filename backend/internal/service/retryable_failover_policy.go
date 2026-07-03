@@ -14,7 +14,7 @@ func shouldApplyRetryableFailoverTempUnschedule(ctx context.Context, repo Accoun
 	account, err := repo.GetByID(readCtx, accountID)
 	if err != nil || account == nil {
 		slog.Warn("retryable_failover_temp_unschedule_account_load_failed", "account_id", accountID, "error", err)
-		return true
+		return false
 	}
 	if failoverErr.StatusCode > 0 {
 		if !shouldApplyLocalErrorState(account, failoverErr.StatusCode) {

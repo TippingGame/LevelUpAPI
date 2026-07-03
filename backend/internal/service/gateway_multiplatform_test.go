@@ -487,6 +487,26 @@ func TestGatewayServiceTempUnscheduleRetryableErrorSkipsPoolModeDefault(t *testi
 	require.Nil(t, cache.states[45])
 }
 
+func TestGatewayServiceTempUnscheduleRetryableErrorSkipsWhenAccountPolicyUnavailable(t *testing.T) {
+	cache := &runtimeTempUnschedCacheStub{}
+	repo := &mockAccountRepoForPlatform{accountsByID: map[int64]*Account{}}
+	svc := &GatewayService{
+		accountRepo: repo,
+		rateLimitService: &RateLimitService{
+			tempUnschedCache: cache,
+		},
+	}
+
+	svc.TempUnscheduleRetryableError(context.Background(), 47, &UpstreamFailoverError{
+		StatusCode:             http.StatusBadGateway,
+		RetryableOnSameAccount: true,
+	})
+
+	require.Equal(t, 1, repo.getByIDCalls)
+	require.Equal(t, 0, repo.tempCalls)
+	require.Nil(t, cache.states[47])
+}
+
 func TestGatewayServiceTempUnscheduleRetryableErrorPoolModeCustomHitWrites(t *testing.T) {
 	cache := &runtimeTempUnschedCacheStub{}
 	repo := &mockAccountRepoForPlatform{accountsByID: map[int64]*Account{
