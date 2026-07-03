@@ -2239,18 +2239,28 @@ func parseRetryAfterMillisecondsResetTime(headers http.Header, now time.Time, ma
 		if raw == "" {
 			continue
 		}
-		milliseconds, err := strconv.ParseFloat(raw, 64)
-		if err != nil || math.IsNaN(milliseconds) || math.IsInf(milliseconds, 0) || milliseconds <= 0 {
-			continue
+		if resetAt := parseMillisecondsResetValue(raw, now, maxAge); resetAt != nil {
+			return resetAt
 		}
-		duration := time.Duration(milliseconds * float64(time.Millisecond))
-		if duration <= 0 || duration > maxAge {
-			continue
-		}
-		resetAt := now.Add(duration)
-		return &resetAt
 	}
 	return nil
+}
+
+func parseMillisecondsResetValue(raw string, now time.Time, maxAge time.Duration) *time.Time {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || maxAge <= 0 {
+		return nil
+	}
+	milliseconds, err := strconv.ParseFloat(raw, 64)
+	if err != nil || math.IsNaN(milliseconds) || math.IsInf(milliseconds, 0) || milliseconds <= 0 {
+		return nil
+	}
+	duration := time.Duration(milliseconds * float64(time.Millisecond))
+	if duration <= 0 || duration > maxAge {
+		return nil
+	}
+	resetAt := now.Add(duration)
+	return &resetAt
 }
 
 func parseUpstreamBackoffResetTime(headers http.Header, now time.Time, maxAge time.Duration) *time.Time {
@@ -2268,6 +2278,14 @@ var genericRateLimitResetHeaderNames = []string{
 	"X-Rate-Limit-Reset-After",
 }
 
+var genericRateLimitResetMillisecondsHeaderNames = []string{
+	"RateLimit-Reset-Ms",
+	"X-RateLimit-Reset-Ms",
+	"X-Rate-Limit-Reset-Ms",
+	"X-RateLimit-Reset-After-Ms",
+	"X-Rate-Limit-Reset-After-Ms",
+}
+
 func parseGenericRateLimitResetTime(headers http.Header, now time.Time, maxAge time.Duration) *time.Time {
 	if maxAge <= 0 {
 		return nil
@@ -2278,6 +2296,15 @@ func parseGenericRateLimitResetTime(headers http.Header, now time.Time, maxAge t
 			continue
 		}
 		if resetAt := parseGenericRateLimitResetValue(raw, now, maxAge); resetAt != nil {
+			return resetAt
+		}
+	}
+	for _, name := range genericRateLimitResetMillisecondsHeaderNames {
+		raw := strings.TrimSpace(headers.Get(name))
+		if raw == "" {
+			continue
+		}
+		if resetAt := parseMillisecondsResetValue(raw, now, maxAge); resetAt != nil {
 			return resetAt
 		}
 	}

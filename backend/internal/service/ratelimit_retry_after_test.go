@@ -327,6 +327,52 @@ func TestHandle429RateLimitResetFractionalSecondsSetsRateLimit(t *testing.T) {
 	require.False(t, repo.lastRateReset.After(after.Add(1500*time.Millisecond)))
 }
 
+func TestHandle429RateLimitResetMsSetsRateLimit(t *testing.T) {
+	repo := &permanentKeywordAccountRepoStub{}
+	svc := &RateLimitService{accountRepo: repo}
+	account := &Account{
+		ID:          7323,
+		Platform:    PlatformGemini,
+		Type:        AccountTypeAPIKey,
+		Status:      StatusActive,
+		Schedulable: true,
+	}
+	headers := http.Header{}
+	headers.Set("X-RateLimit-Reset-After-Ms", "1750")
+
+	before := time.Now()
+	svc.handle429(context.Background(), account, headers, []byte(`{"error":{"message":"slow down"}}`))
+	after := time.Now()
+
+	require.Equal(t, 1, repo.rateLimitCalls)
+	require.Equal(t, account.ID, repo.lastRateLimitID)
+	require.False(t, repo.lastRateReset.Before(before.Add(1750*time.Millisecond)))
+	require.False(t, repo.lastRateReset.After(after.Add(1750*time.Millisecond)))
+}
+
+func TestHandle429RateLimitResetPrefersStandardHeaderOverMs(t *testing.T) {
+	repo := &permanentKeywordAccountRepoStub{}
+	svc := &RateLimitService{accountRepo: repo}
+	account := &Account{
+		ID:          7324,
+		Platform:    PlatformGemini,
+		Type:        AccountTypeAPIKey,
+		Status:      StatusActive,
+		Schedulable: true,
+	}
+	headers := http.Header{}
+	headers.Set("RateLimit-Reset", "3")
+	headers.Set("X-RateLimit-Reset-After-Ms", "90000")
+
+	before := time.Now()
+	svc.handle429(context.Background(), account, headers, []byte(`{"error":{"message":"slow down"}}`))
+	after := time.Now()
+
+	require.Equal(t, 1, repo.rateLimitCalls)
+	require.False(t, repo.lastRateReset.Before(before.Add(3*time.Second)))
+	require.False(t, repo.lastRateReset.After(after.Add(3*time.Second)))
+}
+
 func TestHandle429RateLimitResetTooLargeFallsBackToDefault(t *testing.T) {
 	repo := &permanentKeywordAccountRepoStub{}
 	svc := &RateLimitService{accountRepo: repo}
