@@ -97,6 +97,11 @@ func (s *GatewayService) maybeTempUnscheduleAnthropicTransportError(ctx context.
 
 	until := time.Now().Add(anthropicTransportErrorTempUnschedDuration)
 	reason := "upstream transport error (proxy/network): " + strings.TrimSpace(safeErr)
+	var cache TempUnschedCache
+	if s.rateLimitService != nil {
+		cache = s.rateLimitService.tempUnschedCache
+	}
+	state := newTempUnschedState(until, 0, "anthropic_transport_error", reason)
 
 	bgCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), anthropicTransportErrorStateUpdateTimeout)
 	defer cancel()
@@ -106,17 +111,11 @@ func (s *GatewayService) maybeTempUnscheduleAnthropicTransportError(ctx context.
 			zap.Int64("account_id", account.ID),
 			zap.Error(setErr),
 		)
+		markTempUnschedRuntimeState(bgCtx, cache, account, until, reason, state, "anthropic_transport_error_runtime_fallback")
 		return
 	}
 
-	account.TempUnschedulableUntil = &until
-	account.TempUnschedulableReason = reason
-	var cache TempUnschedCache
-	if s.rateLimitService != nil {
-		cache = s.rateLimitService.tempUnschedCache
-	}
-	state := newTempUnschedState(until, 0, "anthropic_transport_error", reason)
-	setTempUnschedCacheBestEffort(bgCtx, cache, account.ID, state, "anthropic_transport_error")
+	markTempUnschedRuntimeState(bgCtx, cache, account, until, reason, state, "anthropic_transport_error")
 
 	logger.L().With(zap.String("component", "service.gateway")).Warn(
 		"anthropic.account_temp_unscheduled_transport",

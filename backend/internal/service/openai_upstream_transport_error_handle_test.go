@@ -20,11 +20,12 @@ import (
 type openaiTransportAccountRepoStub struct {
 	AccountRepository
 	tempUnschedCalls []tempUnschedCall
+	tempErr          error
 }
 
 func (r *openaiTransportAccountRepoStub) SetTempUnschedulable(_ context.Context, id int64, until time.Time, reason string) error {
 	r.tempUnschedCalls = append(r.tempUnschedCalls, tempUnschedCall{accountID: id, until: until, reason: reason})
-	return nil
+	return r.tempErr
 }
 
 func newOpenAITransportErrTestContext() (*gin.Context, *httptest.ResponseRecorder) {
@@ -80,6 +81,24 @@ func TestHandleOpenAIUpstreamTransportError_PersistentEvictsAndFailsOver(t *test
 	require.NotNil(t, tempCache.states[4627])
 	require.Equal(t, "openai_transport_error", tempCache.states[4627].MatchedKeyword)
 	require.Equal(t, 0, rec.Body.Len())
+}
+
+func TestTempUnscheduleOpenAITransportError_PersistFailureUsesRuntimeFallback(t *testing.T) {
+	repo := &openaiTransportAccountRepoStub{tempErr: errors.New("db unavailable")}
+	tempCache := &runtimeTempUnschedCacheStub{}
+	svc := &OpenAIGatewayService{
+		accountRepo:      repo,
+		rateLimitService: &RateLimitService{tempUnschedCache: tempCache},
+	}
+	account := &Account{ID: 4628, Name: "proxy-db-fail", Platform: PlatformOpenAI}
+
+	svc.tempUnscheduleOpenAITransportError(context.Background(), account, "proxy authentication required")
+
+	require.Len(t, repo.tempUnschedCalls, 1)
+	require.NotNil(t, account.TempUnschedulableUntil)
+	require.Contains(t, account.TempUnschedulableReason, "proxy authentication required")
+	require.NotNil(t, tempCache.states[4628])
+	require.Equal(t, "openai_transport_error", tempCache.states[4628].MatchedKeyword)
 }
 
 func TestHandleOpenAIUpstreamTransportError_TransientFailsOverWithoutEviction(t *testing.T) {

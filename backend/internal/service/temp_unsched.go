@@ -36,6 +36,15 @@ func newTempUnschedState(until time.Time, statusCode int, matchedKeyword string,
 	}
 }
 
+func markTempUnschedRuntimeState(ctx context.Context, cache TempUnschedCache, account *Account, until time.Time, reason string, state *TempUnschedState, source string) {
+	if account == nil || state == nil {
+		return
+	}
+	account.TempUnschedulableUntil = &until
+	account.TempUnschedulableReason = reason
+	setTempUnschedCacheBestEffort(ctx, cache, account.ID, state, source)
+}
+
 func markAccountErrorRuntimeEvicted(ctx context.Context, cache TempUnschedCache, account *Account, errorMsg string, source string) {
 	if account == nil {
 		return

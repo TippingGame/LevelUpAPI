@@ -19,6 +19,7 @@ type antigravityTransportAccountRepoStub struct {
 	lastAccountID  int64
 	lastTempUntil  time.Time
 	lastTempReason string
+	tempErr        error
 }
 
 func (r *antigravityTransportAccountRepoStub) SetTempUnschedulable(_ context.Context, id int64, until time.Time, reason string) error {
@@ -26,7 +27,7 @@ func (r *antigravityTransportAccountRepoStub) SetTempUnschedulable(_ context.Con
 	r.lastAccountID = id
 	r.lastTempUntil = until
 	r.lastTempReason = reason
-	return nil
+	return r.tempErr
 }
 
 func TestClassifyAntigravityTransportError(t *testing.T) {
@@ -81,6 +82,24 @@ func TestHandleAntigravityUpstreamTransportError_PersistentEvictsAndFailsOver(t 
 	require.NotNil(t, tempCache.states[42])
 	require.Equal(t, "antigravity_transport_error", tempCache.states[42].MatchedKeyword)
 	require.Equal(t, 0, rec.Body.Len())
+}
+
+func TestTempUnscheduleAntigravityTransportError_PersistFailureUsesRuntimeFallback(t *testing.T) {
+	repo := &antigravityTransportAccountRepoStub{tempErr: errors.New("db unavailable")}
+	tempCache := &runtimeTempUnschedCacheStub{}
+	svc := &AntigravityGatewayService{
+		accountRepo:      repo,
+		rateLimitService: &RateLimitService{tempUnschedCache: tempCache},
+	}
+	account := &Account{ID: 47, Name: "ag-db-fail", Platform: PlatformAntigravity, Type: AccountTypeOAuth}
+
+	svc.tempUnscheduleAntigravityTransportError(context.Background(), account, "proxy authentication required")
+
+	require.Equal(t, 1, repo.tempCalls)
+	require.NotNil(t, account.TempUnschedulableUntil)
+	require.Contains(t, account.TempUnschedulableReason, "proxy authentication required")
+	require.NotNil(t, tempCache.states[47])
+	require.Equal(t, "antigravity_transport_error", tempCache.states[47].MatchedKeyword)
 }
 
 func TestAntigravityRetryErrorToFailover(t *testing.T) {

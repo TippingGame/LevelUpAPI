@@ -96,6 +96,11 @@ func (s *AntigravityGatewayService) tempUnscheduleAntigravityTransportError(ctx 
 
 	until := time.Now().Add(antigravityTransportErrorTempUnschedDuration)
 	reason := "upstream transport error (proxy/network): " + strings.TrimSpace(safeErr)
+	var cache TempUnschedCache
+	if s.rateLimitService != nil {
+		cache = s.rateLimitService.tempUnschedCache
+	}
+	state := newTempUnschedState(until, 0, "antigravity_transport_error", reason)
 
 	bgCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), antigravityTransportErrorStateUpdateTimeout)
 	defer cancel()
@@ -105,17 +110,11 @@ func (s *AntigravityGatewayService) tempUnscheduleAntigravityTransportError(ctx 
 			zap.Int64("account_id", account.ID),
 			zap.Error(err),
 		)
+		markTempUnschedRuntimeState(bgCtx, cache, account, until, reason, state, "antigravity_transport_error_runtime_fallback")
 		return
 	}
 
-	account.TempUnschedulableUntil = &until
-	account.TempUnschedulableReason = reason
-	var cache TempUnschedCache
-	if s.rateLimitService != nil {
-		cache = s.rateLimitService.tempUnschedCache
-	}
-	state := newTempUnschedState(until, 0, "antigravity_transport_error", reason)
-	setTempUnschedCacheBestEffort(bgCtx, cache, account.ID, state, "antigravity_transport_error")
+	markTempUnschedRuntimeState(bgCtx, cache, account, until, reason, state, "antigravity_transport_error")
 
 	logger.L().With(zap.String("component", "service.antigravity_gateway")).Warn(
 		"antigravity.account_temp_unscheduled_transport",

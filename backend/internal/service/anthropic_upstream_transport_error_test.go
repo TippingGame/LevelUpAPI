@@ -19,6 +19,7 @@ type anthropicTransportAccountRepoStub struct {
 	lastAccountID  int64
 	lastTempUntil  time.Time
 	lastTempReason string
+	tempErr        error
 }
 
 func (r *anthropicTransportAccountRepoStub) SetTempUnschedulable(_ context.Context, id int64, until time.Time, reason string) error {
@@ -26,7 +27,7 @@ func (r *anthropicTransportAccountRepoStub) SetTempUnschedulable(_ context.Conte
 	r.lastAccountID = id
 	r.lastTempUntil = until
 	r.lastTempReason = reason
-	return nil
+	return r.tempErr
 }
 
 func TestClassifyAnthropicTransportError(t *testing.T) {
@@ -76,6 +77,29 @@ func TestMaybeTempUnscheduleAnthropicTransportError(t *testing.T) {
 	require.Equal(t, repo.lastTempReason, account.TempUnschedulableReason)
 	require.NotNil(t, tempCache.states[42])
 	require.Equal(t, "anthropic_transport_error", tempCache.states[42].MatchedKeyword)
+}
+
+func TestMaybeTempUnscheduleAnthropicTransportError_PersistFailureUsesRuntimeFallback(t *testing.T) {
+	repo := &anthropicTransportAccountRepoStub{tempErr: errors.New("db unavailable")}
+	tempCache := &runtimeTempUnschedCacheStub{}
+	svc := &GatewayService{
+		accountRepo:      repo,
+		rateLimitService: &RateLimitService{tempUnschedCache: tempCache},
+	}
+	account := &Account{
+		ID:       45,
+		Name:     "claude-db-fail",
+		Platform: PlatformAnthropic,
+		Type:     AccountTypeOAuth,
+	}
+
+	svc.maybeTempUnscheduleAnthropicTransportError(context.Background(), account, errors.New("proxy authentication required"), "proxy authentication required")
+
+	require.Equal(t, 1, repo.tempCalls)
+	require.NotNil(t, account.TempUnschedulableUntil)
+	require.Contains(t, account.TempUnschedulableReason, "proxy authentication required")
+	require.NotNil(t, tempCache.states[45])
+	require.Equal(t, "anthropic_transport_error", tempCache.states[45].MatchedKeyword)
 }
 
 func TestMaybeTempUnscheduleAnthropicTransportErrorSkipsNonPersistentAndAPIKey(t *testing.T) {

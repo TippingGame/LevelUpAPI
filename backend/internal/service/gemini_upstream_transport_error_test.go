@@ -19,6 +19,7 @@ type geminiTransportAccountRepoStub struct {
 	lastAccountID  int64
 	lastTempUntil  time.Time
 	lastTempReason string
+	tempErr        error
 }
 
 func (r *geminiTransportAccountRepoStub) SetTempUnschedulable(_ context.Context, id int64, until time.Time, reason string) error {
@@ -26,7 +27,7 @@ func (r *geminiTransportAccountRepoStub) SetTempUnschedulable(_ context.Context,
 	r.lastAccountID = id
 	r.lastTempUntil = until
 	r.lastTempReason = reason
-	return nil
+	return r.tempErr
 }
 
 func TestClassifyGeminiTransportError(t *testing.T) {
@@ -81,6 +82,24 @@ func TestHandleGeminiUpstreamTransportError_PersistentEvictsAndFailsOver(t *test
 	require.NotNil(t, tempCache.states[42])
 	require.Equal(t, "gemini_transport_error", tempCache.states[42].MatchedKeyword)
 	require.Equal(t, 0, rec.Body.Len())
+}
+
+func TestTempUnscheduleGeminiTransportError_PersistFailureUsesRuntimeFallback(t *testing.T) {
+	repo := &geminiTransportAccountRepoStub{tempErr: errors.New("db unavailable")}
+	tempCache := &runtimeTempUnschedCacheStub{}
+	svc := &GeminiMessagesCompatService{
+		accountRepo:      repo,
+		rateLimitService: &RateLimitService{tempUnschedCache: tempCache},
+	}
+	account := &Account{ID: 46, Name: "gemini-db-fail", Platform: PlatformGemini, Type: AccountTypeOAuth}
+
+	svc.tempUnscheduleGeminiTransportError(context.Background(), account, "proxy authentication required")
+
+	require.Equal(t, 1, repo.tempCalls)
+	require.NotNil(t, account.TempUnschedulableUntil)
+	require.Contains(t, account.TempUnschedulableReason, "proxy authentication required")
+	require.NotNil(t, tempCache.states[46])
+	require.Equal(t, "gemini_transport_error", tempCache.states[46].MatchedKeyword)
 }
 
 func TestHandleGeminiUpstreamTransportError_TransientFailsOverWithoutEviction(t *testing.T) {

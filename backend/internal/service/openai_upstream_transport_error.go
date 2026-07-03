@@ -88,6 +88,11 @@ func (s *OpenAIGatewayService) tempUnscheduleOpenAITransportError(ctx context.Co
 	}
 	until := time.Now().Add(openAITransportErrorTempUnschedDuration)
 	reason := "upstream transport error (proxy/network): " + safeErr
+	var cache TempUnschedCache
+	if s.rateLimitService != nil {
+		cache = s.rateLimitService.tempUnschedCache
+	}
+	state := newTempUnschedState(until, 0, "openai_transport_error", reason)
 
 	bgCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), openAITransportErrorStateUpdateTimeout)
 	defer cancel()
@@ -97,16 +102,10 @@ func (s *OpenAIGatewayService) tempUnscheduleOpenAITransportError(ctx context.Co
 			zap.Int64("account_id", account.ID),
 			zap.Error(err),
 		)
+		markTempUnschedRuntimeState(bgCtx, cache, account, until, reason, state, "openai_transport_error_runtime_fallback")
 		return
 	}
-	account.TempUnschedulableUntil = &until
-	account.TempUnschedulableReason = reason
-	var cache TempUnschedCache
-	if s.rateLimitService != nil {
-		cache = s.rateLimitService.tempUnschedCache
-	}
-	state := newTempUnschedState(until, 0, "openai_transport_error", reason)
-	setTempUnschedCacheBestEffort(bgCtx, cache, account.ID, state, "openai_transport_error")
+	markTempUnschedRuntimeState(bgCtx, cache, account, until, reason, state, "openai_transport_error")
 
 	logger.L().With(zap.String("component", "service.openai_gateway")).Warn(
 		"openai.account_temp_unscheduled_transport",

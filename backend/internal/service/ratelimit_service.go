@@ -222,14 +222,11 @@ func (s *RateLimitService) persistTempUnschedulableState(ctx context.Context, ac
 }
 
 func (s *RateLimitService) markTempUnschedRuntimeFallback(ctx context.Context, account *Account, until time.Time, reason string, state *TempUnschedState, source string) {
-	if account == nil || state == nil {
-		return
-	}
-	account.TempUnschedulableUntil = &until
-	account.TempUnschedulableReason = reason
+	var cache TempUnschedCache
 	if s != nil {
-		setTempUnschedCacheBestEffort(ctx, s.tempUnschedCache, account.ID, state, source)
+		cache = s.tempUnschedCache
 	}
+	markTempUnschedRuntimeState(ctx, cache, account, until, reason, state, source)
 }
 
 func (s *RateLimitService) persistRateLimitedState(ctx context.Context, account *Account, resetAt time.Time) error {
