@@ -59,9 +59,15 @@ type accountShareModeTesterStub struct {
 	modelID   string
 	result    *ScheduledTestResult
 	err       error
+	done      chan struct{}
 }
 
 func (s *accountShareModeTesterStub) RunTestBackground(_ context.Context, accountID int64, modelID string) (*ScheduledTestResult, error) {
+	defer func() {
+		if s.done != nil {
+			s.done <- struct{}{}
+		}
+	}()
 	s.calls++
 	s.accountID = accountID
 	s.modelID = modelID
@@ -728,11 +734,14 @@ func TestAccountShareModeUpdateListingOwnerRelistRejectsUnavailableAccountAfterR
 	}
 }
 
-func TestAccountShareModePostCreateFailedTestEvictsRuntimeAccountCache(t *testing.T) {
-	evictDone := make(chan struct{}, 1)
+func TestAccountShareModePostCreateFailedTestDoesNotDisableAccount(t *testing.T) {
+	testDone := make(chan struct{}, 1)
 	accountRepo := &accountShareModeAccountRepoStub{}
-	tester := &accountShareModeTesterStub{result: &ScheduledTestResult{Status: "failed", ErrorMessage: "oauth expired"}}
-	recovery := &accountShareModeRecoveryStub{evictDone: evictDone}
+	tester := &accountShareModeTesterStub{
+		result: &ScheduledTestResult{Status: "failed", ErrorMessage: "oauth expired"},
+		done:   testDone,
+	}
+	recovery := &accountShareModeRecoveryStub{}
 	svc := &AccountShareModeService{
 		accountRepo:        accountRepo,
 		accountTestService: tester,
@@ -745,18 +754,18 @@ func TestAccountShareModePostCreateFailedTestEvictsRuntimeAccountCache(t *testin
 	})
 
 	select {
-	case <-evictDone:
+	case <-testDone:
 	case <-time.After(time.Second):
-		t.Fatal("expected runtime eviction after failed post-create connectivity test")
+		t.Fatal("expected post-create connectivity test to run")
 	}
 	if tester.calls != 1 || tester.accountID != 99 || tester.modelID != "gpt-5.5" {
 		t.Fatalf("unexpected tester call: calls=%d account=%d model=%q", tester.calls, tester.accountID, tester.modelID)
 	}
-	if accountRepo.setErrorCalls != 1 || accountRepo.accountID != 99 || !strings.Contains(accountRepo.errorMsg, "oauth expired") {
-		t.Fatalf("unexpected SetError call: calls=%d account=%d msg=%q", accountRepo.setErrorCalls, accountRepo.accountID, accountRepo.errorMsg)
+	if accountRepo.setErrorCalls != 0 {
+		t.Fatalf("post-create connectivity test failure should not SetError, got %d calls", accountRepo.setErrorCalls)
 	}
-	if recovery.evictCalls != 1 || recovery.evictAccountID != 99 || recovery.evictSource != "account_share_connectivity_test" || !strings.Contains(recovery.evictErrorMsg, "oauth expired") {
-		t.Fatalf("unexpected eviction call: calls=%d account=%d source=%q msg=%q", recovery.evictCalls, recovery.evictAccountID, recovery.evictSource, recovery.evictErrorMsg)
+	if recovery.evictCalls != 0 {
+		t.Fatalf("post-create connectivity test failure should not evict runtime account cache, got %d calls", recovery.evictCalls)
 	}
 }
 
