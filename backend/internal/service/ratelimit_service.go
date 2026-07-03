@@ -2057,10 +2057,20 @@ func (s *RateLimitService) handle429(ctx context.Context, account *Account, head
 		return
 	}
 
-	// 5. 尝试从响应头解析重置时间（Anthropic 聚合头，向后兼容）
+	// 5. 通用 body retry_after / retry_after_ms：有些中转只把退避时间放在响应体里。
+	if resetAt := parseBodyRetryAfterResetTime(responseBody, time.Now(), time.Duration(maxRateLimit429CooldownSeconds)*time.Second); resetAt != nil {
+		if err := s.persistRateLimitedState(ctx, account, *resetAt); err != nil {
+			slog.Warn("rate_limit_body_retry_after_set_failed", "account_id", account.ID, "error", err)
+			return
+		}
+		slog.Info("account_rate_limited_body_retry_after", "account_id", account.ID, "platform", account.Platform, "reset_at", *resetAt, "reset_in", time.Until(*resetAt).Truncate(time.Second))
+		return
+	}
+
+	// 6. 尝试从响应头解析重置时间（Anthropic 聚合头，向后兼容）
 	resetTimestamp := headers.Get("anthropic-ratelimit-unified-reset")
 
-	// 6. 如果响应头没有，尝试从响应体解析（OpenAI usage_limit_reached, Gemini）
+	// 7. 如果响应头没有，尝试从响应体解析（OpenAI usage_limit_reached, Gemini）
 	if resetTimestamp == "" {
 		switch account.Platform {
 		case PlatformOpenAI:
@@ -2308,6 +2318,53 @@ func parseGenericRateLimitResetTime(headers http.Header, now time.Time, maxAge t
 			continue
 		}
 		if resetAt := parseMillisecondsResetValue(raw, now, maxAge); resetAt != nil {
+			return resetAt
+		}
+	}
+	return nil
+}
+
+var bodyRetryAfterValuePaths = []string{
+	"retry_after",
+	"retryAfter",
+	"retry_after_seconds",
+	"retryAfterSeconds",
+	"error.retry_after",
+	"error.retryAfter",
+	"error.retry_after_seconds",
+	"error.retryAfterSeconds",
+}
+
+var bodyRetryAfterMillisecondsPaths = []string{
+	"retry_after_ms",
+	"retryAfterMs",
+	"retry_after_millis",
+	"retryAfterMillis",
+	"error.retry_after_ms",
+	"error.retryAfterMs",
+	"error.retry_after_millis",
+	"error.retryAfterMillis",
+}
+
+func parseBodyRetryAfterResetTime(body []byte, now time.Time, maxAge time.Duration) *time.Time {
+	if len(body) == 0 || maxAge <= 0 || !gjson.ValidBytes(body) {
+		return nil
+	}
+	for _, path := range bodyRetryAfterValuePaths {
+		value := gjson.GetBytes(body, path)
+		if !value.Exists() {
+			continue
+		}
+		if resetAt := parseGenericRateLimitResetValue(value.String(), now, maxAge); resetAt != nil {
+			return resetAt
+		}
+	}
+	for _, path := range bodyRetryAfterMillisecondsPaths {
+		value := gjson.GetBytes(body, path)
+		if !value.Exists() {
+			continue
+		}
+		if resetAt := parseMillisecondsResetValue(value.String(), now, maxAge); resetAt != nil {
 			return resetAt
 		}
 	}

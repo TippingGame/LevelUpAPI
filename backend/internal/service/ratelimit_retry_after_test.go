@@ -216,6 +216,71 @@ func TestHandle429InvalidRetryAfterFallsBackToMsHeader(t *testing.T) {
 	require.False(t, repo.lastRateReset.After(after.Add(2500*time.Millisecond)))
 }
 
+func TestHandle429BodyRetryAfterSetsRateLimit(t *testing.T) {
+	repo := &permanentKeywordAccountRepoStub{}
+	svc := &RateLimitService{accountRepo: repo}
+	account := &Account{
+		ID:          7328,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeOAuth,
+		Status:      StatusActive,
+		Schedulable: true,
+	}
+
+	before := time.Now()
+	svc.handle429(context.Background(), account, http.Header{}, []byte(`{"error":{"type":"rate_limit_error","retry_after":"2s","message":"slow down"}}`))
+	after := time.Now()
+
+	require.Equal(t, 1, repo.rateLimitCalls)
+	require.Equal(t, account.ID, repo.lastRateLimitID)
+	require.False(t, repo.lastRateReset.Before(before.Add(2*time.Second)))
+	require.False(t, repo.lastRateReset.After(after.Add(2*time.Second)))
+}
+
+func TestHandle429BodyRetryAfterMsSetsRateLimit(t *testing.T) {
+	repo := &permanentKeywordAccountRepoStub{}
+	svc := &RateLimitService{accountRepo: repo}
+	account := &Account{
+		ID:          7329,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeOAuth,
+		Status:      StatusActive,
+		Schedulable: true,
+	}
+
+	before := time.Now()
+	svc.handle429(context.Background(), account, http.Header{}, []byte(`{"error":{"type":"rate_limit_error","retry_after_ms":2500,"message":"slow down"}}`))
+	after := time.Now()
+
+	require.Equal(t, 1, repo.rateLimitCalls)
+	require.Equal(t, account.ID, repo.lastRateLimitID)
+	require.False(t, repo.lastRateReset.Before(before.Add(2500*time.Millisecond)))
+	require.False(t, repo.lastRateReset.After(after.Add(2500*time.Millisecond)))
+}
+
+func TestHandle429HeadersPreferOverBodyRetryAfter(t *testing.T) {
+	repo := &permanentKeywordAccountRepoStub{}
+	svc := &RateLimitService{accountRepo: repo}
+	account := &Account{
+		ID:          7330,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeOAuth,
+		Status:      StatusActive,
+		Schedulable: true,
+	}
+	headers := http.Header{}
+	headers.Set("Retry-After", "2")
+
+	before := time.Now()
+	svc.handle429(context.Background(), account, headers, []byte(`{"error":{"type":"rate_limit_error","retry_after_ms":90000,"message":"slow down"}}`))
+	after := time.Now()
+
+	require.Equal(t, 1, repo.rateLimitCalls)
+	require.Equal(t, account.ID, repo.lastRateLimitID)
+	require.False(t, repo.lastRateReset.Before(before.Add(2*time.Second)))
+	require.False(t, repo.lastRateReset.After(after.Add(2*time.Second)))
+}
+
 func TestHandle429RateLimitResetSecondsSetsRateLimit(t *testing.T) {
 	repo := &permanentKeywordAccountRepoStub{}
 	svc := &RateLimitService{accountRepo: repo}
