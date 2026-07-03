@@ -85,6 +85,7 @@ const (
 	runtimeAccountErrorEvictionTTL       = 24 * time.Hour
 	customErrorCodeCooldown              = 24 * time.Hour
 	billingQuotaCooldown                 = 24 * time.Hour
+	upstreamRelayPoolUnavailableCooldown = time.Minute
 	rateLimitStateUpdateTimeout          = 3 * time.Second
 )
 
@@ -451,6 +452,10 @@ func (s *RateLimitService) HandleUpstreamError(ctx context.Context, account *Acc
 
 	if msg, ok := permanentAccountKeywordErrorMessage(account, statusCode, upstreamMsg, responseBody); ok {
 		s.handleAuthError(ctx, account, msg)
+		return true
+	}
+
+	if s.handleUpstreamRelayPoolUnavailable(ctx, account, statusCode, upstreamMsg, responseBody) {
 		return true
 	}
 
@@ -1428,6 +1433,41 @@ func recoverableBillingQuotaErrorMessage(account *Account, statusCode int, upstr
 	return fmt.Sprintf("Billing/quota cooldown (%d): %s", statusCode, msg), true
 }
 
+var upstreamRelayPoolUnavailableKeywords = []string{
+	"no available account",
+	"no available accounts",
+	"no available api key group routes",
+	"no available channel",
+	"no available channels",
+	"no available account instance",
+}
+
+func isUpstreamRelayPoolUnavailableError(statusCode int, upstreamMsg string, responseBody []byte) bool {
+	if statusCode != http.StatusServiceUnavailable {
+		return false
+	}
+
+	normalized := normalizedUpstreamErrorText(upstreamMsg, responseBody)
+	if normalized == "" {
+		return false
+	}
+
+	// Claude Code-only is a client/group routing mismatch, not upstream pool
+	// exhaustion. Cooling the whole relay account would punish valid Claude Code
+	// traffic that could have used the same route.
+	if strings.Contains(normalized, "only allows claude code") ||
+		strings.Contains(normalized, "only supports claude code") {
+		return false
+	}
+
+	for _, keyword := range upstreamRelayPoolUnavailableKeywords {
+		if strings.Contains(normalized, keyword) {
+			return true
+		}
+	}
+	return false
+}
+
 func permanentAccountKeywordErrorMessageFromBody(account *Account, statusCode int, responseBody []byte) (string, bool) {
 	upstreamMsg := strings.TrimSpace(extractUpstreamErrorMessage(responseBody))
 	upstreamMsg = sanitizeUpstreamErrorMessage(upstreamMsg)
@@ -1435,6 +1475,44 @@ func permanentAccountKeywordErrorMessageFromBody(account *Account, statusCode in
 		upstreamMsg = truncateForLog([]byte(upstreamMsg), 512)
 	}
 	return permanentAccountKeywordErrorMessage(account, statusCode, upstreamMsg, responseBody)
+}
+
+func (s *RateLimitService) handleUpstreamRelayPoolUnavailable(ctx context.Context, account *Account, statusCode int, upstreamMsg string, responseBody []byte) bool {
+	if account == nil {
+		return false
+	}
+	if !isUpstreamRelayPoolUnavailableError(statusCode, upstreamMsg, responseBody) {
+		return false
+	}
+	if !shouldApplyLocalErrorState(account, statusCode) {
+		slog.Info("upstream_relay_pool_unavailable_local_state_skipped", "account_id", account.ID, "status_code", statusCode)
+		return false
+	}
+
+	msg := strings.TrimSpace(upstreamMsg)
+	if msg == "" {
+		msg = "upstream relay returned no available accounts"
+	}
+	msg = fmt.Sprintf("Upstream relay pool unavailable (%d): %s", statusCode, msg)
+
+	until := time.Now().Add(upstreamRelayPoolUnavailableCooldown)
+	state := newTempUnschedState(until, statusCode, "upstream_relay_pool_unavailable", msg)
+	if bodyMsg := truncateTempUnschedMessage(responseBody, tempUnschedMessageMaxBytes); bodyMsg != "" {
+		state.ErrorMessage = bodyMsg
+	}
+	reason := msg
+	if raw, err := json.Marshal(state); err == nil {
+		reason = string(raw)
+	}
+
+	if err := s.persistTempUnschedulableState(ctx, account, until, reason, state, "upstream_relay_pool_unavailable"); err != nil {
+		slog.Warn("upstream_relay_pool_unavailable_temp_unschedulable_failed", "account_id", account.ID, "status_code", statusCode, "error", err)
+		s.markTempUnschedRuntimeFallback(ctx, account, until, reason, state, "upstream_relay_pool_unavailable_runtime_fallback")
+		return true
+	}
+
+	slog.Warn("upstream_relay_pool_unavailable_temp_unschedulable", "account_id", account.ID, "status_code", statusCode, "until", until, "error", msg)
+	return true
 }
 
 // handle403 处理 403 Forbidden 错误。

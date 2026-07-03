@@ -18,6 +18,7 @@ type permanentKeywordAccountRepoStub struct {
 	lastErrorCtxErr error
 	setErrorErr     error
 	tempCalls       int
+	lastTempUntil   time.Time
 	lastTempReason  string
 	lastTempCtxErr  error
 	tempErr         error
@@ -30,8 +31,9 @@ func (r *permanentKeywordAccountRepoStub) SetError(ctx context.Context, _ int64,
 	return r.setErrorErr
 }
 
-func (r *permanentKeywordAccountRepoStub) SetTempUnschedulable(ctx context.Context, _ int64, _ time.Time, reason string) error {
+func (r *permanentKeywordAccountRepoStub) SetTempUnschedulable(ctx context.Context, _ int64, until time.Time, reason string) error {
 	r.tempCalls++
+	r.lastTempUntil = until
 	r.lastTempReason = reason
 	r.lastTempCtxErr = ctx.Err()
 	return r.tempErr
