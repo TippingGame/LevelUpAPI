@@ -636,7 +636,8 @@ func accountSchedulableInQuotaGroup(account Account, now time.Time, groupStatus,
 	}
 	if groupPlatform == PlatformOpenAI {
 		required := NormalizeOpenAISharedPoolRequiredLevel(requiredAccountLevel)
-		if required != "" && !strings.EqualFold(strings.TrimSpace(account.Type), AccountTypeAPIKey) && !CanOpenAIAccountJoinSharedPool(account.AccountLevel, required) {
+		accountLevel := EffectiveOpenAISharedPoolAccountLevel(account.Platform, account.AccountLevel, account.Credentials, account.Extra)
+		if required != "" && !strings.EqualFold(strings.TrimSpace(account.Type), AccountTypeAPIKey) && !CanOpenAIAccountJoinSharedPool(accountLevel, required) {
 			return false
 		}
 	}

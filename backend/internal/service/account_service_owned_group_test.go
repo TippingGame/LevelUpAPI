@@ -579,6 +579,26 @@ func TestAccountServiceResolveOwnedPublicShareGroup(t *testing.T) {
 	require.Equal(t, int64(11), group.ID)
 }
 
+func TestAccountServiceResolveOwnedPublicShareGroupInfersProPlanFromMetadata(t *testing.T) {
+	svc := &AccountService{
+		groupRepo: &ownedPublicShareGroupRepoStub{
+			groups: []Group{
+				{ID: 11, Name: "PLUS共享号池", Platform: PlatformOpenAI, Status: StatusActive, Scope: GroupScopePublic, RequiredAccountLevel: AccountLevelPlus},
+				{ID: 13, Name: "PRO共享号池", Platform: PlatformOpenAI, Status: StatusActive, Scope: GroupScopePublic, RequiredAccountLevel: AccountLevelPro},
+			},
+		},
+	}
+
+	group, err := svc.resolveOwnedPublicShareGroup(context.Background(), &Account{
+		Platform:     PlatformOpenAI,
+		AccountLevel: AccountLevelUnknown,
+		Credentials:  map[string]any{"plan_type": "chatgpt_pro"},
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, int64(13), group.ID)
+}
+
 func TestAccountServiceResolveOwnedPublicShareGroupRejectsHigherLevelFallbackToLowerPool(t *testing.T) {
 	svc := &AccountService{
 		groupRepo: &ownedPublicShareGroupRepoStub{
@@ -2141,6 +2161,35 @@ func TestAccountQuotaGroupDashboardCountsCodexProtectedOpenAIAsSchedulable(t *te
 	require.Len(t, summaries, 1)
 	require.Equal(t, 1, summaries[0].SchedulableAccountCount)
 	require.Equal(t, 1, summaries[0].CodexQuotaProtectedCount)
+}
+
+func TestAccountQuotaGroupDashboardRequiredLevelInfersOpenAIPlanType(t *testing.T) {
+	now := time.Date(2026, 5, 13, 10, 0, 0, 0, time.UTC)
+	group := &Group{
+		ID:                   102,
+		Name:                 "OpenAI pro pool",
+		Platform:             PlatformOpenAI,
+		Status:               StatusActive,
+		Scope:                GroupScopePublic,
+		RequiredAccountLevel: AccountLevelPro,
+	}
+
+	builder := newAccountQuotaGroupDashboardBuilder(now)
+	builder.addAccount(Account{
+		ID:           1,
+		Platform:     PlatformOpenAI,
+		Type:         AccountTypeOAuth,
+		AccountLevel: AccountLevelUnknown,
+		Status:       StatusActive,
+		Schedulable:  true,
+		Credentials:  map[string]any{"plan_type": "pro5x"},
+		Groups:       []*Group{group},
+	})
+
+	summaries := builder.finalize()
+	require.Len(t, summaries, 1)
+	require.Equal(t, 1, summaries[0].AccountCount)
+	require.Equal(t, 1, summaries[0].SchedulableAccountCount)
 }
 
 func TestAccountQuotaGroupDashboardRequiredLevelAllowsOpenAIAPIKey(t *testing.T) {

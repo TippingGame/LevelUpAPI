@@ -852,6 +852,51 @@ func (s *AccountRepoSuite) TestListSchedulableByGroupIDAndPlatform_OpenAIRequire
 	s.Require().Equal(apiKeyAcc.ID, accounts[1].ID)
 }
 
+func (s *AccountRepoSuite) TestListSchedulableByGroupIDAndPlatform_OpenAIRequiredAccountLevelInfersPlanType() {
+	group := mustCreateGroup(s.T(), s.client, &service.Group{
+		Name:                 "g-openai-pro",
+		Platform:             service.PlatformOpenAI,
+		RequiredAccountLevel: service.AccountLevelPro,
+	})
+	inferredProAcc := mustCreateAccount(s.T(), s.client, &service.Account{
+		Name:         "inferred-pro",
+		Platform:     service.PlatformOpenAI,
+		AccountLevel: service.AccountLevelUnknown,
+		Credentials:  map[string]any{"plan_type": "chatgpt_pro"},
+		Schedulable:  true,
+	})
+	rawProAcc := mustCreateAccount(s.T(), s.client, &service.Account{
+		Name:         "raw-pro",
+		Platform:     service.PlatformOpenAI,
+		AccountLevel: service.AccountLevelPro,
+		Schedulable:  true,
+	})
+	plusAcc := mustCreateAccount(s.T(), s.client, &service.Account{
+		Name:         "plus",
+		Platform:     service.PlatformOpenAI,
+		AccountLevel: service.AccountLevelPlus,
+		Credentials:  map[string]any{"plan_type": "pro"},
+		Schedulable:  true,
+	})
+	unknownAcc := mustCreateAccount(s.T(), s.client, &service.Account{
+		Name:         "unknown",
+		Platform:     service.PlatformOpenAI,
+		AccountLevel: service.AccountLevelUnknown,
+		Schedulable:  true,
+	})
+	mustBindAccountToGroup(s.T(), s.client, inferredProAcc.ID, group.ID, 1)
+	mustBindAccountToGroup(s.T(), s.client, rawProAcc.ID, group.ID, 2)
+	mustBindAccountToGroup(s.T(), s.client, plusAcc.ID, group.ID, 3)
+	mustBindAccountToGroup(s.T(), s.client, unknownAcc.ID, group.ID, 4)
+
+	accounts, err := s.repo.ListSchedulableByGroupIDAndPlatform(s.ctx, group.ID, service.PlatformOpenAI)
+
+	s.Require().NoError(err)
+	s.Require().Len(accounts, 2)
+	s.Require().Equal(inferredProAcc.ID, accounts[0].ID)
+	s.Require().Equal(rawProAcc.ID, accounts[1].ID)
+}
+
 func (s *AccountRepoSuite) TestListSchedulableByGroupIDAndPlatform_RequireOAuthOnlyExcludesAPIKey() {
 	group := mustCreateGroup(s.T(), s.client, &service.Group{
 		Name:             "g-openai-oauth-only",

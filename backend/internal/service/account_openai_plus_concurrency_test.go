@@ -29,6 +29,18 @@ func TestNormalizeOpenAIAccountLevel_FromPlanType(t *testing.T) {
 		map[string]any{"plan_type": "plus"},
 		nil,
 	))
+	require.Equal(t, AccountLevelPro, NormalizeOpenAIAccountLevel(
+		PlatformOpenAI,
+		AccountLevelUnknown,
+		map[string]any{"plan_type": "chatgpt_pro"},
+		nil,
+	))
+	require.Equal(t, AccountLevelPro, NormalizeOpenAIAccountLevel(
+		PlatformOpenAI,
+		AccountLevelUnknown,
+		map[string]any{"plan_type": "pro5x"},
+		nil,
+	))
 }
 
 func TestNormalizeOpenAIAccountLevel_ManualLevelTakesPriority(t *testing.T) {

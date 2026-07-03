@@ -2209,7 +2209,7 @@ func (s *AccountService) resolveOwnedPublicShareGroup(ctx context.Context, accou
 		return nil, fmt.Errorf("list public share groups: %w", err)
 	}
 	if account.Platform == PlatformOpenAI {
-		accountLevel := NormalizeOpenAISharedPoolAccountLevel(NormalizeOpenAIAccountLevel(account.Platform, account.AccountLevel, account.Credentials, account.Extra))
+		accountLevel := EffectiveOpenAISharedPoolAccountLevel(account.Platform, account.AccountLevel, account.Credentials, account.Extra)
 		if OpenAISharedPoolLevelRank(accountLevel) == 0 {
 			return nil, ErrOwnedAccountPublicPoolUnavailable.WithMetadata(map[string]string{
 				"platform":      platform,

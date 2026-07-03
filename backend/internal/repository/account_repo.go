@@ -888,6 +888,12 @@ func (r *accountRepository) listQuotaPoolAccountRows(ctx context.Context, ownerU
 			a.name,
 			a.platform,
 			a.account_level,
+			a.credentials->>'plan_type',
+			a.credentials->>'chatgpt_plan_type',
+			a.credentials->>'subscription_plan',
+			a.extra->>'plan_type',
+			a.extra->>'chatgpt_plan_type',
+			a.extra->>'subscription_plan',
 			a.type,
 			a.extra->>'quota_limit',
 			a.extra->>'quota_used',
@@ -942,11 +948,19 @@ func (r *accountRepository) listQuotaPoolAccountRows(ctx context.Context, ownerU
 		var codex5hUsedPercent, codex5hResetAfterSeconds, codex5hResetAt, codex5hLimitPercent sql.NullString
 		var codex7dUsedPercent, codex7dResetAfterSeconds, codex7dResetAt, codex7dLimitPercent sql.NullString
 		var codexUsageUpdatedAt, privacyMode sql.NullString
+		var credentialPlanType, credentialChatGPTPlanType, credentialSubscriptionPlan sql.NullString
+		var extraPlanType, extraChatGPTPlanType, extraSubscriptionPlan sql.NullString
 		if err := rows.Scan(
 			&account.ID,
 			&account.Name,
 			&account.Platform,
 			&account.AccountLevel,
+			&credentialPlanType,
+			&credentialChatGPTPlanType,
+			&credentialSubscriptionPlan,
+			&extraPlanType,
+			&extraChatGPTPlanType,
+			&extraSubscriptionPlan,
 			&account.Type,
 			&quotaLimit,
 			&quotaUsed,
@@ -987,10 +1001,17 @@ func (r *accountRepository) listQuotaPoolAccountRows(ctx context.Context, ownerU
 		if ownerUserID.Valid {
 			account.OwnerUserID = &ownerUserID.Int64
 		}
-		account.AccountLevel = service.NormalizeAccountLevel(account.AccountLevel)
 		account.ShareMode = service.NormalizeAccountShareMode(account.ShareMode)
 		account.ShareStatus = service.NormalizeAccountShareStatus(account.ShareStatus)
+		account.Credentials = map[string]any{}
 		account.Extra = map[string]any{}
+		setNullStringExtra(account.Credentials, "plan_type", credentialPlanType)
+		setNullStringExtra(account.Credentials, "chatgpt_plan_type", credentialChatGPTPlanType)
+		setNullStringExtra(account.Credentials, "subscription_plan", credentialSubscriptionPlan)
+		setNullStringExtra(account.Extra, "plan_type", extraPlanType)
+		setNullStringExtra(account.Extra, "chatgpt_plan_type", extraChatGPTPlanType)
+		setNullStringExtra(account.Extra, "subscription_plan", extraSubscriptionPlan)
+		account.AccountLevel = service.NormalizeOpenAIAccountLevel(account.Platform, account.AccountLevel, account.Credentials, account.Extra)
 		setNullStringExtra(account.Extra, "quota_limit", quotaLimit)
 		setNullStringExtra(account.Extra, "quota_used", quotaUsed)
 		setNullStringExtra(account.Extra, "quota_daily_limit", quotaDailyLimit)
@@ -1207,6 +1228,106 @@ func accountOpenAIOAuthRelayPoolTempUnschedIgnoredSQL(s *entsql.Selector) *entsq
 		b.WriteString("COALESCE(").Ident(reasonCol).WriteString(", ").Arg("").WriteString(") ILIKE ").Arg("%upstream relay pool unavailable%")
 		b.WriteString("))")
 	})
+}
+
+func openAISharedPoolEffectiveAccountLevelPredicate(requiredLevel string) dbpredicate.Account {
+	required := service.NormalizeOpenAISharedPoolRequiredLevel(requiredLevel)
+	return dbpredicate.Account(func(s *entsql.Selector) {
+		if required == "" || service.OpenAISharedPoolLevelRank(required) == 0 {
+			s.Where(entsql.False())
+			return
+		}
+		accountLevelCol := s.C(dbaccount.FieldAccountLevel)
+		credentialsCol := s.C(dbaccount.FieldCredentials)
+		extraCol := s.C(dbaccount.FieldExtra)
+		s.Where(entsql.P(func(b *entsql.Builder) {
+			writeOpenAISharedPoolEffectiveAccountLevelEntSQL(b, accountLevelCol, credentialsCol, extraCol)
+			b.WriteString(" = ").Arg(required)
+		}))
+	})
+}
+
+func writeOpenAISharedPoolEffectiveAccountLevelEntSQL(b *entsql.Builder, accountLevelCol, credentialsCol, extraCol string) {
+	b.WriteString("(CASE WHEN ")
+	b.Ident(accountLevelCol).
+		WriteString(" IN (").
+		Arg(service.AccountLevelFree).
+		WriteString(", ").
+		Arg(service.AccountLevelPlus).
+		WriteString(", ").
+		Arg(service.AccountLevelPro).
+		WriteString(", ").
+		Arg(service.AccountLevelTeam).
+		WriteString(") THEN ")
+	b.Ident(accountLevelCol)
+	b.WriteString(" WHEN ")
+	writeOpenAIPlanTokenEntSQL(b, credentialsCol, extraCol)
+	b.WriteString(" IN (").
+		Arg(service.AccountLevelFree).
+		WriteString(", ").
+		Arg("chatgptfree").
+		WriteString(") THEN ").
+		Arg(service.AccountLevelFree)
+	b.WriteString(" WHEN (")
+	writeOpenAIPlanTokenEntSQL(b, credentialsCol, extraCol)
+	b.WriteString(" = ").Arg(service.AccountLevelPlus)
+	b.WriteString(" OR ")
+	writeOpenAIPlanTokenEntSQL(b, credentialsCol, extraCol)
+	b.WriteString(" = ").Arg("chatgptplus")
+	b.WriteString(" OR ")
+	writeOpenAIPlanTokenEntSQL(b, credentialsCol, extraCol)
+	b.WriteString(" LIKE ").Arg("plus%")
+	b.WriteString(") THEN ").Arg(service.AccountLevelPlus)
+	b.WriteString(" WHEN (")
+	writeOpenAIPlanTokenEntSQL(b, credentialsCol, extraCol)
+	b.WriteString(" = ").Arg(service.AccountLevelPro)
+	b.WriteString(" OR ")
+	writeOpenAIPlanTokenEntSQL(b, credentialsCol, extraCol)
+	b.WriteString(" = ").Arg("chatgptpro")
+	b.WriteString(" OR ")
+	writeOpenAIPlanTokenEntSQL(b, credentialsCol, extraCol)
+	b.WriteString(" LIKE ").Arg("pro%")
+	b.WriteString(" OR ")
+	writeOpenAIPlanTokenEntSQL(b, credentialsCol, extraCol)
+	b.WriteString(" LIKE ").Arg("chatgptpro%")
+	b.WriteString(") THEN ").Arg(service.AccountLevelPro)
+	b.WriteString(" WHEN ")
+	writeOpenAIPlanTokenEntSQL(b, credentialsCol, extraCol)
+	b.WriteString(" IN (").
+		Arg(service.AccountLevelTeam).
+		WriteString(", ").
+		Arg("chatgptteam").
+		WriteString(") THEN ").
+		Arg(service.AccountLevelTeam)
+	b.WriteString(" ELSE ").Arg(service.AccountLevelFree).WriteString(" END)")
+}
+
+func writeOpenAIPlanTokenEntSQL(b *entsql.Builder, credentialsCol, extraCol string) {
+	b.WriteString("regexp_replace(lower(COALESCE(")
+	writeJSONTextNullIfEmptyEntSQL(b, credentialsCol, "plan_type")
+	b.WriteString(", ")
+	writeJSONTextNullIfEmptyEntSQL(b, credentialsCol, "chatgpt_plan_type")
+	b.WriteString(", ")
+	writeJSONTextNullIfEmptyEntSQL(b, credentialsCol, "subscription_plan")
+	b.WriteString(", ")
+	writeJSONTextNullIfEmptyEntSQL(b, extraCol, "plan_type")
+	b.WriteString(", ")
+	writeJSONTextNullIfEmptyEntSQL(b, extraCol, "chatgpt_plan_type")
+	b.WriteString(", ")
+	writeJSONTextNullIfEmptyEntSQL(b, extraCol, "subscription_plan")
+	b.WriteString(", ").Arg("").WriteString(")), ").
+		Arg(`[[:space:]_-]+`).
+		WriteString(", ").
+		Arg("").
+		WriteString(", ").
+		Arg("g").
+		WriteString(")")
+}
+
+func writeJSONTextNullIfEmptyEntSQL(b *entsql.Builder, jsonCol, key string) {
+	b.WriteString("NULLIF(")
+	b.Ident(jsonCol).WriteString(" ->> ").Arg(key)
+	b.WriteString(", ").Arg("").WriteString(")")
 }
 
 func accountCustomErrorPolicyActiveEntSQL(b *entsql.Builder, credentialsCol string) {
@@ -2657,15 +2778,14 @@ func (r *accountRepository) queryAccountsByGroup(ctx context.Context, groupID in
 		}
 		requiredLevel := service.NormalizeRequiredAccountLevel(group.RequiredAccountLevel)
 		if group.Platform == service.PlatformOpenAI && requiredLevel != "" {
-			allowedLevels := service.OpenAISharedPoolAllowedAccountLevels(requiredLevel)
-			if len(allowedLevels) == 0 {
+			if service.OpenAISharedPoolLevelRank(requiredLevel) == 0 {
 				return []service.Account{}, nil
 			}
 			preds = append(preds,
 				dbaccount.PlatformEQ(service.PlatformOpenAI),
 				dbaccount.Or(
 					dbaccount.TypeEQ(service.AccountTypeAPIKey),
-					dbaccount.AccountLevelIn(allowedLevels...),
+					openAISharedPoolEffectiveAccountLevelPredicate(requiredLevel),
 				),
 			)
 		}
@@ -2991,16 +3111,18 @@ func accountEntityToService(m *dbent.Account) *service.Account {
 	}
 
 	rateMultiplier := m.RateMultiplier
+	credentials := copyJSONMap(m.Credentials)
+	extra := copyJSONMap(m.Extra)
 
 	return &service.Account{
 		ID:                      m.ID,
 		Name:                    m.Name,
 		Notes:                   m.Notes,
 		Platform:                m.Platform,
-		AccountLevel:            service.NormalizeAccountLevel(m.AccountLevel),
+		AccountLevel:            service.NormalizeOpenAIAccountLevel(m.Platform, m.AccountLevel, credentials, extra),
 		Type:                    m.Type,
-		Credentials:             copyJSONMap(m.Credentials),
-		Extra:                   copyJSONMap(m.Extra),
+		Credentials:             credentials,
+		Extra:                   extra,
 		OwnerUserID:             m.OwnerUserID,
 		ShareMode:               service.NormalizeAccountShareMode(m.ShareMode),
 		ShareStatus:             service.NormalizeAccountShareStatus(m.ShareStatus),

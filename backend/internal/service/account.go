@@ -252,6 +252,10 @@ func NormalizeOpenAISharedPoolRequiredLevel(level string) string {
 	return NormalizeRequiredAccountLevel(level)
 }
 
+func EffectiveOpenAISharedPoolAccountLevel(platform, accountLevel string, credentials, extra map[string]any) string {
+	return NormalizeOpenAISharedPoolAccountLevel(NormalizeOpenAIAccountLevel(platform, accountLevel, credentials, extra))
+}
+
 func OpenAISharedPoolLevelRank(level string) int {
 	switch NormalizeOpenAISharedPoolAccountLevel(level) {
 	case AccountLevelFree:
