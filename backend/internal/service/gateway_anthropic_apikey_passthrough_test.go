@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -26,6 +27,10 @@ type anthropicHTTPUpstreamRecorder struct {
 	lastBody []byte
 	resp     *http.Response
 	err      error
+}
+
+func (r *openAIPassthroughFailoverRepo) UpdateSessionWindow(context.Context, int64, *time.Time, *time.Time, string) error {
+	return nil
 }
 
 func newAnthropicAPIKeyAccountForTest() *Account {
@@ -1211,6 +1216,94 @@ func TestGatewayService_AnthropicAPIKeyPassthrough_StreamingStillCollectsUsageAf
 	require.NotNil(t, result.usage)
 	require.Equal(t, 11, result.usage.InputTokens)
 	require.Equal(t, 5, result.usage.OutputTokens)
+}
+
+func TestGatewayService_AnthropicAPIKeyPassthrough_StreamingRateLimitErrorFailsOverBeforeOutput(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+
+	repo := &openAIPassthroughFailoverRepo{}
+	svc := &GatewayService{
+		cfg: &config.Config{
+			Gateway: config.GatewayConfig{
+				MaxLineSize: defaultMaxLineSize,
+			},
+		},
+		rateLimitService: NewRateLimitService(repo, nil, &config.Config{}, nil, nil),
+	}
+
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Header: http.Header{
+			"Content-Type":                         []string{"text/event-stream"},
+			"X-Request-Id":                         []string{"rid-apikey-stream-rate-limit"},
+			"Anthropic-Ratelimit-Unified-5h-Reset": []string{fmt.Sprint(time.Now().Add(time.Hour).Unix())},
+			"Anthropic-Ratelimit-Unified-5h-Surpassed-Threshold": []string{"true"},
+			"Anthropic-Ratelimit-Unified-5h-Utilization":         []string{"1.0"},
+		},
+		Body: io.NopCloser(strings.NewReader(strings.Join([]string{
+			"event: error",
+			`data: {"type":"error","error":{"type":"rate_limit_error","message":"rate limit exceeded"}}`,
+			"",
+		}, "\n"))),
+	}
+	account := newAnthropicAPIKeyAccountForTest()
+
+	result, err := svc.handleStreamingResponseAnthropicAPIKeyPassthrough(context.Background(), resp, c, account, time.Now(), "claude-3-7-sonnet-20250219")
+
+	require.Nil(t, result)
+	var failoverErr *UpstreamFailoverError
+	require.ErrorAs(t, err, &failoverErr)
+	require.Equal(t, http.StatusTooManyRequests, failoverErr.StatusCode)
+	require.Contains(t, string(failoverErr.ResponseBody), "rate_limit_error")
+	require.Empty(t, rec.Body.String(), "pre-output error should not commit the client stream before failover")
+	require.Len(t, repo.rateLimitCalls, 1)
+}
+
+func TestGatewayService_AnthropicAPIKeyPassthrough_StreamingInvalidRequestErrorDoesNotFailoverOrCoolAccount(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+
+	repo := &openAIPassthroughFailoverRepo{}
+	svc := &GatewayService{
+		cfg: &config.Config{
+			Gateway: config.GatewayConfig{
+				MaxLineSize: defaultMaxLineSize,
+			},
+		},
+		rateLimitService: NewRateLimitService(repo, nil, &config.Config{}, nil, nil),
+	}
+
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Header: http.Header{
+			"Content-Type": []string{"text/event-stream"},
+			"X-Request-Id": []string{"rid-apikey-stream-invalid"},
+		},
+		Body: io.NopCloser(strings.NewReader(strings.Join([]string{
+			"event: error",
+			`data: {"type":"error","error":{"type":"invalid_request_error","message":"messages: text is required"}}`,
+			"",
+		}, "\n"))),
+	}
+	account := newAnthropicAPIKeyAccountForTest()
+
+	result, err := svc.handleStreamingResponseAnthropicAPIKeyPassthrough(context.Background(), resp, c, account, time.Now(), "claude-3-7-sonnet-20250219")
+
+	require.Error(t, err)
+	require.NotNil(t, result)
+	var failoverErr *UpstreamFailoverError
+	require.False(t, errors.As(err, &failoverErr), "invalid request stream errors must not switch accounts")
+	require.Empty(t, repo.rateLimitCalls)
+	require.Empty(t, repo.tempCalls)
+	require.Contains(t, rec.Body.String(), "invalid_request_error")
+	require.Contains(t, rec.Body.String(), "event: error")
 }
 
 func TestGatewayService_AnthropicAPIKeyPassthrough_MissingTerminalEventReturnsError(t *testing.T) {

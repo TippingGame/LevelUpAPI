@@ -6789,6 +6789,40 @@ func (s *GatewayService) handleStreamingResponseAnthropicAPIKeyPassthrough(
 	}
 	lastDataAt := time.Now()
 	inPartialEvent := false
+	currentEventName := ""
+	deferredEventLine := ""
+
+	writeStreamLine := func(line string) {
+		if clientDisconnected {
+			return
+		}
+		restored := string(reverseToolNamesIfPresent(c, []byte(line)))
+		if _, err := io.WriteString(w, restored); err != nil {
+			clientDisconnected = true
+			logger.LegacyPrintf("service.gateway", "[Anthropic passthrough] Client disconnected during streaming, continue draining upstream for usage: account=%d", account.ID)
+			return
+		}
+		if _, err := io.WriteString(w, "\n"); err != nil {
+			clientDisconnected = true
+			logger.LegacyPrintf("service.gateway", "[Anthropic passthrough] Client disconnected during streaming, continue draining upstream for usage: account=%d", account.ID)
+			return
+		}
+		if line == "" {
+			flusher.Flush()
+			lastDataAt = time.Now()
+			inPartialEvent = false
+		} else {
+			inPartialEvent = true
+		}
+	}
+	flushDeferredEventLine := func() {
+		if deferredEventLine == "" {
+			return
+		}
+		line := deferredEventLine
+		deferredEventLine = ""
+		writeStreamLine(line)
+	}
 
 	streamIdleTimedOut := func() bool {
 		if streamInterval <= 0 {
@@ -6835,10 +6869,53 @@ func (s *GatewayService) handleStreamingResponseAnthropicAPIKeyPassthrough(
 			}
 
 			line := ev.line
+			trimmedLine := strings.TrimSpace(line)
+			if strings.HasPrefix(trimmedLine, "event:") {
+				eventName := strings.TrimSpace(strings.TrimPrefix(trimmedLine, "event:"))
+				currentEventName = eventName
+				if anthropicStreamEventIsTerminal(eventName, "") {
+					sawTerminalEvent = true
+				}
+				if strings.EqualFold(eventName, "error") {
+					deferredEventLine = line
+					inPartialEvent = true
+					continue
+				}
+				flushDeferredEventLine()
+				writeStreamLine(line)
+				continue
+			}
+
 			if data, ok := extractAnthropicSSEDataLine(line); ok {
 				trimmed := strings.TrimSpace(data)
 				if anthropicStreamEventIsTerminal("", trimmed) {
 					sawTerminalEvent = true
+				}
+				if isAnthropicPassthroughStreamErrorData(currentEventName, trimmed) {
+					sseErr := newSSEStreamErrorEventError(trimmed)
+					body := sseErr.ResponseBody
+					if len(body) == 0 {
+						body = normalizeAnthropicStreamErrorBody(sseErr.RawData)
+					}
+					statusCode := sseErr.StatusCode
+					if statusCode == 0 {
+						statusCode, _ = anthropicStreamErrorStatusAndMessage(body)
+					}
+					if s.rateLimitService != nil {
+						s.rateLimitService.HandleUpstreamErrorForModel(ctx, account, model, statusCode, resp.Header, body)
+					}
+					if !c.Writer.Written() && !claudeUsageHasBillableTokens(usage) &&
+						!IsUpstreamReplayUnsafeTimeoutStatus(statusCode) &&
+						s.shouldFailoverAnthropicStreamError(statusCode) {
+						return nil, &UpstreamFailoverError{
+							StatusCode:      statusCode,
+							ResponseBody:    body,
+							ResponseHeaders: resp.Header.Clone(),
+						}
+					}
+					flushDeferredEventLine()
+					writeStreamLine(line)
+					return &streamingResult{usage: usage, firstTokenMs: firstTokenMs, clientDisconnect: clientDisconnected}, sseErr
 				}
 				if firstTokenMs == nil && trimmed != "" && trimmed != "[DONE]" {
 					ms := int(time.Since(startTime).Milliseconds())
@@ -6846,29 +6923,13 @@ func (s *GatewayService) handleStreamingResponseAnthropicAPIKeyPassthrough(
 				}
 				s.parseSSEUsagePassthrough(data, usage)
 			} else {
-				trimmed := strings.TrimSpace(line)
-				if strings.HasPrefix(trimmed, "event:") && anthropicStreamEventIsTerminal(strings.TrimSpace(strings.TrimPrefix(trimmed, "event:")), "") {
-					sawTerminalEvent = true
+				if trimmedLine == "" {
+					currentEventName = ""
 				}
 			}
 
-			if !clientDisconnected {
-				restored := string(reverseToolNamesIfPresent(c, []byte(line)))
-				if _, err := io.WriteString(w, restored); err != nil {
-					clientDisconnected = true
-					logger.LegacyPrintf("service.gateway", "[Anthropic passthrough] Client disconnected during streaming, continue draining upstream for usage: account=%d", account.ID)
-				} else if _, err := io.WriteString(w, "\n"); err != nil {
-					clientDisconnected = true
-					logger.LegacyPrintf("service.gateway", "[Anthropic passthrough] Client disconnected during streaming, continue draining upstream for usage: account=%d", account.ID)
-				} else if line == "" {
-					// 按 SSE 事件边界刷出，减少每行 flush 带来的 syscall 开销。
-					flusher.Flush()
-					lastDataAt = time.Now()
-					inPartialEvent = false
-				} else {
-					inPartialEvent = true
-				}
-			}
+			flushDeferredEventLine()
+			writeStreamLine(line)
 
 		case <-intervalCh:
 			lastRead := time.Unix(0, atomic.LoadInt64(&lastReadAt))
@@ -6885,7 +6946,7 @@ func (s *GatewayService) handleStreamingResponseAnthropicAPIKeyPassthrough(
 			return &streamingResult{usage: usage, firstTokenMs: firstTokenMs}, fmt.Errorf("stream data interval timeout")
 
 		case <-keepaliveCh:
-			if clientDisconnected || inPartialEvent {
+			if clientDisconnected || inPartialEvent || deferredEventLine != "" {
 				continue
 			}
 			if time.Since(lastDataAt) < keepaliveInterval {
@@ -6914,6 +6975,20 @@ func extractAnthropicSSEDataLine(line string) (string, bool) {
 		start++
 	}
 	return line[start:], true
+}
+
+func isAnthropicPassthroughStreamErrorData(eventName, data string) bool {
+	data = strings.TrimSpace(data)
+	if data == "" || data == "[DONE]" {
+		return false
+	}
+	if strings.EqualFold(strings.TrimSpace(eventName), "error") {
+		return true
+	}
+	if !gjson.Valid(data) {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(gjson.Get(data, "type").String()), "error")
 }
 
 func (s *GatewayService) parseSSEUsagePassthrough(data string, usage *ClaudeUsage) {
