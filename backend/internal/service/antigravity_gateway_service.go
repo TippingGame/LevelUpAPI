@@ -228,7 +228,10 @@ func (s *AntigravityGatewayService) handleSmartRetry(p antigravityRetryLoopParam
 			p.prefix, resp.StatusCode, modelName, p.account.ID, rateLimitDuration, truncateForLog(respBody, 200))
 
 		resetAt := time.Now().Add(rateLimitDuration)
-		if !setModelRateLimitByModelName(p.ctx, p.accountRepo, p.account.ID, modelName, p.prefix, resp.StatusCode, resetAt, false) {
+		if !shouldApplyLocalErrorState(p.account, resp.StatusCode) {
+			logger.LegacyPrintf("service.antigravity_gateway", "%s status=%d model_rate_limit_skipped model=%s account=%d reason=policy_skipped",
+				p.prefix, resp.StatusCode, modelName, p.account.ID)
+		} else if !setModelRateLimitByModelName(p.ctx, p.accountRepo, p.account.ID, modelName, p.prefix, resp.StatusCode, resetAt, false) {
 			p.handleError(p.ctx, p.prefix, p.account, resp.StatusCode, resp.Header, respBody, p.requestedModel, p.groupID, p.sessionHash, p.isStickySession)
 			logger.LegacyPrintf("service.antigravity_gateway", "%s status=%d rate_limited account=%d (no model mapping)", p.prefix, resp.StatusCode, p.account.ID)
 		} else {
@@ -393,15 +396,20 @@ func (s *AntigravityGatewayService) handleSmartRetry(p antigravityRetryLoopParam
 
 		resetAt := time.Now().Add(rateLimitDuration)
 		if p.accountRepo != nil && modelName != "" {
-			writeCtx, cancel := retryableErrorStateContext(p.ctx)
-			if err := p.accountRepo.SetModelRateLimit(writeCtx, p.account.ID, modelName, resetAt); err != nil {
-				cancel()
-				logger.LegacyPrintf("service.antigravity_gateway", "%s status=%d model_rate_limit_failed model=%s error=%v", p.prefix, resp.StatusCode, modelName, err)
+			if !shouldApplyLocalErrorState(p.account, resp.StatusCode) {
+				logger.LegacyPrintf("service.antigravity_gateway", "%s status=%d model_rate_limit_after_smart_retry_skipped model=%s account=%d reason=policy_skipped",
+					p.prefix, resp.StatusCode, modelName, p.account.ID)
 			} else {
-				logger.LegacyPrintf("service.antigravity_gateway", "%s status=%d model_rate_limited_after_smart_retry model=%s account=%d reset_in=%v",
-					p.prefix, resp.StatusCode, modelName, p.account.ID, rateLimitDuration)
-				s.updateAccountModelRateLimitInCache(writeCtx, p.account, modelName, resetAt)
-				cancel()
+				writeCtx, cancel := retryableErrorStateContext(p.ctx)
+				if err := p.accountRepo.SetModelRateLimit(writeCtx, p.account.ID, modelName, resetAt); err != nil {
+					cancel()
+					logger.LegacyPrintf("service.antigravity_gateway", "%s status=%d model_rate_limit_failed model=%s error=%v", p.prefix, resp.StatusCode, modelName, err)
+				} else {
+					logger.LegacyPrintf("service.antigravity_gateway", "%s status=%d model_rate_limited_after_smart_retry model=%s account=%d reset_in=%v",
+						p.prefix, resp.StatusCode, modelName, p.account.ID, rateLimitDuration)
+					s.updateAccountModelRateLimitInCache(writeCtx, p.account, modelName, resetAt)
+					cancel()
+				}
 			}
 		}
 
@@ -2912,14 +2920,21 @@ func (s *AntigravityGatewayService) setModelRateLimitAndClearSession(p *handleMo
 		p.prefix, p.statusCode, info.ModelName, p.account.ID, info.RetryDelay)
 
 	// 设置模型限流状态（数据库）
-	writeCtx, cancel := retryableErrorStateContext(p.ctx)
-	defer cancel()
-	if err := s.accountRepo.SetModelRateLimit(writeCtx, p.account.ID, info.ModelName, resetAt); err != nil {
-		logger.LegacyPrintf("service.antigravity_gateway", "%s model_rate_limit_failed model=%s error=%v", p.prefix, info.ModelName, err)
-	}
+	writeCtx := p.ctx
+	if !shouldApplyLocalErrorState(p.account, p.statusCode) {
+		logger.LegacyPrintf("service.antigravity_gateway", "%s status=%d model_rate_limit_skipped model=%s account=%d reason=policy_skipped",
+			p.prefix, p.statusCode, info.ModelName, p.account.ID)
+	} else {
+		var cancel context.CancelFunc
+		writeCtx, cancel = retryableErrorStateContext(p.ctx)
+		defer cancel()
+		if err := s.accountRepo.SetModelRateLimit(writeCtx, p.account.ID, info.ModelName, resetAt); err != nil {
+			logger.LegacyPrintf("service.antigravity_gateway", "%s model_rate_limit_failed model=%s error=%v", p.prefix, info.ModelName, err)
+		}
 
-	// 立即更新 Redis 快照中账号的限流状态，避免并发请求重复选中
-	s.updateAccountModelRateLimitInCache(writeCtx, p.account, info.ModelName, resetAt)
+		// 立即更新 Redis 快照中账号的限流状态，避免并发请求重复选中
+		s.updateAccountModelRateLimitInCache(writeCtx, p.account, info.ModelName, resetAt)
+	}
 
 	// 清除粘性会话绑定
 	if p.cache != nil && p.sessionHash != "" {
