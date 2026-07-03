@@ -195,6 +195,11 @@ func (s *RateLimitService) persistAccountError(ctx context.Context, account *Acc
 	writeCtx, cancel := rateLimitStateContext(ctx)
 	defer cancel()
 	if err := s.accountRepo.SetError(writeCtx, account.ID, errorMsg); err != nil {
+		fallbackSource := strings.TrimSpace(source)
+		if fallbackSource == "" {
+			fallbackSource = "account_error"
+		}
+		markAccountErrorRuntimeEvicted(writeCtx, s.tempUnschedCache, account, errorMsg, fallbackSource+"_runtime_fallback")
 		return err
 	}
 	markAccountErrorRuntimeEvicted(writeCtx, s.tempUnschedCache, account, errorMsg, source)

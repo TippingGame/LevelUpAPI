@@ -16,6 +16,7 @@ type permanentKeywordAccountRepoStub struct {
 	setErrorCalls   int
 	lastErrorMsg    string
 	lastErrorCtxErr error
+	setErrorErr     error
 	tempCalls       int
 	lastTempReason  string
 	lastTempCtxErr  error
@@ -26,7 +27,7 @@ func (r *permanentKeywordAccountRepoStub) SetError(ctx context.Context, _ int64,
 	r.setErrorCalls++
 	r.lastErrorMsg = errorMsg
 	r.lastErrorCtxErr = ctx.Err()
-	return nil
+	return r.setErrorErr
 }
 
 func (r *permanentKeywordAccountRepoStub) SetTempUnschedulable(ctx context.Context, _ int64, _ time.Time, reason string) error {
@@ -501,6 +502,35 @@ func TestRateLimitServiceHandleUpstreamErrorPermanentErrorWritesRuntimeEvictionC
 	require.NotNil(t, cache.states[55])
 	require.Equal(t, "account_error", cache.states[55].MatchedKeyword)
 	require.True(t, cache.states[55].UntilUnix > time.Now().Add(time.Hour).Unix())
+}
+
+func TestRateLimitServiceHandleUpstreamErrorPermanentErrorRuntimeFallbackOnSetErrorFailure(t *testing.T) {
+	repo := &permanentKeywordAccountRepoStub{setErrorErr: errors.New("db timeout")}
+	cache := &runtimeTempUnschedCacheStub{}
+	svc := NewRateLimitService(repo, nil, nil, nil, cache)
+	account := &Account{
+		ID:          551,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Status:      StatusActive,
+		Schedulable: true,
+	}
+
+	shouldDisable := svc.HandleUpstreamError(
+		context.Background(),
+		account,
+		http.StatusUnauthorized,
+		http.Header{},
+		[]byte(`{"error":{"message":"The API key has been revoked."}}`),
+	)
+
+	require.True(t, shouldDisable)
+	require.Equal(t, 1, repo.setErrorCalls)
+	require.Equal(t, StatusError, account.Status)
+	require.False(t, account.Schedulable)
+	require.Contains(t, account.ErrorMessage, "API key has been revoked")
+	require.NotNil(t, cache.states[551])
+	require.Equal(t, "account_error", cache.states[551].MatchedKeyword)
 }
 
 func TestRateLimitServiceHandleUpstreamErrorCustomErrorSetsTempUnschedulable(t *testing.T) {
