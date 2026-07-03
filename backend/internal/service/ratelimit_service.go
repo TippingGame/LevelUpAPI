@@ -2194,6 +2194,13 @@ func parseRetryAfterResetTime(headers http.Header, now time.Time, maxAge time.Du
 		resetAt := now.Add(time.Duration(seconds) * time.Second)
 		return &resetAt
 	}
+	if seconds, err := strconv.ParseFloat(raw, 64); err == nil {
+		if math.IsNaN(seconds) || math.IsInf(seconds, 0) || seconds <= 0 || seconds > maxAge.Seconds() {
+			return nil
+		}
+		resetAt := now.Add(time.Duration(seconds * float64(time.Second)))
+		return &resetAt
+	}
 
 	resetAt, err := http.ParseTime(raw)
 	if err != nil {

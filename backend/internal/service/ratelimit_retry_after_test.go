@@ -57,6 +57,29 @@ func TestHandle429RetryAfterHTTPDateSetsRateLimit(t *testing.T) {
 	require.Equal(t, resetAt.Unix(), repo.lastRateReset.Unix())
 }
 
+func TestHandle429RetryAfterFractionalSecondsSetsRateLimit(t *testing.T) {
+	repo := &permanentKeywordAccountRepoStub{}
+	svc := &RateLimitService{accountRepo: repo}
+	account := &Account{
+		ID:          7318,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeOAuth,
+		Status:      StatusActive,
+		Schedulable: true,
+	}
+	headers := http.Header{}
+	headers.Set("Retry-After", "1.5")
+
+	before := time.Now()
+	svc.handle429(context.Background(), account, headers, []byte(`{"error":{"type":"rate_limit_error","message":"slow down"}}`))
+	after := time.Now()
+
+	require.Equal(t, 1, repo.rateLimitCalls)
+	require.Equal(t, account.ID, repo.lastRateLimitID)
+	require.False(t, repo.lastRateReset.Before(before.Add(1500*time.Millisecond)))
+	require.False(t, repo.lastRateReset.After(after.Add(1500*time.Millisecond)))
+}
+
 func TestHandle429AnthropicAPIKeyHonorsRetryAfter(t *testing.T) {
 	repo := &permanentKeywordAccountRepoStub{}
 	svc := &RateLimitService{accountRepo: repo}
@@ -92,6 +115,28 @@ func TestHandle429RetryAfterTooLargeFallsBackToDefault(t *testing.T) {
 	}
 	headers := http.Header{}
 	headers.Set("Retry-After", "999999")
+
+	before := time.Now()
+	svc.handle429(context.Background(), account, headers, []byte(`{"error":{"type":"rate_limit_error","message":"slow down"}}`))
+	after := time.Now()
+
+	require.Equal(t, 1, repo.rateLimitCalls)
+	require.False(t, repo.lastRateReset.Before(before.Add(time.Duration(defaultRateLimit429CooldownSeconds)*time.Second)))
+	require.False(t, repo.lastRateReset.After(after.Add(time.Duration(defaultRateLimit429CooldownSeconds)*time.Second)))
+}
+
+func TestHandle429RetryAfterNonFiniteFallsBackToDefault(t *testing.T) {
+	repo := &permanentKeywordAccountRepoStub{}
+	svc := &RateLimitService{accountRepo: repo}
+	account := &Account{
+		ID:          7319,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeOAuth,
+		Status:      StatusActive,
+		Schedulable: true,
+	}
+	headers := http.Header{}
+	headers.Set("Retry-After", "+Inf")
 
 	before := time.Now()
 	svc.handle429(context.Background(), account, headers, []byte(`{"error":{"type":"rate_limit_error","message":"slow down"}}`))
