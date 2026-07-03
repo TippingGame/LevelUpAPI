@@ -273,6 +273,19 @@ func (p *OpenAITokenProvider) disableAccountMissingRefreshToken(account *Account
 		return
 	}
 	bgCtx := context.Background()
+	if !shouldApplyLocalErrorState(account, tokenRefreshNonRetryableStatusCode) {
+		slog.Info("openai_token_provider_missing_refresh_token_local_state_skipped", "account_id", account.ID)
+		if p.tokenCache != nil {
+			cacheKey := OpenAITokenCacheKey(account)
+			if err := p.tokenCache.DeleteAccessToken(bgCtx, cacheKey); err != nil {
+				slog.Warn("openai_token_provider.cache_delete_failed",
+					"account_id", account.ID,
+					"error", err,
+				)
+			}
+		}
+		return
+	}
 	var setErr error
 	if p.accountRepo != nil {
 		setErr = p.accountRepo.SetError(bgCtx, account.ID, reason)

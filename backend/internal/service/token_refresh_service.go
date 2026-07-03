@@ -298,6 +298,10 @@ func (s *TokenRefreshService) refreshWithRetry(ctx context.Context, account *Acc
 			if s.deferNonRetryableRefreshError(ctx, account, err) {
 				return err
 			}
+			if !shouldApplyLocalErrorState(account, tokenRefreshNonRetryableStatusCode) {
+				slog.Info("token_refresh.non_retryable_local_state_skipped", "account_id", account.ID)
+				return err
+			}
 			errorMsg := fmt.Sprintf("Token refresh failed (non-retryable): %v", err)
 			writeCtx, cancel := rateLimitStateContext(ctx)
 			setErr := s.accountRepo.SetError(writeCtx, account.ID, errorMsg)
@@ -338,6 +342,10 @@ func (s *TokenRefreshService) refreshWithRetry(ctx context.Context, account *Acc
 		"max_retries", s.cfg.MaxRetries,
 		"error", lastErr,
 	)
+	if !shouldApplyLocalSystemErrorState(account) {
+		slog.Info("token_refresh.retry_exhausted_local_state_skipped", "account_id", account.ID)
+		return lastErr
+	}
 
 	// 设置临时不可调度 10 分钟（不标记 error，保持 status=active 让下个刷新周期能继续尝试）
 	until := time.Now().Add(TokenRefreshTempUnschedDuration)
@@ -369,6 +377,10 @@ func (s *TokenRefreshService) deferNonRetryableRefreshError(ctx context.Context,
 		return false
 	}
 	if isMissingRefreshTokenRefreshError(err) {
+		return false
+	}
+	if !shouldApplyLocalErrorState(account, tokenRefreshNonRetryableStatusCode) {
+		slog.Info("token_refresh.non_retryable_temp_unschedulable_skipped", "account_id", account.ID)
 		return false
 	}
 

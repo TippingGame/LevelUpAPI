@@ -140,3 +140,28 @@ func TestAntigravityTokenProvider_MarkTempUnschedulableSurvivesRepoWriteFailure(
 	require.Equal(t, "antigravity_token_refresh", tempCache.states[42].MatchedKeyword)
 	require.Contains(t, tempCache.states[42].ErrorMessage, "refresh timeout")
 }
+
+func TestAntigravityTokenProvider_MarkTempUnschedulablePoolModeSkipsLocalState(t *testing.T) {
+	repo := &antigravityTokenProviderRepoStub{}
+	tempCache := &runtimeTempUnschedCacheStub{}
+	provider := &AntigravityTokenProvider{
+		accountRepo:      repo,
+		tempUnschedCache: tempCache,
+	}
+	account := &Account{
+		ID:          43,
+		Platform:    PlatformAntigravity,
+		Type:        AccountTypeAPIKey,
+		Status:      StatusActive,
+		Schedulable: true,
+		Credentials: map[string]any{
+			"pool_mode": true,
+		},
+	}
+
+	provider.markTempUnschedulable(account, errors.New("refresh timeout"))
+
+	require.Equal(t, 0, repo.tempCalls)
+	require.Nil(t, account.TempUnschedulableUntil)
+	require.Nil(t, tempCache.states[43])
+}

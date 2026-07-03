@@ -492,6 +492,37 @@ func TestTokenRefreshService_RefreshWithRetry_RefreshFailed(t *testing.T) {
 	require.Equal(t, "token_refresh_retry_exhausted", tempCache.state.MatchedKeyword)
 }
 
+func TestTokenRefreshService_RefreshWithRetry_RetryExhaustedPoolModeSkipsLocalState(t *testing.T) {
+	repo := &tokenRefreshAccountRepo{}
+	tempCache := &tempUnschedCacheStub{}
+	cfg := &config.Config{
+		TokenRefresh: config.TokenRefreshConfig{
+			MaxRetries:          1,
+			RetryBackoffSeconds: 0,
+		},
+	}
+	service := NewTokenRefreshService(repo, nil, nil, nil, nil, nil, nil, cfg, tempCache)
+	account := &Account{
+		ID:       125,
+		Platform: PlatformGemini,
+		Type:     AccountTypeAPIKey,
+		Credentials: map[string]any{
+			"pool_mode": true,
+		},
+	}
+	refresher := &tokenRefresherStub{
+		err: errors.New("network timeout"),
+	}
+
+	err := service.refreshWithRetry(context.Background(), account, refresher, refresher, time.Hour)
+
+	require.Error(t, err)
+	require.Equal(t, 0, repo.setTempUnschedCalls)
+	require.Equal(t, 0, repo.setErrorCalls)
+	require.Nil(t, account.TempUnschedulableUntil)
+	require.Equal(t, 0, tempCache.setCalls)
+}
+
 func TestTokenRefreshService_RefreshWithRetry_RetryExhaustedStateSurvivesCanceledContext(t *testing.T) {
 	repo := &tokenRefreshAccountRepo{}
 	tempCache := &tempUnschedCacheStub{}
@@ -618,6 +649,71 @@ func TestTokenRefreshService_RefreshWithRetry_AntigravityNonRetryableError(t *te
 	require.Equal(t, int64(14), tempCache.accountID)
 	require.NotNil(t, tempCache.state)
 	require.Equal(t, tokenRefreshNonRetryableKeyword, tempCache.state.MatchedKeyword)
+}
+
+func TestTokenRefreshService_RefreshWithRetry_NonRetryablePoolModeSkipsLocalState(t *testing.T) {
+	repo := &tokenRefreshAccountRepo{}
+	tempCache := &tempUnschedCacheStub{}
+	cfg := &config.Config{
+		TokenRefresh: config.TokenRefreshConfig{
+			MaxRetries:          1,
+			RetryBackoffSeconds: 0,
+		},
+	}
+	service := NewTokenRefreshService(repo, nil, nil, nil, nil, nil, nil, cfg, tempCache)
+	account := &Account{
+		ID:       129,
+		Platform: PlatformAntigravity,
+		Type:     AccountTypeAPIKey,
+		Credentials: map[string]any{
+			"pool_mode": true,
+		},
+	}
+	refresher := &tokenRefresherStub{
+		err: errors.New("invalid_grant: token revoked"),
+	}
+
+	err := service.refreshWithRetry(context.Background(), account, refresher, refresher, time.Hour)
+
+	require.Error(t, err)
+	require.Equal(t, 0, repo.setTempUnschedCalls)
+	require.Equal(t, 0, repo.setErrorCalls)
+	require.Nil(t, account.TempUnschedulableUntil)
+	require.Equal(t, 0, tempCache.setCalls)
+}
+
+func TestTokenRefreshService_RefreshWithRetry_NonRetryablePoolModeCustomPolicyStillWrites(t *testing.T) {
+	repo := &tokenRefreshAccountRepo{}
+	tempCache := &tempUnschedCacheStub{}
+	cfg := &config.Config{
+		TokenRefresh: config.TokenRefreshConfig{
+			MaxRetries:          1,
+			RetryBackoffSeconds: 0,
+		},
+	}
+	service := NewTokenRefreshService(repo, nil, nil, nil, nil, nil, nil, cfg, tempCache)
+	account := &Account{
+		ID:       130,
+		Platform: PlatformAntigravity,
+		Type:     AccountTypeAPIKey,
+		Credentials: map[string]any{
+			"pool_mode":                  true,
+			"custom_error_codes_enabled": true,
+			"custom_error_codes":         []any{float64(tokenRefreshNonRetryableStatusCode)},
+		},
+	}
+	refresher := &tokenRefresherStub{
+		err: errors.New("invalid_grant: token revoked"),
+	}
+
+	err := service.refreshWithRetry(context.Background(), account, refresher, refresher, time.Hour)
+
+	require.Error(t, err)
+	require.Equal(t, 0, repo.setTempUnschedCalls)
+	require.Equal(t, 1, repo.setErrorCalls)
+	require.Nil(t, account.TempUnschedulableUntil)
+	require.Equal(t, 1, tempCache.setCalls)
+	require.Equal(t, "account_error", tempCache.state.MatchedKeyword)
 }
 
 func TestTokenRefreshService_RefreshWithRetry_NonRetryableStateSurvivesCanceledContext(t *testing.T) {

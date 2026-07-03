@@ -926,7 +926,7 @@ func (s *AccountTestService) reconcileOpenAI429State(ctx context.Context, accoun
 
 	persistOpenAI429PlanType(ctx, s.accountRepo, account, body)
 
-	if account.IsPoolMode() {
+	if !shouldApplyLocalErrorState(account, http.StatusTooManyRequests) {
 		slog.Info("account_test_openai_429_pool_mode_rate_limit_skipped", "account_id", account.ID)
 		return
 	}

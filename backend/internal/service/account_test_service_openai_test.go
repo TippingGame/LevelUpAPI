@@ -633,6 +633,45 @@ func TestAccountTestService_OpenAI429PoolModeSkipsLocalRateLimit(t *testing.T) {
 	require.Nil(t, account.RateLimitResetAt)
 }
 
+func TestAccountTestService_OpenAI429PoolModeCustomPolicySetsLocalRateLimit(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	ctx, _ := newTestContext()
+	cancelTestRequest(ctx)
+
+	resetAt := time.Now().Add(time.Hour).Unix()
+	resp := newJSONResponse(http.StatusTooManyRequests, fmt.Sprintf(`{"error":{"type":"usage_limit_reached","message":"limit reached","plan_type":"free","resets_at":%d}}`, resetAt))
+
+	repo := &openAIAccountTestRepo{}
+	upstream := &queuedHTTPUpstream{responses: []*http.Response{resp}}
+	svc := &AccountTestService{accountRepo: repo, httpUpstream: upstream, cfg: &config.Config{}}
+	account := &Account{
+		ID:           86,
+		Platform:     PlatformOpenAI,
+		Type:         AccountTypeAPIKey,
+		Status:       StatusError,
+		ErrorMessage: "stale 403",
+		Concurrency:  1,
+		Credentials: map[string]any{
+			"api_key":                    "sk-test",
+			"base_url":                   "https://api.openai.com",
+			"pool_mode":                  true,
+			"custom_error_codes_enabled": true,
+			"custom_error_codes":         []any{float64(http.StatusTooManyRequests)},
+			"plan_type":                  "plus",
+		},
+	}
+
+	err := svc.testOpenAIAccountConnection(ctx, account, "gpt-5.4", "", "")
+
+	require.Error(t, err)
+	require.Equal(t, account.ID, repo.rateLimitedID)
+	require.NotNil(t, repo.rateLimitedAt)
+	require.Equal(t, account.ID, repo.clearedErrorID)
+	require.Equal(t, StatusActive, account.Status)
+	require.Empty(t, account.ErrorMessage)
+	require.NotNil(t, account.RateLimitResetAt)
+}
+
 func TestAccountTestService_OpenAI429ActiveAccountDoesNotClearError(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	ctx, _ := newTestContext()

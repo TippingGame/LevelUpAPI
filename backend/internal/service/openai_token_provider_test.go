@@ -966,6 +966,36 @@ func TestOpenAITokenProvider_NoRefreshTokenExpired_DisablesAccount(t *testing.T)
 	require.NotContains(t, cache.tokens, cacheKey)
 }
 
+func TestOpenAITokenProvider_DisableMissingRefreshTokenPoolModeSkipsLocalState(t *testing.T) {
+	cache := newOpenAITokenCacheStub()
+	repo := &rateLimitAccountRepoStub{}
+	tempCache := &runtimeTempUnschedCacheStub{}
+	account := &Account{
+		ID:          2883,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Status:      StatusActive,
+		Schedulable: true,
+		Credentials: map[string]any{
+			"api_key":   "sk-test",
+			"pool_mode": true,
+		},
+	}
+	cacheKey := OpenAITokenCacheKey(account)
+	cache.tokens[cacheKey] = "stale-cached-token"
+
+	provider := NewOpenAITokenProvider(repo, cache, nil)
+	provider.SetTempUnschedCache(tempCache)
+
+	provider.disableAccountMissingRefreshToken(account, "refresh_token is missing")
+
+	require.Equal(t, 0, repo.setErrorCalls)
+	require.Equal(t, StatusActive, account.Status)
+	require.True(t, account.Schedulable)
+	require.Nil(t, tempCache.states[2883])
+	require.NotContains(t, cache.tokens, cacheKey)
+}
+
 func TestOpenAITokenProvider_NoRefreshTokenExpired_RuntimeFallbackOnSetErrorFailure(t *testing.T) {
 	cache := newOpenAITokenCacheStub()
 	repo := &rateLimitAccountRepoStub{setErrorErr: errors.New("db timeout")}
