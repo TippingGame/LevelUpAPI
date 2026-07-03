@@ -1188,6 +1188,106 @@ func (s *AccountRepoSuite) TestListQuotaPoolAccountsCreatesMissingOpenAIProShare
 	s.Require().True(hasProSharedGroup, "quota pool account rows should include the newly created Pro shared group")
 }
 
+func (s *AccountRepoSuite) TestListQuotaPoolAccountsRepairsLegacyBlankShareStatusOpenAIProShareBinding() {
+	owner := mustCreateUser(s.T(), s.client, &service.User{Email: "quota-pool-legacy-status-owner@example.com"})
+	privateGroup := mustCreateGroup(s.T(), s.client, &service.Group{
+		Name:             "quota-pool-legacy-status-private",
+		Platform:         service.PlatformOpenAI,
+		Scope:            service.GroupScopeUserPrivate,
+		SubscriptionType: service.SubscriptionTypeStandard,
+		OwnerUserID:      &owner.ID,
+	})
+	plusGroup := mustCreateGroup(s.T(), s.client, &service.Group{
+		Name:                 "quota-pool-legacy-status-plus",
+		Platform:             service.PlatformOpenAI,
+		Scope:                service.GroupScopePublic,
+		SubscriptionType:     service.SubscriptionTypeStandard,
+		RequiredAccountLevel: service.AccountLevelPlus,
+	})
+	mustCreateGroup(s.T(), s.client, &service.Group{
+		Name:                 "quota-pool-legacy-status-pro",
+		Platform:             service.PlatformOpenAI,
+		Scope:                service.GroupScopePublic,
+		SubscriptionType:     service.SubscriptionTypeStandard,
+		RequiredAccountLevel: service.AccountLevelPro,
+	})
+	account := mustCreateAccount(s.T(), s.client, &service.Account{
+		Name:         "quota-pool-legacy-blank-approved-pro",
+		Platform:     service.PlatformOpenAI,
+		Type:         service.AccountTypeOAuth,
+		AccountLevel: service.AccountLevelPlus,
+		OwnerUserID:  &owner.ID,
+		Credentials:  map[string]any{"plan_type": "chatgpt_pro"},
+		Schedulable:  true,
+	})
+	mustBindAccountToGroup(s.T(), s.client, account.ID, privateGroup.ID, 1)
+	mustBindAccountToGroup(s.T(), s.client, account.ID, plusGroup.ID, 2)
+	_, err := s.repo.sql.ExecContext(s.ctx, `
+		UPDATE accounts
+		SET share_mode = 'public', share_status = '', updated_at = NOW()
+		WHERE id = $1
+	`, account.ID)
+	s.Require().NoError(err)
+
+	accounts, err := s.repo.ListQuotaPoolAccounts(s.ctx, owner.ID)
+
+	s.Require().NoError(err)
+	s.Require().True(s.accountHasGroup(account.ID, privateGroup.ID), "private owner group should be preserved")
+	s.Require().True(s.accountHasOpenAIStandardPoolLevel(account.ID, service.AccountLevelPro), "legacy blank approved share status should still repair into the Pro pool")
+	s.Require().False(s.accountHasGroup(account.ID, plusGroup.ID), "stale Plus public pool binding should be removed")
+	var found *service.Account
+	for i := range accounts {
+		if accounts[i].ID == account.ID {
+			found = &accounts[i]
+			break
+		}
+	}
+	s.Require().NotNil(found, "legacy blank share-status account should be returned")
+	s.Require().Equal(service.AccountShareStatusApproved, found.ShareStatus)
+}
+
+func (s *AccountRepoSuite) TestListQuotaPoolAccountsIncludesLegacyBlankShareStatusPlatformShare() {
+	viewer := mustCreateUser(s.T(), s.client, &service.User{Email: "quota-pool-legacy-status-viewer@example.com"})
+	owner := mustCreateUser(s.T(), s.client, &service.User{Email: "quota-pool-legacy-status-other-owner@example.com"})
+	proGroup := mustCreateGroup(s.T(), s.client, &service.Group{
+		Name:                 "quota-pool-legacy-status-platform-pro",
+		Platform:             service.PlatformOpenAI,
+		Scope:                service.GroupScopePublic,
+		SubscriptionType:     service.SubscriptionTypeStandard,
+		RequiredAccountLevel: service.AccountLevelPro,
+	})
+	account := mustCreateAccount(s.T(), s.client, &service.Account{
+		Name:         "quota-pool-legacy-platform-approved-pro",
+		Platform:     service.PlatformOpenAI,
+		Type:         service.AccountTypeOAuth,
+		AccountLevel: service.AccountLevelPlus,
+		OwnerUserID:  &owner.ID,
+		Credentials:  map[string]any{"plan_type": "chatgpt_pro"},
+		Schedulable:  true,
+	})
+	mustBindAccountToGroup(s.T(), s.client, account.ID, proGroup.ID, 1)
+	_, err := s.repo.sql.ExecContext(s.ctx, `
+		UPDATE accounts
+		SET share_mode = 'public', share_status = '', updated_at = NOW()
+		WHERE id = $1
+	`, account.ID)
+	s.Require().NoError(err)
+
+	accounts, err := s.repo.ListQuotaPoolAccounts(s.ctx, viewer.ID)
+
+	s.Require().NoError(err)
+	var found *service.Account
+	for i := range accounts {
+		if accounts[i].ID == account.ID {
+			found = &accounts[i]
+			break
+		}
+	}
+	s.Require().NotNil(found, "platform quota pool should include legacy blank share-status public accounts owned by other users")
+	s.Require().True(found.IsPublicShareApproved())
+	s.Require().True(s.accountHasOpenAIStandardPoolLevel(account.ID, service.AccountLevelPro))
+}
+
 func (s *AccountRepoSuite) TestListOwnedWithFiltersRepairsApprovedOpenAIProShareBinding() {
 	owner := mustCreateUser(s.T(), s.client, &service.User{Email: "owned-list-pro-repair-owner@example.com"})
 	privateGroup := mustCreateGroup(s.T(), s.client, &service.Group{

@@ -888,7 +888,7 @@ func (r *accountRepository) repairQuotaPoolOwnerOpenAISharedPoolBindings(ctx con
 			AND platform = 'openai'
 			AND type = 'oauth'
 			AND lower(btrim(COALESCE(share_mode, ''))) = 'public'
-			AND lower(btrim(COALESCE(share_status, ''))) = 'approved'
+			AND lower(btrim(COALESCE(share_status, ''))) NOT IN ('pending', 'suspended')
 	`, ownerUserID)
 	if err != nil {
 		return false, err
@@ -934,8 +934,8 @@ func (r *accountRepository) listQuotaPoolAccountRows(ctx context.Context, ownerU
 					a.owner_user_id IS NULL
 					OR (
 						a.owner_user_id IS NOT NULL
-						AND a.share_mode = 'public'
-						AND a.share_status = 'approved'
+						AND lower(btrim(COALESCE(a.share_mode, ''))) = 'public'
+						AND lower(btrim(COALESCE(a.share_status, ''))) NOT IN ('pending', 'suspended')
 					)
 				)
 		)
@@ -2907,7 +2907,7 @@ func repairOpenAISharedPoolBindingsForAccounts(ctx context.Context, exec sqlExec
 				AND a.type = 'oauth'
 				AND a.owner_user_id IS NOT NULL
 				AND lower(btrim(COALESCE(a.share_mode, ''))) = 'public'
-				AND lower(btrim(COALESCE(a.share_status, ''))) = 'approved'
+				AND lower(btrim(COALESCE(a.share_status, ''))) NOT IN ('pending', 'suspended')
 		),
 		candidate_target_groups AS (
 			SELECT
@@ -3020,7 +3020,7 @@ func ensureOpenAIProSharedPoolForAccounts(ctx context.Context, exec sqlExecutor,
 				AND a.type = 'oauth'
 				AND a.owner_user_id IS NOT NULL
 				AND lower(btrim(COALESCE(a.share_mode, ''))) = 'public'
-				AND lower(btrim(COALESCE(a.share_status, ''))) = 'approved'
+				AND lower(btrim(COALESCE(a.share_status, ''))) NOT IN ('pending', 'suspended')
 				AND NOT (
 					lower(btrim(COALESCE(a.account_level, ''))) = 'team'
 					OR plan.token IN ('team', 'chatgptteam')
