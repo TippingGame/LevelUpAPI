@@ -52,7 +52,10 @@ func (s *OpenAIGatewayService) MarkCyberSessionBlocked(ctx context.Context, key 
 	if key == "" {
 		return
 	}
-	enabled, ttl := s.CyberSessionBlockRuntime(ctx)
+	writeCtx, cancel := rateLimitStateContext(ctx)
+	defer cancel()
+
+	enabled, ttl := s.CyberSessionBlockRuntime(writeCtx)
 	if !enabled {
 		return
 	}
@@ -60,7 +63,7 @@ func (s *OpenAIGatewayService) MarkCyberSessionBlocked(ctx context.Context, key 
 	if store == nil {
 		return
 	}
-	if err := store.SetCyberSessionBlocked(ctx, key, ttl); err != nil {
+	if err := store.SetCyberSessionBlocked(writeCtx, key, ttl); err != nil {
 		logger.LegacyPrintf("service.openai_gateway", "cyber session block write failed: err=%v", err)
 	}
 }

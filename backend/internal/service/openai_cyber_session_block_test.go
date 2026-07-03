@@ -76,7 +76,9 @@ func (s *cyberSessionBlockSettingRepoStub) Delete(ctx context.Context, key strin
 }
 
 type cyberSessionBlockCacheStub struct {
-	blocked map[string]time.Duration
+	blocked        map[string]time.Duration
+	setCtxErr      error
+	setHasDeadline bool
 }
 
 func (c *cyberSessionBlockCacheStub) GetSessionAccountID(context.Context, int64, string) (int64, error) {
@@ -108,6 +110,11 @@ func (c *cyberSessionBlockCacheStub) DeleteSessionString(context.Context, int64,
 }
 
 func (c *cyberSessionBlockCacheStub) SetCyberSessionBlocked(ctx context.Context, key string, ttl time.Duration) error {
+	c.setCtxErr = ctx.Err()
+	_, c.setHasDeadline = ctx.Deadline()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if c.blocked == nil {
 		c.blocked = map[string]time.Duration{}
 	}
@@ -186,4 +193,28 @@ func TestOpenAIGatewayServiceCyberSessionBlockHonorsRuntimeSwitch(t *testing.T) 
 	svc.MarkCyberSessionBlocked(context.Background(), "session-a")
 	require.True(t, svc.IsCyberSessionBlocked(context.Background(), "session-a"))
 	require.Equal(t, 2*time.Second, cache.blocked["session-a"])
+}
+
+func TestOpenAIGatewayServiceMarkCyberSessionBlockedIgnoresCanceledParent(t *testing.T) {
+	resetCyberSessionBlockRuntimeCacheForTest(t)
+
+	repo := &cyberSessionBlockSettingRepoStub{values: map[string]string{
+		SettingKeyCyberSessionBlockEnabled:    "true",
+		SettingKeyCyberSessionBlockTTLSeconds: "3",
+	}}
+	cache := &cyberSessionBlockCacheStub{}
+	svc := &OpenAIGatewayService{
+		cache:          cache,
+		settingService: NewSettingService(repo, nil),
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	svc.MarkCyberSessionBlocked(ctx, "session-canceled")
+
+	require.NoError(t, cache.setCtxErr)
+	require.True(t, cache.setHasDeadline, "cyber session block writes should use a bounded detached context")
+	require.True(t, svc.IsCyberSessionBlocked(context.Background(), "session-canceled"))
+	require.Equal(t, 3*time.Second, cache.blocked["session-canceled"])
 }
