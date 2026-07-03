@@ -11,12 +11,17 @@ import (
 )
 
 const scheduledTestDefaultMaxWorkers = 10
+const scheduledTestInvalidCronBackoff = time.Hour
+
+type scheduledAccountTester interface {
+	RunTestBackground(ctx context.Context, accountID int64, modelID string) (*ScheduledTestResult, error)
+}
 
 // ScheduledTestRunnerService periodically scans due test plans and executes them.
 type ScheduledTestRunnerService struct {
 	planRepo       ScheduledTestPlanRepository
 	scheduledSvc   *ScheduledTestService
-	accountTestSvc *AccountTestService
+	accountTestSvc scheduledAccountTester
 	rateLimitSvc   *RateLimitService
 	cfg            *config.Config
 
@@ -120,14 +125,20 @@ func (s *ScheduledTestRunnerService) runScheduled() {
 }
 
 func (s *ScheduledTestRunnerService) runOnePlan(ctx context.Context, plan *ScheduledTestPlan) {
-	result, err := s.accountTestSvc.RunTestBackground(ctx, plan.AccountID, plan.ModelID)
-	if err != nil {
-		logger.LegacyPrintf("service.scheduled_test_runner", "[ScheduledTestRunner] plan=%d RunTestBackground error: %v", plan.ID, err)
+	if plan == nil {
 		return
 	}
+	result, testErr := s.runBackgroundAccountTest(ctx, plan)
+	if testErr != nil {
+		logger.LegacyPrintf("service.scheduled_test_runner", "[ScheduledTestRunner] plan=%d RunTestBackground error: %v", plan.ID, testErr)
+	}
 
-	if err := s.scheduledSvc.SaveResult(ctx, plan.ID, plan.MaxResults, result); err != nil {
-		logger.LegacyPrintf("service.scheduled_test_runner", "[ScheduledTestRunner] plan=%d SaveResult error: %v", plan.ID, err)
+	if s.scheduledSvc != nil {
+		if err := s.scheduledSvc.SaveResult(ctx, plan.ID, effectiveScheduledTestMaxResults(plan), result); err != nil {
+			logger.LegacyPrintf("service.scheduled_test_runner", "[ScheduledTestRunner] plan=%d SaveResult error: %v", plan.ID, err)
+		}
+	} else {
+		logger.LegacyPrintf("service.scheduled_test_runner", "[ScheduledTestRunner] plan=%d SaveResult skipped: scheduled service unavailable", plan.ID)
 	}
 
 	// Auto-recover account if test succeeded and auto_recover is enabled.
@@ -135,15 +146,56 @@ func (s *ScheduledTestRunnerService) runOnePlan(ctx context.Context, plan *Sched
 		s.tryRecoverAccount(ctx, plan.AccountID, plan.ID)
 	}
 
-	nextRun, err := computeNextRun(plan.CronExpression, time.Now())
+	lastRunAt := time.Now()
+	nextRun, err := computeNextRun(plan.CronExpression, lastRunAt)
 	if err != nil {
 		logger.LegacyPrintf("service.scheduled_test_runner", "[ScheduledTestRunner] plan=%d computeNextRun error: %v", plan.ID, err)
-		return
+		nextRun = lastRunAt.Add(scheduledTestInvalidCronBackoff)
 	}
 
-	if err := s.planRepo.UpdateAfterRun(ctx, plan.ID, time.Now(), nextRun); err != nil {
+	if s.planRepo == nil {
+		logger.LegacyPrintf("service.scheduled_test_runner", "[ScheduledTestRunner] plan=%d UpdateAfterRun skipped: plan repository unavailable", plan.ID)
+		return
+	}
+	if err := s.planRepo.UpdateAfterRun(ctx, plan.ID, lastRunAt, nextRun); err != nil {
 		logger.LegacyPrintf("service.scheduled_test_runner", "[ScheduledTestRunner] plan=%d UpdateAfterRun error: %v", plan.ID, err)
 	}
+}
+
+func (s *ScheduledTestRunnerService) runBackgroundAccountTest(ctx context.Context, plan *ScheduledTestPlan) (*ScheduledTestResult, error) {
+	startedAt := time.Now()
+	if plan == nil {
+		return failedScheduledTestResult(startedAt, "scheduled test plan is nil"), nil
+	}
+	if s == nil || s.accountTestSvc == nil {
+		return failedScheduledTestResult(startedAt, "account test service unavailable"), nil
+	}
+	result, err := s.accountTestSvc.RunTestBackground(ctx, plan.AccountID, plan.ModelID)
+	if err != nil {
+		return failedScheduledTestResult(startedAt, err.Error()), err
+	}
+	if result == nil {
+		return failedScheduledTestResult(startedAt, "account test did not return a result"), nil
+	}
+	return result, nil
+}
+
+func failedScheduledTestResult(startedAt time.Time, errorMessage string) *ScheduledTestResult {
+	finishedAt := time.Now()
+	return &ScheduledTestResult{
+		Status:       "failed",
+		ErrorMessage: errorMessage,
+		LatencyMs:    finishedAt.Sub(startedAt).Milliseconds(),
+		StartedAt:    startedAt,
+		FinishedAt:   finishedAt,
+	}
+}
+
+func effectiveScheduledTestMaxResults(plan *ScheduledTestPlan) int {
+	if plan != nil && plan.MaxResults > 0 {
+		return plan.MaxResults
+	}
+	return 50
 }
 
 // tryRecoverAccount attempts to recover an account from recoverable runtime state.
