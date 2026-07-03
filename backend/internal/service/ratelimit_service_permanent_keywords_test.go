@@ -742,6 +742,70 @@ func TestRateLimitServiceHandleStreamTimeoutErrorActionDowngradesAPIKeyToTempUns
 	require.Contains(t, repo.lastTempReason, "gpt-5")
 }
 
+func TestRateLimitServiceHandleStreamTimeoutPoolModeSkipsLocalState(t *testing.T) {
+	repo := &permanentKeywordAccountRepoStub{}
+	settingSvc := NewSettingService(&streamTimeoutSettingRepoStub{value: streamTimeoutSettingsValue(t, StreamTimeoutSettings{
+		Enabled:                true,
+		Action:                 StreamTimeoutActionTempUnsched,
+		TempUnschedMinutes:     7,
+		ThresholdCount:         1,
+		ThresholdWindowMinutes: 10,
+	})}, nil)
+	svc := NewRateLimitService(repo, nil, nil, nil, nil)
+	svc.SetSettingService(settingSvc)
+	account := &Account{
+		ID:          61,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Status:      StatusActive,
+		Schedulable: true,
+		Credentials: map[string]any{
+			"pool_mode": true,
+		},
+	}
+
+	handled := svc.HandleStreamTimeout(context.Background(), account, "gpt-5")
+
+	require.False(t, handled)
+	require.Equal(t, 0, repo.setErrorCalls)
+	require.Equal(t, 0, repo.tempCalls)
+	require.Nil(t, account.TempUnschedulableUntil)
+}
+
+func TestRateLimitServiceHandleStreamTimeoutPoolModeCustomPolicyStillTempUnscheds(t *testing.T) {
+	repo := &permanentKeywordAccountRepoStub{}
+	settingSvc := NewSettingService(&streamTimeoutSettingRepoStub{value: streamTimeoutSettingsValue(t, StreamTimeoutSettings{
+		Enabled:                true,
+		Action:                 StreamTimeoutActionTempUnsched,
+		TempUnschedMinutes:     7,
+		ThresholdCount:         1,
+		ThresholdWindowMinutes: 10,
+	})}, nil)
+	svc := NewRateLimitService(repo, nil, nil, nil, nil)
+	svc.SetSettingService(settingSvc)
+	account := &Account{
+		ID:          62,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Status:      StatusActive,
+		Schedulable: true,
+		Credentials: map[string]any{
+			"pool_mode":                  true,
+			"custom_error_codes_enabled": true,
+			"custom_error_codes":         []any{float64(http.StatusTooManyRequests)},
+		},
+	}
+
+	handled := svc.HandleStreamTimeout(context.Background(), account, "gpt-5")
+
+	require.True(t, handled)
+	require.Equal(t, 0, repo.setErrorCalls)
+	require.Equal(t, 1, repo.tempCalls)
+	require.NoError(t, repo.lastTempCtxErr)
+	require.Contains(t, repo.lastTempReason, `"matched_keyword":"stream_timeout"`)
+	require.Contains(t, repo.lastTempReason, "gpt-5")
+}
+
 func TestRateLimitServiceEvictAccountErrorFromRuntimeCache(t *testing.T) {
 	cache := &runtimeTempUnschedCacheStub{}
 	svc := NewRateLimitService(nil, nil, nil, nil, cache)

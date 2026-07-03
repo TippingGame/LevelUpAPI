@@ -12,3 +12,13 @@ func shouldApplyLocalErrorState(account *Account, statusCode int) bool {
 	}
 	return true
 }
+
+func shouldApplyLocalSystemErrorState(account *Account) bool {
+	if account == nil {
+		return false
+	}
+	if account.IsPoolMode() && !account.IsCustomErrorCodesEnabled() {
+		return false
+	}
+	return true
+}
