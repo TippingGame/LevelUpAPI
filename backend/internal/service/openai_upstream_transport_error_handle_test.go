@@ -148,6 +148,7 @@ func TestTempUnscheduleOpenAITransportError_PoolModeCustomPolicyStillWrites(t *t
 		Credentials: map[string]any{
 			"pool_mode":                  true,
 			"custom_error_codes_enabled": true,
+			"custom_error_codes":         []any{float64(http.StatusBadGateway)},
 		},
 	}
 

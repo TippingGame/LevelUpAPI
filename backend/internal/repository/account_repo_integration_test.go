@@ -701,10 +701,29 @@ func (s *AccountRepoSuite) TestListSchedulableIgnoresDefaultPoolModeLocalState()
 		Credentials: map[string]any{
 			"pool_mode":                  true,
 			"custom_error_codes_enabled": true,
+			"custom_error_codes":         []any{float64(429)},
 		},
 	})
 	mustBindAccountToGroup(s.T(), s.client, poolCustom.ID, group.ID, 1)
 	s.Require().NoError(s.client.Account.UpdateOneID(poolCustom.ID).
+		SetTempUnschedulableUntil(future).
+		Exec(s.ctx))
+
+	poolInvalidCustom := mustCreateAccount(s.T(), s.client, &service.Account{
+		Name:             "pool-invalid-custom",
+		Platform:         service.PlatformOpenAI,
+		Type:             service.AccountTypeAPIKey,
+		Schedulable:      true,
+		RateLimitResetAt: &future,
+		OverloadUntil:    &future,
+		Credentials: map[string]any{
+			"pool_mode":                  true,
+			"custom_error_codes_enabled": true,
+			"custom_error_codes":         "bad",
+		},
+	})
+	mustBindAccountToGroup(s.T(), s.client, poolInvalidCustom.ID, group.ID, 1)
+	s.Require().NoError(s.client.Account.UpdateOneID(poolInvalidCustom.ID).
 		SetTempUnschedulableUntil(future).
 		Exec(s.ctx))
 
@@ -726,6 +745,7 @@ func (s *AccountRepoSuite) TestListSchedulableIgnoresDefaultPoolModeLocalState()
 	s.Require().NoError(err)
 	allIDs := idsOfAccounts(all)
 	s.Require().Contains(allIDs, poolDefault.ID)
+	s.Require().Contains(allIDs, poolInvalidCustom.ID)
 	s.Require().NotContains(allIDs, poolCustom.ID)
 	s.Require().NotContains(allIDs, nonPool.ID)
 
@@ -733,6 +753,7 @@ func (s *AccountRepoSuite) TestListSchedulableIgnoresDefaultPoolModeLocalState()
 	s.Require().NoError(err)
 	groupIDs := idsOfAccounts(groupAccounts)
 	s.Require().Contains(groupIDs, poolDefault.ID)
+	s.Require().Contains(groupIDs, poolInvalidCustom.ID)
 	s.Require().NotContains(groupIDs, poolCustom.ID)
 	s.Require().NotContains(groupIDs, nonPool.ID)
 }

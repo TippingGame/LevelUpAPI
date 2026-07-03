@@ -425,6 +425,7 @@ func TestModelRateLimitRespectsPoolModePolicy(t *testing.T) {
 		account := newLimitedAccount(map[string]any{
 			"pool_mode":                  true,
 			"custom_error_codes_enabled": true,
+			"custom_error_codes":         []any{float64(429)},
 		})
 
 		require.True(t, account.isModelRateLimitedWithContext(context.Background(), "claude-sonnet-4-5"))

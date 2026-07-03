@@ -95,6 +95,35 @@ func TestAccountShouldHandleErrorCode_CustomExactCodesStillWork(t *testing.T) {
 	require.False(t, account.ShouldHandleErrorCode(500))
 }
 
+func TestAccountShouldHandleErrorCode_EmptyCustomPolicyDoesNotMatchAll(t *testing.T) {
+	cases := []struct {
+		name string
+		raw  any
+	}{
+		{name: "missing", raw: nil},
+		{name: "empty list", raw: []any{}},
+		{name: "empty string", raw: ""},
+		{name: "invalid string", raw: "bad"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			credentials := map[string]any{"custom_error_codes_enabled": true}
+			if tc.raw != nil {
+				credentials["custom_error_codes"] = tc.raw
+			}
+			account := &Account{
+				Type:        AccountTypeAPIKey,
+				Credentials: credentials,
+			}
+
+			require.False(t, account.HasActiveCustomErrorCodePolicy())
+			require.False(t, account.ShouldHandleErrorCode(429))
+			require.False(t, account.ShouldHandleErrorCode(500))
+		})
+	}
+}
+
 func TestTempUnschedulableRule_StatusCodeRange(t *testing.T) {
 	repo := &statusRangeAccountRepoStub{}
 	svc := NewRateLimitService(repo, nil, nil, nil, nil)

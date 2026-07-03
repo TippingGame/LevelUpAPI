@@ -1247,6 +1247,13 @@ func (a *Account) IsCustomErrorCodesEnabled() bool {
 	return false
 }
 
+func (a *Account) HasActiveCustomErrorCodePolicy() bool {
+	if !a.IsCustomErrorCodesEnabled() {
+		return false
+	}
+	return len(a.GetCustomErrorCodeRanges()) > 0
+}
+
 // IsPoolMode 检查 API Key 账号是否启用池模式。
 // 池模式下，上游错误不标记本地账号状态，而是在同一账号上重试。
 func (a *Account) IsPoolMode() bool {
@@ -1427,7 +1434,7 @@ func (a *Account) ShouldHandleErrorCode(statusCode int) bool {
 	}
 	ranges := a.GetCustomErrorCodeRanges()
 	if len(ranges) == 0 {
-		return true
+		return false
 	}
 	return httpStatusCodeRangesContain(ranges, statusCode)
 }

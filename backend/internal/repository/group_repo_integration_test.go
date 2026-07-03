@@ -611,7 +611,14 @@ func (s *GroupRepoSuite) TestListWithFilters_AccountCountIgnoresDefaultPoolModeL
 			name, platform, type, credentials,
 			rate_limit_reset_at, overload_until, temp_unschedulable_until
 		) VALUES ($1, $2, $3, $4::jsonb, NOW() + INTERVAL '1 hour', NOW() + INTERVAL '1 hour', NOW() + INTERVAL '1 hour') RETURNING id`,
-		[]any{"acc-pool-custom-count", service.PlatformOpenAI, service.AccountTypeAPIKey, `{"pool_mode": true, "custom_error_codes_enabled": true}`},
+		[]any{"acc-pool-custom-count", service.PlatformOpenAI, service.AccountTypeAPIKey, `{"pool_mode": true, "custom_error_codes_enabled": true, "custom_error_codes": [429]}`},
+	)
+	poolInvalidCustomID := insertAccount(
+		`INSERT INTO accounts (
+			name, platform, type, credentials,
+			rate_limit_reset_at, overload_until, temp_unschedulable_until
+		) VALUES ($1, $2, $3, $4::jsonb, NOW() + INTERVAL '1 hour', NOW() + INTERVAL '1 hour', NOW() + INTERVAL '1 hour') RETURNING id`,
+		[]any{"acc-pool-invalid-custom-count", service.PlatformOpenAI, service.AccountTypeAPIKey, `{"pool_mode": true, "custom_error_codes_enabled": true, "custom_error_codes": "bad"}`},
 	)
 	nonPoolID := insertAccount(
 		`INSERT INTO accounts (
@@ -621,7 +628,7 @@ func (s *GroupRepoSuite) TestListWithFilters_AccountCountIgnoresDefaultPoolModeL
 		[]any{"acc-non-pool-count", service.PlatformOpenAI, service.AccountTypeAPIKey, `{}`},
 	)
 
-	for priority, accountID := range []int64{normalID, poolDefaultID, poolCustomID, nonPoolID} {
+	for priority, accountID := range []int64{normalID, poolDefaultID, poolCustomID, poolInvalidCustomID, nonPoolID} {
 		_, err := s.tx.ExecContext(
 			s.ctx,
 			"INSERT INTO account_groups (account_id, group_id, priority, created_at) VALUES ($1, $2, $3, NOW())",
@@ -649,8 +656,8 @@ func (s *GroupRepoSuite) TestListWithFilters_AccountCountIgnoresDefaultPoolModeL
 		}
 	}
 	s.Require().NotNil(found, "created group must appear in ListWithFilters result")
-	s.Assert().Equal(int64(4), found.AccountCount, "AccountCount must include all linked accounts")
-	s.Assert().Equal(int64(2), found.ActiveAccountCount, "default pool mode local state should not reduce active count")
+	s.Assert().Equal(int64(5), found.AccountCount, "AccountCount must include all linked accounts")
+	s.Assert().Equal(int64(3), found.ActiveAccountCount, "default or invalid pool custom policy local state should not reduce active count")
 	s.Assert().Equal(int64(2), found.RateLimitedAccountCount, "only non-pool and custom-error pool accounts should be counted as locally limited")
 
 	total, active, err := s.repo.GetAccountCount(s.ctx, g.ID)

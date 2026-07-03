@@ -369,10 +369,28 @@ func TestLocalSchedulabilityStateStillAppliesOutsideDefaultPoolMode(t *testing.T
 			Credentials: map[string]any{
 				"pool_mode":                  true,
 				"custom_error_codes_enabled": true,
+				"custom_error_codes":         []any{float64(429)},
 			},
 		}
 
 		require.False(t, account.IsSchedulableAt(now))
 		require.True(t, account.IsRateLimitedAt(now))
+	})
+
+	t.Run("pool mode empty custom error policy", func(t *testing.T) {
+		account := &Account{
+			Type:             AccountTypeAPIKey,
+			Platform:         PlatformOpenAI,
+			Status:           StatusActive,
+			Schedulable:      true,
+			RateLimitResetAt: &future,
+			Credentials: map[string]any{
+				"pool_mode":                  true,
+				"custom_error_codes_enabled": true,
+			},
+		}
+
+		require.True(t, account.IsSchedulableAt(now))
+		require.False(t, account.IsRateLimitedAt(now))
 	})
 }

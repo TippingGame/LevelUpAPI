@@ -1170,11 +1170,107 @@ func accountIgnoresLocalSystemErrorStateSQL(s *entsql.Selector) *entsql.Predicat
 		b.WriteString(" AND LOWER(COALESCE(")
 		b.Ident(credentialsCol).WriteString(" ->> ").Arg("pool_mode")
 		b.WriteString(", ").Arg("").WriteString(")) = ").Arg("true")
-		b.WriteString(" AND LOWER(COALESCE(")
-		b.Ident(credentialsCol).WriteString(" ->> ").Arg("custom_error_codes_enabled")
-		b.WriteString(", ").Arg("").WriteString(")) <> ").Arg("true")
+		b.WriteString(" AND NOT ")
+		accountCustomErrorPolicyActiveEntSQL(b, credentialsCol)
 		b.WriteString(")")
 	})
+}
+
+func accountCustomErrorPolicyActiveEntSQL(b *entsql.Builder, credentialsCol string) {
+	b.WriteString("(")
+	b.WriteString("LOWER(COALESCE(")
+	b.Ident(credentialsCol).WriteString(" ->> ").Arg("custom_error_codes_enabled")
+	b.WriteString(", ").Arg("").WriteString(")) = ").Arg("true")
+	b.WriteString(" AND ")
+	accountCustomErrorPolicyValueActiveEntSQL(b, func(b *entsql.Builder) {
+		b.Ident(credentialsCol).WriteString(" -> ").Arg("custom_error_codes")
+	})
+	b.WriteString(")")
+}
+
+type entSQLWriter func(*entsql.Builder)
+
+func accountCustomErrorPolicyValueActiveEntSQL(b *entsql.Builder, writeValue entSQLWriter) {
+	b.WriteString("CASE jsonb_typeof(")
+	writeValue(b)
+	b.WriteString(") WHEN ").Arg("array").WriteString(" THEN EXISTS (SELECT 1 FROM jsonb_array_elements(")
+	writeValue(b)
+	b.WriteString(") AS custom_error_code(value) WHERE ")
+	accountCustomErrorPolicyScalarActiveEntSQL(b, func(b *entsql.Builder) {
+		b.Ident("custom_error_code").WriteString(".").Ident("value")
+	})
+	b.WriteString(") WHEN ").Arg("string").WriteString(" THEN ")
+	accountCustomErrorPolicyStringActiveEntSQL(b, writeValue)
+	b.WriteString(" WHEN ").Arg("number").WriteString(" THEN ")
+	accountCustomErrorPolicyNumberActiveEntSQL(b, writeValue)
+	b.WriteString(" ELSE FALSE END")
+}
+
+func accountCustomErrorPolicyScalarActiveEntSQL(b *entsql.Builder, writeValue entSQLWriter) {
+	b.WriteString("CASE jsonb_typeof(")
+	writeValue(b)
+	b.WriteString(") WHEN ").Arg("string").WriteString(" THEN ")
+	accountCustomErrorPolicyStringActiveEntSQL(b, writeValue)
+	b.WriteString(" WHEN ").Arg("number").WriteString(" THEN ")
+	accountCustomErrorPolicyNumberActiveEntSQL(b, writeValue)
+	b.WriteString(" ELSE FALSE END")
+}
+
+func accountCustomErrorPolicyNumberActiveEntSQL(b *entsql.Builder, writeValue entSQLWriter) {
+	b.WriteString("(")
+	writeCustomErrorPolicyJSONTextEntSQL(b, writeValue)
+	b.WriteString(" ~ ").Arg(`^[0-9]+(\.[0-9]+)?$`)
+	b.WriteString(" AND (")
+	writeCustomErrorPolicyJSONTextEntSQL(b, writeValue)
+	b.WriteString(")::numeric >= 100 AND (")
+	writeCustomErrorPolicyJSONTextEntSQL(b, writeValue)
+	b.WriteString(")::numeric < 600)")
+}
+
+func accountCustomErrorPolicyStringActiveEntSQL(b *entsql.Builder, writeValue entSQLWriter) {
+	b.WriteString("EXISTS (SELECT 1 FROM regexp_split_to_table(")
+	writeCustomErrorPolicyNormalizedStringEntSQL(b, writeValue)
+	b.WriteString(", ").Arg(",").WriteString(") AS custom_error_token(token) WHERE ")
+	accountCustomErrorPolicyStringTokenActiveEntSQL(b, func(b *entsql.Builder) {
+		b.Ident("custom_error_token").WriteString(".").Ident("token")
+	})
+	b.WriteString(")")
+}
+
+func accountCustomErrorPolicyStringTokenActiveEntSQL(b *entsql.Builder, writeToken entSQLWriter) {
+	b.WriteString("(")
+	writeToken(b)
+	b.WriteString(" <> ").Arg("")
+	b.WriteString(" AND ((")
+	writeToken(b)
+	b.WriteString(" ~ ").Arg("^[0-9]+$")
+	b.WriteString(" AND (")
+	writeToken(b)
+	b.WriteString(")::numeric BETWEEN 100 AND 599) OR (")
+	writeToken(b)
+	b.WriteString(" ~ ").Arg("^[0-9]+-[0-9]+$")
+	b.WriteString(" AND (split_part(")
+	writeToken(b)
+	b.WriteString(", ").Arg("-").WriteString(", 1))::numeric BETWEEN 100 AND 599")
+	b.WriteString(" AND (split_part(")
+	writeToken(b)
+	b.WriteString(", ").Arg("-").WriteString(", 2))::numeric BETWEEN 100 AND 599")
+	b.WriteString(" AND (split_part(")
+	writeToken(b)
+	b.WriteString(", ").Arg("-").WriteString(", 1))::numeric <= (split_part(")
+	writeToken(b)
+	b.WriteString(", ").Arg("-").WriteString(", 2))::numeric)))")
+}
+
+func writeCustomErrorPolicyNormalizedStringEntSQL(b *entsql.Builder, writeValue entSQLWriter) {
+	b.WriteString("replace(replace(COALESCE(")
+	writeCustomErrorPolicyJSONTextEntSQL(b, writeValue)
+	b.WriteString(", ").Arg("").WriteString("), ").Arg("，").WriteString(", ").Arg(",").WriteString("), ").Arg(" ").WriteString(", ").Arg("").WriteString(")")
+}
+
+func writeCustomErrorPolicyJSONTextEntSQL(b *entsql.Builder, writeValue entSQLWriter) {
+	writeValue(b)
+	b.WriteString(" #>> ").Arg("{}")
 }
 
 func accountCodexQuotaProtectedPredicate() dbpredicate.Account {
