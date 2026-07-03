@@ -1762,6 +1762,50 @@ func TestOpenAIStreamingPassthroughResponseFailedBeforeOutputReturnsFailover(t *
 	require.Empty(t, rec.Body.String())
 }
 
+func TestOpenAIStreamingPassthroughAccessDeniedPolicyTextReturnsFailover(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	cfg := &config.Config{
+		Gateway: config.GatewayConfig{
+			MaxLineSize: defaultMaxLineSize,
+		},
+	}
+	repo := &openAIPassthroughFailoverRepo{}
+	svc := &OpenAIGatewayService{
+		cfg:              cfg,
+		rateLimitService: &RateLimitService{accountRepo: repo},
+	}
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/", nil)
+
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Body: io.NopCloser(strings.NewReader(strings.Join([]string{
+			"event: response.created",
+			`data: {"type":"response.created","response":{"id":"resp_1"}}`,
+			"",
+			"event: response.failed",
+			`data: {"type":"response.failed","response":{"status":"failed","error":{"type":"access_denied","message":"workspace forbidden by policy","details":{"reason":"ip_blocked"}}}}`,
+			"",
+		}, "\n"))),
+		Header: http.Header{"X-Request-Id": []string{"rid-passthrough-access-denied"}},
+	}
+	account := &Account{ID: 45, Platform: PlatformOpenAI, Name: "acc", Type: AccountTypeOAuth}
+
+	_, err := svc.handleStreamingResponsePassthrough(c.Request.Context(), resp, c, account, time.Now(), "", "")
+
+	require.Error(t, err)
+	var failoverErr *UpstreamFailoverError
+	require.ErrorAs(t, err, &failoverErr)
+	require.Equal(t, http.StatusBadGateway, failoverErr.StatusCode)
+	require.False(t, c.Writer.Written())
+	require.Empty(t, rec.Body.String())
+	require.Len(t, repo.tempCalls, 1)
+	require.Contains(t, repo.tempReasons[0], "openai_403_counter_unavailable")
+	require.Contains(t, repo.tempReasons[0], "workspace forbidden by policy")
+}
+
 func TestOpenAIStreamingPassthroughResponseFailedCapacityAfterOutputTempUnscheds(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	cfg := &config.Config{

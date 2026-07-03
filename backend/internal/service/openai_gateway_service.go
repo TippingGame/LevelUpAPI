@@ -3919,9 +3919,13 @@ func openAIStreamDataStartsClientOutput(data, eventType string) bool {
 }
 
 func openAIStreamFailedEventShouldFailover(payload []byte, message string) bool {
+	if isOpenAIRequestPolicyError(payload, message) {
+		return false
+	}
 	if isOpenAITransientProcessingError(http.StatusBadRequest, message, payload) {
 		return true
 	}
+	body := normalizeOpenAIResponsesStreamErrorBody(payload)
 	code := strings.ToLower(strings.TrimSpace(gjson.GetBytes(payload, "response.error.code").String()))
 	if code == "" {
 		code = strings.ToLower(strings.TrimSpace(gjson.GetBytes(payload, "error.code").String()))
@@ -3929,6 +3933,14 @@ func openAIStreamFailedEventShouldFailover(payload []byte, message string) bool 
 	errType := strings.ToLower(strings.TrimSpace(gjson.GetBytes(payload, "response.error.type").String()))
 	if errType == "" {
 		errType = strings.ToLower(strings.TrimSpace(gjson.GetBytes(payload, "error.type").String()))
+	}
+	sideEffectCode, sideEffectType, sideEffectMsg := parseOpenAIResponsesStreamErrorFields(body)
+	if sideEffectMsg == "" {
+		sideEffectMsg = message
+	}
+	switch openAIResponsesStreamErrorSideEffectStatus(sideEffectCode, sideEffectType, sideEffectMsg, body) {
+	case http.StatusUnauthorized, http.StatusPaymentRequired, http.StatusForbidden, http.StatusTooManyRequests:
+		return true
 	}
 	combined := strings.ToLower(strings.TrimSpace(message + " " + code + " " + errType))
 	if combined == "" {
