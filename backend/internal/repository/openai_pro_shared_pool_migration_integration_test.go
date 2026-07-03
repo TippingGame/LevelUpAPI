@@ -85,6 +85,42 @@ WHERE deleted_at IS NULL
 	require.Equal(t, 1, migration203PublicOpenAIStandardGroupCount(t, tx, observedProID), "observed Pro account should have one public standard pool binding")
 }
 
+func TestMigration205RebindsOpenAISharedPoolByEffectiveLevel(t *testing.T) {
+	tx := testTx(t)
+	suffix := time.Now().UnixNano()
+
+	ownerID := insertMigration203User(t, tx, suffix)
+	privateGroupID := insertMigration203Group(t, tx, fmt.Sprintf("migration205-private-%d", suffix), service.PlatformOpenAI, service.GroupScopeUserPrivate, service.SubscriptionTypeStandard, "", &ownerID)
+	plusGroupID := insertMigration203Group(t, tx, fmt.Sprintf("migration205-plus-%d", suffix), service.PlatformOpenAI, service.GroupScopePublic, service.SubscriptionTypeStandard, service.AccountLevelPlus, nil)
+	proGroupID := ensureMigration203ProPool(t, tx, suffix)
+
+	observedProID := insertMigration203PublicAccount(t, tx, ownerID, fmt.Sprintf("migration205-observed-pro-%d", suffix), service.AccountTypeOAuth, service.AccountLevelPlus, `{"plan_type":"chatgpt_pro"}`)
+	stillPlusID := insertMigration203PublicAccount(t, tx, ownerID, fmt.Sprintf("migration205-still-plus-%d", suffix), service.AccountTypeOAuth, service.AccountLevelPlus, `{"plan_type":"plus"}`)
+	apiKeyID := insertMigration203PublicAccount(t, tx, ownerID, fmt.Sprintf("migration205-api-key-%d", suffix), service.AccountTypeAPIKey, service.AccountLevelPlus, `{"plan_type":"chatgpt_pro"}`)
+
+	insertMigration203AccountGroup(t, tx, observedProID, privateGroupID, 7)
+	insertMigration203AccountGroup(t, tx, observedProID, plusGroupID, 9)
+	insertMigration203AccountGroup(t, tx, stillPlusID, privateGroupID, 7)
+	insertMigration203AccountGroup(t, tx, stillPlusID, plusGroupID, 9)
+	insertMigration203AccountGroup(t, tx, apiKeyID, privateGroupID, 7)
+	insertMigration203AccountGroup(t, tx, apiKeyID, plusGroupID, 9)
+
+	runMigration205(t, tx)
+	runMigration205(t, tx)
+
+	require.True(t, migration203AccountHasGroup(t, tx, observedProID, privateGroupID), "observed Pro account should keep owner private group")
+	require.True(t, migration203AccountHasGroup(t, tx, observedProID, proGroupID), "observed Pro account should be in Pro shared pool")
+	require.False(t, migration203AccountHasGroup(t, tx, observedProID, plusGroupID), "observed Pro account should leave stale Plus shared pool")
+	require.Equal(t, 1, migration203PublicOpenAIStandardGroupCount(t, tx, observedProID), "observed Pro account should have one public standard pool binding")
+
+	require.True(t, migration203AccountHasOpenAIStandardPoolLevel(t, tx, stillPlusID, service.AccountLevelPlus), "Plus OAuth account should stay in a Plus pool")
+	require.False(t, migration203AccountHasGroup(t, tx, stillPlusID, proGroupID), "Plus OAuth account should not be promoted")
+	require.Equal(t, 1, migration203PublicOpenAIStandardGroupCount(t, tx, stillPlusID), "Plus OAuth account should keep one public standard pool binding")
+
+	require.True(t, migration203AccountHasGroup(t, tx, apiKeyID, plusGroupID), "OpenAI API key binding should not be rewritten by the OAuth repair")
+	require.False(t, migration203AccountHasGroup(t, tx, apiKeyID, proGroupID), "OpenAI API key should not be moved to Pro pool")
+}
+
 func runMigration203(t *testing.T, tx *sql.Tx) {
 	t.Helper()
 	sqlBytes, err := os.ReadFile(filepath.Join("..", "..", "migrations", "203_rebind_openai_pro_shared_pool.sql"))
@@ -96,6 +132,14 @@ func runMigration203(t *testing.T, tx *sql.Tx) {
 func runMigration204(t *testing.T, tx *sql.Tx) {
 	t.Helper()
 	sqlBytes, err := os.ReadFile(filepath.Join("..", "..", "migrations", "204_harden_openai_pro_shared_pool_repair.sql"))
+	require.NoError(t, err)
+	_, err = tx.ExecContext(context.Background(), string(sqlBytes))
+	require.NoError(t, err)
+}
+
+func runMigration205(t *testing.T, tx *sql.Tx) {
+	t.Helper()
+	sqlBytes, err := os.ReadFile(filepath.Join("..", "..", "migrations", "205_repair_openai_shared_pool_bindings_by_effective_level.sql"))
 	require.NoError(t, err)
 	_, err = tx.ExecContext(context.Background(), string(sqlBytes))
 	require.NoError(t, err)
@@ -212,8 +256,31 @@ WHERE ag.account_id = $1
   AND g.platform = 'openai'
   AND g.owner_user_id IS NULL
   AND g.scope = 'public'
+  AND g.is_exclusive = FALSE
   AND COALESCE(g.subscription_type, '') IN ('', 'standard')
 `, accountID).Scan(&count)
 	require.NoError(t, err)
 	return count
+}
+
+func migration203AccountHasOpenAIStandardPoolLevel(t *testing.T, tx *sql.Tx, accountID int64, level string) bool {
+	t.Helper()
+	var exists bool
+	err := tx.QueryRowContext(context.Background(), `
+SELECT EXISTS (
+    SELECT 1
+    FROM account_groups ag
+    JOIN groups g ON g.id = ag.group_id
+    WHERE ag.account_id = $1
+      AND g.deleted_at IS NULL
+      AND g.platform = 'openai'
+      AND g.owner_user_id IS NULL
+      AND g.scope = 'public'
+      AND g.is_exclusive = FALSE
+      AND COALESCE(g.subscription_type, '') IN ('', 'standard')
+      AND lower(btrim(COALESCE(g.required_account_level, ''))) = $2
+)
+`, accountID, service.NormalizeRequiredAccountLevel(level)).Scan(&exists)
+	require.NoError(t, err)
+	return exists
 }

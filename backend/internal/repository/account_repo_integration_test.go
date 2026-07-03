@@ -86,6 +86,63 @@ func (s *schedulerCacheRecorder) SetOutboxWatermark(ctx context.Context, id int6
 	return nil
 }
 
+func (s *AccountRepoSuite) accountHasGroup(accountID, groupID int64) bool {
+	exists, err := s.client.AccountGroup.Query().
+		Where(accountgroup.AccountIDEQ(accountID), accountgroup.GroupIDEQ(groupID)).
+		Exist(s.ctx)
+	s.Require().NoError(err)
+	return exists
+}
+
+func (s *AccountRepoSuite) publicOpenAIStandardGroupCount(accountID int64) int {
+	rows, err := s.client.AccountGroup.Query().
+		Where(accountgroup.AccountIDEQ(accountID)).
+		WithGroup().
+		All(s.ctx)
+	s.Require().NoError(err)
+
+	count := 0
+	for _, row := range rows {
+		group := row.Edges.Group
+		if group == nil || group.DeletedAt != nil {
+			continue
+		}
+		if group.Platform == service.PlatformOpenAI &&
+			group.OwnerUserID == nil &&
+			group.Scope == service.GroupScopePublic &&
+			!group.IsExclusive &&
+			(group.SubscriptionType == "" || group.SubscriptionType == service.SubscriptionTypeStandard) {
+			count++
+		}
+	}
+	return count
+}
+
+func (s *AccountRepoSuite) accountHasOpenAIStandardPoolLevel(accountID int64, level string) bool {
+	rows, err := s.client.AccountGroup.Query().
+		Where(accountgroup.AccountIDEQ(accountID)).
+		WithGroup().
+		All(s.ctx)
+	s.Require().NoError(err)
+
+	level = service.NormalizeRequiredAccountLevel(level)
+	for _, row := range rows {
+		group := row.Edges.Group
+		if group == nil || group.DeletedAt != nil {
+			continue
+		}
+		if group.Platform == service.PlatformOpenAI &&
+			group.OwnerUserID == nil &&
+			group.Scope == service.GroupScopePublic &&
+			!group.IsExclusive &&
+			(group.SubscriptionType == "" || group.SubscriptionType == service.SubscriptionTypeStandard) &&
+			service.NormalizeRequiredAccountLevel(group.RequiredAccountLevel) == level {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *AccountRepoSuite) SetupTest() {
 	s.ctx = context.Background()
 	tx := testEntTx(s.T())
@@ -932,6 +989,95 @@ func (s *AccountRepoSuite) TestListQuotaPoolAccountsLoadsTempUnschedulableReason
 	s.Require().Len(accounts, 1)
 	s.Require().Equal(reason, accounts[0].TempUnschedulableReason)
 	s.Require().False((&accounts[0]).IsTemporarilyUnschedulableAt(time.Now()))
+}
+
+func (s *AccountRepoSuite) TestUpdateCredentialsRebindsApprovedOpenAISharedPoolByEffectiveLevel() {
+	owner := mustCreateUser(s.T(), s.client, &service.User{Email: "shared-pool-update-credentials@example.com"})
+	privateGroup := mustCreateGroup(s.T(), s.client, &service.Group{
+		Name:             "shared-pool-update-private",
+		Platform:         service.PlatformOpenAI,
+		Scope:            service.GroupScopeUserPrivate,
+		SubscriptionType: service.SubscriptionTypeStandard,
+		OwnerUserID:      &owner.ID,
+	})
+	plusGroup := mustCreateGroup(s.T(), s.client, &service.Group{
+		Name:                 "shared-pool-update-plus",
+		Platform:             service.PlatformOpenAI,
+		Scope:                service.GroupScopePublic,
+		SubscriptionType:     service.SubscriptionTypeStandard,
+		RequiredAccountLevel: service.AccountLevelPlus,
+	})
+	mustCreateGroup(s.T(), s.client, &service.Group{
+		Name:                 "shared-pool-update-pro",
+		Platform:             service.PlatformOpenAI,
+		Scope:                service.GroupScopePublic,
+		SubscriptionType:     service.SubscriptionTypeStandard,
+		RequiredAccountLevel: service.AccountLevelPro,
+	})
+	account := mustCreateAccount(s.T(), s.client, &service.Account{
+		Name:         "shared-pool-update-observed-pro",
+		Platform:     service.PlatformOpenAI,
+		Type:         service.AccountTypeOAuth,
+		AccountLevel: service.AccountLevelPlus,
+		OwnerUserID:  &owner.ID,
+		Credentials:  map[string]any{"plan_type": "plus"},
+		Schedulable:  true,
+	})
+	mustBindAccountToGroup(s.T(), s.client, account.ID, privateGroup.ID, 7)
+	mustBindAccountToGroup(s.T(), s.client, account.ID, plusGroup.ID, 9)
+	s.Require().NoError(s.client.Account.UpdateOneID(account.ID).
+		SetShareMode(service.AccountShareModePublic).
+		SetShareStatus(service.AccountShareStatusApproved).
+		Exec(s.ctx))
+
+	s.Require().NoError(s.repo.UpdateCredentials(s.ctx, account.ID, map[string]any{"plan_type": "chatgpt_pro"}))
+
+	s.Require().True(s.accountHasGroup(account.ID, privateGroup.ID), "private owner group should be preserved")
+	s.Require().True(s.accountHasOpenAIStandardPoolLevel(account.ID, service.AccountLevelPro), "observed Pro account should be rebound to a Pro shared pool")
+	s.Require().False(s.accountHasGroup(account.ID, plusGroup.ID), "stale Plus pool binding should be removed")
+	s.Require().Equal(1, s.publicOpenAIStandardGroupCount(account.ID), "account should keep exactly one public OpenAI standard pool binding")
+}
+
+func (s *AccountRepoSuite) TestBulkUpdateCredentialsRebindsApprovedOpenAISharedPoolByEffectiveLevel() {
+	owner := mustCreateUser(s.T(), s.client, &service.User{Email: "shared-pool-bulk-credentials@example.com"})
+	plusGroup := mustCreateGroup(s.T(), s.client, &service.Group{
+		Name:                 "shared-pool-bulk-plus",
+		Platform:             service.PlatformOpenAI,
+		Scope:                service.GroupScopePublic,
+		SubscriptionType:     service.SubscriptionTypeStandard,
+		RequiredAccountLevel: service.AccountLevelPlus,
+	})
+	mustCreateGroup(s.T(), s.client, &service.Group{
+		Name:                 "shared-pool-bulk-pro",
+		Platform:             service.PlatformOpenAI,
+		Scope:                service.GroupScopePublic,
+		SubscriptionType:     service.SubscriptionTypeStandard,
+		RequiredAccountLevel: service.AccountLevelPro,
+	})
+	account := mustCreateAccount(s.T(), s.client, &service.Account{
+		Name:         "shared-pool-bulk-observed-pro",
+		Platform:     service.PlatformOpenAI,
+		Type:         service.AccountTypeOAuth,
+		AccountLevel: service.AccountLevelPlus,
+		OwnerUserID:  &owner.ID,
+		Credentials:  map[string]any{"plan_type": "plus", "access_token": "token"},
+		Schedulable:  true,
+	})
+	mustBindAccountToGroup(s.T(), s.client, account.ID, plusGroup.ID, 9)
+	s.Require().NoError(s.client.Account.UpdateOneID(account.ID).
+		SetShareMode(service.AccountShareModePublic).
+		SetShareStatus(service.AccountShareStatusApproved).
+		Exec(s.ctx))
+
+	affected, err := s.repo.BulkUpdate(s.ctx, []int64{account.ID}, service.AccountBulkUpdate{
+		Credentials: map[string]any{"plan_type": "chatgpt_pro"},
+	})
+
+	s.Require().NoError(err)
+	s.Require().Equal(int64(1), affected)
+	s.Require().True(s.accountHasOpenAIStandardPoolLevel(account.ID, service.AccountLevelPro), "bulk plan sync should rebind observed Pro account to a Pro shared pool")
+	s.Require().False(s.accountHasGroup(account.ID, plusGroup.ID), "bulk plan sync should remove stale Plus pool binding")
+	s.Require().Equal(1, s.publicOpenAIStandardGroupCount(account.ID), "account should keep exactly one public OpenAI standard pool binding")
 }
 
 func (s *AccountRepoSuite) TestListSchedulableByGroupIDAndPlatform_RequireOAuthOnlyExcludesAPIKey() {

@@ -398,6 +398,9 @@ func (r *accountRepository) Update(ctx context.Context, account *service.Account
 	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventAccountChanged, &account.ID, nil, buildSchedulerGroupPayload(account.GroupIDs)); err != nil {
 		logger.LegacyPrintf("repository.account", "[SchedulerOutbox] enqueue account update failed: account=%d err=%v", account.ID, err)
 	}
+	if err := r.repairOpenAISharedPoolBindings(ctx, []int64{account.ID}); err != nil {
+		return err
+	}
 	// 普通账号编辑（如 model_mapping / credentials）也需要立即刷新单账号快照，
 	// 否则网关在 outbox worker 延迟或异常时仍可能读到旧配置。
 	r.syncSchedulerAccountSnapshot(ctx, account.ID)
@@ -688,6 +691,9 @@ func (r *accountRepository) UpdateCredentials(ctx context.Context, id int64, cre
 		Save(ctx)
 	if err != nil {
 		return translatePersistenceError(err, service.ErrAccountNotFound, nil)
+	}
+	if err := r.repairOpenAISharedPoolBindings(ctx, []int64{id}); err != nil {
+		return err
 	}
 	r.syncSchedulerAccountSnapshot(ctx, id)
 	return nil
@@ -2743,9 +2749,167 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 		if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventAccountBulkChanged, nil, nil, payload); err != nil {
 			logger.LegacyPrintf("repository.account", "[SchedulerOutbox] enqueue bulk update failed: err=%v", err)
 		}
+		if updates.AccountLevel != nil || len(updates.Credentials) > 0 || len(updates.Extra) > 0 {
+			if err := r.repairOpenAISharedPoolBindings(ctx, ids); err != nil {
+				return 0, err
+			}
+		}
 		r.syncSchedulerAccountSnapshots(ctx, ids)
 	}
 	return rows, nil
+}
+
+func (r *accountRepository) repairOpenAISharedPoolBindings(ctx context.Context, accountIDs []int64) error {
+	if r == nil || r.sql == nil || len(accountIDs) == 0 {
+		return nil
+	}
+	changedAccountIDs, affectedGroupIDs, err := repairOpenAISharedPoolBindingsForAccounts(ctx, r.sql, accountIDs)
+	if err != nil {
+		return fmt.Errorf("repair openai shared pool bindings: %w", err)
+	}
+	if len(changedAccountIDs) == 0 {
+		return nil
+	}
+	payload := map[string]any{"account_ids": changedAccountIDs}
+	if len(affectedGroupIDs) > 0 {
+		payload["group_ids"] = affectedGroupIDs
+	}
+	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventAccountBulkChanged, nil, nil, payload); err != nil {
+		logger.LegacyPrintf("repository.account", "[SchedulerOutbox] enqueue shared pool binding repair failed: err=%v", err)
+	}
+	return nil
+}
+
+func repairOpenAISharedPoolBindingsForAccounts(ctx context.Context, exec sqlExecutor, accountIDs []int64) ([]int64, []int64, error) {
+	if exec == nil || len(accountIDs) == 0 {
+		return nil, nil, nil
+	}
+	var changedAccountIDs pq.Int64Array
+	var affectedGroupIDs pq.Int64Array
+	err := scanSingleRow(ctx, exec, `
+		WITH candidate_accounts AS (
+			SELECT
+				a.id,
+				CASE
+					WHEN lower(btrim(COALESCE(a.account_level, ''))) = 'team'
+						OR plan.token IN ('team', 'chatgptteam')
+						OR plan.token LIKE 'team%' THEN 'team'
+					WHEN lower(btrim(COALESCE(a.account_level, ''))) = 'pro'
+						OR plan.token = 'pro'
+						OR plan.token = 'chatgptpro'
+						OR plan.token LIKE 'pro%'
+						OR plan.token LIKE 'chatgptpro%' THEN 'pro'
+					WHEN lower(btrim(COALESCE(a.account_level, ''))) = 'plus'
+						OR plan.token = 'plus'
+						OR plan.token = 'chatgptplus'
+						OR plan.token LIKE 'plus%' THEN 'plus'
+					WHEN lower(btrim(COALESCE(a.account_level, ''))) = 'free'
+						OR plan.token IN ('free', 'chatgptfree') THEN 'free'
+					ELSE 'free'
+				END AS effective_level
+			FROM accounts a
+			CROSS JOIN LATERAL (
+				SELECT regexp_replace(lower(COALESCE(
+					NULLIF(a.credentials->>'plan_type', ''),
+					NULLIF(a.credentials->>'chatgpt_plan_type', ''),
+					NULLIF(a.credentials->>'subscription_plan', ''),
+					NULLIF(a.extra->>'plan_type', ''),
+					NULLIF(a.extra->>'chatgpt_plan_type', ''),
+					NULLIF(a.extra->>'subscription_plan', ''),
+					''
+				)), '[[:space:]_-]+', '', 'g') AS token
+			) plan
+			WHERE a.id = ANY($1)
+				AND a.deleted_at IS NULL
+				AND a.platform = 'openai'
+				AND a.type = 'oauth'
+				AND a.owner_user_id IS NOT NULL
+				AND lower(btrim(COALESCE(a.share_mode, ''))) = 'public'
+				AND lower(btrim(COALESCE(a.share_status, ''))) = 'approved'
+		),
+		candidate_target_groups AS (
+			SELECT
+				g.id,
+				lower(btrim(COALESCE(g.required_account_level, ''))) AS required_level,
+				g.name,
+				g.sort_order
+			FROM groups g
+			WHERE g.deleted_at IS NULL
+				AND g.platform = 'openai'
+				AND g.status = 'active'
+				AND g.owner_user_id IS NULL
+				AND g.scope = 'public'
+				AND g.is_exclusive = FALSE
+				AND COALESCE(g.subscription_type, '') IN ('', 'standard')
+				AND lower(btrim(COALESCE(g.required_account_level, ''))) IN ('free', 'plus', 'pro', 'team')
+		),
+		target_groups AS (
+			SELECT DISTINCT ON (required_level)
+				required_level,
+				id
+			FROM candidate_target_groups
+			ORDER BY
+				required_level,
+				CASE
+					WHEN required_level = 'pro' AND name = 'PRO共享号池' THEN 0
+					WHEN required_level = 'pro' AND name = 'OpenAI PRO共享号池' THEN 1
+					WHEN required_level = 'pro' AND name = 'OpenAI PRO共享号池(公共)' THEN 2
+					WHEN name LIKE '%共享号池%' THEN 3
+					ELSE 4
+				END,
+				sort_order,
+				id
+		),
+		matched_accounts AS (
+			SELECT ca.id AS account_id, tg.id AS target_group_id
+			FROM candidate_accounts ca
+			JOIN target_groups tg ON tg.required_level = ca.effective_level
+		),
+		stale_public_bindings AS (
+			DELETE FROM account_groups ag
+			USING groups g, matched_accounts ma
+			WHERE ag.account_id = ma.account_id
+				AND ag.group_id = g.id
+				AND g.deleted_at IS NULL
+				AND g.platform = 'openai'
+				AND g.owner_user_id IS NULL
+				AND g.scope = 'public'
+				AND g.is_exclusive = FALSE
+				AND COALESCE(g.subscription_type, '') IN ('', 'standard')
+				AND g.id <> ma.target_group_id
+			RETURNING ag.account_id, ag.group_id, ag.priority
+		),
+		inserted_bindings AS (
+			INSERT INTO account_groups (account_id, group_id, priority, created_at)
+			SELECT
+				ma.account_id,
+				ma.target_group_id,
+				COALESCE(MIN(spb.priority), 50),
+				NOW()
+			FROM matched_accounts ma
+			LEFT JOIN stale_public_bindings spb ON spb.account_id = ma.account_id
+			GROUP BY ma.account_id, ma.target_group_id
+			ON CONFLICT (account_id, group_id) DO NOTHING
+			RETURNING account_id, group_id
+		),
+		changed_accounts AS (
+			SELECT account_id FROM stale_public_bindings
+			UNION
+			SELECT account_id FROM inserted_bindings
+		),
+		affected_groups AS (
+			SELECT group_id FROM stale_public_bindings
+			UNION
+			SELECT group_id FROM inserted_bindings
+		)
+		SELECT
+			COALESCE((SELECT array_agg(account_id ORDER BY account_id) FROM changed_accounts), '{}'::bigint[]),
+			COALESCE((SELECT array_agg(group_id ORDER BY group_id) FROM affected_groups), '{}'::bigint[])
+	`, []any{pq.Array(accountIDs)}, &changedAccountIDs, &affectedGroupIDs)
+	if err != nil {
+		return nil, nil, err
+	}
+	return append([]int64(nil), changedAccountIDs...), append([]int64(nil), affectedGroupIDs...), nil
 }
 
 type accountGroupQueryOptions struct {
