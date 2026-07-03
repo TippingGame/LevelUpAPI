@@ -991,6 +991,53 @@ func (s *AccountRepoSuite) TestListQuotaPoolAccountsLoadsTempUnschedulableReason
 	s.Require().False((&accounts[0]).IsTemporarilyUnschedulableAt(time.Now()))
 }
 
+func (s *AccountRepoSuite) TestListQuotaPoolAccountsHydratesProxyForPublicOpenAIProShare() {
+	owner := mustCreateUser(s.T(), s.client, &service.User{Email: "quota-pool-pro-proxy-owner@example.com"})
+	proxy := mustCreateProxy(s.T(), s.client, &service.Proxy{
+		Name:   "quota-pool-pro-proxy",
+		Status: service.StatusActive,
+	})
+	group := mustCreateGroup(s.T(), s.client, &service.Group{
+		Name:                 "quota-pool-pro-proxy-group",
+		Platform:             service.PlatformOpenAI,
+		Scope:                service.GroupScopePublic,
+		SubscriptionType:     service.SubscriptionTypeStandard,
+		RequiredAccountLevel: service.AccountLevelPro,
+	})
+	account := mustCreateAccount(s.T(), s.client, &service.Account{
+		Name:         "quota-pool-public-pro-with-proxy",
+		Platform:     service.PlatformOpenAI,
+		Type:         service.AccountTypeOAuth,
+		AccountLevel: service.AccountLevelPro,
+		OwnerUserID:  &owner.ID,
+		ProxyID:      &proxy.ID,
+		Schedulable:  true,
+		Concurrency:  3,
+	})
+	mustBindAccountToGroup(s.T(), s.client, account.ID, group.ID, 1)
+	s.Require().NoError(s.client.Account.UpdateOneID(account.ID).
+		SetShareMode(service.AccountShareModePublic).
+		SetShareStatus(service.AccountShareStatusApproved).
+		Exec(s.ctx))
+
+	accounts, err := s.repo.ListQuotaPoolAccounts(s.ctx, owner.ID)
+
+	s.Require().NoError(err)
+	var found *service.Account
+	for i := range accounts {
+		if accounts[i].ID == account.ID {
+			found = &accounts[i]
+			break
+		}
+	}
+	s.Require().NotNil(found, "public Pro share account should be included in quota pool dashboard data")
+	s.Require().NotNil(found.ProxyID, "quota pool dashboard account rows must preserve proxy_id for Pro schedulability")
+	s.Require().Equal(proxy.ID, *found.ProxyID)
+	s.Require().NotNil(found.Proxy, "quota pool dashboard account rows must hydrate proxy status for Pro schedulability")
+	s.Require().Equal(service.StatusActive, found.Proxy.Status)
+	s.Require().True(found.IsSchedulableWithoutCodexQuotaProtection(), "public Pro share account with an active proxy should stay schedulable in quota pool dashboard")
+}
+
 func (s *AccountRepoSuite) TestUpdateCredentialsRebindsApprovedOpenAISharedPoolByEffectiveLevel() {
 	owner := mustCreateUser(s.T(), s.client, &service.User{Email: "shared-pool-update-credentials@example.com"})
 	privateGroup := mustCreateGroup(s.T(), s.client, &service.Group{

@@ -856,6 +856,9 @@ func (r *accountRepository) ListQuotaPoolAccounts(ctx context.Context, ownerUser
 	if len(accounts) == 0 {
 		return []service.Account{}, nil
 	}
+	if err := r.loadQuotaPoolAccountProxies(ctx, accounts); err != nil {
+		return nil, err
+	}
 	if err := r.loadQuotaPoolAccountGroupRows(ctx, ownerUserID, accounts); err != nil {
 		return nil, err
 	}
@@ -923,6 +926,7 @@ func (r *accountRepository) listQuotaPoolAccountRows(ctx context.Context, ownerU
 			a.extra->>'codex_7d_limit_percent',
 			a.extra->>'codex_usage_updated_at',
 			a.extra->>'privacy_mode',
+			a.proxy_id,
 			a.owner_user_id,
 			a.share_mode,
 			a.share_status,
@@ -958,6 +962,7 @@ func (r *accountRepository) listQuotaPoolAccountRows(ctx context.Context, ownerU
 		var credentialPlanType, credentialChatGPTPlanType, credentialSubscriptionPlan sql.NullString
 		var extraPlanType, extraChatGPTPlanType, extraSubscriptionPlan sql.NullString
 		var tempUnschedulableReason sql.NullString
+		var proxyID sql.NullInt64
 		if err := rows.Scan(
 			&account.ID,
 			&account.Name,
@@ -992,6 +997,7 @@ func (r *accountRepository) listQuotaPoolAccountRows(ctx context.Context, ownerU
 			&codex7dLimitPercent,
 			&codexUsageUpdatedAt,
 			&privacyMode,
+			&proxyID,
 			&ownerUserID,
 			&account.ShareMode,
 			&account.ShareStatus,
@@ -1009,6 +1015,9 @@ func (r *accountRepository) listQuotaPoolAccountRows(ctx context.Context, ownerU
 		}
 		if ownerUserID.Valid {
 			account.OwnerUserID = &ownerUserID.Int64
+		}
+		if proxyID.Valid {
+			account.ProxyID = &proxyID.Int64
 		}
 		account.ShareMode = service.NormalizeAccountShareMode(account.ShareMode)
 		account.ShareStatus = service.NormalizeAccountShareStatus(account.ShareStatus)
@@ -1050,6 +1059,28 @@ func (r *accountRepository) listQuotaPoolAccountRows(ctx context.Context, ownerU
 		return nil, err
 	}
 	return accounts, nil
+}
+
+func (r *accountRepository) loadQuotaPoolAccountProxies(ctx context.Context, accounts []service.Account) error {
+	proxyIDs := make([]int64, 0, len(accounts))
+	for i := range accounts {
+		if accounts[i].ProxyID != nil {
+			proxyIDs = append(proxyIDs, *accounts[i].ProxyID)
+		}
+	}
+	proxies, err := r.loadProxies(ctx, proxyIDs)
+	if err != nil {
+		return err
+	}
+	for i := range accounts {
+		if accounts[i].ProxyID == nil {
+			continue
+		}
+		if proxy, ok := proxies[*accounts[i].ProxyID]; ok {
+			accounts[i].Proxy = proxy
+		}
+	}
+	return nil
 }
 
 func (r *accountRepository) loadQuotaPoolAccountGroupRows(ctx context.Context, ownerUserID int64, accounts []service.Account) error {
