@@ -2905,8 +2905,17 @@ func (r *accountRepository) repairOpenAISharedPoolBindings(ctx context.Context, 
 	if err != nil {
 		return false, fmt.Errorf("repair openai shared pool bindings: %w", err)
 	}
-	if len(changedAccountIDs) == 0 {
+	if len(changedAccountIDs) == 0 && len(affectedGroupIDs) == 0 {
 		return false, nil
+	}
+	if len(changedAccountIDs) == 0 {
+		for _, groupID := range uniquePositiveInt64s(affectedGroupIDs) {
+			gid := groupID
+			if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventGroupChanged, nil, &gid, nil); err != nil {
+				logger.LegacyPrintf("repository.account", "[SchedulerOutbox] enqueue shared pool group repair failed: group=%d err=%v", gid, err)
+			}
+		}
+		return true, nil
 	}
 	payload := map[string]any{"account_ids": changedAccountIDs}
 	if len(affectedGroupIDs) > 0 {

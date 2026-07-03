@@ -1523,6 +1523,96 @@ func (s *AccountRepoSuite) TestListQuotaPoolAccountsRepairsVisibleOtherOwnerOpen
 	s.Require().True(hasStandardProGroup, "quota pool account rows should include a standard Pro shared group after repair")
 }
 
+func (s *AccountRepoSuite) TestRepairQuotaPoolVisibleOpenAIProShareReportsGroupMetadataRepair() {
+	viewer := mustCreateUser(s.T(), s.client, &service.User{Email: "quota-pool-pro-metadata-viewer@example.com"})
+	owner := mustCreateUser(s.T(), s.client, &service.User{Email: "quota-pool-pro-metadata-owner@example.com"})
+	proxy := mustCreateProxy(s.T(), s.client, &service.Proxy{
+		Name:   "quota-pool-pro-metadata-proxy",
+		Status: service.StatusActive,
+	})
+
+	var proGroupID int64
+	err := scanSingleRow(s.ctx, s.repo.sql, `
+		SELECT id
+		FROM groups
+		WHERE deleted_at IS NULL
+			AND platform = 'openai'
+			AND status = 'active'
+			AND owner_user_id IS NULL
+			AND lower(btrim(COALESCE(scope, ''))) = 'public'
+			AND is_exclusive = FALSE
+			AND lower(btrim(COALESCE(subscription_type, ''))) IN ('', 'standard')
+			AND lower(btrim(COALESCE(required_account_level, ''))) = 'pro'
+		ORDER BY
+			CASE
+				WHEN name = 'PRO共享号池' THEN 0
+				WHEN name = 'OpenAI PRO共享号池' THEN 1
+				WHEN name = 'OpenAI PRO共享号池(公共)' THEN 2
+				WHEN name LIKE '%共享号池%' THEN 3
+				ELSE 4
+			END,
+			sort_order,
+			id
+		LIMIT 1
+	`, nil, &proGroupID)
+	s.Require().NoError(err)
+
+	account := mustCreateAccount(s.T(), s.client, &service.Account{
+		Name:         "quota-pool-pro-metadata-bound-account",
+		Platform:     service.PlatformOpenAI,
+		Type:         service.AccountTypeOAuth,
+		AccountLevel: service.AccountLevelPlus,
+		OwnerUserID:  &owner.ID,
+		Credentials:  map[string]any{"plan_type": "chatgpt_pro"},
+		ProxyID:      &proxy.ID,
+		Schedulable:  true,
+		Concurrency:  3,
+	})
+	mustBindAccountToGroup(s.T(), s.client, account.ID, proGroupID, 1)
+	s.Require().NoError(s.client.Account.UpdateOneID(account.ID).
+		SetShareMode(service.AccountShareModePublic).
+		SetShareStatus(service.AccountShareStatusApproved).
+		Exec(s.ctx))
+	_, err = s.repo.sql.ExecContext(s.ctx, `
+		UPDATE groups
+		SET subscription_type = 'subscription',
+			updated_at = NOW()
+		WHERE id = $1
+	`, proGroupID)
+	s.Require().NoError(err)
+	_, err = s.repo.sql.ExecContext(s.ctx, "TRUNCATE scheduler_outbox")
+	s.Require().NoError(err)
+
+	changed, err := s.repo.RepairQuotaPoolVisibleOpenAISharedPoolBindings(s.ctx, viewer.ID)
+
+	s.Require().NoError(err)
+	s.Require().True(changed, "metadata-only Pro shared pool repairs must invalidate quota dashboard caches")
+	s.Require().True(s.accountHasGroup(account.ID, proGroupID), "metadata-only repair should not need to rebind the account")
+
+	updatedGroup, err := s.client.Group.Get(s.ctx, proGroupID)
+	s.Require().NoError(err)
+	s.Require().Equal(service.SubscriptionTypeStandard, updatedGroup.SubscriptionType)
+
+	var groupOutboxCount int
+	err = scanSingleRow(s.ctx, s.repo.sql, `
+		SELECT COUNT(*)
+		FROM scheduler_outbox
+		WHERE event_type = $1
+			AND group_id = $2
+	`, []any{service.SchedulerOutboxEventGroupChanged, proGroupID}, &groupOutboxCount)
+	s.Require().NoError(err)
+	s.Require().Equal(1, groupOutboxCount, "metadata-only repair should rebuild scheduler buckets for the repaired group")
+
+	var bulkOutboxCount int
+	err = scanSingleRow(s.ctx, s.repo.sql, `
+		SELECT COUNT(*)
+		FROM scheduler_outbox
+		WHERE event_type = $1
+	`, []any{service.SchedulerOutboxEventAccountBulkChanged}, &bulkOutboxCount)
+	s.Require().NoError(err)
+	s.Require().Zero(bulkOutboxCount, "metadata-only repair should not emit a misleading account bulk event")
+}
+
 func (s *AccountRepoSuite) TestListOwnedWithFiltersRepairsApprovedOpenAIProShareBinding() {
 	owner := mustCreateUser(s.T(), s.client, &service.User{Email: "owned-list-pro-repair-owner@example.com"})
 	privateGroup := mustCreateGroup(s.T(), s.client, &service.Group{
