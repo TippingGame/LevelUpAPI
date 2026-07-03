@@ -13,7 +13,11 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/antigravity"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/gemini"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/Wei-Shaw/sub2api/internal/util/httputil"
 	"github.com/tidwall/gjson"
 )
@@ -605,8 +609,8 @@ func (s *RateLimitService) handleUpstreamModelNotFound(ctx context.Context, acco
 	if !isUpstreamModelNotFoundError(statusCode, responseBody) {
 		return false
 	}
-	modelKey := modelRateLimitKeyForUpstreamModelNotFound(ctx, account, requestedModel)
-	if modelKey == "" {
+	modelKey, shouldCooldown := modelRateLimitKeyForUpstreamModelNotFound(ctx, account, requestedModel)
+	if !shouldCooldown || modelKey == "" {
 		return false
 	}
 	resetAt := time.Now().Add(upstreamModelNotFoundCooldown)
@@ -641,21 +645,90 @@ func normalizeModelNotFoundBody(body []byte) string {
 	return strings.Join(strings.Fields(normalized), " ")
 }
 
-func modelRateLimitKeyForUpstreamModelNotFound(ctx context.Context, account *Account, requestedModel string) string {
+func modelRateLimitKeyForUpstreamModelNotFound(ctx context.Context, account *Account, requestedModel string) (string, bool) {
 	modelKey := strings.TrimSpace(requestedModel)
 	if account == nil || modelKey == "" {
-		return modelKey
+		return modelKey, false
 	}
-	mapped := strings.TrimSpace(account.GetMappedModel(modelKey))
+
+	mapped, mappingMatched := account.ResolveMappedModel(modelKey)
+	mapped = strings.TrimSpace(mapped)
 	if mapped != "" {
 		modelKey = mapped
 	}
 	if account.Platform == PlatformAntigravity {
 		if resolved := strings.TrimSpace(resolveFinalAntigravityModelKey(ctx, account, requestedModel)); resolved != "" {
 			modelKey = resolved
+			mappingMatched = true
 		}
 	}
-	return modelKey
+	if mappingMatched ||
+		isKnownDefaultModelForPlatform(account.Platform, requestedModel) ||
+		isKnownDefaultModelForPlatform(account.Platform, modelKey) {
+		return modelKey, true
+	}
+	return "", false
+}
+
+func isKnownDefaultModelForPlatform(platform, model string) bool {
+	model = strings.TrimSpace(model)
+	if model == "" {
+		return false
+	}
+
+	switch platform {
+	case PlatformOpenAI:
+		return containsModelID(openai.DefaultModelIDs(), model)
+	case PlatformAnthropic:
+		return isKnownAnthropicDefaultModel(model)
+	case PlatformGemini:
+		return gemini.HasFallbackModel(model)
+	case PlatformAntigravity:
+		return isKnownAntigravityDefaultModel(model)
+	default:
+		return false
+	}
+}
+
+func containsModelID(modelIDs []string, model string) bool {
+	for _, id := range modelIDs {
+		if strings.EqualFold(strings.TrimSpace(id), model) {
+			return true
+		}
+	}
+	return false
+}
+
+func isKnownAnthropicDefaultModel(model string) bool {
+	candidates := []string{
+		model,
+		claude.NormalizeModelID(model),
+		strings.ReplaceAll(model, "@", "-"),
+	}
+	for _, candidate := range candidates {
+		if containsModelID(claude.DefaultModelIDs(), candidate) {
+			return true
+		}
+	}
+	return false
+}
+
+func isKnownAntigravityDefaultModel(model string) bool {
+	normalized := normalizeAntigravityModelName(model)
+	for _, candidate := range []string{model, normalized} {
+		for _, defaultModel := range antigravity.DefaultModels() {
+			if strings.EqualFold(strings.TrimSpace(defaultModel.ID), strings.TrimSpace(candidate)) {
+				return true
+			}
+		}
+		for _, defaultModel := range antigravity.DefaultGeminiModels() {
+			if strings.EqualFold(strings.TrimSpace(defaultModel.Name), strings.TrimSpace(candidate)) ||
+				strings.EqualFold(normalizeAntigravityModelName(defaultModel.Name), strings.TrimSpace(candidate)) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (s *RateLimitService) handleOpenAIModelCapacityError(ctx context.Context, account *Account, statusCode int, responseBody []byte) bool {

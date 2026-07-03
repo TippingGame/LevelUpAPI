@@ -460,7 +460,7 @@ func TestRateLimitService_HandleUpstreamErrorForModel_OpenAI404SetsModelCooldown
 	shouldDisable := service.HandleUpstreamErrorForModel(
 		context.Background(),
 		account,
-		"gpt-missing",
+		"gpt-5.4",
 		http.StatusNotFound,
 		http.Header{},
 		[]byte(`{"error":{"message":"Model not found","type":"invalid_request_error"}}`),
@@ -471,9 +471,63 @@ func TestRateLimitService_HandleUpstreamErrorForModel_OpenAI404SetsModelCooldown
 	require.Len(t, repo.modelRateLimitCalls, 1)
 	call := repo.modelRateLimitCalls[0]
 	require.Equal(t, account.ID, call.accountID)
-	require.Equal(t, "gpt-missing", call.modelKey)
+	require.Equal(t, "gpt-5.4", call.modelKey)
 	require.True(t, !call.resetAt.Before(before.Add(upstreamModelNotFoundCooldown)))
 	require.True(t, !call.resetAt.After(after.Add(upstreamModelNotFoundCooldown)))
+	require.Equal(t, 0, repo.setErrorCalls)
+	require.Equal(t, 0, repo.tempCalls)
+}
+
+func TestRateLimitService_HandleUpstreamErrorForModel_OpenAI404UnknownModelDoesNotCooldown(t *testing.T) {
+	repo := &rateLimitAccountRepoStub{}
+	service := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+	account := &Account{
+		ID:       207,
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeAPIKey,
+	}
+
+	shouldDisable := service.HandleUpstreamErrorForModel(
+		context.Background(),
+		account,
+		"gpt-user-typo",
+		http.StatusNotFound,
+		http.Header{},
+		[]byte(`{"error":{"message":"Model not found","type":"invalid_request_error"}}`),
+	)
+
+	require.False(t, shouldDisable)
+	require.Empty(t, repo.modelRateLimitCalls)
+	require.Equal(t, 0, repo.setErrorCalls)
+	require.Equal(t, 0, repo.tempCalls)
+}
+
+func TestRateLimitService_HandleUpstreamErrorForModel_OpenAI404MappedAliasStillCooldowns(t *testing.T) {
+	repo := &rateLimitAccountRepoStub{}
+	service := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+	account := &Account{
+		ID:       208,
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeAPIKey,
+		Credentials: map[string]any{
+			"model_mapping": map[string]any{
+				"gpt-alias": "gpt-upstream-experimental",
+			},
+		},
+	}
+
+	shouldDisable := service.HandleUpstreamErrorForModel(
+		context.Background(),
+		account,
+		"gpt-alias",
+		http.StatusNotFound,
+		http.Header{},
+		[]byte(`{"error":{"message":"Model not found","type":"invalid_request_error"}}`),
+	)
+
+	require.True(t, shouldDisable)
+	require.Len(t, repo.modelRateLimitCalls, 1)
+	require.Equal(t, "gpt-upstream-experimental", repo.modelRateLimitCalls[0].modelKey)
 	require.Equal(t, 0, repo.setErrorCalls)
 	require.Equal(t, 0, repo.tempCalls)
 }

@@ -212,13 +212,13 @@ func TestRateLimitService_StateWritesSurviveCanceledRequestContext(t *testing.T)
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
 
-		disable := service.HandleUpstreamErrorForModel(ctx, account, "gpt-test", http.StatusNotFound, http.Header{}, []byte(`{"error":{"message":"model not found"}}`))
+		disable := service.HandleUpstreamErrorForModel(ctx, account, "gpt-5.4", http.StatusNotFound, http.Header{}, []byte(`{"error":{"message":"model not found"}}`))
 
 		require.True(t, disable)
 		require.Len(t, repo.modelRateLimitCalls, 1)
-		require.Equal(t, "gpt-test", repo.modelRateLimitCalls[0].modelKey)
+		require.Equal(t, "gpt-5.4", repo.modelRateLimitCalls[0].modelKey)
 		require.NoError(t, repo.lastModelRateLimitErr)
-		require.True(t, account.isModelRateLimitedWithContext(context.Background(), "gpt-test"))
+		require.True(t, account.isModelRateLimitedWithContext(context.Background(), "gpt-5.4"))
 	})
 
 	t.Run("model_not_found_model_rate_limit_survives_repo_write_failure", func(t *testing.T) {
@@ -232,12 +232,12 @@ func TestRateLimitService_StateWritesSurviveCanceledRequestContext(t *testing.T)
 			Credentials: map[string]any{},
 		}
 
-		disable := service.HandleUpstreamErrorForModel(context.Background(), account, "gpt-test", http.StatusNotFound, http.Header{}, []byte(`{"error":{"message":"model not found"}}`))
+		disable := service.HandleUpstreamErrorForModel(context.Background(), account, "gpt-5.4", http.StatusNotFound, http.Header{}, []byte(`{"error":{"message":"model not found"}}`))
 
 		require.True(t, disable)
 		require.Len(t, repo.modelRateLimitCalls, 1)
-		require.Equal(t, "gpt-test", repo.modelRateLimitCalls[0].modelKey)
-		require.True(t, account.isModelRateLimitedWithContext(context.Background(), "gpt-test"))
+		require.Equal(t, "gpt-5.4", repo.modelRateLimitCalls[0].modelKey)
+		require.True(t, account.isModelRateLimitedWithContext(context.Background(), "gpt-5.4"))
 	})
 }
 
