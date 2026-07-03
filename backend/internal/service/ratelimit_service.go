@@ -67,6 +67,8 @@ const (
 	maxRateLimit429CooldownSeconds     = 7200
 	openAI429FiveHourResetMaxAge       = 6 * time.Hour
 	openAI429SevenDayResetMaxAge       = 8 * 24 * time.Hour
+	anthropic429FiveHourResetMaxAge    = 6 * time.Hour
+	anthropic429SevenDayResetMaxAge    = 8 * 24 * time.Hour
 )
 
 const (
@@ -1851,15 +1853,19 @@ func (s *RateLimitService) handle429(ctx context.Context, account *Account, head
 		return
 	}
 
-	// 解析Unix时间戳
-	ts, err := strconv.ParseInt(resetTimestamp, 10, 64)
-	if err != nil {
-		slog.Warn("rate_limit_reset_parse_failed", "reset_timestamp", resetTimestamp, "error", err)
+	resetAt, ok := parseAnthropicUnifiedResetTimestamp(resetTimestamp, time.Now())
+	if !ok {
+		slog.Warn("rate_limit_reset_parse_failed", "reset_timestamp", resetTimestamp)
+		if account.Platform == PlatformAnthropic && !account.IsAnthropicOAuthOrSetupToken() {
+			slog.Warn("rate_limit_invalid_reset_skipped",
+				"account_id", account.ID,
+				"platform", account.Platform,
+				"reason", "invalid anthropic reset header, likely not a reliable account rate limit")
+			return
+		}
 		s.apply429FallbackRateLimit(ctx, account, "reset_parse_failed")
 		return
 	}
-
-	resetAt := time.Unix(ts, 0)
 
 	// 标记限流状态
 	if err := s.persistRateLimitedState(ctx, account, resetAt); err != nil {
@@ -2084,11 +2090,36 @@ func parseAnthropicWindowReset(headers http.Header, window string, now time.Time
 		return time.Time{}, false
 	}
 
-	maxAge := 8 * 24 * time.Hour
+	maxAge := anthropic429SevenDayResetMaxAge
 	if window == "5h" {
-		maxAge = 6 * time.Hour
+		maxAge = anthropic429FiveHourResetMaxAge
 	}
 	if resetAt.After(now.Add(maxAge)) {
+		return time.Time{}, false
+	}
+	return resetAt, true
+}
+
+func parseAnthropicUnifiedResetTimestamp(raw string, now time.Time) (time.Time, bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return time.Time{}, false
+	}
+	if now.IsZero() {
+		now = time.Now()
+	}
+	ts, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil {
+		return time.Time{}, false
+	}
+	if ts > 1e11 {
+		ts /= 1000
+	}
+	resetAt := time.Unix(ts, 0)
+	if !resetAt.After(now) {
+		return time.Time{}, false
+	}
+	if resetAt.After(now.Add(anthropic429SevenDayResetMaxAge)) {
 		return time.Time{}, false
 	}
 	return resetAt, true
@@ -2162,27 +2193,33 @@ func (s *RateLimitService) persistAnthropicExhaustedWindowLimit(ctx context.Cont
 //   - anthropic-ratelimit-unified-7d-utilization / anthropic-ratelimit-unified-7d-surpassed-threshold
 //   - anthropic-ratelimit-unified-7d-reset
 //
-// Returns nil when the per-window headers are absent (caller should fall back to
-// the aggregated anthropic-ratelimit-unified-reset header).
+// Returns nil when the per-window headers are absent or do not show an
+// exhausted window (caller should fall back to the aggregated header or the
+// short local 429 fallback).
 func calculateAnthropic429ResetTime(headers http.Header) *anthropic429Result {
+	return calculateAnthropic429ResetTimeAt(headers, time.Now())
+}
+
+func calculateAnthropic429ResetTimeAt(headers http.Header, now time.Time) *anthropic429Result {
 	reset5hStr := headers.Get("anthropic-ratelimit-unified-5h-reset")
 	reset7dStr := headers.Get("anthropic-ratelimit-unified-7d-reset")
 
 	if reset5hStr == "" && reset7dStr == "" {
 		return nil
 	}
+	if now.IsZero() {
+		now = time.Now()
+	}
 
 	var reset5h, reset7d *time.Time
-	if ts, err := strconv.ParseInt(reset5hStr, 10, 64); err == nil {
-		t := time.Unix(ts, 0)
+	if t, ok := parseAnthropicWindowReset(headers, "5h", now); ok {
 		reset5h = &t
 	}
-	if ts, err := strconv.ParseInt(reset7dStr, 10, 64); err == nil {
-		t := time.Unix(ts, 0)
+	if t, ok := parseAnthropicWindowReset(headers, "7d", now); ok {
 		reset7d = &t
 	}
 
-	is5hExceeded := isAnthropicWindowExceeded(headers, "5h")
+	is5hExceeded := isAnthropic5hRejected(headers) || isAnthropicWindowExceeded(headers, "5h")
 	is7dExceeded := isAnthropicWindowExceeded(headers, "7d")
 
 	slog.Info("anthropic_429_window_analysis",
@@ -2206,8 +2243,12 @@ func calculateAnthropic429ResetTime(headers http.Header) *anthropic429Result {
 	case is7dExceeded:
 		chosen = reset7d
 	default:
-		// Neither flag clearly exceeded — pick the sooner reset as best guess
-		chosen = pickSooner(reset5h, reset7d)
+		slog.Info(
+			"anthropic_429_window_headers_not_exhausted",
+			"reset_5h", reset5hStr,
+			"reset_7d", reset7dStr,
+		)
+		return nil
 	}
 
 	if chosen == nil {
@@ -2235,22 +2276,6 @@ func isAnthropicWindowExceeded(headers http.Header, window string) bool {
 	}
 
 	return false
-}
-
-// pickSooner returns whichever of the two time pointers is earlier.
-// If only one is non-nil, it is returned. If both are nil, returns nil.
-func pickSooner(a, b *time.Time) *time.Time {
-	switch {
-	case a != nil && b != nil:
-		if a.Before(*b) {
-			return a
-		}
-		return b
-	case a != nil:
-		return a
-	default:
-		return b
-	}
 }
 
 func (s *RateLimitService) persistOpenAICodexSnapshot(ctx context.Context, account *Account, headers http.Header) {

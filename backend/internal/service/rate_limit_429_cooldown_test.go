@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"testing"
 	"time"
 
@@ -136,4 +137,88 @@ func TestHandle429_AnthropicAPIKeyNoResetStillSkipsFallback(t *testing.T) {
 	svc.handle429(context.Background(), account, http.Header{}, []byte(`{"error":{"message":"Extra usage required"}}`))
 
 	require.Zero(t, accountRepo.rateLimitCalls)
+}
+
+func TestHandle429_AnthropicOAuthPerWindowHeadersNotExceededUseFallback(t *testing.T) {
+	accountRepo := &rateLimit429AccountRepoStub{}
+	svc := NewRateLimitService(accountRepo, nil, &config.Config{}, nil, nil)
+
+	account := &Account{ID: 47, Platform: PlatformAnthropic, Type: AccountTypeOAuth}
+	headers := http.Header{}
+	headers.Set("anthropic-ratelimit-unified-5h-utilization", "0.70")
+	headers.Set("anthropic-ratelimit-unified-5h-reset", strconv.FormatInt(time.Now().Add(2*time.Hour).Unix(), 10))
+	headers.Set("anthropic-ratelimit-unified-7d-utilization", "0.80")
+	headers.Set("anthropic-ratelimit-unified-7d-reset", strconv.FormatInt(time.Now().Add(72*time.Hour).Unix(), 10))
+
+	before := time.Now()
+	svc.handle429(context.Background(), account, headers, []byte(`{"error":{"type":"rate_limit_error","message":"slow down"}}`))
+	after := time.Now()
+
+	require.Equal(t, 1, accountRepo.rateLimitCalls)
+	require.Equal(t, int64(47), accountRepo.lastRateLimitID)
+	require.False(t, accountRepo.lastRateLimitReset.Before(before.Add(5*time.Second)))
+	require.False(t, accountRepo.lastRateLimitReset.After(after.Add(5*time.Second)))
+}
+
+func TestHandle429_AnthropicAPIKeyPerWindowHeadersNotExceededSkipsFallback(t *testing.T) {
+	accountRepo := &rateLimit429AccountRepoStub{}
+	svc := NewRateLimitService(accountRepo, nil, &config.Config{}, nil, nil)
+
+	account := &Account{ID: 48, Platform: PlatformAnthropic, Type: AccountTypeAPIKey}
+	headers := http.Header{}
+	headers.Set("anthropic-ratelimit-unified-5h-utilization", "0.70")
+	headers.Set("anthropic-ratelimit-unified-5h-reset", strconv.FormatInt(time.Now().Add(2*time.Hour).Unix(), 10))
+	headers.Set("anthropic-ratelimit-unified-7d-utilization", "0.80")
+	headers.Set("anthropic-ratelimit-unified-7d-reset", strconv.FormatInt(time.Now().Add(72*time.Hour).Unix(), 10))
+
+	svc.handle429(context.Background(), account, headers, []byte(`{"error":{"type":"rate_limit_error","message":"slow down"}}`))
+
+	require.Zero(t, accountRepo.rateLimitCalls)
+}
+
+func TestHandle429_AnthropicOAuthInvalidUnifiedResetUsesFallback(t *testing.T) {
+	accountRepo := &rateLimit429AccountRepoStub{}
+	svc := NewRateLimitService(accountRepo, nil, &config.Config{}, nil, nil)
+
+	account := &Account{ID: 49, Platform: PlatformAnthropic, Type: AccountTypeOAuth}
+	headers := http.Header{}
+	headers.Set("anthropic-ratelimit-unified-reset", strconv.FormatInt(time.Now().Add(9*24*time.Hour).Unix(), 10))
+
+	before := time.Now()
+	svc.handle429(context.Background(), account, headers, []byte(`{"error":{"type":"rate_limit_error","message":"slow down"}}`))
+	after := time.Now()
+
+	require.Equal(t, 1, accountRepo.rateLimitCalls)
+	require.Equal(t, int64(49), accountRepo.lastRateLimitID)
+	require.False(t, accountRepo.lastRateLimitReset.Before(before.Add(5*time.Second)))
+	require.False(t, accountRepo.lastRateLimitReset.After(after.Add(5*time.Second)))
+}
+
+func TestHandle429_AnthropicAPIKeyInvalidUnifiedResetSkipsFallback(t *testing.T) {
+	accountRepo := &rateLimit429AccountRepoStub{}
+	svc := NewRateLimitService(accountRepo, nil, &config.Config{}, nil, nil)
+
+	account := &Account{ID: 50, Platform: PlatformAnthropic, Type: AccountTypeAPIKey}
+	headers := http.Header{}
+	headers.Set("anthropic-ratelimit-unified-reset", strconv.FormatInt(time.Now().Add(9*24*time.Hour).Unix(), 10))
+
+	svc.handle429(context.Background(), account, headers, []byte(`{"error":{"type":"rate_limit_error","message":"slow down"}}`))
+
+	require.Zero(t, accountRepo.rateLimitCalls)
+}
+
+func TestHandle429_AnthropicUnifiedResetMillisAccepted(t *testing.T) {
+	accountRepo := &rateLimit429AccountRepoStub{}
+	svc := NewRateLimitService(accountRepo, nil, &config.Config{}, nil, nil)
+
+	account := &Account{ID: 51, Platform: PlatformAnthropic, Type: AccountTypeAPIKey}
+	resetAt := time.Now().Add(2 * time.Hour).Truncate(time.Second)
+	headers := http.Header{}
+	headers.Set("anthropic-ratelimit-unified-reset", strconv.FormatInt(resetAt.UnixMilli(), 10))
+
+	svc.handle429(context.Background(), account, headers, []byte(`{"error":{"type":"rate_limit_error","message":"slow down"}}`))
+
+	require.Equal(t, 1, accountRepo.rateLimitCalls)
+	require.Equal(t, int64(51), accountRepo.lastRateLimitID)
+	require.Equal(t, resetAt.Unix(), accountRepo.lastRateLimitReset.Unix())
 }

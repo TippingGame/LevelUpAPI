@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"net/http"
+	"strconv"
 	"testing"
 	"time"
 
@@ -24,45 +25,54 @@ func (r *anthropicDefaultTempUnschedRepoStub) SetTempUnschedulable(_ context.Con
 }
 
 func TestCalculateAnthropic429ResetTime_Only5hExceeded(t *testing.T) {
+	now := time.Unix(1800000000, 0)
+	reset5h := now.Add(2 * time.Hour).Unix()
+	reset7d := now.Add(72 * time.Hour).Unix()
 	headers := http.Header{}
 	headers.Set("anthropic-ratelimit-unified-5h-utilization", "1.02")
-	headers.Set("anthropic-ratelimit-unified-5h-reset", "1770998400")
+	headers.Set("anthropic-ratelimit-unified-5h-reset", formatUnix(reset5h))
 	headers.Set("anthropic-ratelimit-unified-7d-utilization", "0.32")
-	headers.Set("anthropic-ratelimit-unified-7d-reset", "1771549200")
+	headers.Set("anthropic-ratelimit-unified-7d-reset", formatUnix(reset7d))
 
-	result := calculateAnthropic429ResetTime(headers)
-	assertAnthropicResult(t, result, 1770998400)
+	result := calculateAnthropic429ResetTimeAt(headers, now)
+	assertAnthropicResult(t, result, reset5h)
 
-	if result.fiveHourReset == nil || !result.fiveHourReset.Equal(time.Unix(1770998400, 0)) {
-		t.Errorf("expected fiveHourReset=1770998400, got %v", result.fiveHourReset)
+	if result.fiveHourReset == nil || !result.fiveHourReset.Equal(time.Unix(reset5h, 0)) {
+		t.Errorf("expected fiveHourReset=%d, got %v", reset5h, result.fiveHourReset)
 	}
 }
 
 func TestCalculateAnthropic429ResetTime_Only7dExceeded(t *testing.T) {
+	now := time.Unix(1800000000, 0)
+	reset5h := now.Add(2 * time.Hour).Unix()
+	reset7d := now.Add(72 * time.Hour).Unix()
 	headers := http.Header{}
 	headers.Set("anthropic-ratelimit-unified-5h-utilization", "0.50")
-	headers.Set("anthropic-ratelimit-unified-5h-reset", "1770998400")
+	headers.Set("anthropic-ratelimit-unified-5h-reset", formatUnix(reset5h))
 	headers.Set("anthropic-ratelimit-unified-7d-utilization", "1.05")
-	headers.Set("anthropic-ratelimit-unified-7d-reset", "1771549200")
+	headers.Set("anthropic-ratelimit-unified-7d-reset", formatUnix(reset7d))
 
-	result := calculateAnthropic429ResetTime(headers)
-	assertAnthropicResult(t, result, 1771549200)
+	result := calculateAnthropic429ResetTimeAt(headers, now)
+	assertAnthropicResult(t, result, reset7d)
 
 	// fiveHourReset should still be populated for session window calculation
-	if result.fiveHourReset == nil || !result.fiveHourReset.Equal(time.Unix(1770998400, 0)) {
-		t.Errorf("expected fiveHourReset=1770998400, got %v", result.fiveHourReset)
+	if result.fiveHourReset == nil || !result.fiveHourReset.Equal(time.Unix(reset5h, 0)) {
+		t.Errorf("expected fiveHourReset=%d, got %v", reset5h, result.fiveHourReset)
 	}
 }
 
 func TestCalculateAnthropic429ResetTime_BothExceeded(t *testing.T) {
+	now := time.Unix(1800000000, 0)
+	reset5h := now.Add(2 * time.Hour).Unix()
+	reset7d := now.Add(72 * time.Hour).Unix()
 	headers := http.Header{}
 	headers.Set("anthropic-ratelimit-unified-5h-utilization", "1.10")
-	headers.Set("anthropic-ratelimit-unified-5h-reset", "1770998400")
+	headers.Set("anthropic-ratelimit-unified-5h-reset", formatUnix(reset5h))
 	headers.Set("anthropic-ratelimit-unified-7d-utilization", "1.02")
-	headers.Set("anthropic-ratelimit-unified-7d-reset", "1771549200")
+	headers.Set("anthropic-ratelimit-unified-7d-reset", formatUnix(reset7d))
 
-	result := calculateAnthropic429ResetTime(headers)
-	assertAnthropicResult(t, result, 1771549200)
+	result := calculateAnthropic429ResetTimeAt(headers, now)
+	assertAnthropicResult(t, result, reset7d)
 }
 
 func TestCalculateAnthropic429ResetTime_NoPerWindowHeaders(t *testing.T) {
@@ -83,57 +93,102 @@ func TestCalculateAnthropic429ResetTime_NoHeaders(t *testing.T) {
 }
 
 func TestCalculateAnthropic429ResetTime_SurpassedThreshold(t *testing.T) {
+	now := time.Unix(1800000000, 0)
+	reset5h := now.Add(2 * time.Hour).Unix()
+	reset7d := now.Add(72 * time.Hour).Unix()
 	headers := http.Header{}
 	headers.Set("anthropic-ratelimit-unified-5h-surpassed-threshold", "true")
-	headers.Set("anthropic-ratelimit-unified-5h-reset", "1770998400")
+	headers.Set("anthropic-ratelimit-unified-5h-reset", formatUnix(reset5h))
 	headers.Set("anthropic-ratelimit-unified-7d-surpassed-threshold", "false")
-	headers.Set("anthropic-ratelimit-unified-7d-reset", "1771549200")
+	headers.Set("anthropic-ratelimit-unified-7d-reset", formatUnix(reset7d))
 
-	result := calculateAnthropic429ResetTime(headers)
-	assertAnthropicResult(t, result, 1770998400)
+	result := calculateAnthropic429ResetTimeAt(headers, now)
+	assertAnthropicResult(t, result, reset5h)
 }
 
 func TestCalculateAnthropic429ResetTime_UtilizationExactlyOne(t *testing.T) {
+	now := time.Unix(1800000000, 0)
+	reset5h := now.Add(2 * time.Hour).Unix()
+	reset7d := now.Add(72 * time.Hour).Unix()
 	headers := http.Header{}
 	headers.Set("anthropic-ratelimit-unified-5h-utilization", "1.0")
-	headers.Set("anthropic-ratelimit-unified-5h-reset", "1770998400")
+	headers.Set("anthropic-ratelimit-unified-5h-reset", formatUnix(reset5h))
 	headers.Set("anthropic-ratelimit-unified-7d-utilization", "0.5")
-	headers.Set("anthropic-ratelimit-unified-7d-reset", "1771549200")
+	headers.Set("anthropic-ratelimit-unified-7d-reset", formatUnix(reset7d))
 
-	result := calculateAnthropic429ResetTime(headers)
-	assertAnthropicResult(t, result, 1770998400)
+	result := calculateAnthropic429ResetTimeAt(headers, now)
+	assertAnthropicResult(t, result, reset5h)
 }
 
-func TestCalculateAnthropic429ResetTime_NeitherExceeded_UsesShorter(t *testing.T) {
+func TestCalculateAnthropic429ResetTime_NeitherExceededReturnsNil(t *testing.T) {
+	now := time.Unix(1800000000, 0)
 	headers := http.Header{}
 	headers.Set("anthropic-ratelimit-unified-5h-utilization", "0.95")
-	headers.Set("anthropic-ratelimit-unified-5h-reset", "1770998400") // sooner
+	headers.Set("anthropic-ratelimit-unified-5h-reset", formatUnix(now.Add(2*time.Hour).Unix()))
 	headers.Set("anthropic-ratelimit-unified-7d-utilization", "0.80")
-	headers.Set("anthropic-ratelimit-unified-7d-reset", "1771549200") // later
+	headers.Set("anthropic-ratelimit-unified-7d-reset", formatUnix(now.Add(72*time.Hour).Unix()))
 
-	result := calculateAnthropic429ResetTime(headers)
-	assertAnthropicResult(t, result, 1770998400)
+	result := calculateAnthropic429ResetTimeAt(headers, now)
+	require.Nil(t, result)
 }
 
 func TestCalculateAnthropic429ResetTime_Only5hResetHeader(t *testing.T) {
+	now := time.Unix(1800000000, 0)
+	reset5h := now.Add(2 * time.Hour).Unix()
 	headers := http.Header{}
 	headers.Set("anthropic-ratelimit-unified-5h-utilization", "1.05")
-	headers.Set("anthropic-ratelimit-unified-5h-reset", "1770998400")
+	headers.Set("anthropic-ratelimit-unified-5h-reset", formatUnix(reset5h))
 
-	result := calculateAnthropic429ResetTime(headers)
-	assertAnthropicResult(t, result, 1770998400)
+	result := calculateAnthropic429ResetTimeAt(headers, now)
+	assertAnthropicResult(t, result, reset5h)
 }
 
 func TestCalculateAnthropic429ResetTime_Only7dResetHeader(t *testing.T) {
+	now := time.Unix(1800000000, 0)
+	reset7d := now.Add(72 * time.Hour).Unix()
 	headers := http.Header{}
 	headers.Set("anthropic-ratelimit-unified-7d-utilization", "1.03")
-	headers.Set("anthropic-ratelimit-unified-7d-reset", "1771549200")
+	headers.Set("anthropic-ratelimit-unified-7d-reset", formatUnix(reset7d))
 
-	result := calculateAnthropic429ResetTime(headers)
-	assertAnthropicResult(t, result, 1771549200)
+	result := calculateAnthropic429ResetTimeAt(headers, now)
+	assertAnthropicResult(t, result, reset7d)
 
 	if result.fiveHourReset != nil {
 		t.Errorf("expected fiveHourReset=nil when no 5h headers, got %v", result.fiveHourReset)
+	}
+}
+
+func TestCalculateAnthropic429ResetTime_RejectedStatusCountsAs5hExhausted(t *testing.T) {
+	now := time.Unix(1800000000, 0)
+	reset5h := now.Add(2 * time.Hour).Unix()
+	headers := http.Header{}
+	headers.Set("anthropic-ratelimit-unified-5h-status", "rejected")
+	headers.Set("anthropic-ratelimit-unified-5h-utilization", "0.75")
+	headers.Set("anthropic-ratelimit-unified-5h-reset", formatUnix(reset5h))
+
+	result := calculateAnthropic429ResetTimeAt(headers, now)
+	assertAnthropicResult(t, result, reset5h)
+}
+
+func TestCalculateAnthropic429ResetTime_InvalidResetReturnsNil(t *testing.T) {
+	now := time.Unix(1800000000, 0)
+	tests := []struct {
+		name  string
+		reset string
+	}{
+		{name: "past reset", reset: formatUnix(now.Add(-time.Minute).Unix())},
+		{name: "too far reset", reset: formatUnix(now.Add(9 * 24 * time.Hour).Unix())},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			headers := http.Header{}
+			headers.Set("anthropic-ratelimit-unified-7d-utilization", "1.03")
+			headers.Set("anthropic-ratelimit-unified-7d-reset", tt.reset)
+
+			result := calculateAnthropic429ResetTimeAt(headers, now)
+			require.Nil(t, result)
+		})
 	}
 }
 
@@ -216,6 +271,10 @@ func makeHeader(key, value string) http.Header {
 	h := http.Header{}
 	h.Set(key, value)
 	return h
+}
+
+func formatUnix(ts int64) string {
+	return strconv.FormatInt(ts, 10)
 }
 
 func TestHandleUpstreamErrorAnthropicOAuthDefault503OverloadTempUnschedulable(t *testing.T) {
