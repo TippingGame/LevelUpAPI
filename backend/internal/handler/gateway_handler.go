@@ -404,6 +404,14 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 				}
 				account := selection.Account
 				setOpsSelectedAccount(c, account.ID, account.Platform)
+				currentSessionBoundAccountID = h.refreshStickyBoundAccountAfterSelection(
+					c.Request.Context(),
+					reqLog,
+					currentAPIKey.GroupID,
+					sessionKey,
+					currentSessionBoundAccountID,
+					account.ID,
+				)
 
 				// 检查请求拦截（预热请求、SUGGESTION MODE等）
 				if account.IsInterceptWarmupEnabled() {
@@ -767,6 +775,14 @@ routeLoop:
 			}
 			account := selection.Account
 			setOpsSelectedAccount(c, account.ID, account.Platform)
+			currentSessionBoundAccountID = h.refreshStickyBoundAccountAfterSelection(
+				c.Request.Context(),
+				reqLog,
+				currentAPIKey.GroupID,
+				sessionKey,
+				currentSessionBoundAccountID,
+				account.ID,
+			)
 
 			// [DEBUG-STICKY] 打印账号选择结果
 			reqLog.Info("sticky.account_selected",
