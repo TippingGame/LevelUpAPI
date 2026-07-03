@@ -1170,6 +1170,56 @@ func TestUpdateAccountModelRateLimitInCache_UpdatesExtraAndCallsCache(t *testing
 	require.Equal(t, account.ID, cache.setAccountCalls[0].ID)
 }
 
+func TestUpdateAccountModelRateLimitInCache_PoolModeDefaultSkipsLocalState(t *testing.T) {
+	cache := &stubSchedulerCache{}
+	snapshotService := &SchedulerSnapshotService{cache: cache}
+	svc := &AntigravityGatewayService{
+		schedulerSnapshot: snapshotService,
+	}
+
+	account := &Account{
+		ID:       101,
+		Name:     "pool-default",
+		Platform: PlatformAntigravity,
+		Type:     AccountTypeAPIKey,
+		Credentials: map[string]any{
+			"pool_mode": true,
+		},
+	}
+
+	svc.updateAccountModelRateLimitInCache(context.Background(), account, "claude-sonnet-4-5", time.Now().Add(30*time.Second))
+
+	require.Nil(t, account.Extra)
+	require.Empty(t, cache.setAccountCalls)
+}
+
+func TestUpdateAccountModelRateLimitInCache_PoolModeCustomPolicyUpdatesCache(t *testing.T) {
+	cache := &stubSchedulerCache{}
+	snapshotService := &SchedulerSnapshotService{cache: cache}
+	svc := &AntigravityGatewayService{
+		schedulerSnapshot: snapshotService,
+	}
+
+	account := &Account{
+		ID:       102,
+		Name:     "pool-custom",
+		Platform: PlatformAntigravity,
+		Type:     AccountTypeAPIKey,
+		Credentials: map[string]any{
+			"pool_mode":                  true,
+			"custom_error_codes_enabled": true,
+		},
+	}
+
+	svc.updateAccountModelRateLimitInCache(context.Background(), account, "claude-sonnet-4-5", time.Now().Add(30*time.Second))
+
+	require.NotNil(t, account.Extra)
+	limits, ok := account.Extra["model_rate_limits"].(map[string]any)
+	require.True(t, ok)
+	require.NotNil(t, limits["claude-sonnet-4-5"])
+	require.Len(t, cache.setAccountCalls, 1)
+}
+
 // TestUpdateAccountModelRateLimitInCache_NilSchedulerSnapshot 测试 schedulerSnapshot 为 nil 时不 panic
 func TestUpdateAccountModelRateLimitInCache_NilSchedulerSnapshot(t *testing.T) {
 	svc := &AntigravityGatewayService{

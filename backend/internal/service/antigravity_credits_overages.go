@@ -62,6 +62,10 @@ func (s *AntigravityGatewayService) setCreditsExhausted(ctx context.Context, acc
 	if account == nil || account.ID == 0 {
 		return
 	}
+	if !shouldApplyLocalSystemErrorState(account) {
+		logger.LegacyPrintf("service.antigravity_gateway", "credits_exhausted_skipped account=%d reason=policy_skipped", account.ID)
+		return
+	}
 	resetAt := time.Now().Add(creditsExhaustedDuration)
 	writeCtx, cancel := retryableErrorStateContext(ctx)
 	defer cancel()

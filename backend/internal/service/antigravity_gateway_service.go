@@ -2947,6 +2947,10 @@ func (s *AntigravityGatewayService) updateAccountModelRateLimitInCache(ctx conte
 	if s.schedulerSnapshot == nil || account == nil || modelKey == "" {
 		return
 	}
+	if !shouldApplyLocalSystemErrorState(account) {
+		logger.LegacyPrintf("service.antigravity_gateway", "[antigravity-Forward] cache_model_rate_limit_skipped account=%d model=%s reason=policy_skipped", account.ID, modelKey)
+		return
+	}
 
 	// 更新账号对象的 Extra 字段
 	if account.Extra == nil {

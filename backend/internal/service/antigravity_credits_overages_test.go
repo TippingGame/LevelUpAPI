@@ -456,6 +456,56 @@ func TestHandleCreditsRetryFailure_PoolModeCustomErrorCodeHitMarksExhausted(t *t
 	require.Equal(t, creditsExhaustedKey, repo.modelRateLimitCalls[0].modelKey)
 }
 
+func TestSetCreditsExhausted_PoolModeDefaultSkipsLocalState(t *testing.T) {
+	repo := &stubAntigravityAccountRepo{}
+	cache := &stubSchedulerCache{}
+	svc := &AntigravityGatewayService{
+		accountRepo:       repo,
+		schedulerSnapshot: &SchedulerSnapshotService{cache: cache},
+	}
+	account := &Account{
+		ID:       109,
+		Name:     "pool-default",
+		Type:     AccountTypeAPIKey,
+		Platform: PlatformAntigravity,
+		Credentials: map[string]any{
+			"pool_mode": true,
+		},
+	}
+
+	svc.setCreditsExhausted(context.Background(), account)
+
+	require.Empty(t, repo.modelRateLimitCalls)
+	require.Nil(t, account.Extra)
+	require.Empty(t, cache.setAccountCalls)
+}
+
+func TestSetCreditsExhausted_PoolModeCustomPolicyWritesLocalState(t *testing.T) {
+	repo := &stubAntigravityAccountRepo{}
+	cache := &stubSchedulerCache{}
+	svc := &AntigravityGatewayService{
+		accountRepo:       repo,
+		schedulerSnapshot: &SchedulerSnapshotService{cache: cache},
+	}
+	account := &Account{
+		ID:       110,
+		Name:     "pool-custom",
+		Type:     AccountTypeAPIKey,
+		Platform: PlatformAntigravity,
+		Credentials: map[string]any{
+			"pool_mode":                  true,
+			"custom_error_codes_enabled": true,
+		},
+	}
+
+	svc.setCreditsExhausted(context.Background(), account)
+
+	require.Len(t, repo.modelRateLimitCalls, 1)
+	require.Equal(t, creditsExhaustedKey, repo.modelRateLimitCalls[0].modelKey)
+	require.NotNil(t, account.Extra)
+	require.Len(t, cache.setAccountCalls, 1)
+}
+
 func TestShouldMarkCreditsExhausted(t *testing.T) {
 	t.Run("reqErr 不为 nil 时不标记", func(t *testing.T) {
 		resp := &http.Response{StatusCode: http.StatusForbidden}
