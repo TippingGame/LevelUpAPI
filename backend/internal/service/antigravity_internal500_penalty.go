@@ -52,6 +52,17 @@ func (s *AntigravityGatewayService) syncInternal500TempUnschedState(ctx context.
 func (s *AntigravityGatewayService) applyInternal500Penalty(
 	ctx context.Context, prefix string, account *Account, count int64,
 ) {
+	if account == nil {
+		return
+	}
+	if account.IsPoolMode() && !account.IsCustomErrorCodesEnabled() {
+		slog.Info("internal500_pool_mode_penalty_skipped", "account_id", account.ID, "consecutive_count", count)
+		return
+	}
+	if account.IsCustomErrorCodesEnabled() && !account.ShouldHandleErrorCode(http.StatusInternalServerError) {
+		slog.Info("internal500_custom_error_code_skipped", "account_id", account.ID, "consecutive_count", count)
+		return
+	}
 	switch {
 	case count >= int64(internal500PenaltyTier3Threshold):
 		until := time.Now().Add(internal500PenaltyTier3Duration)

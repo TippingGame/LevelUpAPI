@@ -5,6 +5,7 @@ package service
 import (
 	"context"
 	"errors"
+	"net/http"
 	"testing"
 	"time"
 
@@ -240,6 +241,80 @@ func TestApplyInternal500Penalty(t *testing.T) {
 
 		require.Empty(t, repo.tempUnschedCalls)
 		require.Empty(t, repo.setErrorCalls)
+	})
+
+	t.Run("pool_mode without custom error codes skips penalty", func(t *testing.T) {
+		repo := &internal500AccountRepoStub{}
+		tempCache := &runtimeTempUnschedCacheStub{}
+		svc := &AntigravityGatewayService{
+			accountRepo:      repo,
+			rateLimitService: &RateLimitService{tempUnschedCache: tempCache},
+		}
+		account := &Account{
+			ID:       14,
+			Name:     "pool-default",
+			Platform: PlatformAntigravity,
+			Type:     AccountTypeAPIKey,
+			Credentials: map[string]any{
+				"pool_mode": true,
+			},
+		}
+
+		svc.applyInternal500Penalty(context.Background(), "[test]", account, 3)
+
+		require.Empty(t, repo.tempUnschedCalls)
+		require.Empty(t, repo.setErrorCalls)
+		require.Nil(t, account.TempUnschedulableUntil)
+		require.Nil(t, tempCache.states[14])
+	})
+
+	t.Run("custom error codes miss skips penalty", func(t *testing.T) {
+		repo := &internal500AccountRepoStub{}
+		svc := &AntigravityGatewayService{accountRepo: repo}
+		account := &Account{
+			ID:       15,
+			Name:     "custom-miss",
+			Platform: PlatformAntigravity,
+			Type:     AccountTypeAPIKey,
+			Credentials: map[string]any{
+				"custom_error_codes_enabled": true,
+				"custom_error_codes":         []any{float64(http.StatusTooManyRequests)},
+			},
+		}
+
+		svc.applyInternal500Penalty(context.Background(), "[test]", account, 3)
+
+		require.Empty(t, repo.tempUnschedCalls)
+		require.Empty(t, repo.setErrorCalls)
+		require.Nil(t, account.TempUnschedulableUntil)
+	})
+
+	t.Run("pool_mode custom 500 still applies penalty", func(t *testing.T) {
+		repo := &internal500AccountRepoStub{}
+		tempCache := &runtimeTempUnschedCacheStub{}
+		svc := &AntigravityGatewayService{
+			accountRepo:      repo,
+			rateLimitService: &RateLimitService{tempUnschedCache: tempCache},
+		}
+		account := &Account{
+			ID:       16,
+			Name:     "pool-custom-500",
+			Platform: PlatformAntigravity,
+			Type:     AccountTypeAPIKey,
+			Credentials: map[string]any{
+				"pool_mode":                  true,
+				"custom_error_codes_enabled": true,
+				"custom_error_codes":         []any{float64(http.StatusInternalServerError)},
+			},
+		}
+
+		svc.applyInternal500Penalty(context.Background(), "[test]", account, 3)
+
+		require.Len(t, repo.tempUnschedCalls, 1)
+		require.Empty(t, repo.setErrorCalls)
+		require.NotNil(t, account.TempUnschedulableUntil)
+		require.NotNil(t, tempCache.states[16])
+		require.Equal(t, "antigravity_internal_500", tempCache.states[16].MatchedKeyword)
 	})
 
 	t.Run("count=1 canceled context still temp unschedules", func(t *testing.T) {
