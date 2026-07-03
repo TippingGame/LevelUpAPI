@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -2257,6 +2258,13 @@ func parseGenericRateLimitResetValue(raw string, now time.Time, maxAge time.Dura
 			return &resetAt
 		}
 		return nil
+	}
+	if seconds, err := strconv.ParseFloat(raw, 64); err == nil {
+		if math.IsNaN(seconds) || math.IsInf(seconds, 0) || seconds <= 0 || seconds > maxAge.Seconds() {
+			return nil
+		}
+		resetAt := now.Add(time.Duration(seconds * float64(time.Second)))
+		return &resetAt
 	}
 	if duration, err := time.ParseDuration(raw); err == nil {
 		if duration <= 0 || duration > maxAge {

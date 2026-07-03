@@ -190,6 +190,29 @@ func TestHandle429RateLimitResetDurationSetsRateLimit(t *testing.T) {
 	require.False(t, repo.lastRateReset.After(after.Add(90*time.Second)))
 }
 
+func TestHandle429RateLimitResetFractionalSecondsSetsRateLimit(t *testing.T) {
+	repo := &permanentKeywordAccountRepoStub{}
+	svc := &RateLimitService{accountRepo: repo}
+	account := &Account{
+		ID:          7316,
+		Platform:    PlatformGemini,
+		Type:        AccountTypeAPIKey,
+		Status:      StatusActive,
+		Schedulable: true,
+	}
+	headers := http.Header{}
+	headers.Set("X-Rate-Limit-Reset-After", "1.5")
+
+	before := time.Now()
+	svc.handle429(context.Background(), account, headers, []byte(`{"error":{"message":"slow down"}}`))
+	after := time.Now()
+
+	require.Equal(t, 1, repo.rateLimitCalls)
+	require.Equal(t, account.ID, repo.lastRateLimitID)
+	require.False(t, repo.lastRateReset.Before(before.Add(1500*time.Millisecond)))
+	require.False(t, repo.lastRateReset.After(after.Add(1500*time.Millisecond)))
+}
+
 func TestHandle429RateLimitResetTooLargeFallsBackToDefault(t *testing.T) {
 	repo := &permanentKeywordAccountRepoStub{}
 	svc := &RateLimitService{accountRepo: repo}
@@ -202,6 +225,28 @@ func TestHandle429RateLimitResetTooLargeFallsBackToDefault(t *testing.T) {
 	}
 	headers := http.Header{}
 	headers.Set("RateLimit-Reset", "999999")
+
+	before := time.Now()
+	svc.handle429(context.Background(), account, headers, []byte(`{"error":{"type":"rate_limit_error","message":"slow down"}}`))
+	after := time.Now()
+
+	require.Equal(t, 1, repo.rateLimitCalls)
+	require.False(t, repo.lastRateReset.Before(before.Add(time.Duration(defaultRateLimit429CooldownSeconds)*time.Second)))
+	require.False(t, repo.lastRateReset.After(after.Add(time.Duration(defaultRateLimit429CooldownSeconds)*time.Second)))
+}
+
+func TestHandle429RateLimitResetNonFiniteFallsBackToDefault(t *testing.T) {
+	repo := &permanentKeywordAccountRepoStub{}
+	svc := &RateLimitService{accountRepo: repo}
+	account := &Account{
+		ID:          7317,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeOAuth,
+		Status:      StatusActive,
+		Schedulable: true,
+	}
+	headers := http.Header{}
+	headers.Set("X-RateLimit-Reset-After", "NaN")
 
 	before := time.Now()
 	svc.handle429(context.Background(), account, headers, []byte(`{"error":{"type":"rate_limit_error","message":"slow down"}}`))
