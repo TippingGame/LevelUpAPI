@@ -406,6 +406,50 @@ func TestRateLimitServiceHandleUpstreamErrorAmbiguousPermissionDoesNotSetPermane
 	}
 }
 
+func TestRateLimitServiceHandleUpstreamErrorAmbiguousKeyTextDoesNotSetPermanentError(t *testing.T) {
+	tests := []struct {
+		name string
+		body []byte
+	}{
+		{
+			name: "prompt cache key expired",
+			body: []byte(`{"error":{"message":"The prompt cache key has expired. Please retry without the stale cache key.","type":"invalid_request_error"}}`),
+		},
+		{
+			name: "idempotency key revoked",
+			body: []byte(`{"error":{"message":"The idempotency key has been revoked for this request.","type":"invalid_request_error"}}`),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := &permanentKeywordAccountRepoStub{}
+			svc := &RateLimitService{accountRepo: repo}
+			account := &Account{
+				ID:          2072,
+				Platform:    PlatformOpenAI,
+				Type:        AccountTypeAPIKey,
+				Status:      StatusActive,
+				Schedulable: true,
+			}
+
+			shouldDisable := svc.HandleUpstreamError(
+				context.Background(),
+				account,
+				http.StatusBadRequest,
+				http.Header{},
+				tt.body,
+			)
+
+			require.False(t, shouldDisable)
+			require.Equal(t, 0, repo.setErrorCalls)
+			require.Equal(t, 0, repo.tempCalls)
+			require.Equal(t, StatusActive, account.Status)
+			require.True(t, account.Schedulable)
+		})
+	}
+}
+
 func TestRateLimitServiceRecoverable403TempPersistFailureDoesNotSetPermanentError(t *testing.T) {
 	tests := []struct {
 		name        string
