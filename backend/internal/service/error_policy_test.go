@@ -298,6 +298,31 @@ func TestCheckErrorPolicy_GeminiRequestPolicyBypassesCustomErrorCodeFilter(t *te
 	require.Equal(t, 0, repo.tempCalls)
 }
 
+func TestCheckErrorPolicy_AntigravityRequestPolicyBypassesCustomErrorCodeFilter(t *testing.T) {
+	repo := &errorPolicyRepoStub{}
+	svc := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+	account := &Account{
+		ID:       19,
+		Type:     AccountTypeAPIKey,
+		Platform: PlatformAntigravity,
+		Credentials: map[string]any{
+			"custom_error_codes_enabled": true,
+			"custom_error_codes":         []any{float64(http.StatusForbidden)},
+		},
+	}
+
+	result := svc.CheckErrorPolicy(
+		context.Background(),
+		account,
+		http.StatusForbidden,
+		[]byte(`{"error":{"code":403,"message":"The response was blocked due to prohibited content.","status":"FAILED_PRECONDITION","details":[{"@type":"type.googleapis.com/google.rpc.ErrorInfo","reason":"PROHIBITED_CONTENT"}]}}`),
+	)
+
+	require.Equal(t, ErrorPolicyNone, result)
+	require.Equal(t, 0, repo.setErrCalls)
+	require.Equal(t, 0, repo.tempCalls)
+}
+
 func TestCheckErrorPolicy_NilAccountReturnsNone(t *testing.T) {
 	svc := NewRateLimitService(&errorPolicyRepoStub{}, nil, &config.Config{}, nil, nil)
 

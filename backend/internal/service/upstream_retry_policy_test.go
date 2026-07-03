@@ -177,4 +177,14 @@ func TestAuthPaymentPermissionStatusesFailoverWithoutSameAccountRetry(t *testing
 		"Permission denied",
 		[]byte(`{"error":{"code":403,"message":"Permission denied","status":"PERMISSION_DENIED"}}`),
 	))
+	require.False(t, (&AntigravityGatewayService{}).shouldFailoverUpstreamResponse(
+		http.StatusForbidden,
+		"The response was blocked due to prohibited content.",
+		[]byte(`{"error":{"code":403,"message":"The response was blocked due to prohibited content.","status":"FAILED_PRECONDITION","details":[{"@type":"type.googleapis.com/google.rpc.ErrorInfo","reason":"PROHIBITED_CONTENT"}]}}`),
+	))
+	require.True(t, (&AntigravityGatewayService{}).shouldFailoverUpstreamResponse(
+		http.StatusForbidden,
+		"Permission denied",
+		[]byte(`{"error":{"code":403,"message":"Permission denied","status":"PERMISSION_DENIED"}}`),
+	))
 }
