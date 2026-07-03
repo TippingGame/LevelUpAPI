@@ -222,6 +222,39 @@ func TestHandle529RetryAfterSetsOverloadCooldown(t *testing.T) {
 	require.Equal(t, repo.lastOverloadEnd.Unix(), account.OverloadUntil.Unix())
 }
 
+func TestHandle529GenericRateLimitResetSetsOverloadCooldown(t *testing.T) {
+	repo := &permanentKeywordAccountRepoStub{}
+	svc := &RateLimitService{accountRepo: repo}
+	account := &Account{
+		ID:          7313,
+		Platform:    PlatformAnthropic,
+		Type:        AccountTypeOAuth,
+		Status:      StatusActive,
+		Schedulable: true,
+	}
+	headers := http.Header{}
+	headers.Set("RateLimit-Reset", "29")
+
+	before := time.Now()
+	shouldDisable := svc.HandleUpstreamError(
+		context.Background(),
+		account,
+		529,
+		headers,
+		[]byte(`{"error":{"type":"overloaded_error","message":"overloaded"}}`),
+	)
+	after := time.Now()
+
+	require.False(t, shouldDisable)
+	require.Equal(t, 1, repo.overloadCalls)
+	require.Equal(t, account.ID, repo.lastOverloadID)
+	require.NoError(t, repo.lastOverloadErr)
+	require.False(t, repo.lastOverloadEnd.Before(before.Add(29*time.Second)))
+	require.False(t, repo.lastOverloadEnd.After(after.Add(29*time.Second)))
+	require.NotNil(t, account.OverloadUntil)
+	require.Equal(t, repo.lastOverloadEnd.Unix(), account.OverloadUntil.Unix())
+}
+
 func TestHandle5xxRetryAfterTempUnschedulable(t *testing.T) {
 	repo := &permanentKeywordAccountRepoStub{}
 	svc := &RateLimitService{accountRepo: repo}
@@ -250,6 +283,38 @@ func TestHandle5xxRetryAfterTempUnschedulable(t *testing.T) {
 	require.Contains(t, repo.lastTempReason, "upstream_retry_after")
 	require.False(t, repo.lastTempUntil.Before(before.Add(31*time.Second)))
 	require.False(t, repo.lastTempUntil.After(after.Add(31*time.Second)))
+	require.NotNil(t, account.TempUnschedulableUntil)
+	require.Equal(t, repo.lastTempUntil.Unix(), account.TempUnschedulableUntil.Unix())
+}
+
+func TestHandle5xxGenericRateLimitResetTempUnschedulable(t *testing.T) {
+	repo := &permanentKeywordAccountRepoStub{}
+	svc := &RateLimitService{accountRepo: repo}
+	account := &Account{
+		ID:          7314,
+		Platform:    PlatformAnthropic,
+		Type:        AccountTypeAPIKey,
+		Status:      StatusActive,
+		Schedulable: true,
+	}
+	headers := http.Header{}
+	headers.Set("X-Rate-Limit-Reset-After", "37")
+
+	before := time.Now()
+	shouldDisable := svc.HandleUpstreamError(
+		context.Background(),
+		account,
+		http.StatusServiceUnavailable,
+		headers,
+		[]byte(`{"error":{"type":"api_error","message":"upstream is cooling down"}}`),
+	)
+	after := time.Now()
+
+	require.True(t, shouldDisable)
+	require.Equal(t, 1, repo.tempCalls)
+	require.Contains(t, repo.lastTempReason, "upstream_retry_after")
+	require.False(t, repo.lastTempUntil.Before(before.Add(37*time.Second)))
+	require.False(t, repo.lastTempUntil.After(after.Add(37*time.Second)))
 	require.NotNil(t, account.TempUnschedulableUntil)
 	require.Equal(t, repo.lastTempUntil.Unix(), account.TempUnschedulableUntil.Unix())
 }

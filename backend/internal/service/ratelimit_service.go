@@ -1541,7 +1541,7 @@ func (s *RateLimitService) handleUpstreamRetryAfterBackoff(ctx context.Context, 
 		slog.Info("upstream_retry_after_backoff_local_state_skipped", "account_id", account.ID, "status_code", statusCode)
 		return false
 	}
-	until := parseRetryAfterResetTime(headers, time.Now(), time.Duration(maxRateLimit429CooldownSeconds)*time.Second)
+	until := parseUpstreamBackoffResetTime(headers, time.Now(), time.Duration(maxRateLimit429CooldownSeconds)*time.Second)
 	if until == nil {
 		return false
 	}
@@ -2766,9 +2766,10 @@ func (s *RateLimitService) handle529WithHeaders(ctx context.Context, account *Ac
 		cooldownMinutes = overloadCooldownMinutesDefault
 	}
 
-	until := time.Now().Add(time.Duration(cooldownMinutes) * time.Minute)
-	if retryAfterUntil := parseRetryAfterResetTime(headers, time.Now(), time.Duration(maxRateLimit429CooldownSeconds)*time.Second); retryAfterUntil != nil {
-		until = *retryAfterUntil
+	now := time.Now()
+	until := now.Add(time.Duration(cooldownMinutes) * time.Minute)
+	if headerUntil := parseUpstreamBackoffResetTime(headers, now, time.Duration(maxRateLimit429CooldownSeconds)*time.Second); headerUntil != nil {
+		until = *headerUntil
 	}
 	if err := s.persistOverloadedState(ctx, account, until); err != nil {
 		slog.Warn("overload_set_failed", "account_id", account.ID, "error", err)
