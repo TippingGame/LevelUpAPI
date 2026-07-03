@@ -60,6 +60,7 @@ func (s *AntigravityGatewayService) applyInternal500Penalty(
 		defer cancel()
 		if err := s.accountRepo.SetTempUnschedulable(writeCtx, account.ID, until, reason); err != nil {
 			slog.Error("internal500_temp_unsched_failed", "account_id", account.ID, "error", err)
+			s.syncInternal500TempUnschedState(writeCtx, account, until, reason, count)
 			return
 		}
 		s.syncInternal500TempUnschedState(writeCtx, account, until, reason, count)
@@ -73,6 +74,7 @@ func (s *AntigravityGatewayService) applyInternal500Penalty(
 		defer cancel()
 		if err := s.accountRepo.SetTempUnschedulable(writeCtx, account.ID, until, reason); err != nil {
 			slog.Error("internal500_temp_unsched_failed", "account_id", account.ID, "error", err)
+			s.syncInternal500TempUnschedState(writeCtx, account, until, reason, count)
 			return
 		}
 		s.syncInternal500TempUnschedState(writeCtx, account, until, reason, count)
@@ -86,6 +88,7 @@ func (s *AntigravityGatewayService) applyInternal500Penalty(
 		defer cancel()
 		if err := s.accountRepo.SetTempUnschedulable(writeCtx, account.ID, until, reason); err != nil {
 			slog.Error("internal500_temp_unsched_failed", "account_id", account.ID, "error", err)
+			s.syncInternal500TempUnschedState(writeCtx, account, until, reason, count)
 			return
 		}
 		s.syncInternal500TempUnschedState(writeCtx, account, until, reason, count)

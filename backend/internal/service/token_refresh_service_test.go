@@ -33,6 +33,7 @@ type tokenRefreshAccountRepo struct {
 	clearTempContextErr      error
 	setTempUnschedContextErr error
 	lastTempReason           string
+	setTempUnschedErr        error
 }
 
 func (r *tokenRefreshAccountRepo) Update(ctx context.Context, account *Account) error {
@@ -92,7 +93,7 @@ func (r *tokenRefreshAccountRepo) SetTempUnschedulable(ctx context.Context, id i
 	r.setTempUnschedCalls++
 	r.setTempUnschedContextErr = ctx.Err()
 	r.lastTempReason = reason
-	return nil
+	return r.setTempUnschedErr
 }
 
 type tokenCacheInvalidatorStub struct {
@@ -521,6 +522,36 @@ func TestTokenRefreshService_RefreshWithRetry_RetryExhaustedStateSurvivesCancele
 	require.NotNil(t, account.TempUnschedulableUntil)
 }
 
+func TestTokenRefreshService_RefreshWithRetry_RetryExhaustedStateSurvivesRepoWriteFailure(t *testing.T) {
+	repo := &tokenRefreshAccountRepo{setTempUnschedErr: errors.New("db timeout")}
+	tempCache := &tempUnschedCacheStub{}
+	cfg := &config.Config{
+		TokenRefresh: config.TokenRefreshConfig{
+			MaxRetries:          1,
+			RetryBackoffSeconds: 0,
+		},
+	}
+	service := NewTokenRefreshService(repo, nil, nil, nil, nil, nil, nil, cfg, tempCache)
+	account := &Account{
+		ID:       124,
+		Platform: PlatformGemini,
+		Type:     AccountTypeOAuth,
+	}
+	refresher := &tokenRefresherStub{
+		err: errors.New("network timeout"),
+	}
+
+	err := service.refreshWithRetry(context.Background(), account, refresher, refresher, time.Hour)
+	require.Error(t, err)
+	require.Equal(t, 1, repo.setTempUnschedCalls)
+	require.NotNil(t, account.TempUnschedulableUntil)
+	require.Contains(t, account.TempUnschedulableReason, tokenRefreshRetryExhaustedReasonPrefix)
+	require.Equal(t, 1, tempCache.setCalls)
+	require.Equal(t, int64(124), tempCache.accountID)
+	require.NotNil(t, tempCache.state)
+	require.Equal(t, "token_refresh_retry_exhausted", tempCache.state.MatchedKeyword)
+}
+
 // TestTokenRefreshService_RefreshWithRetry_AntigravityRefreshFailed 测试 Antigravity 刷新失败不设置错误状态
 func TestTokenRefreshService_RefreshWithRetry_AntigravityRefreshFailed(t *testing.T) {
 	repo := &tokenRefreshAccountRepo{}
@@ -623,6 +654,41 @@ func TestTokenRefreshService_RefreshWithRetry_NonRetryableStateSurvivesCanceledC
 	require.True(t, account.Schedulable)
 	require.NotNil(t, account.TempUnschedulableUntil)
 	require.NotEmpty(t, account.TempUnschedulableReason)
+}
+
+func TestTokenRefreshService_RefreshWithRetry_NonRetryableStateSurvivesRepoWriteFailure(t *testing.T) {
+	repo := &tokenRefreshAccountRepo{setTempUnschedErr: errors.New("db timeout")}
+	tempCache := &tempUnschedCacheStub{}
+	cfg := &config.Config{
+		TokenRefresh: config.TokenRefreshConfig{
+			MaxRetries:          1,
+			RetryBackoffSeconds: 0,
+		},
+	}
+	service := NewTokenRefreshService(repo, nil, nil, nil, nil, nil, nil, cfg, tempCache)
+	account := &Account{
+		ID:          125,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeOAuth,
+		Status:      StatusActive,
+		Schedulable: true,
+	}
+	refresher := &tokenRefresherStub{
+		err: errors.New("invalid_grant: token revoked"),
+	}
+
+	err := service.refreshWithRetry(context.Background(), account, refresher, refresher, time.Hour)
+	require.Error(t, err)
+	require.Equal(t, 0, repo.setErrorCalls)
+	require.Equal(t, 1, repo.setTempUnschedCalls)
+	require.Equal(t, StatusActive, account.Status)
+	require.True(t, account.Schedulable)
+	require.NotNil(t, account.TempUnschedulableUntil)
+	require.Contains(t, account.TempUnschedulableReason, tokenRefreshNonRetryableKeyword)
+	require.Equal(t, 1, tempCache.setCalls)
+	require.Equal(t, int64(125), tempCache.accountID)
+	require.NotNil(t, tempCache.state)
+	require.Equal(t, tokenRefreshNonRetryableKeyword, tempCache.state.MatchedKeyword)
 }
 
 // TestTokenRefreshService_RefreshWithRetry_ClearsTempUnschedulable 测试刷新成功后清除临时不可调度（DB + Redis）

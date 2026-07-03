@@ -2496,7 +2496,11 @@ func (s *RateLimitService) SetTempUnschedulable(ctx context.Context, account *Ac
 		TriggeredAtUnix: time.Now().Unix(),
 		ErrorMessage:    reason,
 	}
-	return s.persistTempUnschedulableState(ctx, account, until, reason, state, "manual_temp_unsched")
+	if err := s.persistTempUnschedulableState(ctx, account, until, reason, state, "manual_temp_unsched"); err != nil {
+		s.markTempUnschedRuntimeFallback(ctx, account, until, reason, state, "manual_temp_unsched_runtime_fallback")
+		return err
+	}
+	return nil
 }
 
 func hasRecoverableRuntimeState(account *Account) bool {

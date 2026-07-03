@@ -4,10 +4,29 @@ package service
 
 import (
 	"context"
+	"errors"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
+
+type antigravityTokenProviderRepoStub struct {
+	AccountRepository
+	tempErr    error
+	tempCalls  int
+	lastID     int64
+	lastUntil  time.Time
+	lastReason string
+}
+
+func (r *antigravityTokenProviderRepoStub) SetTempUnschedulable(ctx context.Context, id int64, until time.Time, reason string) error {
+	r.tempCalls++
+	r.lastID = id
+	r.lastUntil = until
+	r.lastReason = reason
+	return r.tempErr
+}
 
 func TestAntigravityTokenProvider_GetAccessToken_Upstream(t *testing.T) {
 	provider := &AntigravityTokenProvider{}
@@ -94,4 +113,30 @@ func TestAntigravityTokenProvider_GetAccessToken_Guards(t *testing.T) {
 		require.Contains(t, err.Error(), "not an antigravity oauth account")
 		require.Empty(t, token)
 	})
+}
+
+func TestAntigravityTokenProvider_MarkTempUnschedulableSurvivesRepoWriteFailure(t *testing.T) {
+	repo := &antigravityTokenProviderRepoStub{tempErr: errors.New("db timeout")}
+	tempCache := &runtimeTempUnschedCacheStub{}
+	provider := &AntigravityTokenProvider{
+		accountRepo:      repo,
+		tempUnschedCache: tempCache,
+	}
+	account := &Account{
+		ID:          42,
+		Platform:    PlatformAntigravity,
+		Type:        AccountTypeOAuth,
+		Status:      StatusActive,
+		Schedulable: true,
+	}
+
+	provider.markTempUnschedulable(account, errors.New("refresh timeout"))
+
+	require.Equal(t, 1, repo.tempCalls)
+	require.Equal(t, int64(42), repo.lastID)
+	require.NotNil(t, account.TempUnschedulableUntil)
+	require.Contains(t, account.TempUnschedulableReason, "refresh timeout")
+	require.NotNil(t, tempCache.states[42])
+	require.Equal(t, "antigravity_token_refresh", tempCache.states[42].MatchedKeyword)
+	require.Contains(t, tempCache.states[42].ErrorMessage, "refresh timeout")
 }

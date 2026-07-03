@@ -198,32 +198,21 @@ func (p *AntigravityTokenProvider) markTempUnschedulable(account *Account, refre
 	until := now.Add(TokenRefreshTempUnschedDuration)
 	reason := "token refresh failed on request path: " + refreshErr.Error()
 	bgCtx := context.Background()
+	state := newTempUnschedState(until, 0, "antigravity_token_refresh", reason)
 	if err := p.accountRepo.SetTempUnschedulable(bgCtx, account.ID, until, reason); err != nil {
 		slog.Warn("antigravity_token_provider.set_temp_unschedulable_failed",
 			"account_id", account.ID,
 			"error", err,
 		)
+		markTempUnschedRuntimeState(bgCtx, p.tempUnschedCache, account, until, reason, state, "antigravity_token_provider_runtime_fallback")
 		return
 	}
+	markTempUnschedRuntimeState(bgCtx, p.tempUnschedCache, account, until, reason, state, "antigravity_token_provider")
 	slog.Warn("antigravity_token_provider.temp_unschedulable_set",
 		"account_id", account.ID,
 		"until", until.Format(time.RFC3339),
 		"reason", reason,
 	)
-	// 同步写 Redis 缓存，调度器立即生效
-	if p.tempUnschedCache != nil {
-		state := &TempUnschedState{
-			UntilUnix:       until.Unix(),
-			TriggeredAtUnix: now.Unix(),
-			ErrorMessage:    reason,
-		}
-		if err := p.tempUnschedCache.SetTempUnsched(bgCtx, account.ID, state); err != nil {
-			slog.Warn("antigravity_token_provider.temp_unsched_cache_set_failed",
-				"account_id", account.ID,
-				"error", err,
-			)
-		}
-	}
 }
 
 func (p *AntigravityTokenProvider) markBackfillAttempted(accountID int64) {

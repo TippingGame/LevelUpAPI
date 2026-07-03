@@ -341,19 +341,18 @@ func (s *TokenRefreshService) refreshWithRetry(ctx context.Context, account *Acc
 	// 设置临时不可调度 10 分钟（不标记 error，保持 status=active 让下个刷新周期能继续尝试）
 	until := time.Now().Add(TokenRefreshTempUnschedDuration)
 	reason := fmt.Sprintf("%s %v", tokenRefreshRetryExhaustedReasonPrefix, lastErr)
+	state := newTempUnschedState(until, 0, "token_refresh_retry_exhausted", reason)
 	writeCtx, cancel := rateLimitStateContext(ctx)
 	setErr := s.accountRepo.SetTempUnschedulable(writeCtx, account.ID, until, reason)
 	if setErr != nil {
-		cancel()
 		slog.Warn("token_refresh.set_temp_unschedulable_failed",
 			"account_id", account.ID,
 			"error", setErr,
 		)
+		markTempUnschedRuntimeState(writeCtx, s.tempUnschedCache, account, until, reason, state, "token_refresh_retry_exhausted_runtime_fallback")
+		cancel()
 	} else {
-		account.TempUnschedulableUntil = &until
-		account.TempUnschedulableReason = reason
-		state := newTempUnschedState(until, 0, "token_refresh_retry_exhausted", reason)
-		setTempUnschedCacheBestEffort(writeCtx, s.tempUnschedCache, account.ID, state, "token_refresh_retry_exhausted")
+		markTempUnschedRuntimeState(writeCtx, s.tempUnschedCache, account, until, reason, state, "token_refresh_retry_exhausted")
 		cancel()
 		slog.Info("token_refresh.temp_unschedulable_set",
 			"account_id", account.ID,
@@ -407,11 +406,10 @@ func (s *TokenRefreshService) deferNonRetryableRefreshError(ctx context.Context,
 			"account_id", account.ID,
 			"error", setErr,
 		)
-		return false
+		markTempUnschedRuntimeState(writeCtx, s.tempUnschedCache, account, until, reason, state, tokenRefreshNonRetryableKeyword+"_runtime_fallback")
+		return true
 	}
-	account.TempUnschedulableUntil = &until
-	account.TempUnschedulableReason = reason
-	setTempUnschedCacheBestEffort(writeCtx, s.tempUnschedCache, account.ID, state, tokenRefreshNonRetryableKeyword)
+	markTempUnschedRuntimeState(writeCtx, s.tempUnschedCache, account, until, reason, state, tokenRefreshNonRetryableKeyword)
 	slog.Warn("token_refresh.non_retryable_temp_unschedulable",
 		"account_id", account.ID,
 		"count", count,

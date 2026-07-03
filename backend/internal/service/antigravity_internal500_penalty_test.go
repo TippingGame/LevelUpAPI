@@ -39,6 +39,7 @@ type internal500AccountRepoStub struct {
 
 	tempUnschedCalls []tempUnschedCall
 	setErrorCalls    []setErrorCall
+	tempErr          error
 }
 
 type tempUnschedCall struct {
@@ -56,7 +57,7 @@ type setErrorCall struct {
 
 func (r *internal500AccountRepoStub) SetTempUnschedulable(ctx context.Context, id int64, until time.Time, reason string) error {
 	r.tempUnschedCalls = append(r.tempUnschedCalls, tempUnschedCall{accountID: id, until: until, reason: reason, ctxErr: ctx.Err()})
-	return nil
+	return r.tempErr
 }
 
 func (r *internal500AccountRepoStub) SetError(ctx context.Context, id int64, errorMsg string) error {
@@ -277,6 +278,28 @@ func TestApplyInternal500Penalty(t *testing.T) {
 		require.NoError(t, repo.tempUnschedCalls[0].ctxErr)
 		require.Equal(t, StatusActive, account.Status)
 		require.NotNil(t, tempCache.states[12])
+	})
+
+	t.Run("repo write failure still syncs runtime temp unschedule", func(t *testing.T) {
+		repo := &internal500AccountRepoStub{tempErr: errors.New("db timeout")}
+		tempCache := &runtimeTempUnschedCacheStub{}
+		svc := &AntigravityGatewayService{
+			accountRepo:      repo,
+			rateLimitService: &RateLimitService{tempUnschedCache: tempCache},
+		}
+		account := &Account{ID: 13, Name: "acc-13", Status: StatusActive, Schedulable: true}
+
+		svc.applyInternal500Penalty(context.Background(), "[test]", account, 3)
+
+		require.Len(t, repo.tempUnschedCalls, 1)
+		require.Empty(t, repo.setErrorCalls)
+		require.Equal(t, StatusActive, account.Status)
+		require.True(t, account.Schedulable)
+		require.NotNil(t, account.TempUnschedulableUntil)
+		require.Equal(t, repo.tempUnschedCalls[0].reason, account.TempUnschedulableReason)
+		require.NotNil(t, tempCache.states[13])
+		require.Equal(t, "antigravity_internal_500", tempCache.states[13].MatchedKeyword)
+		require.Equal(t, 3, tempCache.states[13].ConsecutiveCount)
 	})
 }
 

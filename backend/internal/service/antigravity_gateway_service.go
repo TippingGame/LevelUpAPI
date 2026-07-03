@@ -2527,10 +2527,11 @@ func tempUnscheduleGoogleConfigError(ctx context.Context, repo AccountRepository
 	defer cancel()
 	if err := repo.SetTempUnschedulable(writeCtx, accountID, until, reason); err != nil {
 		log.Printf("%s temp_unschedule_failed account=%d error=%v", logPrefix, accountID, err)
-	} else {
 		cacheTempUnschedState(writeCtx, cache, accountID, until, http.StatusBadRequest, "invalid project resource name", reason)
-		log.Printf("%s temp_unscheduled account=%d until=%v reason=%q", logPrefix, accountID, until.Format("15:04:05"), reason)
+		return
 	}
+	cacheTempUnschedState(writeCtx, cache, accountID, until, http.StatusBadRequest, "invalid project resource name", reason)
+	log.Printf("%s temp_unscheduled account=%d until=%v reason=%q", logPrefix, accountID, until.Format("15:04:05"), reason)
 }
 
 // emptyResponseCooldown 空流式响应的临时封禁时长
@@ -2545,10 +2546,11 @@ func tempUnscheduleEmptyResponse(ctx context.Context, repo AccountRepository, ca
 	defer cancel()
 	if err := repo.SetTempUnschedulable(writeCtx, accountID, until, reason); err != nil {
 		log.Printf("%s temp_unschedule_failed account=%d error=%v", logPrefix, accountID, err)
-	} else {
 		cacheTempUnschedState(writeCtx, cache, accountID, until, http.StatusBadGateway, "empty stream response", reason)
-		log.Printf("%s temp_unscheduled account=%d until=%v reason=%q", logPrefix, accountID, until.Format("15:04:05"), reason)
+		return
 	}
+	cacheTempUnschedState(writeCtx, cache, accountID, until, http.StatusBadGateway, "empty stream response", reason)
+	log.Printf("%s temp_unscheduled account=%d until=%v reason=%q", logPrefix, accountID, until.Format("15:04:05"), reason)
 }
 
 // retryableErrorExhaustedCooldown 同账号可重试错误耗尽后的兜底临停时长。
@@ -2577,6 +2579,7 @@ func tempUnscheduleRetryableStatusError(ctx context.Context, repo AccountReposit
 	defer cancel()
 	if err := repo.SetTempUnschedulable(writeCtx, accountID, until, reason); err != nil {
 		log.Printf("%s temp_unschedule_failed account=%d error=%v", logPrefix, accountID, err)
+		cacheTempUnschedState(writeCtx, cache, accountID, until, statusCode, matchedKeyword, reason)
 		return
 	}
 	cacheTempUnschedState(writeCtx, cache, accountID, until, statusCode, matchedKeyword, reason)
