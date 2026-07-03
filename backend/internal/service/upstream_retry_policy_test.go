@@ -55,6 +55,33 @@ func TestTransientUpstreamStatusesStillFailover(t *testing.T) {
 	}
 }
 
+func TestCustomErrorCodeOmittedClientStatusesDoNotRetry(t *testing.T) {
+	statuses := []int{
+		http.StatusBadRequest,
+		http.StatusNotFound,
+		http.StatusMethodNotAllowed,
+		http.StatusConflict,
+		http.StatusRequestEntityTooLarge,
+		http.StatusUnsupportedMediaType,
+		http.StatusUnprocessableEntity,
+	}
+	customRetryAccount := &Account{
+		Type: AccountTypeAPIKey,
+		Credentials: map[string]any{
+			"custom_error_codes_enabled": true,
+			"custom_error_codes":         []any{float64(http.StatusUnauthorized), float64(http.StatusForbidden), float64(http.StatusTooManyRequests)},
+		},
+	}
+
+	for _, status := range statuses {
+		require.True(t, isDeterministicClientRequestStatus(status))
+		require.False(t, (&GatewayService{}).shouldRetryUpstreamError(customRetryAccount, status))
+	}
+
+	require.False(t, isDeterministicClientRequestStatus(http.StatusTooManyRequests))
+	require.True(t, (&GatewayService{}).shouldRetryUpstreamError(customRetryAccount, http.StatusServiceUnavailable))
+}
+
 func TestAnthropicStreamClientErrorStatusesDoNotFailover(t *testing.T) {
 	svc := &GatewayService{}
 	statuses := []int{

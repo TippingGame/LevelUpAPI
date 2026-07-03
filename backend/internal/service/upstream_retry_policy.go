@@ -16,3 +16,9 @@ func IsUpstreamReplayUnsafeTimeoutStatus(statusCode int) bool {
 		return false
 	}
 }
+
+func isDeterministicClientRequestStatus(statusCode int) bool {
+	return statusCode >= http.StatusBadRequest &&
+		statusCode < http.StatusInternalServerError &&
+		statusCode != http.StatusTooManyRequests
+}

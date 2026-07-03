@@ -4778,6 +4778,9 @@ func (s *GatewayService) shouldRetryUpstreamError(account *Account, statusCode i
 	case 401, 402, 403:
 		return false
 	}
+	if isDeterministicClientRequestStatus(statusCode) {
+		return false
+	}
 
 	// API Key 账号：未配置的错误码重试
 	return !account.ShouldHandleErrorCode(statusCode)
