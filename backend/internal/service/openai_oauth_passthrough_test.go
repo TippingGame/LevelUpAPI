@@ -757,7 +757,7 @@ func TestOpenAIGatewayService_OAuthPassthrough_UpstreamErrorIncludesPassthroughF
 	require.Equal(t, "http_error", arr[len(arr)-1].Kind)
 }
 
-func TestOpenAIGatewayService_OpenAIPassthrough_429And529TriggerFailover(t *testing.T) {
+func TestOpenAIGatewayService_OpenAIPassthroughAccountErrorsTriggerFailover(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	originalBody := []byte(`{"model":"gpt-5.2","stream":false,"instructions":"local-test-instructions","input":[{"type":"text","text":"hi"}]}`)
 
@@ -815,6 +815,19 @@ func TestOpenAIGatewayService_OpenAIPassthrough_429And529TriggerFailover(t *test
 			},
 		},
 		{
+			name:        "oauth_403_temp_cooldown",
+			accountType: AccountTypeOAuth,
+			statusCode:  http.StatusForbidden,
+			body:        `{"error":{"message":"Permission denied for this account","type":"access_denied"}}`,
+			assertRepo: func(t *testing.T, repo *openAIPassthroughFailoverRepo, _ time.Time) {
+				require.Empty(t, repo.rateLimitCalls)
+				require.Empty(t, repo.overloadCalls)
+				require.Len(t, repo.tempCalls, 1)
+				require.Contains(t, repo.tempReasons[0], "openai_403_counter_unavailable")
+				require.Contains(t, repo.tempReasons[0], "Permission denied for this account")
+			},
+		},
+		{
 			name:        "oauth_503_service_unavailable",
 			accountType: AccountTypeOAuth,
 			statusCode:  http.StatusServiceUnavailable,
@@ -863,6 +876,19 @@ func TestOpenAIGatewayService_OpenAIPassthrough_429And529TriggerFailover(t *test
 				require.WithinDuration(t, start.Add(10*time.Minute), repo.overloadCalls[0], 5*time.Second)
 			},
 		},
+		{
+			name:        "apikey_403_temp_cooldown",
+			accountType: AccountTypeAPIKey,
+			statusCode:  http.StatusForbidden,
+			body:        `{"error":{"message":"Permission denied for this key","type":"access_denied"}}`,
+			assertRepo: func(t *testing.T, repo *openAIPassthroughFailoverRepo, _ time.Time) {
+				require.Empty(t, repo.rateLimitCalls)
+				require.Empty(t, repo.overloadCalls)
+				require.Len(t, repo.tempCalls, 1)
+				require.Contains(t, repo.tempReasons[0], "openai_403_counter_unavailable")
+				require.Contains(t, repo.tempReasons[0], "Permission denied for this key")
+			},
+		},
 	}
 
 	for _, tc := range testCases {
@@ -903,7 +929,7 @@ func TestOpenAIGatewayService_OpenAIPassthrough_429And529TriggerFailover(t *test
 			var failoverErr *UpstreamFailoverError
 			require.ErrorAs(t, err, &failoverErr)
 			require.Equal(t, tc.statusCode, failoverErr.StatusCode)
-			require.False(t, c.Writer.Written(), "429/529 passthrough 应返回 failover 错误给上层换号，而不是直接向客户端写响应")
+			require.False(t, c.Writer.Written(), "passthrough account errors should return failover error to the upper retry loop instead of writing directly to the client")
 
 			v, ok := c.Get(OpsUpstreamErrorsKey)
 			require.True(t, ok)

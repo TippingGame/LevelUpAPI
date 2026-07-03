@@ -3722,8 +3722,7 @@ func shouldFailoverOpenAIPassthroughResponse(account *Account, statusCode int, u
 	case http.StatusUnauthorized, http.StatusPaymentRequired, http.StatusTooManyRequests, 529:
 		return true
 	case http.StatusForbidden:
-		_, permanent := permanentAccountKeywordErrorMessage(account, statusCode, upstreamMsg, upstreamBody)
-		return permanent
+		return true
 	default:
 		if statusCode >= http.StatusInternalServerError {
 			return true
