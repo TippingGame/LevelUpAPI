@@ -148,6 +148,14 @@ func (s *AccountTestService) handleAccountTestUpstreamError(ctx context.Context,
 	if s.accountRepo == nil {
 		return
 	}
+	if account.IsPoolMode() && !account.IsCustomErrorCodesEnabled() {
+		slog.Info("account_test_pool_mode_error_skipped", "account_id", account.ID, "status_code", statusCode)
+		return
+	}
+	if account.IsCustomErrorCodesEnabled() && !account.ShouldHandleErrorCode(statusCode) {
+		slog.Info("account_test_error_code_skipped", "account_id", account.ID, "status_code", statusCode)
+		return
+	}
 	switch statusCode {
 	case http.StatusUnauthorized:
 		s.markAccountErrorFromTest(ctx, account, fallbackErrorMsg, fallbackSource)

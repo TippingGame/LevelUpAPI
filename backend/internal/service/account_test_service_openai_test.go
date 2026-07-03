@@ -163,6 +163,75 @@ func TestAccountTestService_MarkAccountErrorRuntimeFallbackOnSetErrorFailure(t *
 	require.Contains(t, cache.states[82].ErrorMessage, "bad token")
 }
 
+func TestAccountTestService_UpstreamErrorFallbackSkipsPoolMode(t *testing.T) {
+	ctx, _ := newTestContext()
+
+	repo := &openAIAccountTestRepo{}
+	svc := &AccountTestService{accountRepo: repo}
+	account := &Account{
+		ID:          83,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Status:      StatusActive,
+		Schedulable: true,
+		Credentials: map[string]any{
+			"api_key":   "sk-test",
+			"pool_mode": true,
+		},
+	}
+
+	svc.handleAccountTestUpstreamError(
+		ctx.Request.Context(),
+		account,
+		"gpt-5.4",
+		http.StatusUnauthorized,
+		http.Header{},
+		[]byte(`{"error":{"message":"invalid api key"}}`),
+		"Authentication failed (401): invalid api key",
+		"account_test_openai_401",
+	)
+
+	require.Zero(t, repo.setErrorID)
+	require.Empty(t, repo.setErrorMsg)
+	require.Equal(t, StatusActive, account.Status)
+	require.True(t, account.Schedulable)
+}
+
+func TestAccountTestService_UpstreamErrorFallbackHonorsCustomErrorCodes(t *testing.T) {
+	ctx, _ := newTestContext()
+
+	repo := &openAIAccountTestRepo{}
+	svc := &AccountTestService{accountRepo: repo}
+	account := &Account{
+		ID:          84,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Status:      StatusActive,
+		Schedulable: true,
+		Credentials: map[string]any{
+			"api_key":                    "sk-test",
+			"custom_error_codes_enabled": true,
+			"custom_error_codes":         []any{float64(http.StatusTooManyRequests)},
+		},
+	}
+
+	svc.handleAccountTestUpstreamError(
+		ctx.Request.Context(),
+		account,
+		"gpt-5.4",
+		http.StatusUnauthorized,
+		http.Header{},
+		[]byte(`{"error":{"message":"invalid api key"}}`),
+		"Authentication failed (401): invalid api key",
+		"account_test_openai_401",
+	)
+
+	require.Zero(t, repo.setErrorID)
+	require.Empty(t, repo.setErrorMsg)
+	require.Equal(t, StatusActive, account.Status)
+	require.True(t, account.Schedulable)
+}
+
 func TestAccountTestService_OpenAISuccessPersistsSnapshotFromHeaders(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	ctx, recorder := newTestContext()
