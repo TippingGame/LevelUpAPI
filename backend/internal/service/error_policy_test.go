@@ -442,10 +442,20 @@ func TestRateLimitServiceLocalStateHelpersSkipPoolModeDefault(t *testing.T) {
 	svc.handleGeneric403TempUnschedulable(context.Background(), account, "forbidden")
 	require.False(t, svc.setOpenAI403TempUnschedulable(context.Background(), account, "forbidden", 1, "test"))
 	svc.handleCustomErrorCode(context.Background(), account, http.StatusInternalServerError, "custom failure")
+	require.NoError(t, svc.persistAccountError(context.Background(), account, "auth failed", "test"))
+	require.NoError(t, svc.persistRateLimitedState(context.Background(), account, time.Now().Add(time.Minute)))
+	require.NoError(t, svc.persistOverloadedState(context.Background(), account, time.Now().Add(time.Minute)))
+	require.NoError(t, svc.persistModelRateLimitedState(context.Background(), account, "gpt-5.4", time.Now().Add(time.Minute)))
 
 	require.Equal(t, 0, repo.setErrCalls)
 	require.Equal(t, 0, repo.tempCalls)
+	require.Equal(t, 0, repo.rateLimitedCalls)
+	require.Equal(t, 0, repo.overloadedCalls)
+	require.Equal(t, 0, repo.modelRateLimitedCalls)
 	require.Nil(t, account.TempUnschedulableUntil)
+	require.Nil(t, account.RateLimitResetAt)
+	require.Nil(t, account.OverloadUntil)
+	require.Empty(t, account.Extra)
 	require.Equal(t, StatusActive, account.Status)
 	require.Empty(t, cache.states)
 }
@@ -463,7 +473,13 @@ func TestRateLimitServiceLocalStateHelpersPoolModeCustomPolicyStillWrites(t *tes
 		Credentials: map[string]any{
 			"pool_mode":                  true,
 			"custom_error_codes_enabled": true,
-			"custom_error_codes":         []any{float64(http.StatusPaymentRequired), float64(http.StatusForbidden), float64(http.StatusServiceUnavailable)},
+			"custom_error_codes": []any{
+				float64(http.StatusPaymentRequired),
+				float64(http.StatusForbidden),
+				float64(http.StatusTooManyRequests),
+				float64(http.StatusServiceUnavailable),
+				float64(529),
+			},
 		},
 	}
 
@@ -471,10 +487,19 @@ func TestRateLimitServiceLocalStateHelpersPoolModeCustomPolicyStillWrites(t *tes
 	svc.handleBillingQuotaTempUnschedulable(context.Background(), account, http.StatusPaymentRequired, "quota exhausted")
 	require.True(t, svc.setOpenAI403TempUnschedulable(context.Background(), account, "forbidden", 1, "test"))
 	svc.handleAuthError(context.Background(), account, "auth failed")
+	require.NoError(t, svc.persistRateLimitedState(context.Background(), account, time.Now().Add(time.Minute)))
+	require.NoError(t, svc.persistOverloadedState(context.Background(), account, time.Now().Add(time.Minute)))
+	require.NoError(t, svc.persistModelRateLimitedState(context.Background(), account, "gpt-5.4", time.Now().Add(time.Minute)))
 
 	require.Equal(t, 1, repo.setErrCalls)
 	require.Equal(t, 3, repo.tempCalls)
+	require.Equal(t, 1, repo.rateLimitedCalls)
+	require.Equal(t, 1, repo.overloadedCalls)
+	require.Equal(t, 1, repo.modelRateLimitedCalls)
 	require.NotNil(t, account.TempUnschedulableUntil)
+	require.NotNil(t, account.RateLimitResetAt)
+	require.NotNil(t, account.OverloadUntil)
+	require.NotEmpty(t, account.Extra)
 	require.NotNil(t, cache.states[33])
 }
 
@@ -609,9 +634,12 @@ func TestApplyErrorPolicy(t *testing.T) {
 
 type errorPolicyRepoStub struct {
 	mockAccountRepoForGemini
-	tempCalls    int
-	setErrCalls  int
-	lastErrorMsg string
+	tempCalls             int
+	setErrCalls           int
+	rateLimitedCalls      int
+	overloadedCalls       int
+	modelRateLimitedCalls int
+	lastErrorMsg          string
 }
 
 func (r *errorPolicyRepoStub) SetTempUnschedulable(ctx context.Context, id int64, until time.Time, reason string) error {
@@ -622,5 +650,20 @@ func (r *errorPolicyRepoStub) SetTempUnschedulable(ctx context.Context, id int64
 func (r *errorPolicyRepoStub) SetError(ctx context.Context, id int64, errorMsg string) error {
 	r.setErrCalls++
 	r.lastErrorMsg = errorMsg
+	return nil
+}
+
+func (r *errorPolicyRepoStub) SetRateLimited(ctx context.Context, id int64, resetAt time.Time) error {
+	r.rateLimitedCalls++
+	return nil
+}
+
+func (r *errorPolicyRepoStub) SetOverloaded(ctx context.Context, id int64, until time.Time) error {
+	r.overloadedCalls++
+	return nil
+}
+
+func (r *errorPolicyRepoStub) SetModelRateLimit(ctx context.Context, id int64, modelKey string, resetAt time.Time) error {
+	r.modelRateLimitedCalls++
 	return nil
 }

@@ -477,6 +477,24 @@ func TestHandleGeminiUpstreamError_PoolMode429SkipsLocalRateLimit(t *testing.T) 
 	require.Nil(t, account.RateLimitResetAt)
 }
 
+func TestSetGeminiRateLimited_PoolModeDefaultSkipsDirectRepoWrite(t *testing.T) {
+	repo := &geminiErrorPolicyRepo{}
+	svc := &GeminiMessagesCompatService{accountRepo: repo}
+	account := &Account{
+		ID:       515,
+		Platform: PlatformGemini,
+		Type:     AccountTypeAPIKey,
+		Credentials: map[string]any{
+			"pool_mode": true,
+		},
+	}
+
+	svc.setGeminiRateLimited(context.Background(), account, time.Now().Add(time.Minute))
+
+	require.Zero(t, repo.setRateLimitedCalls)
+	require.Nil(t, account.RateLimitResetAt)
+}
+
 func TestHandleGeminiUpstreamError_PoolModeCustom429StillUsesLocalPolicy(t *testing.T) {
 	repo := &geminiErrorPolicyRepo{}
 	rlSvc := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)

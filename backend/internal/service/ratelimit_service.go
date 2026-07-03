@@ -209,6 +209,10 @@ func (s *RateLimitService) persistAccountError(ctx context.Context, account *Acc
 	if s == nil || s.accountRepo == nil {
 		return fmt.Errorf("account repository is nil")
 	}
+	if !shouldApplyLocalSystemErrorState(account) {
+		slog.Info("account_error_persist_skipped", "account_id", account.ID)
+		return nil
+	}
 	writeCtx, cancel := rateLimitStateContext(ctx)
 	defer cancel()
 	if err := s.accountRepo.SetError(writeCtx, account.ID, errorMsg); err != nil {
@@ -258,6 +262,10 @@ func (s *RateLimitService) persistRateLimitedState(ctx context.Context, account 
 	if s == nil || s.accountRepo == nil {
 		return fmt.Errorf("account repository is nil")
 	}
+	if !shouldApplyLocalErrorState(account, http.StatusTooManyRequests) {
+		slog.Info("rate_limit_persist_skipped", "account_id", account.ID)
+		return nil
+	}
 	writeCtx, cancel := rateLimitStateContext(ctx)
 	defer cancel()
 	if err := s.accountRepo.SetRateLimited(writeCtx, account.ID, resetAt); err != nil {
@@ -276,6 +284,10 @@ func (s *RateLimitService) persistOverloadedState(ctx context.Context, account *
 	if s == nil || s.accountRepo == nil {
 		return fmt.Errorf("account repository is nil")
 	}
+	if !shouldApplyLocalErrorState(account, 529) {
+		slog.Info("overload_persist_skipped", "account_id", account.ID)
+		return nil
+	}
 	writeCtx, cancel := rateLimitStateContext(ctx)
 	defer cancel()
 	if err := s.accountRepo.SetOverloaded(writeCtx, account.ID, until); err != nil {
@@ -292,6 +304,10 @@ func (s *RateLimitService) persistModelRateLimitedState(ctx context.Context, acc
 	}
 	if s == nil || s.accountRepo == nil {
 		return fmt.Errorf("account repository is nil")
+	}
+	if !shouldApplyLocalSystemErrorState(account) {
+		slog.Info("model_rate_limit_persist_skipped", "account_id", account.ID, "model", modelKey)
+		return nil
 	}
 	writeCtx, cancel := rateLimitStateContext(ctx)
 	defer cancel()

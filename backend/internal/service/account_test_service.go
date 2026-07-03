@@ -109,6 +109,10 @@ func (s *AccountTestService) markAccountErrorFromTest(ctx context.Context, accou
 	if s == nil || s.accountRepo == nil || account == nil {
 		return
 	}
+	if !shouldApplyLocalSystemErrorState(account) {
+		slog.Info("account_test_error_persist_skipped", "account_id", account.ID)
+		return
+	}
 	writeCtx, cancel := rateLimitStateContext(ctx)
 	defer cancel()
 

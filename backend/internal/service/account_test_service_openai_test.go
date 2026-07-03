@@ -197,6 +197,36 @@ func TestAccountTestService_UpstreamErrorFallbackSkipsPoolMode(t *testing.T) {
 	require.True(t, account.Schedulable)
 }
 
+func TestAccountTestService_MarkAccountErrorFromTestSkipsPoolModeDefault(t *testing.T) {
+	ctx, _ := newTestContext()
+
+	repo := &openAIAccountTestRepo{}
+	cache := &runtimeTempUnschedCacheStub{}
+	svc := &AccountTestService{
+		accountRepo:      repo,
+		rateLimitService: NewRateLimitService(repo, nil, nil, nil, cache),
+	}
+	account := &Account{
+		ID:          85,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Status:      StatusActive,
+		Schedulable: true,
+		Credentials: map[string]any{
+			"api_key":   "sk-test",
+			"pool_mode": true,
+		},
+	}
+
+	svc.markAccountErrorFromTest(ctx.Request.Context(), account, "Authentication failed (401): invalid api key", "account_test_openai_401")
+
+	require.Zero(t, repo.setErrorID)
+	require.Empty(t, repo.setErrorMsg)
+	require.Equal(t, StatusActive, account.Status)
+	require.True(t, account.Schedulable)
+	require.Nil(t, cache.states[85])
+}
+
 func TestAccountTestService_UpstreamErrorFallbackHonorsCustomErrorCodes(t *testing.T) {
 	ctx, _ := newTestContext()
 

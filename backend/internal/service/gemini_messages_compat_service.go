@@ -2992,6 +2992,10 @@ func (s *GeminiMessagesCompatService) setGeminiRateLimited(ctx context.Context, 
 	if s == nil || account == nil {
 		return
 	}
+	if !shouldApplyLocalErrorState(account, http.StatusTooManyRequests) {
+		slog.Info("gemini_rate_limit_persist_skipped", "account_id", account.ID)
+		return
+	}
 	if s.rateLimitService != nil {
 		if err := s.rateLimitService.persistRateLimitedState(ctx, account, resetAt); err != nil {
 			logger.LegacyPrintf("service.gemini_messages_compat", "[Gemini 429] Account %d rate limit persist failed: %v", account.ID, err)
