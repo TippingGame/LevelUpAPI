@@ -628,6 +628,14 @@ func openAIImagesUpstreamErrorFromSSEPayload(payload []byte) *OpenAIImagesUpstre
 	}
 }
 
+func openAIImagesWrappedErrorPayload(errorObj gjson.Result) []byte {
+	raw := strings.TrimSpace(errorObj.Raw)
+	if raw == "" || !gjson.ValidBytes([]byte(raw)) {
+		return nil
+	}
+	return []byte(`{"error":` + raw + `}`)
+}
+
 func extractOpenAIImagesModelRefusal(body []byte) string {
 	var b strings.Builder
 	collect := func(s string) {
@@ -750,7 +758,9 @@ func openAIImagesUpstreamErrorFromGJSON(errorObj gjson.Result, upstreamRequestID
 	message := strings.TrimSpace(errorObj.Get("message").String())
 	param := strings.TrimSpace(errorObj.Get("param").String())
 	statusCode := http.StatusBadGateway
-	if strings.EqualFold(code, "moderation_blocked") || strings.EqualFold(errType, "image_generation_user_error") {
+	if strings.EqualFold(code, "moderation_blocked") ||
+		strings.EqualFold(errType, "image_generation_user_error") ||
+		!openAIStreamFailedEventShouldFailover(openAIImagesWrappedErrorPayload(errorObj), message) {
 		statusCode = http.StatusBadRequest
 	}
 	if message == "" {

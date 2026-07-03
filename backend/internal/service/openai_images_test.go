@@ -883,6 +883,61 @@ func TestOpenAIGatewayServiceForwardImages_OAuthNonStreamModerationBlockedReturn
 	require.Contains(t, gjson.Get(rec.Body.String(), "error.message").String(), "safety system")
 }
 
+func TestOpenAIGatewayServiceForwardImages_OAuthNonStreamResponseFailedPolicyReturnsClientError(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	body := []byte(`{"model":"gpt-image-2","prompt":"draw blocked image","response_format":"b64_json"}`)
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/images/generations", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = req
+
+	svc := &OpenAIGatewayService{}
+	parsed, err := svc.ParseOpenAIImagesRequest(c, body)
+	require.NoError(t, err)
+
+	svc.httpUpstream = &httpUpstreamRecorder{
+		resp: &http.Response{
+			StatusCode: http.StatusOK,
+			Header: http.Header{
+				"Content-Type": []string{"text/event-stream"},
+				"X-Request-Id": []string{"req_img_policy"},
+			},
+			Body: io.NopCloser(strings.NewReader(
+				"data: {\"type\":\"response.created\",\"response\":{\"created_at\":1710000020}}\n\n" +
+					"data: {\"type\":\"response.failed\",\"response\":{\"id\":\"resp_policy\",\"status\":\"failed\",\"error\":{\"type\":\"invalid_request_error\",\"code\":\"content_policy_violation\",\"message\":\"This request violates the content policy.\"}}}\n\n",
+			)),
+		},
+	}
+	repo := &openAIPassthroughFailoverRepo{}
+	svc.rateLimitService = NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+
+	account := &Account{
+		ID:       4,
+		Name:     "openai-oauth-policy",
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeOAuth,
+		Credentials: map[string]any{
+			"access_token": "token-123",
+		},
+	}
+
+	result, err := svc.ForwardImages(context.Background(), c, account, body, parsed, "")
+	require.Nil(t, result)
+	var upstreamErr *OpenAIImagesUpstreamError
+	require.ErrorAs(t, err, &upstreamErr)
+	require.Equal(t, http.StatusBadRequest, upstreamErr.StatusCode)
+	require.Equal(t, "content_policy_violation", upstreamErr.Code)
+	var failoverErr *UpstreamFailoverError
+	require.False(t, errors.As(err, &failoverErr))
+	require.Empty(t, repo.rateLimitCalls)
+
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	require.Equal(t, "invalid_request_error", gjson.Get(rec.Body.String(), "error.type").String())
+	require.Equal(t, "content_policy_violation", gjson.Get(rec.Body.String(), "error.code").String())
+}
+
 func TestOpenAIGatewayServiceForwardImages_OAuthNonStreamResponseFailedRateLimitPersistsAndFailovers(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	body := []byte(`{"model":"gpt-image-2","prompt":"draw a cat","response_format":"b64_json"}`)
@@ -983,6 +1038,57 @@ func TestOpenAIGatewayServiceForwardImages_OAuthStreamErrorEventRateLimitPersist
 	require.False(t, errors.As(err, &failoverErr), "stream response.failed must not trigger cross-account replay")
 	require.Len(t, repo.rateLimitCalls, 1)
 	require.Contains(t, rec.Body.String(), "rate_limit_exceeded")
+}
+
+func TestOpenAIGatewayServiceForwardImages_OAuthStreamPolicyErrorDoesNotFailoverOrCoolAccount(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	body := []byte(`{"model":"gpt-image-2","prompt":"draw blocked image","response_format":"b64_json","stream":true}`)
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/images/generations", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = req
+
+	svc := &OpenAIGatewayService{}
+	parsed, err := svc.ParseOpenAIImagesRequest(c, body)
+	require.NoError(t, err)
+
+	svc.httpUpstream = &httpUpstreamRecorder{
+		resp: &http.Response{
+			StatusCode: http.StatusOK,
+			Header: http.Header{
+				"Content-Type": []string{"text/event-stream"},
+				"X-Request-Id": []string{"req_img_stream_policy"},
+			},
+			Body: io.NopCloser(strings.NewReader(
+				"data: {\"type\":\"response.created\",\"response\":{\"created_at\":1710000020}}\n\n" +
+					"data: {\"type\":\"response.failed\",\"response\":{\"id\":\"resp_policy_stream\",\"status\":\"failed\",\"error\":{\"type\":\"invalid_request_error\",\"code\":\"content_policy_violation\",\"message\":\"This request violates the content policy.\"}}}\n\n",
+			)),
+		},
+	}
+	repo := &openAIPassthroughFailoverRepo{}
+	svc.rateLimitService = NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+
+	account := &Account{
+		ID:       5,
+		Name:     "openai-oauth-stream-policy",
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeOAuth,
+		Credentials: map[string]any{
+			"access_token": "token-123",
+		},
+	}
+
+	result, err := svc.ForwardImages(context.Background(), c, account, body, parsed, "")
+	require.Nil(t, result)
+	var upstreamErr *OpenAIImagesUpstreamError
+	require.ErrorAs(t, err, &upstreamErr)
+	require.Equal(t, http.StatusBadRequest, upstreamErr.StatusCode)
+	var failoverErr *UpstreamFailoverError
+	require.False(t, errors.As(err, &failoverErr), "stream policy errors must not trigger cross-account replay")
+	require.Empty(t, repo.rateLimitCalls)
+	require.Contains(t, rec.Body.String(), "content_policy_violation")
 }
 
 func TestOpenAIGatewayServiceForwardImages_OAuthEditsMultipartUsesResponsesAPI(t *testing.T) {
