@@ -133,3 +133,94 @@ func TestHandle529RetryAfterSetsOverloadCooldown(t *testing.T) {
 	require.NotNil(t, account.OverloadUntil)
 	require.Equal(t, repo.lastOverloadEnd.Unix(), account.OverloadUntil.Unix())
 }
+
+func TestHandle5xxRetryAfterTempUnschedulable(t *testing.T) {
+	repo := &permanentKeywordAccountRepoStub{}
+	svc := &RateLimitService{accountRepo: repo}
+	account := &Account{
+		ID:          7306,
+		Platform:    PlatformAnthropic,
+		Type:        AccountTypeAPIKey,
+		Status:      StatusActive,
+		Schedulable: true,
+	}
+	headers := http.Header{}
+	headers.Set("Retry-After", "31")
+
+	before := time.Now()
+	shouldDisable := svc.HandleUpstreamError(
+		context.Background(),
+		account,
+		http.StatusServiceUnavailable,
+		headers,
+		[]byte(`{"error":{"type":"api_error","message":"upstream is warming up"}}`),
+	)
+	after := time.Now()
+
+	require.True(t, shouldDisable)
+	require.Equal(t, 1, repo.tempCalls)
+	require.Contains(t, repo.lastTempReason, "upstream_retry_after")
+	require.False(t, repo.lastTempUntil.Before(before.Add(31*time.Second)))
+	require.False(t, repo.lastTempUntil.After(after.Add(31*time.Second)))
+	require.NotNil(t, account.TempUnschedulableUntil)
+	require.Equal(t, repo.lastTempUntil.Unix(), account.TempUnschedulableUntil.Unix())
+}
+
+func TestHandle5xxRetryAfterSkipsReplayUnsafeTimeout(t *testing.T) {
+	repo := &permanentKeywordAccountRepoStub{}
+	svc := &RateLimitService{accountRepo: repo}
+	account := &Account{
+		ID:          7307,
+		Platform:    PlatformAnthropic,
+		Type:        AccountTypeAPIKey,
+		Status:      StatusActive,
+		Schedulable: true,
+	}
+	headers := http.Header{}
+	headers.Set("Retry-After", "31")
+
+	shouldDisable := svc.HandleUpstreamError(
+		context.Background(),
+		account,
+		http.StatusGatewayTimeout,
+		headers,
+		[]byte(`{"error":{"message":"upstream timeout"}}`),
+	)
+
+	require.False(t, shouldDisable)
+	require.Zero(t, repo.tempCalls)
+	require.Nil(t, account.TempUnschedulableUntil)
+}
+
+func TestHandle5xxRetryAfterPreservesCustomErrorCodePriority(t *testing.T) {
+	repo := &permanentKeywordAccountRepoStub{}
+	svc := &RateLimitService{accountRepo: repo}
+	account := &Account{
+		ID:          7308,
+		Platform:    PlatformAnthropic,
+		Type:        AccountTypeAPIKey,
+		Status:      StatusActive,
+		Schedulable: true,
+		Credentials: map[string]any{
+			"custom_error_codes_enabled": true,
+			"custom_error_codes":         []any{float64(http.StatusServiceUnavailable)},
+		},
+	}
+	headers := http.Header{}
+	headers.Set("Retry-After", "31")
+
+	before := time.Now()
+	shouldDisable := svc.HandleUpstreamError(
+		context.Background(),
+		account,
+		http.StatusServiceUnavailable,
+		headers,
+		[]byte(`{"error":{"message":"custom outage"}}`),
+	)
+
+	require.True(t, shouldDisable)
+	require.Equal(t, 1, repo.tempCalls)
+	require.Contains(t, repo.lastTempReason, "custom_error_code")
+	require.NotContains(t, repo.lastTempReason, "upstream_retry_after")
+	require.False(t, repo.lastTempUntil.Before(before.Add(customErrorCodeCooldown-2*time.Second)))
+}

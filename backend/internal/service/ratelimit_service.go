@@ -611,6 +611,8 @@ func (s *RateLimitService) HandleUpstreamError(ctx context.Context, account *Acc
 			}
 			s.handleCustomErrorCode(ctx, account, statusCode, msg)
 			shouldDisable = true
+		} else if s.handleUpstreamRetryAfterBackoff(ctx, account, statusCode, upstreamMsg, responseBody, headers) {
+			shouldDisable = true
 		} else if statusCode >= 500 {
 			// 未启用自定义错误码时：仅记录5xx错误
 			slog.Warn("account_upstream_error", "account_id", account.ID, "status_code", statusCode)
@@ -1527,6 +1529,52 @@ func (s *RateLimitService) handleUpstreamRelayPoolUnavailable(ctx context.Contex
 	}
 
 	slog.Warn("upstream_relay_pool_unavailable_temp_unschedulable", "account_id", account.ID, "status_code", statusCode, "until", until, "error", msg)
+	return true
+}
+
+func (s *RateLimitService) handleUpstreamRetryAfterBackoff(ctx context.Context, account *Account, statusCode int, upstreamMsg string, responseBody []byte, headers http.Header) bool {
+	if account == nil || !isRetryAfterBackoffStatus(statusCode) {
+		return false
+	}
+	if !shouldApplyLocalErrorState(account, statusCode) {
+		slog.Info("upstream_retry_after_backoff_local_state_skipped", "account_id", account.ID, "status_code", statusCode)
+		return false
+	}
+	until := parseRetryAfterResetTime(headers, time.Now(), time.Duration(maxRateLimit429CooldownSeconds)*time.Second)
+	if until == nil {
+		return false
+	}
+
+	msg := strings.TrimSpace(upstreamMsg)
+	if msg == "" {
+		msg = "upstream requested retry-after backoff"
+	}
+	msg = fmt.Sprintf("Upstream retry-after backoff (%d): %s", statusCode, msg)
+	state := newTempUnschedState(*until, statusCode, "upstream_retry_after", msg)
+	if bodyMsg := truncateTempUnschedMessage(responseBody, tempUnschedMessageMaxBytes); bodyMsg != "" {
+		state.ErrorMessage = bodyMsg
+	}
+	reason := msg
+	if raw, err := json.Marshal(state); err == nil {
+		reason = string(raw)
+	}
+
+	if err := s.persistTempUnschedulableState(ctx, account, *until, reason, state, "upstream_retry_after"); err != nil {
+		slog.Warn("upstream_retry_after_temp_unschedulable_failed", "account_id", account.ID, "status_code", statusCode, "error", err)
+		s.markTempUnschedRuntimeFallback(ctx, account, *until, reason, state, "upstream_retry_after_runtime_fallback")
+		return true
+	}
+	slog.Warn("upstream_retry_after_temp_unschedulable", "account_id", account.ID, "status_code", statusCode, "until", *until, "error", msg)
+	return true
+}
+
+func isRetryAfterBackoffStatus(statusCode int) bool {
+	if statusCode < http.StatusInternalServerError || statusCode > 599 {
+		return false
+	}
+	if statusCode == 529 || IsUpstreamReplayUnsafeTimeoutStatus(statusCode) {
+		return false
+	}
 	return true
 }
 
