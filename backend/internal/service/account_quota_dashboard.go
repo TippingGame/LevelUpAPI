@@ -139,8 +139,21 @@ func (s *AccountService) GetQuotaPoolDashboard(ctx context.Context, ownerUserID 
 		return nil, fmt.Errorf("account repository is unavailable")
 	}
 
-	if cached := s.getQuotaPoolDashboardCache(ownerUserID); cached != nil {
-		return cached, nil
+	repairedBindings := false
+	if repo, ok := s.accountRepo.(accountQuotaPoolRepairRepository); ok {
+		changed, err := repo.RepairQuotaPoolOwnerOpenAISharedPoolBindings(ctx, ownerUserID)
+		if err != nil {
+			return nil, err
+		}
+		repairedBindings = changed
+	}
+
+	if !repairedBindings {
+		if cached := s.getQuotaPoolDashboardCache(ownerUserID); cached != nil {
+			return cached, nil
+		}
+	} else {
+		s.clearQuotaPoolDashboardCache(ownerUserID)
 	}
 
 	generatedAt := time.Now().UTC()
@@ -213,6 +226,19 @@ func (s *AccountService) setQuotaPoolDashboardCache(ownerUserID int64, dashboard
 	s.quotaPoolDashboardCache.userID = ownerUserID
 	s.quotaPoolDashboardCache.expires = time.Now().Add(accountQuotaPoolDashboardCacheTTL)
 	s.quotaPoolDashboardCache.value = cloneUserAccountQuotaPoolDashboard(dashboard)
+}
+
+func (s *AccountService) clearQuotaPoolDashboardCache(ownerUserID int64) {
+	if s == nil {
+		return
+	}
+	s.quotaPoolDashboardCache.mu.Lock()
+	defer s.quotaPoolDashboardCache.mu.Unlock()
+	if s.quotaPoolDashboardCache.userID != ownerUserID {
+		return
+	}
+	s.quotaPoolDashboardCache.expires = time.Time{}
+	s.quotaPoolDashboardCache.value = nil
 }
 
 func cloneUserAccountQuotaPoolDashboard(in *UserAccountQuotaPoolDashboard) *UserAccountQuotaPoolDashboard {

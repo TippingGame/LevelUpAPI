@@ -398,7 +398,7 @@ func (r *accountRepository) Update(ctx context.Context, account *service.Account
 	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventAccountChanged, &account.ID, nil, buildSchedulerGroupPayload(account.GroupIDs)); err != nil {
 		logger.LegacyPrintf("repository.account", "[SchedulerOutbox] enqueue account update failed: account=%d err=%v", account.ID, err)
 	}
-	if err := r.repairOpenAISharedPoolBindings(ctx, []int64{account.ID}); err != nil {
+	if _, err := r.repairOpenAISharedPoolBindings(ctx, []int64{account.ID}); err != nil {
 		return err
 	}
 	// 普通账号编辑（如 model_mapping / credentials）也需要立即刷新单账号快照，
@@ -692,7 +692,7 @@ func (r *accountRepository) UpdateCredentials(ctx context.Context, id int64, cre
 	if err != nil {
 		return translatePersistenceError(err, service.ErrAccountNotFound, nil)
 	}
-	if err := r.repairOpenAISharedPoolBindings(ctx, []int64{id}); err != nil {
+	if _, err := r.repairOpenAISharedPoolBindings(ctx, []int64{id}); err != nil {
 		return err
 	}
 	r.syncSchedulerAccountSnapshot(ctx, id)
@@ -849,7 +849,7 @@ func (r *accountRepository) ListQuotaPoolAccounts(ctx context.Context, ownerUser
 		return nil, fmt.Errorf("account repository sql executor is unavailable")
 	}
 
-	if err := r.repairQuotaPoolOwnerOpenAISharedPoolBindings(ctx, ownerUserID); err != nil {
+	if _, err := r.repairQuotaPoolOwnerOpenAISharedPoolBindings(ctx, ownerUserID); err != nil {
 		return nil, err
 	}
 
@@ -869,9 +869,13 @@ func (r *accountRepository) ListQuotaPoolAccounts(ctx context.Context, ownerUser
 	return accounts, nil
 }
 
-func (r *accountRepository) repairQuotaPoolOwnerOpenAISharedPoolBindings(ctx context.Context, ownerUserID int64) error {
+func (r *accountRepository) RepairQuotaPoolOwnerOpenAISharedPoolBindings(ctx context.Context, ownerUserID int64) (bool, error) {
+	return r.repairQuotaPoolOwnerOpenAISharedPoolBindings(ctx, ownerUserID)
+}
+
+func (r *accountRepository) repairQuotaPoolOwnerOpenAISharedPoolBindings(ctx context.Context, ownerUserID int64) (bool, error) {
 	if r == nil || r.sql == nil || ownerUserID <= 0 {
-		return nil
+		return false, nil
 	}
 	rows, err := r.sql.QueryContext(ctx, `
 		SELECT id
@@ -884,7 +888,7 @@ func (r *accountRepository) repairQuotaPoolOwnerOpenAISharedPoolBindings(ctx con
 			AND lower(btrim(COALESCE(share_status, ''))) = 'approved'
 	`, ownerUserID)
 	if err != nil {
-		return err
+		return false, err
 	}
 	defer func() { _ = rows.Close() }()
 
@@ -892,15 +896,15 @@ func (r *accountRepository) repairQuotaPoolOwnerOpenAISharedPoolBindings(ctx con
 	for rows.Next() {
 		var id int64
 		if err := rows.Scan(&id); err != nil {
-			return err
+			return false, err
 		}
 		accountIDs = append(accountIDs, id)
 	}
 	if err := rows.Err(); err != nil {
-		return err
+		return false, err
 	}
 	if len(accountIDs) == 0 {
-		return nil
+		return false, nil
 	}
 	return r.repairOpenAISharedPoolBindings(ctx, accountIDs)
 }
@@ -2821,7 +2825,7 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 			logger.LegacyPrintf("repository.account", "[SchedulerOutbox] enqueue bulk update failed: err=%v", err)
 		}
 		if updates.AccountLevel != nil || len(updates.Credentials) > 0 || len(updates.Extra) > 0 {
-			if err := r.repairOpenAISharedPoolBindings(ctx, ids); err != nil {
+			if _, err := r.repairOpenAISharedPoolBindings(ctx, ids); err != nil {
 				return 0, err
 			}
 		}
@@ -2830,16 +2834,16 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 	return rows, nil
 }
 
-func (r *accountRepository) repairOpenAISharedPoolBindings(ctx context.Context, accountIDs []int64) error {
+func (r *accountRepository) repairOpenAISharedPoolBindings(ctx context.Context, accountIDs []int64) (bool, error) {
 	if r == nil || r.sql == nil || len(accountIDs) == 0 {
-		return nil
+		return false, nil
 	}
 	changedAccountIDs, affectedGroupIDs, err := repairOpenAISharedPoolBindingsForAccounts(ctx, r.sql, accountIDs)
 	if err != nil {
-		return fmt.Errorf("repair openai shared pool bindings: %w", err)
+		return false, fmt.Errorf("repair openai shared pool bindings: %w", err)
 	}
 	if len(changedAccountIDs) == 0 {
-		return nil
+		return false, nil
 	}
 	payload := map[string]any{"account_ids": changedAccountIDs}
 	if len(affectedGroupIDs) > 0 {
@@ -2848,7 +2852,7 @@ func (r *accountRepository) repairOpenAISharedPoolBindings(ctx context.Context, 
 	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventAccountBulkChanged, nil, nil, payload); err != nil {
 		logger.LegacyPrintf("repository.account", "[SchedulerOutbox] enqueue shared pool binding repair failed: err=%v", err)
 	}
-	return nil
+	return true, nil
 }
 
 func repairOpenAISharedPoolBindingsForAccounts(ctx context.Context, exec sqlExecutor, accountIDs []int64) ([]int64, []int64, error) {
