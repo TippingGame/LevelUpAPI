@@ -199,6 +199,17 @@ func TestAuthPaymentPermissionStatusesFailoverWithoutSameAccountRetry(t *testing
 		"This request violates the content policy",
 		[]byte(`{"error":{"code":"content_policy_violation","type":"invalid_request_error","message":"This request violates the content policy"}}`),
 	))
+	require.False(t, (&OpenAIGatewayService{}).shouldFailoverOpenAIUpstreamResponse(
+		http.StatusForbidden,
+		"Your request violates our usage policies.",
+		[]byte(`{"error":{"type":"invalid_request_error","message":"Your request violates our usage policies."}}`),
+	))
+	require.False(t, shouldFailoverOpenAIPassthroughResponse(
+		customRetryAccount,
+		http.StatusForbidden,
+		"The input contains disallowed content.",
+		[]byte(`{"error":{"type":"invalid_request_error","message":"The input contains disallowed content."}}`),
+	))
 	require.False(t, shouldFailoverOpenAIPassthroughResponse(
 		customRetryAccount,
 		http.StatusForbidden,

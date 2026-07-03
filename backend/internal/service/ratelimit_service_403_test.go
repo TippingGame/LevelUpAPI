@@ -88,6 +88,14 @@ func TestRateLimitService_HandleUpstreamError_OpenAI403RequestPolicyDoesNotTouch
 			name: "content policy violation",
 			body: []byte(`{"error":{"code":"content_policy_violation","type":"invalid_request_error","message":"This request violates the content policy"}}`),
 		},
+		{
+			name: "usage policy text",
+			body: []byte(`{"error":{"type":"invalid_request_error","message":"Your request violates our usage policies."}}`),
+		},
+		{
+			name: "disallowed content text",
+			body: []byte(`{"error":{"type":"invalid_request_error","message":"The input contains disallowed content."}}`),
+		},
 	}
 
 	for _, tt := range tests {

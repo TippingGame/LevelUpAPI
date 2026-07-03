@@ -95,17 +95,40 @@ func isOpenAIRequestPolicyError(payload []byte, upstreamMsg string) bool {
 		return true
 	}
 
-	combinedMsg := strings.ToLower(strings.TrimSpace(msg + " " + upstreamMsg))
-	combinedMsg = strings.Join(strings.Fields(strings.NewReplacer("_", " ", "-", " ").Replace(combinedMsg)), " ")
+	combinedMsg := normalizePolicyText(msg + " " + upstreamMsg)
 	for _, marker := range []string{
 		"content policy",
 		"high risk cyber",
 		"high-risk cyber",
 		"safety policy",
 		"safety system",
+		"safety systems",
+		"unsafe content",
+		"disallowed content",
+		"blocked by safety",
+		"blocked for safety",
 	} {
 		if strings.Contains(combinedMsg, marker) {
 			return true
+		}
+	}
+
+	if strings.Contains(combinedMsg, "usage policy") ||
+		strings.Contains(combinedMsg, "usage policies") ||
+		strings.Contains(combinedMsg, "acceptable use policy") {
+		for _, requestMarker := range []string{"request", "prompt", "message", "content", "input"} {
+			if strings.Contains(combinedMsg, requestMarker) {
+				return true
+			}
+		}
+	}
+
+	if strings.Contains(combinedMsg, "violat") {
+		for _, requestMarker := range []string{"request", "prompt", "message", "content", "input"} {
+			if strings.Contains(combinedMsg, requestMarker) &&
+				(strings.Contains(combinedMsg, "policy") || strings.Contains(combinedMsg, "safety")) {
+				return true
+			}
 		}
 	}
 	return false
