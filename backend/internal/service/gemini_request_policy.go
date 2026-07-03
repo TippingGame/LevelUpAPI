@@ -119,6 +119,22 @@ func geminiErrorPolicyReasonTokens(payload []byte) []string {
 			return true
 		})
 	}
+	for _, path := range []string{
+		"promptFeedback.blockReason",
+		"response.promptFeedback.blockReason",
+	} {
+		if token := normalizeGeminiPolicyToken(gjson.GetBytes(payload, path).String()); token != "" {
+			tokens = append(tokens, token)
+		}
+	}
+	for _, path := range []string{"candidates", "response.candidates"} {
+		gjson.GetBytes(payload, path).ForEach(func(_, candidate gjson.Result) bool {
+			if token := normalizeGeminiPolicyToken(candidate.Get("finishReason").String()); token != "" {
+				tokens = append(tokens, token)
+			}
+			return true
+		})
+	}
 	return tokens
 }
 

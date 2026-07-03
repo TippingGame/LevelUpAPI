@@ -261,6 +261,16 @@ func TestAuthPaymentPermissionStatusesFailoverWithoutSameAccountRetry(t *testing
 		"The prompt was blocked due to safety filters.",
 		[]byte(`{"error":{"code":403,"message":"The prompt was blocked due to safety filters.","status":"FAILED_PRECONDITION","details":[{"@type":"type.googleapis.com/google.rpc.ErrorInfo","reason":"SAFETY"}]}}`),
 	))
+	require.False(t, (&GeminiMessagesCompatService{}).shouldFailoverGeminiUpstreamResponse(
+		http.StatusForbidden,
+		"",
+		[]byte(`{"promptFeedback":{"blockReason":"PROHIBITED_CONTENT"}}`),
+	))
+	require.False(t, (&GeminiMessagesCompatService{}).shouldFailoverGeminiUpstreamResponse(
+		http.StatusForbidden,
+		"",
+		[]byte(`{"response":{"candidates":[{"finishReason":"SAFETY"}]}}`),
+	))
 	require.True(t, (&GeminiMessagesCompatService{}).shouldFailoverGeminiUpstreamResponse(
 		http.StatusForbidden,
 		"Permission denied",
@@ -270,6 +280,11 @@ func TestAuthPaymentPermissionStatusesFailoverWithoutSameAccountRetry(t *testing
 		http.StatusForbidden,
 		"The response was blocked due to prohibited content.",
 		[]byte(`{"error":{"code":403,"message":"The response was blocked due to prohibited content.","status":"FAILED_PRECONDITION","details":[{"@type":"type.googleapis.com/google.rpc.ErrorInfo","reason":"PROHIBITED_CONTENT"}]}}`),
+	))
+	require.False(t, (&AntigravityGatewayService{}).shouldFailoverUpstreamResponse(
+		http.StatusForbidden,
+		"",
+		[]byte(`{"response":{"promptFeedback":{"blockReason":"PROHIBITED_CONTENT"}}}`),
 	))
 	require.True(t, (&AntigravityGatewayService{}).shouldFailoverUpstreamResponse(
 		http.StatusForbidden,

@@ -55,6 +55,11 @@ func TestShouldFailoverGeminiUpstreamResponseSkipsRequestPolicy(t *testing.T) {
 		"The response was blocked due to prohibited content.",
 		[]byte(`{"error":{"code":403,"message":"The response was blocked due to prohibited content.","status":"FAILED_PRECONDITION","details":[{"@type":"type.googleapis.com/google.rpc.ErrorInfo","reason":"PROHIBITED_CONTENT"}]}}`),
 	))
+	require.False(t, svc.shouldFailoverGeminiUpstreamResponse(
+		http.StatusForbidden,
+		"",
+		[]byte(`{"promptFeedback":{"blockReason":"PROHIBITED_CONTENT"},"candidates":[{"finishReason":"SAFETY"}]}`),
+	))
 
 	require.True(t, svc.shouldFailoverGeminiUpstreamResponse(
 		http.StatusForbidden,

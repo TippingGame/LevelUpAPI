@@ -221,6 +221,14 @@ func TestRateLimitService_HandleUpstreamError_GeminiRequestPolicyDoesNotTouchAcc
 			name: "wrapped prohibited content",
 			body: []byte(`{"response":{"error":{"code":403,"message":"The response was blocked due to prohibited content.","status":"FAILED_PRECONDITION","details":[{"@type":"type.googleapis.com/google.rpc.ErrorInfo","reason":"PROHIBITED_CONTENT"}]}}}`),
 		},
+		{
+			name: "prompt feedback block reason",
+			body: []byte(`{"promptFeedback":{"blockReason":"PROHIBITED_CONTENT"}}`),
+		},
+		{
+			name: "candidate finish reason",
+			body: []byte(`{"response":{"candidates":[{"finishReason":"SAFETY"}]}}`),
+		},
 	}
 
 	for _, tt := range tests {
