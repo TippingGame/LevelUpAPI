@@ -16,29 +16,38 @@ type sessionWindowMockRepo struct {
 	// captured calls
 	sessionWindowCalls []swCall
 	updateExtraCalls   []ueCall
+	rateLimitCalls     []rlCall
 	clearRateLimitIDs  []int64
 }
 
 var _ AccountRepository = (*sessionWindowMockRepo)(nil)
 
 type swCall struct {
-	ID     int64
-	Start  *time.Time
-	End    *time.Time
-	Status string
+	ID         int64
+	Start      *time.Time
+	End        *time.Time
+	Status     string
+	ContextErr error
 }
 
 type ueCall struct {
-	ID      int64
-	Updates map[string]any
+	ID         int64
+	Updates    map[string]any
+	ContextErr error
 }
 
-func (m *sessionWindowMockRepo) UpdateSessionWindow(_ context.Context, id int64, start, end *time.Time, status string) error {
-	m.sessionWindowCalls = append(m.sessionWindowCalls, swCall{ID: id, Start: start, End: end, Status: status})
+type rlCall struct {
+	ID         int64
+	ResetAt    time.Time
+	ContextErr error
+}
+
+func (m *sessionWindowMockRepo) UpdateSessionWindow(ctx context.Context, id int64, start, end *time.Time, status string) error {
+	m.sessionWindowCalls = append(m.sessionWindowCalls, swCall{ID: id, Start: start, End: end, Status: status, ContextErr: ctx.Err()})
 	return nil
 }
-func (m *sessionWindowMockRepo) UpdateExtra(_ context.Context, id int64, updates map[string]any) error {
-	m.updateExtraCalls = append(m.updateExtraCalls, ueCall{ID: id, Updates: updates})
+func (m *sessionWindowMockRepo) UpdateExtra(ctx context.Context, id int64, updates map[string]any) error {
+	m.updateExtraCalls = append(m.updateExtraCalls, ueCall{ID: id, Updates: updates, ContextErr: ctx.Err()})
 	return nil
 }
 func (m *sessionWindowMockRepo) ClearRateLimit(_ context.Context, id int64) error {
@@ -134,8 +143,9 @@ func (m *sessionWindowMockRepo) ListSchedulableUngroupedByPlatform(context.Conte
 func (m *sessionWindowMockRepo) ListSchedulableUngroupedByPlatforms(context.Context, []string) ([]Account, error) {
 	panic("unexpected")
 }
-func (m *sessionWindowMockRepo) SetRateLimited(context.Context, int64, time.Time) error {
-	panic("unexpected")
+func (m *sessionWindowMockRepo) SetRateLimited(ctx context.Context, id int64, resetAt time.Time) error {
+	m.rateLimitCalls = append(m.rateLimitCalls, rlCall{ID: id, ResetAt: resetAt, ContextErr: ctx.Err()})
+	return nil
 }
 func (m *sessionWindowMockRepo) SetModelRateLimit(context.Context, int64, string, time.Time) error {
 	panic("unexpected")
@@ -326,6 +336,40 @@ func TestUpdateSessionWindow_ClearsUtilizationOnWindowReset(t *testing.T) {
 	}
 }
 
+func TestUpdateSessionWindow_SurvivesCanceledRequestContext(t *testing.T) {
+	resetUnix := time.Now().Add(3 * time.Hour).Unix()
+	repo := &sessionWindowMockRepo{}
+	svc := newRateLimitServiceForTest(repo)
+
+	account := &Account{ID: 34}
+	headers := http.Header{}
+	headers.Set("anthropic-ratelimit-unified-5h-status", "allowed")
+	headers.Set("anthropic-ratelimit-unified-5h-reset", fmt.Sprintf("%d", resetUnix))
+	headers.Set("anthropic-ratelimit-unified-5h-utilization", "0.15")
+	headers.Set("anthropic-ratelimit-unified-7d-utilization", "0.25")
+	headers.Set("anthropic-ratelimit-unified-7d-reset", fmt.Sprintf("%d", time.Now().Add(24*time.Hour).Unix()))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	svc.UpdateSessionWindow(ctx, account, headers)
+
+	if len(repo.sessionWindowCalls) != 1 {
+		t.Fatalf("expected 1 UpdateSessionWindow call, got %d", len(repo.sessionWindowCalls))
+	}
+	if err := repo.sessionWindowCalls[0].ContextErr; err != nil {
+		t.Fatalf("expected detached session-window context, got %v", err)
+	}
+	if len(repo.updateExtraCalls) != 2 {
+		t.Fatalf("expected 2 UpdateExtra calls, got %d", len(repo.updateExtraCalls))
+	}
+	for i, call := range repo.updateExtraCalls {
+		if call.ContextErr != nil {
+			t.Fatalf("expected detached extra context for call %d, got %v", i, call.ContextErr)
+		}
+	}
+}
+
 func TestUpdateSessionWindow_NoClearUtilizationOnCorrection(t *testing.T) {
 	// When correcting a stale prediction (needInitWindow=false), utilization should NOT be cleared.
 	staleEnd := time.Now().Add(2 * time.Hour)
@@ -366,5 +410,70 @@ func TestUpdateSessionWindow_NoStatusHeader(t *testing.T) {
 
 	if len(repo.sessionWindowCalls) != 0 {
 		t.Errorf("expected no calls when status header absent, got %d", len(repo.sessionWindowCalls))
+	}
+}
+
+func TestHandle429_AnthropicSessionWindowSurvivesCanceledRequestContext(t *testing.T) {
+	resetAt := time.Now().Add(2 * time.Hour).Unix()
+	repo := &sessionWindowMockRepo{}
+	svc := newRateLimitServiceForTest(repo)
+	account := &Account{ID: 99, Platform: PlatformAnthropic}
+
+	headers := http.Header{}
+	headers.Set("anthropic-ratelimit-unified-reset", fmt.Sprintf("%d", resetAt))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	svc.handle429(ctx, account, headers, nil)
+
+	if len(repo.rateLimitCalls) != 1 {
+		t.Fatalf("expected 1 SetRateLimited call, got %d", len(repo.rateLimitCalls))
+	}
+	if err := repo.rateLimitCalls[0].ContextErr; err != nil {
+		t.Fatalf("expected detached rate-limit context, got %v", err)
+	}
+	if len(repo.sessionWindowCalls) != 1 {
+		t.Fatalf("expected 1 UpdateSessionWindow call, got %d", len(repo.sessionWindowCalls))
+	}
+	call := repo.sessionWindowCalls[0]
+	if call.ContextErr != nil {
+		t.Fatalf("expected detached session-window context, got %v", call.ContextErr)
+	}
+	if call.Status != "rejected" {
+		t.Fatalf("expected status rejected, got %q", call.Status)
+	}
+}
+
+func TestHandleUpstreamError_AnthropicWindowLimitPersistsSessionWindowAfterCancel(t *testing.T) {
+	reset5h := time.Now().Add(2 * time.Hour).Unix()
+	repo := &sessionWindowMockRepo{}
+	svc := newRateLimitServiceForTest(repo)
+	account := &Account{ID: 100, Platform: PlatformAnthropic}
+
+	headers := http.Header{}
+	headers.Set("anthropic-ratelimit-unified-5h-status", "rejected")
+	headers.Set("anthropic-ratelimit-unified-5h-utilization", "1")
+	headers.Set("anthropic-ratelimit-unified-5h-reset", fmt.Sprintf("%d", reset5h))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	disabled := svc.HandleUpstreamError(ctx, account, http.StatusTooManyRequests, headers, nil)
+
+	if disabled {
+		t.Fatal("expected Anthropic window limit to preserve account scheduling")
+	}
+	if len(repo.rateLimitCalls) != 1 {
+		t.Fatalf("expected 1 SetRateLimited call, got %d", len(repo.rateLimitCalls))
+	}
+	if err := repo.rateLimitCalls[0].ContextErr; err != nil {
+		t.Fatalf("expected detached rate-limit context, got %v", err)
+	}
+	if len(repo.sessionWindowCalls) != 1 {
+		t.Fatalf("expected 1 UpdateSessionWindow call, got %d", len(repo.sessionWindowCalls))
+	}
+	if err := repo.sessionWindowCalls[0].ContextErr; err != nil {
+		t.Fatalf("expected detached session-window context, got %v", err)
 	}
 }

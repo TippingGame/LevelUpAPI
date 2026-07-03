@@ -257,6 +257,27 @@ func (s *RateLimitService) persistModelRateLimitedState(ctx context.Context, acc
 	return nil
 }
 
+func (s *RateLimitService) persistAccountExtraState(ctx context.Context, accountID int64, updates map[string]any) error {
+	if len(updates) == 0 {
+		return nil
+	}
+	if s == nil || s.accountRepo == nil {
+		return fmt.Errorf("account repository is nil")
+	}
+	writeCtx, cancel := rateLimitStateContext(ctx)
+	defer cancel()
+	return s.accountRepo.UpdateExtra(writeCtx, accountID, updates)
+}
+
+func (s *RateLimitService) persistSessionWindowState(ctx context.Context, accountID int64, start, end *time.Time, status string) error {
+	if s == nil || s.accountRepo == nil {
+		return fmt.Errorf("account repository is nil")
+	}
+	writeCtx, cancel := rateLimitStateContext(ctx)
+	defer cancel()
+	return s.accountRepo.UpdateSessionWindow(writeCtx, accountID, start, end, status)
+}
+
 // HandlePermanentAccountError marks non-pool API key accounts as errored when
 // upstream returns an unambiguous permanent account/key/billing failure. It is
 // intentionally narrower than HandleUpstreamError so early-return paths such as
@@ -1399,7 +1420,7 @@ func (s *RateLimitService) handle429(ctx context.Context, account *Account, head
 			windowEnd = *result.fiveHourReset
 		}
 		windowStart := windowEnd.Add(-5 * time.Hour)
-		if err := s.accountRepo.UpdateSessionWindow(ctx, account.ID, &windowStart, &windowEnd, "rejected"); err != nil {
+		if err := s.persistSessionWindowState(ctx, account.ID, &windowStart, &windowEnd, "rejected"); err != nil {
 			slog.Warn("rate_limit_update_session_window_failed", "account_id", account.ID, "error", err)
 		}
 
@@ -1476,7 +1497,7 @@ func (s *RateLimitService) handle429(ctx context.Context, account *Account, head
 	// 根据重置时间反推5h窗口
 	windowEnd := resetAt
 	windowStart := resetAt.Add(-5 * time.Hour)
-	if err := s.accountRepo.UpdateSessionWindow(ctx, account.ID, &windowStart, &windowEnd, "rejected"); err != nil {
+	if err := s.persistSessionWindowState(ctx, account.ID, &windowStart, &windowEnd, "rejected"); err != nil {
 		slog.Warn("rate_limit_update_session_window_failed", "account_id", account.ID, "error", err)
 	}
 
@@ -1724,6 +1745,17 @@ func (s *RateLimitService) persistAnthropicExhaustedWindowLimit(ctx context.Cont
 			"error", err)
 		return true
 	}
+	if reset5h, ok := parseAnthropicWindowReset(headers, "5h", now); ok && (limit.window == "5h" || isAnthropic5hRejected(headers) || isAnthropicWindowExceeded(headers, "5h")) {
+		windowStart := reset5h.Add(-5 * time.Hour)
+		if err := s.persistSessionWindowState(ctx, account.ID, &windowStart, &reset5h, "rejected"); err != nil {
+			slog.Warn("anthropic_window_session_window_set_failed",
+				"account_id", account.ID,
+				"window", limit.window,
+				"window_start", windowStart,
+				"window_end", reset5h,
+				"error", err)
+		}
+	}
 	slog.Info("anthropic_window_rate_limited",
 		"account_id", account.ID,
 		"window", limit.window,
@@ -1845,7 +1877,7 @@ func (s *RateLimitService) persistOpenAICodexSnapshot(ctx context.Context, accou
 	if len(updates) == 0 {
 		return
 	}
-	if err := s.accountRepo.UpdateExtra(ctx, account.ID, updates); err != nil {
+	if err := s.persistAccountExtraState(ctx, account.ID, updates); err != nil {
 		slog.Warn("openai_codex_snapshot_persist_failed", "account_id", account.ID, "error", err)
 	}
 }
@@ -2004,15 +2036,17 @@ func (s *RateLimitService) UpdateSessionWindow(ctx context.Context, account *Acc
 
 	// 窗口重置时清除旧的 utilization 和被动采样数据，避免残留上个窗口的数据
 	if windowEnd != nil && needInitWindow {
-		_ = s.accountRepo.UpdateExtra(ctx, account.ID, map[string]any{
+		if err := s.persistAccountExtraState(ctx, account.ID, map[string]any{
 			"session_window_utilization":   nil,
 			"passive_usage_7d_utilization": nil,
 			"passive_usage_7d_reset":       nil,
 			"passive_usage_sampled_at":     nil,
-		})
+		}); err != nil {
+			slog.Warn("session_window_utilization_clear_failed", "account_id", account.ID, "error", err)
+		}
 	}
 
-	if err := s.accountRepo.UpdateSessionWindow(ctx, account.ID, windowStart, windowEnd, status); err != nil {
+	if err := s.persistSessionWindowState(ctx, account.ID, windowStart, windowEnd, status); err != nil {
 		slog.Warn("session_window_update_failed", "account_id", account.ID, "error", err)
 	}
 
@@ -2041,7 +2075,7 @@ func (s *RateLimitService) UpdateSessionWindow(ctx context.Context, account *Acc
 	}
 	if len(extraUpdates) > 0 {
 		extraUpdates["passive_usage_sampled_at"] = time.Now().UTC().Format(time.RFC3339)
-		if err := s.accountRepo.UpdateExtra(ctx, account.ID, extraUpdates); err != nil {
+		if err := s.persistAccountExtraState(ctx, account.ID, extraUpdates); err != nil {
 			slog.Warn("passive_usage_update_failed", "account_id", account.ID, "error", err)
 		}
 	}
@@ -2056,25 +2090,27 @@ func (s *RateLimitService) UpdateSessionWindow(ctx context.Context, account *Acc
 
 // ClearRateLimit 清除账号的限流状态
 func (s *RateLimitService) ClearRateLimit(ctx context.Context, accountID int64) error {
-	if err := s.accountRepo.ClearRateLimit(ctx, accountID); err != nil {
+	writeCtx, cancel := rateLimitStateContext(ctx)
+	defer cancel()
+	if err := s.accountRepo.ClearRateLimit(writeCtx, accountID); err != nil {
 		return err
 	}
-	if err := s.accountRepo.ClearAntigravityQuotaScopes(ctx, accountID); err != nil {
+	if err := s.accountRepo.ClearAntigravityQuotaScopes(writeCtx, accountID); err != nil {
 		return err
 	}
-	if err := s.accountRepo.ClearModelRateLimits(ctx, accountID); err != nil {
+	if err := s.accountRepo.ClearModelRateLimits(writeCtx, accountID); err != nil {
 		return err
 	}
 	// 清除限流时一并清理临时不可调度状态，避免周限/窗口重置后仍被本地临时状态阻断。
-	if err := s.accountRepo.ClearTempUnschedulable(ctx, accountID); err != nil {
+	if err := s.accountRepo.ClearTempUnschedulable(writeCtx, accountID); err != nil {
 		return err
 	}
 	if s.tempUnschedCache != nil {
-		if err := s.tempUnschedCache.DeleteTempUnsched(ctx, accountID); err != nil {
+		if err := s.tempUnschedCache.DeleteTempUnsched(writeCtx, accountID); err != nil {
 			slog.Warn("temp_unsched_cache_delete_failed", "account_id", accountID, "error", err)
 		}
 	}
-	s.ResetOpenAI403Counter(ctx, accountID)
+	s.ResetOpenAI403Counter(writeCtx, accountID)
 	return nil
 }
 
@@ -2082,7 +2118,9 @@ func (s *RateLimitService) ResetOpenAI403Counter(ctx context.Context, accountID 
 	if s == nil || s.openAI403CounterCache == nil || accountID <= 0 {
 		return
 	}
-	if err := s.openAI403CounterCache.ResetOpenAI403Count(ctx, accountID); err != nil {
+	writeCtx, cancel := rateLimitStateContext(ctx)
+	defer cancel()
+	if err := s.openAI403CounterCache.ResetOpenAI403Count(writeCtx, accountID); err != nil {
 		slog.Warn("openai_403_reset_failed", "account_id", accountID, "error", err)
 	}
 }
@@ -2148,16 +2186,18 @@ func (s *RateLimitService) EvictAccountErrorFromRuntimeCache(ctx context.Context
 }
 
 func (s *RateLimitService) ClearTempUnschedulable(ctx context.Context, accountID int64) error {
-	if err := s.accountRepo.ClearTempUnschedulable(ctx, accountID); err != nil {
+	writeCtx, cancel := rateLimitStateContext(ctx)
+	defer cancel()
+	if err := s.accountRepo.ClearTempUnschedulable(writeCtx, accountID); err != nil {
 		return err
 	}
 	if s.tempUnschedCache != nil {
-		if err := s.tempUnschedCache.DeleteTempUnsched(ctx, accountID); err != nil {
+		if err := s.tempUnschedCache.DeleteTempUnsched(writeCtx, accountID); err != nil {
 			slog.Warn("temp_unsched_cache_delete_failed", "account_id", accountID, "error", err)
 		}
 	}
 	// 同时清除模型级别限流
-	if err := s.accountRepo.ClearModelRateLimits(ctx, accountID); err != nil {
+	if err := s.accountRepo.ClearModelRateLimits(writeCtx, accountID); err != nil {
 		slog.Warn("clear_model_rate_limits_on_temp_unsched_reset_failed", "account_id", accountID, "error", err)
 	}
 	return nil

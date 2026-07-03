@@ -149,19 +149,23 @@ func TestCalculateOpenAI429ResetTime_ReversedWindowOrder(t *testing.T) {
 
 type openAI429SnapshotRepo struct {
 	mockAccountRepoForGemini
-	rateLimitedID      int64
-	updatedExtra       map[string]any
-	bulkUpdatedIDs     []int64
-	bulkUpdatedPayload AccountBulkUpdate
+	rateLimitedID         int64
+	rateLimitContextErr   error
+	updatedExtra          map[string]any
+	updateExtraContextErr error
+	bulkUpdatedIDs        []int64
+	bulkUpdatedPayload    AccountBulkUpdate
 }
 
-func (r *openAI429SnapshotRepo) SetRateLimited(_ context.Context, id int64, _ time.Time) error {
+func (r *openAI429SnapshotRepo) SetRateLimited(ctx context.Context, id int64, _ time.Time) error {
 	r.rateLimitedID = id
+	r.rateLimitContextErr = ctx.Err()
 	return nil
 }
 
-func (r *openAI429SnapshotRepo) UpdateExtra(_ context.Context, _ int64, updates map[string]any) error {
+func (r *openAI429SnapshotRepo) UpdateExtra(ctx context.Context, _ int64, updates map[string]any) error {
 	r.updatedExtra = updates
+	r.updateExtraContextErr = ctx.Err()
 	return nil
 }
 
@@ -184,14 +188,19 @@ func TestHandle429_OpenAIPersistsCodexSnapshotImmediately(t *testing.T) {
 	headers.Set("x-codex-secondary-reset-after-seconds", "18000")
 	headers.Set("x-codex-secondary-window-minutes", "300")
 
-	svc.handle429(context.Background(), account, headers, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	svc.handle429(ctx, account, headers, nil)
 
 	if repo.rateLimitedID != account.ID {
 		t.Fatalf("rateLimitedID = %d, want %d", repo.rateLimitedID, account.ID)
 	}
+	require.NoError(t, repo.rateLimitContextErr)
 	if len(repo.updatedExtra) == 0 {
 		t.Fatal("expected codex snapshot to be persisted on 429")
 	}
+	require.NoError(t, repo.updateExtraContextErr)
 	if got := repo.updatedExtra["codex_5h_used_percent"]; got != 100.0 {
 		t.Fatalf("codex_5h_used_percent = %v, want 100", got)
 	}

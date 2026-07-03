@@ -14,19 +14,23 @@ import (
 
 type rateLimitClearRepoStub struct {
 	mockAccountRepoForGemini
-	getByIDAccount            *Account
-	getByIDErr                error
-	getByIDCalls              int
-	clearErrorCalls           int
-	clearRateLimitCalls       int
-	clearAntigravityCalls     int
-	clearModelRateLimitCalls  int
-	clearTempUnschedCalls     int
-	clearErrorErr             error
-	clearRateLimitErr         error
-	clearAntigravityErr       error
-	clearModelRateLimitErr    error
-	clearTempUnschedulableErr error
+	getByIDAccount             *Account
+	getByIDErr                 error
+	getByIDCalls               int
+	clearErrorCalls            int
+	clearRateLimitCalls        int
+	clearAntigravityCalls      int
+	clearModelRateLimitCalls   int
+	clearTempUnschedCalls      int
+	clearErrorErr              error
+	clearRateLimitErr          error
+	clearAntigravityErr        error
+	clearModelRateLimitErr     error
+	clearTempUnschedulableErr  error
+	clearRateLimitContextErr   error
+	clearAntigravityContextErr error
+	clearModelContextErr       error
+	clearTempUnschedContextErr error
 }
 
 func (r *rateLimitClearRepoStub) GetByID(ctx context.Context, id int64) (*Account, error) {
@@ -44,27 +48,32 @@ func (r *rateLimitClearRepoStub) ClearError(ctx context.Context, id int64) error
 
 func (r *rateLimitClearRepoStub) ClearRateLimit(ctx context.Context, id int64) error {
 	r.clearRateLimitCalls++
+	r.clearRateLimitContextErr = ctx.Err()
 	return r.clearRateLimitErr
 }
 
 func (r *rateLimitClearRepoStub) ClearAntigravityQuotaScopes(ctx context.Context, id int64) error {
 	r.clearAntigravityCalls++
+	r.clearAntigravityContextErr = ctx.Err()
 	return r.clearAntigravityErr
 }
 
 func (r *rateLimitClearRepoStub) ClearModelRateLimits(ctx context.Context, id int64) error {
 	r.clearModelRateLimitCalls++
+	r.clearModelContextErr = ctx.Err()
 	return r.clearModelRateLimitErr
 }
 
 func (r *rateLimitClearRepoStub) ClearTempUnschedulable(ctx context.Context, id int64) error {
 	r.clearTempUnschedCalls++
+	r.clearTempUnschedContextErr = ctx.Err()
 	return r.clearTempUnschedulableErr
 }
 
 type tempUnschedCacheRecorder struct {
-	deletedIDs []int64
-	deleteErr  error
+	deletedIDs       []int64
+	deleteErr        error
+	deleteContextErr error
 }
 
 type recoverTokenInvalidatorStub struct {
@@ -82,6 +91,7 @@ func (c *tempUnschedCacheRecorder) GetTempUnsched(ctx context.Context, accountID
 
 func (c *tempUnschedCacheRecorder) DeleteTempUnsched(ctx context.Context, accountID int64) error {
 	c.deletedIDs = append(c.deletedIDs, accountID)
+	c.deleteContextErr = ctx.Err()
 	return c.deleteErr
 }
 
@@ -103,6 +113,40 @@ func TestRateLimitService_ClearRateLimit_AlsoClearsTempUnschedulable(t *testing.
 	require.Equal(t, 1, repo.clearModelRateLimitCalls)
 	require.Equal(t, 1, repo.clearTempUnschedCalls)
 	require.Equal(t, []int64{42}, cache.deletedIDs)
+}
+
+func TestRateLimitService_ClearRateLimit_SurvivesCanceledRequestContext(t *testing.T) {
+	repo := &rateLimitClearRepoStub{}
+	cache := &tempUnschedCacheRecorder{}
+	svc := NewRateLimitService(repo, nil, &config.Config{}, nil, cache)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err := svc.ClearRateLimit(ctx, 43)
+	require.NoError(t, err)
+
+	require.NoError(t, repo.clearRateLimitContextErr)
+	require.NoError(t, repo.clearAntigravityContextErr)
+	require.NoError(t, repo.clearModelContextErr)
+	require.NoError(t, repo.clearTempUnschedContextErr)
+	require.NoError(t, cache.deleteContextErr)
+}
+
+func TestRateLimitService_ClearTempUnschedulable_SurvivesCanceledRequestContext(t *testing.T) {
+	repo := &rateLimitClearRepoStub{}
+	cache := &tempUnschedCacheRecorder{}
+	svc := NewRateLimitService(repo, nil, &config.Config{}, nil, cache)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err := svc.ClearTempUnschedulable(ctx, 44)
+	require.NoError(t, err)
+
+	require.NoError(t, repo.clearTempUnschedContextErr)
+	require.NoError(t, repo.clearModelContextErr)
+	require.NoError(t, cache.deleteContextErr)
 }
 
 func TestRateLimitService_ClearRateLimit_ClearTempUnschedulableFailed(t *testing.T) {
