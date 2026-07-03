@@ -82,6 +82,11 @@ func isOpenAIRequestPolicyError(payload []byte, upstreamMsg string) bool {
 	}
 
 	code, errType, msg := openAIErrorPolicyFields(payload)
+	rawCode := strings.ToLower(strings.TrimSpace(code))
+	rawType := strings.ToLower(strings.TrimSpace(errType))
+	if strings.HasPrefix(rawCode, "violation_fee.") || strings.HasPrefix(rawType, "violation_fee.") {
+		return true
+	}
 	normalizedCode := normalizeOpenAIPolicyToken(code)
 	normalizedType := normalizeOpenAIPolicyToken(errType)
 	switch normalizedCode {
@@ -98,6 +103,8 @@ func isOpenAIRequestPolicyError(payload []byte, upstreamMsg string) bool {
 	combinedMsg := normalizePolicyText(msg + " " + upstreamMsg)
 	for _, marker := range []string{
 		"content policy",
+		"content violates usage guidelines",
+		"failed check: safety check type",
 		"high risk cyber",
 		"high-risk cyber",
 		"moderation blocked",
@@ -105,6 +112,7 @@ func isOpenAIRequestPolicyError(payload []byte, upstreamMsg string) bool {
 		"safety policy",
 		"safety system",
 		"safety systems",
+		"safety check type",
 		"safety violation",
 		"unsafe content",
 		"disallowed content",

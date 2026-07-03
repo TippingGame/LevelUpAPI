@@ -335,6 +335,16 @@ func TestCheckErrorPolicy_OpenAIRequestPolicyBypassesCustomErrorCodeFilter(t *te
 			status: http.StatusBadRequest,
 			body:   []byte(`{"error":{"type":"image_generation_user_error","code":"moderation_blocked","message":"Prompt was blocked."}}`),
 		},
+		{
+			name:   "violation fee code",
+			status: http.StatusBadRequest,
+			body:   []byte(`{"error":{"type":"violation_fee.grok.csam","code":"violation_fee.grok.csam","message":"Failed check: SAFETY_CHECK_TYPE"}}`),
+		},
+		{
+			name:   "grok safety marker",
+			status: http.StatusBadRequest,
+			body:   []byte(`{"error":{"type":"invalid_request_error","message":"Content violates usage guidelines. Failed check: SAFETY_CHECK_TYPE"}}`),
+		},
 	}
 
 	for _, tt := range tests {

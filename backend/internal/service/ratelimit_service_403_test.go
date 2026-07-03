@@ -96,6 +96,10 @@ func TestRateLimitService_HandleUpstreamError_OpenAI403RequestPolicyDoesNotTouch
 			name: "disallowed content text",
 			body: []byte(`{"error":{"type":"invalid_request_error","message":"The input contains disallowed content."}}`),
 		},
+		{
+			name: "grok safety marker",
+			body: []byte(`{"error":{"type":"invalid_request_error","message":"Content violates usage guidelines. Failed check: SAFETY_CHECK_TYPE"}}`),
+		},
 	}
 
 	for _, tt := range tests {
