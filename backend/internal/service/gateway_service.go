@@ -624,7 +624,8 @@ func (s *GatewayService) TempUnscheduleRetryableError(ctx context.Context, accou
 	if failoverErr == nil || !failoverErr.RetryableOnSameAccount {
 		return
 	}
-	if !shouldApplyRetryableFailoverTempUnschedule(ctx, s.accountRepo, accountID, failoverErr) {
+	account, ok := retryableFailoverTempUnscheduleAccount(ctx, s.accountRepo, accountID, failoverErr)
+	if !ok {
 		return
 	}
 	// 根据状态码选择封禁策略
@@ -634,11 +635,11 @@ func (s *GatewayService) TempUnscheduleRetryableError(ctx context.Context, accou
 	}
 	switch failoverErr.StatusCode {
 	case http.StatusBadRequest:
-		tempUnscheduleGoogleConfigError(ctx, s.accountRepo, tempUnschedCache, accountID, "[handler]")
+		tempUnscheduleGoogleConfigError(ctx, s.accountRepo, tempUnschedCache, account, "[handler]")
 	case http.StatusBadGateway:
-		tempUnscheduleEmptyResponse(ctx, s.accountRepo, tempUnschedCache, accountID, "[handler]")
+		tempUnscheduleEmptyResponse(ctx, s.accountRepo, tempUnschedCache, account, "[handler]")
 	default:
-		tempUnscheduleRetryableStatusError(ctx, s.accountRepo, tempUnschedCache, accountID, failoverErr.StatusCode, failoverErr.ResponseBody, "[handler]")
+		tempUnscheduleRetryableStatusError(ctx, s.accountRepo, tempUnschedCache, account, failoverErr.StatusCode, failoverErr.ResponseBody, "[handler]")
 	}
 }
 

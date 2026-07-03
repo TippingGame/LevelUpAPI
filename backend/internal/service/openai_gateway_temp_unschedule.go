@@ -11,7 +11,8 @@ func (s *OpenAIGatewayService) TempUnscheduleRetryableError(ctx context.Context,
 	if s == nil || failoverErr == nil || !failoverErr.RetryableOnSameAccount {
 		return
 	}
-	if !shouldApplyRetryableFailoverTempUnschedule(ctx, s.accountRepo, accountID, failoverErr) {
+	account, ok := retryableFailoverTempUnscheduleAccount(ctx, s.accountRepo, accountID, failoverErr)
+	if !ok {
 		return
 	}
 	var tempUnschedCache TempUnschedCache
@@ -20,10 +21,10 @@ func (s *OpenAIGatewayService) TempUnscheduleRetryableError(ctx context.Context,
 	}
 	switch failoverErr.StatusCode {
 	case http.StatusBadRequest:
-		tempUnscheduleGoogleConfigError(ctx, s.accountRepo, tempUnschedCache, accountID, "[openai_handler]")
+		tempUnscheduleGoogleConfigError(ctx, s.accountRepo, tempUnschedCache, account, "[openai_handler]")
 	case http.StatusBadGateway:
-		tempUnscheduleEmptyResponse(ctx, s.accountRepo, tempUnschedCache, accountID, "[openai_handler]")
+		tempUnscheduleEmptyResponse(ctx, s.accountRepo, tempUnschedCache, account, "[openai_handler]")
 	default:
-		tempUnscheduleRetryableStatusError(ctx, s.accountRepo, tempUnschedCache, accountID, failoverErr.StatusCode, failoverErr.ResponseBody, "[openai_handler]")
+		tempUnscheduleRetryableStatusError(ctx, s.accountRepo, tempUnschedCache, account, failoverErr.StatusCode, failoverErr.ResponseBody, "[openai_handler]")
 	}
 }

@@ -2524,7 +2524,15 @@ const retryableErrorStateUpdateTimeout = 3 * time.Second
 
 // tempUnscheduleGoogleConfigError 对服务端配置类 400 错误触发临时封禁，
 // 避免短时间内反复调度到同一个有问题的账号。
-func tempUnscheduleGoogleConfigError(ctx context.Context, repo AccountRepository, cache TempUnschedCache, accountID int64, logPrefix string) {
+func tempUnscheduleGoogleConfigError(ctx context.Context, repo AccountRepository, cache TempUnschedCache, account *Account, logPrefix string) {
+	if repo == nil || account == nil || account.ID <= 0 {
+		return
+	}
+	if !shouldApplyLocalErrorState(account, http.StatusBadRequest) {
+		log.Printf("%s temp_unschedule_skipped account=%d status=400 reason=policy_skipped", logPrefix, account.ID)
+		return
+	}
+	accountID := account.ID
 	until := time.Now().Add(googleConfigErrorCooldown)
 	reason := "400: invalid project resource name (auto temp-unschedule 1m)"
 	writeCtx, cancel := retryableErrorStateContext(ctx)
@@ -2543,7 +2551,15 @@ const emptyResponseCooldown = 1 * time.Minute
 
 // tempUnscheduleEmptyResponse 对空流式响应触发临时封禁，
 // 避免短时间内反复调度到同一个返回空响应的账号。
-func tempUnscheduleEmptyResponse(ctx context.Context, repo AccountRepository, cache TempUnschedCache, accountID int64, logPrefix string) {
+func tempUnscheduleEmptyResponse(ctx context.Context, repo AccountRepository, cache TempUnschedCache, account *Account, logPrefix string) {
+	if repo == nil || account == nil || account.ID <= 0 {
+		return
+	}
+	if !shouldApplyLocalErrorState(account, http.StatusBadGateway) {
+		log.Printf("%s temp_unschedule_skipped account=%d status=502 reason=policy_skipped", logPrefix, account.ID)
+		return
+	}
+	accountID := account.ID
 	until := time.Now().Add(emptyResponseCooldown)
 	reason := "empty stream response (auto temp-unschedule 1m)"
 	writeCtx, cancel := retryableErrorStateContext(ctx)
@@ -2560,10 +2576,15 @@ func tempUnscheduleEmptyResponse(ctx context.Context, repo AccountRepository, ca
 // retryableErrorExhaustedCooldown 同账号可重试错误耗尽后的兜底临停时长。
 const retryableErrorExhaustedCooldown = 1 * time.Minute
 
-func tempUnscheduleRetryableStatusError(ctx context.Context, repo AccountRepository, cache TempUnschedCache, accountID int64, statusCode int, responseBody []byte, logPrefix string) {
-	if repo == nil || accountID <= 0 || statusCode <= 0 {
+func tempUnscheduleRetryableStatusError(ctx context.Context, repo AccountRepository, cache TempUnschedCache, account *Account, statusCode int, responseBody []byte, logPrefix string) {
+	if repo == nil || account == nil || account.ID <= 0 || statusCode <= 0 {
 		return
 	}
+	if !shouldApplyLocalErrorState(account, statusCode) {
+		log.Printf("%s temp_unschedule_skipped account=%d status=%d reason=policy_skipped", logPrefix, account.ID, statusCode)
+		return
+	}
+	accountID := account.ID
 
 	until := time.Now().Add(retryableErrorExhaustedCooldown)
 	upstreamMsg := strings.TrimSpace(extractUpstreamErrorMessage(responseBody))
