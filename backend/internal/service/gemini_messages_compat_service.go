@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"log/slog"
 	"math"
 	mathrand "math/rand"
 	"net/http"
@@ -2927,6 +2928,10 @@ func asInt(v any) (int, bool) {
 
 func (s *GeminiMessagesCompatService) handleGeminiUpstreamError(ctx context.Context, account *Account, statusCode int, headers http.Header, body []byte) {
 	if account == nil || s == nil {
+		return
+	}
+	if account.IsPoolMode() && !account.IsCustomErrorCodesEnabled() {
+		slog.Info("gemini_pool_mode_error_skipped", "account_id", account.ID, "status_code", statusCode)
 		return
 	}
 	// 遵守自定义错误码策略：未命中则跳过所有限流处理
