@@ -1984,10 +1984,20 @@ func (s *RateLimitService) handle429(ctx context.Context, account *Account, head
 		return
 	}
 
-	// 3. 尝试从响应头解析重置时间（Anthropic 聚合头，向后兼容）
+	// 3. 通用 Retry-After：中转/供应商明确要求退避时优先尊重，避免持续撞限。
+	if resetAt := parseRetryAfterResetTime(headers, time.Now(), time.Duration(maxRateLimit429CooldownSeconds)*time.Second); resetAt != nil {
+		if err := s.persistRateLimitedState(ctx, account, *resetAt); err != nil {
+			slog.Warn("rate_limit_retry_after_set_failed", "account_id", account.ID, "error", err)
+			return
+		}
+		slog.Info("account_rate_limited_retry_after", "account_id", account.ID, "platform", account.Platform, "reset_at", *resetAt, "reset_in", time.Until(*resetAt).Truncate(time.Second))
+		return
+	}
+
+	// 4. 尝试从响应头解析重置时间（Anthropic 聚合头，向后兼容）
 	resetTimestamp := headers.Get("anthropic-ratelimit-unified-reset")
 
-	// 4. 如果响应头没有，尝试从响应体解析（OpenAI usage_limit_reached, Gemini）
+	// 5. 如果响应头没有，尝试从响应体解析（OpenAI usage_limit_reached, Gemini）
 	if resetTimestamp == "" {
 		switch account.Platform {
 		case PlatformOpenAI:
@@ -2103,6 +2113,36 @@ func clampRateLimit429CooldownSeconds(seconds int) int {
 		return maxRateLimit429CooldownSeconds
 	}
 	return seconds
+}
+
+func parseRetryAfterResetTime(headers http.Header, now time.Time, maxAge time.Duration) *time.Time {
+	if maxAge <= 0 {
+		return nil
+	}
+	raw := strings.TrimSpace(headers.Get("Retry-After"))
+	if raw == "" {
+		return nil
+	}
+
+	if seconds, err := strconv.ParseInt(raw, 10, 64); err == nil {
+		if seconds <= 0 || seconds > int64(maxAge/time.Second) {
+			return nil
+		}
+		resetAt := now.Add(time.Duration(seconds) * time.Second)
+		return &resetAt
+	}
+
+	resetAt, err := http.ParseTime(raw)
+	if err != nil {
+		return nil
+	}
+	if !resetAt.After(now) {
+		return nil
+	}
+	if resetAt.After(now.Add(maxAge)) {
+		return nil
+	}
+	return &resetAt
 }
 
 // calculateOpenAI429ResetTime 从 OpenAI 429 响应头计算正确的重置时间

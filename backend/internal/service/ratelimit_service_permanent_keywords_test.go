@@ -22,6 +22,10 @@ type permanentKeywordAccountRepoStub struct {
 	lastTempReason  string
 	lastTempCtxErr  error
 	tempErr         error
+	rateLimitCalls  int
+	lastRateLimitID int64
+	lastRateReset   time.Time
+	lastRateCtxErr  error
 }
 
 func (r *permanentKeywordAccountRepoStub) SetError(ctx context.Context, _ int64, errorMsg string) error {
@@ -37,6 +41,14 @@ func (r *permanentKeywordAccountRepoStub) SetTempUnschedulable(ctx context.Conte
 	r.lastTempReason = reason
 	r.lastTempCtxErr = ctx.Err()
 	return r.tempErr
+}
+
+func (r *permanentKeywordAccountRepoStub) SetRateLimited(ctx context.Context, id int64, resetAt time.Time) error {
+	r.rateLimitCalls++
+	r.lastRateLimitID = id
+	r.lastRateReset = resetAt
+	r.lastRateCtxErr = ctx.Err()
+	return nil
 }
 
 type permanentKeywordOpenAI403CounterStub struct{}
