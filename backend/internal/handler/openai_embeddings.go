@@ -164,7 +164,7 @@ routeLoop:
 					if h.handleAccountShareModeSelectionError(c, err, streamStarted) {
 						return
 					}
-					if routeCursor.switchToNext(apiKey.ID, "account_select_failed", reqLog, zap.Error(err)) {
+					if routeCursor.switchToNextWithoutCooldown(apiKey.ID, "account_select_failed", reqLog, zap.Error(err)) {
 						continue routeLoop
 					}
 					h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "api_error", "No available compatible accounts", streamStarted)
@@ -182,7 +182,7 @@ routeLoop:
 				return
 			}
 			if selection == nil || selection.Account == nil {
-				if routeCursor.switchToNext(apiKey.ID, "account_selection_empty", reqLog, zap.Int64p("group_id", currentAPIKey.GroupID)) {
+				if routeCursor.switchToNextWithoutCooldown(apiKey.ID, "account_selection_empty", reqLog, zap.Int64p("group_id", currentAPIKey.GroupID)) {
 					continue routeLoop
 				}
 				h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "api_error", "No available compatible accounts", streamStarted)

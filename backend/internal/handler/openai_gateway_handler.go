@@ -365,7 +365,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 				return
 			}
 			if len(failedAccountIDs) == 0 {
-				if !errors.Is(err, service.ErrNoAvailableCompactAccounts) && routeCursor.switchToNext(apiKey.ID, "account_select_failed", reqLog, zap.Error(err)) {
+				if !errors.Is(err, service.ErrNoAvailableCompactAccounts) && routeCursor.switchToNextWithoutCooldown(apiKey.ID, "account_select_failed", reqLog, zap.Error(err)) {
 					failedAccountIDs = make(map[int64]struct{})
 					sameAccountRetryCount = make(map[int64]int)
 					switchCount = 0
@@ -395,7 +395,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 			return
 		}
 		if selection == nil || selection.Account == nil {
-			if routeCursor.switchToNext(apiKey.ID, "account_selection_empty", reqLog, zap.Int64p("group_id", currentAPIKey.GroupID)) {
+			if routeCursor.switchToNextWithoutCooldown(apiKey.ID, "account_selection_empty", reqLog, zap.Int64p("group_id", currentAPIKey.GroupID)) {
 				failedAccountIDs = make(map[int64]struct{})
 				sameAccountRetryCount = make(map[int64]int)
 				switchCount = 0
@@ -841,7 +841,7 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 			}
 			if len(failedAccountIDs) == 0 {
 				if err != nil {
-					if routeCursor.switchToNext(apiKey.ID, "account_select_failed", reqLog, zap.Error(err)) {
+					if routeCursor.switchToNextWithoutCooldown(apiKey.ID, "account_select_failed", reqLog, zap.Error(err)) {
 						failedAccountIDs = make(map[int64]struct{})
 						sameAccountRetryCount = make(map[int64]int)
 						switchCount = 0
@@ -869,7 +869,7 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 			}
 		}
 		if selection == nil || selection.Account == nil {
-			if routeCursor.switchToNext(apiKey.ID, "account_selection_empty", reqLog, zap.Int64p("group_id", currentAPIKey.GroupID)) {
+			if routeCursor.switchToNextWithoutCooldown(apiKey.ID, "account_selection_empty", reqLog, zap.Int64p("group_id", currentAPIKey.GroupID)) {
 				failedAccountIDs = make(map[int64]struct{})
 				sameAccountRetryCount = make(map[int64]int)
 				switchCount = 0
@@ -1466,7 +1466,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 			closeOpenAIClientWS(wsConn, coderws.StatusTryAgainLater, "共享账号单用户并发已达上限")
 			return
 		}
-		if !routeCursor.switchToNext(apiKey.ID, "account_select_failed", reqLog, zap.Error(selectErr), zap.Int64p("group_id", currentAPIKey.GroupID)) {
+		if !routeCursor.switchToNextWithoutCooldown(apiKey.ID, "account_select_failed", reqLog, zap.Error(selectErr), zap.Int64p("group_id", currentAPIKey.GroupID)) {
 			closeOpenAIClientWS(wsConn, coderws.StatusTryAgainLater, "no available account")
 			return
 		}

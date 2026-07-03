@@ -363,7 +363,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 							zap.String("platform", platform),
 							zap.Error(err),
 						)
-						if routeCursor.switchToNext(apiKey.ID, "account_select_failed", reqLog, zap.Error(err), zap.Int64p("group_id", currentAPIKey.GroupID)) {
+						if routeCursor.switchToNextWithoutCooldown(apiKey.ID, "account_select_failed", reqLog, zap.Error(err), zap.Int64p("group_id", currentAPIKey.GroupID)) {
 							continue geminiRouteLoop
 						}
 						h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "api_error", "No available accounts: "+err.Error(), streamStarted)
@@ -396,7 +396,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 						zap.Int64p("group_id", currentAPIKey.GroupID),
 						zap.String("platform", platform),
 					)
-					if routeCursor.switchToNext(apiKey.ID, "account_selection_empty", reqLog, zap.Int64p("group_id", currentAPIKey.GroupID)) {
+					if routeCursor.switchToNextWithoutCooldown(apiKey.ID, "account_selection_empty", reqLog, zap.Int64p("group_id", currentAPIKey.GroupID)) {
 						continue geminiRouteLoop
 					}
 					h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "api_error", "No available accounts", streamStarted)
@@ -725,7 +725,7 @@ routeLoop:
 						zap.Bool("fallback_used", fallbackUsed),
 						zap.Error(err),
 					)
-					if routeBackedRequest && routeCursor.switchToNext(apiKey.ID, "account_select_failed", reqLog, zap.Error(err)) {
+					if routeBackedRequest && routeCursor.switchToNextWithoutCooldown(apiKey.ID, "account_select_failed", reqLog, zap.Error(err)) {
 						continue routeLoop
 					}
 					h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "api_error", "No available accounts: "+err.Error(), streamStarted)
@@ -759,7 +759,7 @@ routeLoop:
 					zap.String("platform", platform),
 					zap.Bool("fallback_used", fallbackUsed),
 				)
-				if routeBackedRequest && routeCursor.switchToNext(apiKey.ID, "account_selection_empty", reqLog, zap.Int64p("group_id", currentAPIKey.GroupID)) {
+				if routeBackedRequest && routeCursor.switchToNextWithoutCooldown(apiKey.ID, "account_selection_empty", reqLog, zap.Int64p("group_id", currentAPIKey.GroupID)) {
 					continue routeLoop
 				}
 				h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "api_error", "No available accounts", streamStarted)
@@ -1437,11 +1437,21 @@ func (c *apiKeyGroupRouteCursor) canSwitchAfterFailure() bool {
 }
 
 func (c *apiKeyGroupRouteCursor) switchToNext(apiKeyID int64, reason string, reqLog *zap.Logger, fields ...zap.Field) bool {
+	return c.switchToNextInternal(apiKeyID, reason, true, reqLog, fields...)
+}
+
+func (c *apiKeyGroupRouteCursor) switchToNextWithoutCooldown(apiKeyID int64, reason string, reqLog *zap.Logger, fields ...zap.Field) bool {
+	return c.switchToNextInternal(apiKeyID, reason, false, reqLog, fields...)
+}
+
+func (c *apiKeyGroupRouteCursor) switchToNextInternal(apiKeyID int64, reason string, recordCooldown bool, reqLog *zap.Logger, fields ...zap.Field) bool {
 	current, ok := c.current()
 	if !ok {
 		return false
 	}
-	apiKeyGroupRouteBreaker.recordFailure(apiKeyID, current.Route.GroupID, current.Route.CooldownSeconds)
+	if recordCooldown {
+		apiKeyGroupRouteBreaker.recordFailure(apiKeyID, current.Route.GroupID, current.Route.CooldownSeconds)
+	}
 	if !c.canSwitchAfterFailure() {
 		if reqLog != nil {
 			logFields := []zap.Field{
@@ -1449,6 +1459,7 @@ func (c *apiKeyGroupRouteCursor) switchToNext(apiKeyID int64, reason string, req
 				zap.Int64("group_id", current.Route.GroupID),
 				zap.Int("attempts", c.attempts),
 				zap.Int("max_attempts", c.maxAttempts),
+				zap.Bool("route_cooldown_recorded", recordCooldown),
 			}
 			logFields = append(logFields, fields...)
 			reqLog.Warn("api_key_group_route.exhausted", logFields...)
@@ -1463,6 +1474,7 @@ func (c *apiKeyGroupRouteCursor) switchToNext(apiKeyID int64, reason string, req
 				zap.Int64("group_id", current.Route.GroupID),
 				zap.Int("attempts", c.attempts),
 				zap.Int("max_attempts", c.maxAttempts),
+				zap.Bool("route_cooldown_recorded", recordCooldown),
 			}
 			logFields = append(logFields, fields...)
 			reqLog.Warn("api_key_group_route.exhausted", logFields...)
@@ -1481,6 +1493,7 @@ func (c *apiKeyGroupRouteCursor) switchToNext(apiKeyID int64, reason string, req
 			zap.Int("to_priority", next.Route.Priority),
 			zap.Int("attempts", c.attempts),
 			zap.Int("max_attempts", c.maxAttempts),
+			zap.Bool("route_cooldown_recorded", recordCooldown),
 		}
 		logFields = append(logFields, fields...)
 		reqLog.Warn("api_key_group_route.switching", logFields...)
@@ -2327,7 +2340,7 @@ func (h *GatewayHandler) CountTokens(c *gin.Context) {
 				zap.Error(err),
 				zap.Int64p("group_id", currentAPIKey.GroupID),
 			)
-			if routeCursor.switchToNext(apiKey.ID, "count_tokens_account_select_failed", reqLog, zap.Error(err), zap.Int64p("group_id", currentAPIKey.GroupID)) {
+			if routeCursor.switchToNextWithoutCooldown(apiKey.ID, "count_tokens_account_select_failed", reqLog, zap.Error(err), zap.Int64p("group_id", currentAPIKey.GroupID)) {
 				continue
 			}
 			h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "Service temporarily unavailable")

@@ -73,7 +73,7 @@ func (h *GatewayHandler) GeminiV1BetaListModels(c *gin.Context) {
 			lastErr = err
 			hasAntigravity, _ := h.geminiCompatService.HasAntigravityAccounts(c.Request.Context(), currentAPIKey.GroupID)
 			hasAntigravityFallback = hasAntigravityFallback || hasAntigravity
-			if routeCursor.switchToNext(apiKey.ID, "gemini_list_models_account_select_failed", nil, zap.Error(err), zap.Int64p("group_id", currentAPIKey.GroupID)) {
+			if routeCursor.switchToNextWithoutCooldown(apiKey.ID, "gemini_list_models_account_select_failed", nil, zap.Error(err), zap.Int64p("group_id", currentAPIKey.GroupID)) {
 				continue
 			}
 			break
@@ -156,7 +156,7 @@ func (h *GatewayHandler) GeminiV1BetaGetModel(c *gin.Context) {
 			lastErr = err
 			hasAntigravity, _ := h.geminiCompatService.HasAntigravityAccounts(c.Request.Context(), currentAPIKey.GroupID)
 			hasAntigravityFallback = hasAntigravityFallback || hasAntigravity
-			if routeCursor.switchToNext(apiKey.ID, "gemini_get_model_account_select_failed", nil, zap.Error(err), zap.Int64p("group_id", currentAPIKey.GroupID)) {
+			if routeCursor.switchToNextWithoutCooldown(apiKey.ID, "gemini_get_model_account_select_failed", nil, zap.Error(err), zap.Int64p("group_id", currentAPIKey.GroupID)) {
 				continue
 			}
 			break
@@ -435,7 +435,7 @@ geminiRouteLoop:
 			selection, err := h.gatewayService.SelectAccountWithLoadAwareness(c.Request.Context(), currentAPIKey.GroupID, routeSessionKey, currentModelName, fs.FailedAccountIDs, "", int64(0)) // Gemini 不使用会话限制
 			if err != nil {
 				if len(fs.FailedAccountIDs) == 0 {
-					if routeCursor.switchToNext(apiKey.ID, "gemini_native_account_select_failed", reqLog, zap.Error(err), zap.Int64p("group_id", currentAPIKey.GroupID)) {
+					if routeCursor.switchToNextWithoutCooldown(apiKey.ID, "gemini_native_account_select_failed", reqLog, zap.Error(err), zap.Int64p("group_id", currentAPIKey.GroupID)) {
 						continue geminiRouteLoop
 					}
 					googleError(c, http.StatusServiceUnavailable, "No available Gemini accounts: "+err.Error())
@@ -459,7 +459,7 @@ geminiRouteLoop:
 				}
 			}
 			if selection == nil || selection.Account == nil {
-				if routeCursor.switchToNext(apiKey.ID, "gemini_native_account_selection_empty", reqLog, zap.Int64p("group_id", currentAPIKey.GroupID)) {
+				if routeCursor.switchToNextWithoutCooldown(apiKey.ID, "gemini_native_account_selection_empty", reqLog, zap.Int64p("group_id", currentAPIKey.GroupID)) {
 					continue geminiRouteLoop
 				}
 				googleError(c, http.StatusServiceUnavailable, "No available Gemini accounts")

@@ -56,6 +56,33 @@ func TestAPIKeyGroupRouteCursor_SwitchLoopsThroughRoutesUntilAttemptLimit(t *tes
 	require.Equal(t, maxAPIKeyGroupRouteCyclesPerRequest*2, cursor.attempts)
 }
 
+func TestAPIKeyGroupRouteCursor_SwitchWithoutCooldownDoesNotTripBreaker(t *testing.T) {
+	resetAPIKeyGroupRouteBreakerForTest(t)
+	cursor := newAPIKeyGroupRouteCursorFromCandidates([]apiKeyGroupRouteCandidate{
+		testAPIKeyGroupRouteCandidate(1),
+		testAPIKeyGroupRouteCandidate(2),
+	}, true)
+
+	require.True(t, cursor.switchToNextWithoutCooldown(10, "account_select_failed", nil))
+	require.True(t, apiKeyGroupRouteBreaker.available(10, 1, time.Now()))
+
+	current, ok := cursor.current()
+	require.True(t, ok)
+	require.Equal(t, int64(2), current.Route.GroupID)
+	require.Equal(t, 2, cursor.attempts)
+}
+
+func TestAPIKeyGroupRouteCursor_SwitchWithCooldownTripsBreaker(t *testing.T) {
+	resetAPIKeyGroupRouteBreakerForTest(t)
+	cursor := newAPIKeyGroupRouteCursorFromCandidates([]apiKeyGroupRouteCandidate{
+		testAPIKeyGroupRouteCandidate(1),
+		testAPIKeyGroupRouteCandidate(2),
+	}, true)
+
+	require.True(t, cursor.switchToNext(10, "upstream_failover_exhausted", nil))
+	require.False(t, apiKeyGroupRouteBreaker.available(10, 1, time.Now()))
+}
+
 func TestBuildAPIKeyGroupRouteCandidates_SkipsCoolingDownRoutesForNewRequest(t *testing.T) {
 	resetAPIKeyGroupRouteBreakerForTest(t)
 	group1 := &service.Group{ID: 1, Status: service.StatusActive, Platform: service.PlatformAnthropic, Hydrated: true}
