@@ -436,7 +436,9 @@ func TestGatewayService_SelectAccountForModel_SkipsTempUnschedCache(t *testing.T
 
 func TestGatewayServiceTempUnscheduleRetryableErrorWritesTempCache(t *testing.T) {
 	cache := &runtimeTempUnschedCacheStub{}
-	repo := &mockAccountRepoForPlatform{}
+	repo := &mockAccountRepoForPlatform{accountsByID: map[int64]*Account{
+		42: {ID: 42, Platform: PlatformAntigravity, Type: AccountTypeOAuth},
+	}}
 	svc := &GatewayService{
 		accountRepo: repo,
 		rateLimitService: &RateLimitService{
@@ -457,9 +459,72 @@ func TestGatewayServiceTempUnscheduleRetryableErrorWritesTempCache(t *testing.T)
 	require.Equal(t, 1, repo.tempCalls)
 }
 
+func TestGatewayServiceTempUnscheduleRetryableErrorSkipsPoolModeDefault(t *testing.T) {
+	cache := &runtimeTempUnschedCacheStub{}
+	repo := &mockAccountRepoForPlatform{accountsByID: map[int64]*Account{
+		45: {
+			ID:       45,
+			Platform: PlatformOpenAI,
+			Type:     AccountTypeAPIKey,
+			Credentials: map[string]any{
+				"pool_mode": true,
+			},
+		},
+	}}
+	svc := &GatewayService{
+		accountRepo: repo,
+		rateLimitService: &RateLimitService{
+			tempUnschedCache: cache,
+		},
+	}
+
+	svc.TempUnscheduleRetryableError(context.Background(), 45, &UpstreamFailoverError{
+		StatusCode:             http.StatusBadGateway,
+		RetryableOnSameAccount: true,
+	})
+
+	require.Equal(t, 0, repo.tempCalls)
+	require.Nil(t, cache.states[45])
+}
+
+func TestGatewayServiceTempUnscheduleRetryableErrorPoolModeCustomHitWrites(t *testing.T) {
+	cache := &runtimeTempUnschedCacheStub{}
+	repo := &mockAccountRepoForPlatform{accountsByID: map[int64]*Account{
+		46: {
+			ID:       46,
+			Platform: PlatformOpenAI,
+			Type:     AccountTypeAPIKey,
+			Credentials: map[string]any{
+				"pool_mode":                  true,
+				"custom_error_codes_enabled": true,
+				"custom_error_codes":         []any{float64(http.StatusBadGateway)},
+			},
+		},
+	}}
+	svc := &GatewayService{
+		accountRepo: repo,
+		rateLimitService: &RateLimitService{
+			tempUnschedCache: cache,
+		},
+	}
+
+	svc.TempUnscheduleRetryableError(context.Background(), 46, &UpstreamFailoverError{
+		StatusCode:             http.StatusBadGateway,
+		RetryableOnSameAccount: true,
+	})
+
+	require.Equal(t, 1, repo.tempCalls)
+	require.Equal(t, int64(46), repo.lastTempID)
+	require.NotNil(t, cache.states[46])
+	require.Equal(t, http.StatusBadGateway, cache.states[46].StatusCode)
+	require.Equal(t, "empty stream response", cache.states[46].MatchedKeyword)
+}
+
 func TestGatewayServiceTempUnscheduleRetryableStatusExhaustedWritesTempCache(t *testing.T) {
 	cache := &runtimeTempUnschedCacheStub{}
-	repo := &mockAccountRepoForPlatform{}
+	repo := &mockAccountRepoForPlatform{accountsByID: map[int64]*Account{
+		43: {ID: 43, Platform: PlatformAntigravity, Type: AccountTypeOAuth},
+	}}
 	svc := &GatewayService{
 		accountRepo: repo,
 		rateLimitService: &RateLimitService{
@@ -488,7 +553,9 @@ func TestGatewayServiceTempUnscheduleRetryableStatusExhaustedWritesTempCache(t *
 }
 
 func TestGatewayServiceTempUnscheduleRetryableStatusUsesDetachedContext(t *testing.T) {
-	repo := &mockAccountRepoForPlatform{}
+	repo := &mockAccountRepoForPlatform{accountsByID: map[int64]*Account{
+		44: {ID: 44, Platform: PlatformAntigravity, Type: AccountTypeOAuth},
+	}}
 	svc := &GatewayService{
 		accountRepo: repo,
 		rateLimitService: &RateLimitService{

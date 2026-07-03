@@ -19,8 +19,16 @@ import (
 
 type openaiTransportAccountRepoStub struct {
 	AccountRepository
+	accountsByID     map[int64]*Account
 	tempUnschedCalls []tempUnschedCall
 	tempErr          error
+}
+
+func (r *openaiTransportAccountRepoStub) GetByID(_ context.Context, id int64) (*Account, error) {
+	if acc, ok := r.accountsByID[id]; ok {
+		return acc, nil
+	}
+	return nil, fmt.Errorf("account %d not found", id)
 }
 
 func (r *openaiTransportAccountRepoStub) SetTempUnschedulable(_ context.Context, id int64, until time.Time, reason string) error {
@@ -130,6 +138,63 @@ func TestHandleOpenAIUpstreamTransportError_ContextCanceledNoFailoverNoEviction(
 	require.ErrorIs(t, err, context.Canceled)
 	require.Empty(t, repo.tempUnschedCalls)
 	require.Equal(t, 0, rec.Body.Len())
+}
+
+func TestOpenAIGatewayServiceTempUnscheduleRetryableErrorSkipsPoolModeDefault(t *testing.T) {
+	repo := &openaiTransportAccountRepoStub{accountsByID: map[int64]*Account{
+		88: {
+			ID:       88,
+			Platform: PlatformOpenAI,
+			Type:     AccountTypeAPIKey,
+			Credentials: map[string]any{
+				"pool_mode": true,
+			},
+		},
+	}}
+	cache := &runtimeTempUnschedCacheStub{}
+	svc := &OpenAIGatewayService{
+		accountRepo:      repo,
+		rateLimitService: &RateLimitService{tempUnschedCache: cache},
+	}
+
+	svc.TempUnscheduleRetryableError(context.Background(), 88, &UpstreamFailoverError{
+		StatusCode:             http.StatusBadGateway,
+		RetryableOnSameAccount: true,
+	})
+
+	require.Empty(t, repo.tempUnschedCalls)
+	require.Nil(t, cache.states[88])
+}
+
+func TestOpenAIGatewayServiceTempUnscheduleRetryableErrorPoolModeCustomHitWrites(t *testing.T) {
+	repo := &openaiTransportAccountRepoStub{accountsByID: map[int64]*Account{
+		89: {
+			ID:       89,
+			Platform: PlatformOpenAI,
+			Type:     AccountTypeAPIKey,
+			Credentials: map[string]any{
+				"pool_mode":                  true,
+				"custom_error_codes_enabled": true,
+				"custom_error_codes":         []any{float64(http.StatusBadGateway)},
+			},
+		},
+	}}
+	cache := &runtimeTempUnschedCacheStub{}
+	svc := &OpenAIGatewayService{
+		accountRepo:      repo,
+		rateLimitService: &RateLimitService{tempUnschedCache: cache},
+	}
+
+	svc.TempUnscheduleRetryableError(context.Background(), 89, &UpstreamFailoverError{
+		StatusCode:             http.StatusBadGateway,
+		RetryableOnSameAccount: true,
+	})
+
+	require.Len(t, repo.tempUnschedCalls, 1)
+	require.Equal(t, int64(89), repo.tempUnschedCalls[0].accountID)
+	require.NotNil(t, cache.states[89])
+	require.Equal(t, http.StatusBadGateway, cache.states[89].StatusCode)
+	require.Equal(t, "empty stream response", cache.states[89].MatchedKeyword)
 }
 
 func TestHandleOpenAIUpstreamTransportError_WrappedContextCanceledNoFailover(t *testing.T) {

@@ -624,6 +624,9 @@ func (s *GatewayService) TempUnscheduleRetryableError(ctx context.Context, accou
 	if failoverErr == nil || !failoverErr.RetryableOnSameAccount {
 		return
 	}
+	if !shouldApplyRetryableFailoverTempUnschedule(ctx, s.accountRepo, accountID, failoverErr) {
+		return
+	}
 	// 根据状态码选择封禁策略
 	var tempUnschedCache TempUnschedCache
 	if s.rateLimitService != nil {

@@ -11,6 +11,9 @@ func (s *OpenAIGatewayService) TempUnscheduleRetryableError(ctx context.Context,
 	if s == nil || failoverErr == nil || !failoverErr.RetryableOnSameAccount {
 		return
 	}
+	if !shouldApplyRetryableFailoverTempUnschedule(ctx, s.accountRepo, accountID, failoverErr) {
+		return
+	}
 	var tempUnschedCache TempUnschedCache
 	if s.rateLimitService != nil {
 		tempUnschedCache = s.rateLimitService.tempUnschedCache
