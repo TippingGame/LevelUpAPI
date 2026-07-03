@@ -3746,7 +3746,7 @@ func TestGatewayService_GroupResolution_ReusesContextGroup(t *testing.T) {
 	require.Equal(t, 0, groupRepo.getByIDLiteCalls)
 }
 
-func TestGatewayService_RequirePrivacySetRuntimeEvictsUnreadyMixedAccount(t *testing.T) {
+func TestGatewayService_RequirePrivacySetSkipsUnreadyMixedAccountWithoutDisabling(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	groupID := int64(77)
@@ -3802,12 +3802,10 @@ func TestGatewayService_RequirePrivacySetRuntimeEvictsUnreadyMixedAccount(t *tes
 	require.NoError(t, err)
 	require.NotNil(t, account)
 	require.Equal(t, int64(2), account.ID)
-	require.Equal(t, 1, repo.setErrorCalls)
-	require.Equal(t, int64(1), repo.lastErrorID)
-	require.Contains(t, repo.lastErrorMsg, "Privacy not set")
-	require.NoError(t, repo.lastErrorCtxErr)
-	require.NotNil(t, cache.states[1])
-	require.Equal(t, "account_error", cache.states[1].MatchedKeyword)
+	require.Equal(t, 0, repo.setErrorCalls)
+	require.Equal(t, StatusActive, repo.accounts[0].Status)
+	require.True(t, repo.accounts[0].Schedulable)
+	require.Nil(t, cache.states[1])
 }
 
 func TestGatewayService_GroupResolution_IgnoresInvalidContextGroup(t *testing.T) {

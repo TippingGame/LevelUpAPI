@@ -3,8 +3,8 @@ package service
 import (
 	"container/heap"
 	"context"
-	"fmt"
 	"hash/fnv"
+	"log/slog"
 	"math"
 	"sort"
 	"strconv"
@@ -1150,9 +1150,9 @@ func (s *defaultOpenAIAccountScheduler) filterOpenAIAccountsForLoadBalance(
 		if !s.service.isOpenAIAccountProxyHealthSchedulable(ctx, account) {
 			continue
 		}
-		// require_privacy_set: 跳过 privacy 未设置的账号并标记异常
+		// require_privacy_set: 只在当前分组调度中跳过 privacy 未设置的账号。
 		if schedGroup != nil && schedGroup.RequirePrivacySet && !account.IsPrivacySet() {
-			s.markPrivacyRequiredAccountError(ctx, account, schedGroup)
+			s.notePrivacyRequiredAccountSkipped(account, schedGroup)
 			continue
 		}
 		if !s.isAccountRequestCompatible(account, req) {
@@ -1170,21 +1170,15 @@ func (s *defaultOpenAIAccountScheduler) filterOpenAIAccountsForLoadBalance(
 	return filtered, loadReq
 }
 
-func (s *defaultOpenAIAccountScheduler) markPrivacyRequiredAccountError(ctx context.Context, account *Account, group *Group) {
-	if s == nil || s.service == nil || s.service.accountRepo == nil || account == nil || group == nil {
+func (s *defaultOpenAIAccountScheduler) notePrivacyRequiredAccountSkipped(account *Account, group *Group) {
+	if account == nil || group == nil {
 		return
 	}
-	msg := fmt.Sprintf("Privacy not set, required by group [%s]", group.Name)
-	writeCtx, cancel := rateLimitStateContext(ctx)
-	defer cancel()
-	if err := s.service.accountRepo.SetError(writeCtx, account.ID, msg); err != nil {
-		return
-	}
-	var cache TempUnschedCache
-	if s.service.rateLimitService != nil {
-		cache = s.service.rateLimitService.tempUnschedCache
-	}
-	markAccountErrorRuntimeEvicted(writeCtx, cache, account, msg, "openai_scheduler_require_privacy_set")
+	slog.Info("openai_scheduler_privacy_required_account_skipped",
+		"account_id", account.ID,
+		"group_id", group.ID,
+		"group_name", group.Name,
+	)
 }
 
 func (s *defaultOpenAIAccountScheduler) isAccountTransportCompatible(account *Account, requiredTransport OpenAIUpstreamTransport) bool {

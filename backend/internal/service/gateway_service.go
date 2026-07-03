@@ -639,22 +639,15 @@ func (s *GatewayService) TempUnscheduleRetryableError(ctx context.Context, accou
 	}
 }
 
-func (s *GatewayService) markPrivacyRequiredAccountError(ctx context.Context, account *Account, group *Group) {
-	if s == nil || s.accountRepo == nil || account == nil || group == nil {
+func (s *GatewayService) notePrivacyRequiredAccountSkipped(account *Account, group *Group) {
+	if account == nil || group == nil {
 		return
 	}
-	msg := fmt.Sprintf("Privacy not set, required by group [%s]", group.Name)
-	writeCtx, cancel := rateLimitStateContext(ctx)
-	defer cancel()
-	if err := s.accountRepo.SetError(writeCtx, account.ID, msg); err != nil {
-		slog.Warn("gateway_privacy_required_set_error_failed", "account_id", account.ID, "group_id", group.ID, "error", err)
-		return
-	}
-	var cache TempUnschedCache
-	if s.rateLimitService != nil {
-		cache = s.rateLimitService.tempUnschedCache
-	}
-	markAccountErrorRuntimeEvicted(writeCtx, cache, account, msg, "gateway_require_privacy_set")
+	slog.Info("gateway_privacy_required_account_skipped",
+		"account_id", account.ID,
+		"group_id", group.ID,
+		"group_name", group.Name,
+	)
 }
 
 // GatewayService handles API gateway operations
@@ -4079,9 +4072,9 @@ func (s *GatewayService) selectAccountForModelWithPlatform(ctx context.Context, 
 			if !s.isAccountSchedulableForSelection(ctx, acc) {
 				continue
 			}
-			// require_privacy_set: 跳过 privacy 未设置的账号并标记异常
+			// require_privacy_set: 只在当前分组调度中跳过 privacy 未设置的账号。
 			if schedGroup != nil && schedGroup.RequirePrivacySet && !acc.IsPrivacySet() {
-				s.markPrivacyRequiredAccountError(ctx, acc, schedGroup)
+				s.notePrivacyRequiredAccountSkipped(acc, schedGroup)
 				continue
 			}
 			if requestedModel != "" && !s.isModelSupportedByAccountWithContext(ctx, acc, requestedModel) {
@@ -4175,9 +4168,9 @@ func (s *GatewayService) selectAccountForModelWithPlatform(ctx context.Context, 
 		if !s.isAccountSchedulableForSelection(ctx, acc) {
 			continue
 		}
-		// require_privacy_set: 跳过 privacy 未设置的账号并标记异常
+		// require_privacy_set: 只在当前分组调度中跳过 privacy 未设置的账号。
 		if schedGroup != nil && schedGroup.RequirePrivacySet && !acc.IsPrivacySet() {
-			s.markPrivacyRequiredAccountError(ctx, acc, schedGroup)
+			s.notePrivacyRequiredAccountSkipped(acc, schedGroup)
 			continue
 		}
 		if requestedModel != "" && !s.isModelSupportedByAccountWithContext(ctx, acc, requestedModel) {
@@ -4305,9 +4298,9 @@ func (s *GatewayService) selectAccountWithMixedScheduling(ctx context.Context, g
 			if !s.isAccountSchedulableForSelection(ctx, acc) {
 				continue
 			}
-			// require_privacy_set: 跳过 privacy 未设置的账号并标记异常
+			// require_privacy_set: 只在当前分组调度中跳过 privacy 未设置的账号。
 			if schedGroup != nil && schedGroup.RequirePrivacySet && !acc.IsPrivacySet() {
-				s.markPrivacyRequiredAccountError(ctx, acc, schedGroup)
+				s.notePrivacyRequiredAccountSkipped(acc, schedGroup)
 				continue
 			}
 			// 过滤：原生平台直接通过，antigravity 需要启用混合调度
@@ -4402,9 +4395,9 @@ func (s *GatewayService) selectAccountWithMixedScheduling(ctx context.Context, g
 		if !s.isAccountSchedulableForSelection(ctx, acc) {
 			continue
 		}
-		// require_privacy_set: 跳过 privacy 未设置的账号并标记异常
+		// require_privacy_set: 只在当前分组调度中跳过 privacy 未设置的账号。
 		if schedGroup != nil && schedGroup.RequirePrivacySet && !acc.IsPrivacySet() {
-			s.markPrivacyRequiredAccountError(ctx, acc, schedGroup)
+			s.notePrivacyRequiredAccountSkipped(acc, schedGroup)
 			continue
 		}
 		// 过滤：原生平台直接通过，antigravity 需要启用混合调度
