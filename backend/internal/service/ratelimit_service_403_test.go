@@ -154,6 +154,48 @@ func TestRateLimitService_HandleUpstreamError_AnthropicOAuth403FirstHitTempUnsch
 	require.Contains(t, state.ErrorMessage, "temporary access forbidden")
 }
 
+func TestRateLimitService_HandleUpstreamError_AnthropicRequestPolicyDoesNotTouchAccount(t *testing.T) {
+	tests := []struct {
+		name string
+		body []byte
+	}{
+		{
+			name: "safety error",
+			body: []byte(`{"type":"error","error":{"type":"safety_error","message":"Your request violates Anthropic's Usage Policy."}}`),
+		},
+		{
+			name: "content policy",
+			body: []byte(`{"type":"error","error":{"type":"invalid_request_error","message":"This request violates the content policy."}}`),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := &rateLimitAccountRepoStub{}
+			service := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+			account := &Account{
+				ID:       306,
+				Platform: PlatformAnthropic,
+				Type:     AccountTypeOAuth,
+				Status:   StatusActive,
+			}
+
+			shouldDisable := service.HandleUpstreamError(
+				context.Background(),
+				account,
+				http.StatusForbidden,
+				http.Header{},
+				tt.body,
+			)
+
+			require.False(t, shouldDisable)
+			require.Equal(t, 0, repo.setErrorCalls)
+			require.Equal(t, 0, repo.tempCalls)
+			require.Equal(t, StatusActive, account.Status)
+		})
+	}
+}
+
 func TestRateLimitService_HandleUpstreamError_AnthropicOAuthSecond403KeepsTempUnschedulable(t *testing.T) {
 	repo := &rateLimitAccountRepoStub{}
 	service := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)

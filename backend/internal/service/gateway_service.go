@@ -4796,7 +4796,17 @@ func (s *GatewayService) shouldFailoverUpstreamError(statusCode int) bool {
 	}
 }
 
-func (s *GatewayService) shouldFailoverAnthropicStreamError(statusCode int) bool {
+func (s *GatewayService) shouldFailoverGatewayUpstreamResponse(account *Account, statusCode int, upstreamMsg string, upstreamBody []byte) bool {
+	if account != nil && account.Platform == PlatformAnthropic && isAnthropicRequestPolicyError(statusCode, upstreamBody, upstreamMsg) {
+		return false
+	}
+	return s.shouldFailoverUpstreamError(statusCode)
+}
+
+func (s *GatewayService) shouldFailoverAnthropicStreamError(statusCode int, upstreamMsg string, upstreamBody []byte) bool {
+	if isAnthropicRequestPolicyError(statusCode, upstreamBody, upstreamMsg) {
+		return false
+	}
 	return s.shouldFailoverUpstreamError(statusCode)
 }
 
@@ -6119,6 +6129,11 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 			respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
 			_ = resp.Body.Close()
 			resp.Body = io.NopCloser(bytes.NewReader(respBody))
+			upstreamMsg := strings.TrimSpace(extractUpstreamErrorMessage(respBody))
+			upstreamMsg = sanitizeUpstreamErrorMessage(upstreamMsg)
+			if !s.shouldFailoverGatewayUpstreamResponse(account, resp.StatusCode, upstreamMsg, respBody) {
+				return s.handleRetryExhaustedError(ctx, resp, c, account)
+			}
 
 			// 调试日志：打印重试耗尽后的错误响应
 			logger.LegacyPrintf("service.gateway", "[Forward] Upstream error (retry exhausted, failover): Account=%d(%s) Status=%d RequestID=%s Body=%s",
@@ -6154,6 +6169,11 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
 		_ = resp.Body.Close()
 		resp.Body = io.NopCloser(bytes.NewReader(respBody))
+		upstreamMsg := strings.TrimSpace(extractUpstreamErrorMessage(respBody))
+		upstreamMsg = sanitizeUpstreamErrorMessage(upstreamMsg)
+		if !s.shouldFailoverGatewayUpstreamResponse(account, resp.StatusCode, upstreamMsg, respBody) {
+			return s.handleErrorResponse(ctx, resp, c, account)
+		}
 
 		// 调试日志：打印上游错误响应
 		logger.LegacyPrintf("service.gateway", "[Forward] Upstream error (failover): Account=%d(%s) Status=%d RequestID=%s Body=%s",
@@ -6296,7 +6316,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 					}
 					return nil, fmt.Errorf("upstream stream error: %d message=%s", statusCode, upstreamMsg)
 				}
-				if !s.shouldFailoverAnthropicStreamError(statusCode) {
+				if !s.shouldFailoverAnthropicStreamError(statusCode, upstreamMsg, body) {
 					if upstreamMsg == "" {
 						return nil, fmt.Errorf("upstream stream error: %d", statusCode)
 					}
@@ -6506,6 +6526,11 @@ func (s *GatewayService) forwardAnthropicAPIKeyPassthroughWithInput(
 			respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
 			_ = resp.Body.Close()
 			resp.Body = io.NopCloser(bytes.NewReader(respBody))
+			upstreamMsg := strings.TrimSpace(extractUpstreamErrorMessage(respBody))
+			upstreamMsg = sanitizeUpstreamErrorMessage(upstreamMsg)
+			if !s.shouldFailoverGatewayUpstreamResponse(account, resp.StatusCode, upstreamMsg, respBody) {
+				return s.handleRetryExhaustedError(ctx, resp, c, account)
+			}
 
 			logger.LegacyPrintf("service.gateway", "[Anthropic Passthrough] Upstream error (retry exhausted, failover): Account=%d(%s) Status=%d RequestID=%s Body=%s",
 				account.ID, account.Name, resp.StatusCode, resp.Header.Get("x-request-id"), truncateString(string(respBody), 1000))
@@ -6540,6 +6565,11 @@ func (s *GatewayService) forwardAnthropicAPIKeyPassthroughWithInput(
 		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
 		_ = resp.Body.Close()
 		resp.Body = io.NopCloser(bytes.NewReader(respBody))
+		upstreamMsg := strings.TrimSpace(extractUpstreamErrorMessage(respBody))
+		upstreamMsg = sanitizeUpstreamErrorMessage(upstreamMsg)
+		if !s.shouldFailoverGatewayUpstreamResponse(account, resp.StatusCode, upstreamMsg, respBody) {
+			return s.handleErrorResponse(ctx, resp, c, account)
+		}
 
 		logger.LegacyPrintf("service.gateway", "[Anthropic Passthrough] Upstream error (failover): Account=%d(%s) Status=%d RequestID=%s Body=%s",
 			account.ID, account.Name, resp.StatusCode, resp.Header.Get("x-request-id"), truncateString(string(respBody), 1000))
@@ -6901,12 +6931,13 @@ func (s *GatewayService) handleStreamingResponseAnthropicAPIKeyPassthrough(
 					if statusCode == 0 {
 						statusCode, _ = anthropicStreamErrorStatusAndMessage(body)
 					}
+					upstreamMsg := sanitizeUpstreamErrorMessage(strings.TrimSpace(extractUpstreamErrorMessage(body)))
 					if s.rateLimitService != nil {
 						s.rateLimitService.HandleUpstreamErrorForModel(ctx, account, model, statusCode, resp.Header, body)
 					}
 					if !c.Writer.Written() && !claudeUsageHasBillableTokens(usage) &&
 						!IsUpstreamReplayUnsafeTimeoutStatus(statusCode) &&
-						s.shouldFailoverAnthropicStreamError(statusCode) {
+						s.shouldFailoverAnthropicStreamError(statusCode, upstreamMsg, body) {
 						return nil, &UpstreamFailoverError{
 							StatusCode:      statusCode,
 							ResponseBody:    body,
@@ -7451,6 +7482,11 @@ func (s *GatewayService) handleBedrockUpstreamErrors(
 			respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
 			_ = resp.Body.Close()
 			resp.Body = io.NopCloser(bytes.NewReader(respBody))
+			upstreamMsg := strings.TrimSpace(extractUpstreamErrorMessage(respBody))
+			upstreamMsg = sanitizeUpstreamErrorMessage(upstreamMsg)
+			if !s.shouldFailoverGatewayUpstreamResponse(account, resp.StatusCode, upstreamMsg, respBody) {
+				return s.handleRetryExhaustedError(ctx, resp, c, account)
+			}
 
 			logger.LegacyPrintf("service.gateway", "[Bedrock] Upstream error (retry exhausted, failover): Account=%d(%s) Status=%d Body=%s",
 				account.ID, account.Name, resp.StatusCode, truncateString(string(respBody), 1000))
@@ -7478,6 +7514,11 @@ func (s *GatewayService) handleBedrockUpstreamErrors(
 		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
 		_ = resp.Body.Close()
 		resp.Body = io.NopCloser(bytes.NewReader(respBody))
+		upstreamMsg := strings.TrimSpace(extractUpstreamErrorMessage(respBody))
+		upstreamMsg = sanitizeUpstreamErrorMessage(upstreamMsg)
+		if !s.shouldFailoverGatewayUpstreamResponse(account, resp.StatusCode, upstreamMsg, respBody) {
+			return s.handleErrorResponse(ctx, resp, c, account)
+		}
 
 		s.handleFailoverSideEffects(ctx, resp, account)
 		appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
@@ -8751,8 +8792,11 @@ func (s *GatewayService) handleRetryExhaustedSideEffects(ctx context.Context, re
 
 	// OAuth/Setup Token 账号的 403：标记账号异常
 	if s.rateLimitService != nil && account.IsOAuth() && statusCode == 403 {
-		s.rateLimitService.HandleUpstreamError(ctx, account, statusCode, resp.Header, body)
-		logger.LegacyPrintf("service.gateway", "Account %d: marked as error after %d retries for status %d", account.ID, maxRetryAttempts, statusCode)
+		if s.rateLimitService.HandleUpstreamError(ctx, account, statusCode, resp.Header, body) {
+			logger.LegacyPrintf("service.gateway", "Account %d: marked as error after %d retries for status %d", account.ID, maxRetryAttempts, statusCode)
+		} else {
+			logger.LegacyPrintf("service.gateway", "Account %d: upstream error %d after %d retries (not marking account)", account.ID, statusCode, maxRetryAttempts)
+		}
 	} else {
 		// API Key 未配置错误码：不标记账号状态
 		logger.LegacyPrintf("service.gateway", "Account %d: upstream error %d after %d retries (not marking account)", account.ID, statusCode, maxRetryAttempts)

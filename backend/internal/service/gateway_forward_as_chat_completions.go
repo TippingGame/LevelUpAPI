@@ -149,7 +149,7 @@ func (s *GatewayService) ForwardAsChatCompletions(
 		upstreamMsg := strings.TrimSpace(extractUpstreamErrorMessage(respBody))
 		upstreamMsg = sanitizeUpstreamErrorMessage(upstreamMsg)
 
-		if s.shouldFailoverUpstreamError(resp.StatusCode) {
+		if s.shouldFailoverGatewayUpstreamResponse(account, resp.StatusCode, upstreamMsg, respBody) {
 			appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
 				Platform:           account.Platform,
 				AccountID:          account.ID,
@@ -248,7 +248,7 @@ func (s *GatewayService) handleCCBufferedFromAnthropic(
 
 		if sseErr := anthropicBridgeStreamErrorFromPayload(strings.TrimPrefix(line, "event: "), payload); sseErr != nil {
 			info := s.handleAnthropicBridgeStreamError(ctx, account, resp, mappedModel, sseErr)
-			if s.shouldFailoverAnthropicBridgeStreamError(info.StatusCode, &usage, c) {
+			if s.shouldFailoverAnthropicBridgeStreamError(info, &usage, c) {
 				return nil, &UpstreamFailoverError{
 					StatusCode:      info.StatusCode,
 					ResponseBody:    info.Body,
@@ -472,7 +472,7 @@ func (s *GatewayService) handleCCStreamingFromAnthropic(
 
 		if sseErr := anthropicBridgeStreamErrorFromPayload(strings.TrimPrefix(line, "event: "), payload); sseErr != nil {
 			info := s.handleAnthropicBridgeStreamError(ctx, account, resp, mappedModel, sseErr)
-			if !streamStarted && s.shouldFailoverAnthropicBridgeStreamError(info.StatusCode, &usage, c) {
+			if !streamStarted && s.shouldFailoverAnthropicBridgeStreamError(info, &usage, c) {
 				return nil, &UpstreamFailoverError{
 					StatusCode:      info.StatusCode,
 					ResponseBody:    info.Body,

@@ -147,7 +147,7 @@ func (s *GatewayService) ForwardAsResponses(
 		upstreamMsg := strings.TrimSpace(extractUpstreamErrorMessage(respBody))
 		upstreamMsg = sanitizeUpstreamErrorMessage(upstreamMsg)
 
-		if s.shouldFailoverUpstreamError(resp.StatusCode) {
+		if s.shouldFailoverGatewayUpstreamResponse(account, resp.StatusCode, upstreamMsg, respBody) {
 			appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
 				Platform:           account.Platform,
 				AccountID:          account.ID,
@@ -260,7 +260,7 @@ func (s *GatewayService) handleResponsesBufferedStreamingResponse(
 
 		if sseErr := anthropicBridgeStreamErrorFromPayload(eventType, payload); sseErr != nil {
 			info := s.handleAnthropicBridgeStreamError(ctx, account, resp, mappedModel, sseErr)
-			if s.shouldFailoverAnthropicBridgeStreamError(info.StatusCode, &usage, c) {
+			if s.shouldFailoverAnthropicBridgeStreamError(info, &usage, c) {
 				return nil, &UpstreamFailoverError{
 					StatusCode:      info.StatusCode,
 					ResponseBody:    info.Body,
@@ -503,7 +503,7 @@ func (s *GatewayService) handleResponsesStreamingResponse(
 
 		if sseErr := anthropicBridgeStreamErrorFromPayload(eventType, payload); sseErr != nil {
 			info := s.handleAnthropicBridgeStreamError(ctx, account, resp, mappedModel, sseErr)
-			if !streamStarted && s.shouldFailoverAnthropicBridgeStreamError(info.StatusCode, &usage, c) {
+			if !streamStarted && s.shouldFailoverAnthropicBridgeStreamError(info, &usage, c) {
 				return nil, &UpstreamFailoverError{
 					StatusCode:      info.StatusCode,
 					ResponseBody:    info.Body,
@@ -641,14 +641,15 @@ func (s *GatewayService) handleAnthropicBridgeStreamError(
 	}
 }
 
-func (s *GatewayService) shouldFailoverAnthropicBridgeStreamError(statusCode int, usage *ClaudeUsage, c *gin.Context) bool {
+func (s *GatewayService) shouldFailoverAnthropicBridgeStreamError(info anthropicBridgeStreamErrorInfo, usage *ClaudeUsage, c *gin.Context) bool {
+	statusCode := info.StatusCode
 	if IsUpstreamReplayUnsafeTimeoutStatus(statusCode) || claudeUsageHasBillableTokens(usage) {
 		return false
 	}
 	if c != nil && c.Writer != nil && c.Writer.Written() {
 		return false
 	}
-	return s.shouldFailoverAnthropicStreamError(statusCode)
+	return s.shouldFailoverAnthropicStreamError(statusCode, info.Message, info.Body)
 }
 
 func anthropicBridgeDefaultErrorType(statusCode int) string {

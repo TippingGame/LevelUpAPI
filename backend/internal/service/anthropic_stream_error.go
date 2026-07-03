@@ -91,6 +91,13 @@ func anthropicStreamErrorStatusAndMessage(body []byte) (int, string) {
 	case errType == "request_too_large" ||
 		strings.Contains(combined, "request too large"):
 		return http.StatusRequestEntityTooLarge, message
+	case errType == "safety_error" ||
+		strings.Contains(code, "safety") ||
+		strings.Contains(code, "content_policy") ||
+		strings.Contains(combined, "content policy") ||
+		strings.Contains(combined, "safety policy") ||
+		strings.Contains(combined, "high risk cyber"):
+		return http.StatusBadRequest, message
 	case errType == "timeout_error" ||
 		strings.Contains(combined, "timed out") ||
 		strings.Contains(combined, "timeout"):

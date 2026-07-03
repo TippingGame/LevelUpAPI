@@ -65,7 +65,7 @@ func TestAnthropicStreamClientErrorStatusesDoNotFailover(t *testing.T) {
 	}
 
 	for _, status := range statuses {
-		require.False(t, svc.shouldFailoverAnthropicStreamError(status))
+		require.False(t, svc.shouldFailoverAnthropicStreamError(status, "", nil))
 	}
 }
 
@@ -82,7 +82,7 @@ func TestAnthropicStreamAccountOrTransientStatusesStillFailover(t *testing.T) {
 	}
 
 	for _, status := range statuses {
-		require.True(t, svc.shouldFailoverAnthropicStreamError(status))
+		require.True(t, svc.shouldFailoverAnthropicStreamError(status, "", nil))
 	}
 }
 
@@ -148,5 +148,23 @@ func TestAuthPaymentPermissionStatusesFailoverWithoutSameAccountRetry(t *testing
 		http.StatusForbidden,
 		"This account has been disabled after policy review.",
 		[]byte(`{"error":{"code":"content_policy_violation","message":"This account has been disabled after policy review."}}`),
+	))
+
+	require.False(t, (&GatewayService{}).shouldFailoverGatewayUpstreamResponse(
+		&Account{Platform: PlatformAnthropic},
+		http.StatusForbidden,
+		"Your request violates Anthropic's Usage Policy.",
+		[]byte(`{"type":"error","error":{"type":"safety_error","message":"Your request violates Anthropic's Usage Policy."}}`),
+	))
+	require.False(t, (&GatewayService{}).shouldFailoverAnthropicStreamError(
+		http.StatusBadRequest,
+		"This request has been blocked by a safety system.",
+		[]byte(`{"type":"error","error":{"type":"safety_error","message":"This request has been blocked by a safety system."}}`),
+	))
+	require.True(t, (&GatewayService{}).shouldFailoverGatewayUpstreamResponse(
+		&Account{Platform: PlatformAnthropic},
+		http.StatusForbidden,
+		"Permission denied",
+		[]byte(`{"type":"error","error":{"type":"permission_error","message":"Permission denied"}}`),
 	))
 }
