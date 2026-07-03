@@ -2862,9 +2862,13 @@ func repairOpenAISharedPoolBindingsForAccounts(ctx context.Context, exec sqlExec
 	if exec == nil || len(accountIDs) == 0 {
 		return nil, nil, nil
 	}
+	ensuredGroupIDs, err := ensureOpenAIProSharedPoolForAccounts(ctx, exec, accountIDs)
+	if err != nil {
+		return nil, nil, err
+	}
 	var changedAccountIDs pq.Int64Array
 	var affectedGroupIDs pq.Int64Array
-	err := scanSingleRow(ctx, exec, `
+	err = scanSingleRow(ctx, exec, `
 		WITH candidate_accounts AS (
 			SELECT
 				a.id,
@@ -2987,7 +2991,255 @@ func repairOpenAISharedPoolBindingsForAccounts(ctx context.Context, exec sqlExec
 	if err != nil {
 		return nil, nil, err
 	}
-	return append([]int64(nil), changedAccountIDs...), append([]int64(nil), affectedGroupIDs...), nil
+	return append([]int64(nil), changedAccountIDs...), mergeInt64Slices(affectedGroupIDs, ensuredGroupIDs), nil
+}
+
+func ensureOpenAIProSharedPoolForAccounts(ctx context.Context, exec sqlExecutor, accountIDs []int64) ([]int64, error) {
+	if exec == nil || len(accountIDs) == 0 {
+		return nil, nil
+	}
+	var groupIDs pq.Int64Array
+	err := scanSingleRow(ctx, exec, `
+		WITH effective_pro_accounts AS (
+			SELECT a.id
+			FROM accounts a
+			CROSS JOIN LATERAL (
+				SELECT regexp_replace(lower(COALESCE(
+					NULLIF(a.credentials->>'plan_type', ''),
+					NULLIF(a.credentials->>'chatgpt_plan_type', ''),
+					NULLIF(a.credentials->>'subscription_plan', ''),
+					NULLIF(a.extra->>'plan_type', ''),
+					NULLIF(a.extra->>'chatgpt_plan_type', ''),
+					NULLIF(a.extra->>'subscription_plan', ''),
+					''
+				)), '[[:space:]_-]+', '', 'g') AS token
+			) plan
+			WHERE a.id = ANY($1)
+				AND a.deleted_at IS NULL
+				AND a.platform = 'openai'
+				AND a.type = 'oauth'
+				AND a.owner_user_id IS NOT NULL
+				AND lower(btrim(COALESCE(a.share_mode, ''))) = 'public'
+				AND lower(btrim(COALESCE(a.share_status, ''))) = 'approved'
+				AND NOT (
+					lower(btrim(COALESCE(a.account_level, ''))) = 'team'
+					OR plan.token IN ('team', 'chatgptteam')
+					OR plan.token LIKE 'team%'
+				)
+				AND (
+					lower(btrim(COALESCE(a.account_level, ''))) = 'pro'
+					OR plan.token = 'pro'
+					OR plan.token = 'chatgptpro'
+					OR plan.token LIKE 'pro%'
+					OR plan.token LIKE 'chatgptpro%'
+				)
+		),
+		normalized_pro_pool AS (
+			UPDATE groups
+			SET platform = 'openai',
+				scope = 'public',
+				owner_user_id = NULL,
+				subscription_type = 'standard',
+				required_account_level = 'pro',
+				is_exclusive = FALSE,
+				updated_at = NOW()
+			WHERE deleted_at IS NULL
+				AND status = 'active'
+				AND platform = 'openai'
+				AND (owner_user_id IS NULL OR scope = 'public')
+				AND (
+					lower(btrim(COALESCE(required_account_level, ''))) = 'pro'
+					OR btrim(name) = 'PRO共享号池'
+				)
+				AND (
+					scope <> 'public'
+					OR owner_user_id IS NOT NULL
+					OR COALESCE(subscription_type, '') <> 'standard'
+					OR required_account_level <> 'pro'
+					OR is_exclusive = TRUE
+				)
+			RETURNING id
+		),
+		existing_pro_pool AS (
+			SELECT id
+			FROM groups
+			WHERE deleted_at IS NULL
+				AND platform = 'openai'
+				AND status = 'active'
+				AND owner_user_id IS NULL
+				AND scope = 'public'
+				AND is_exclusive = FALSE
+				AND COALESCE(subscription_type, '') IN ('', 'standard')
+				AND lower(btrim(COALESCE(required_account_level, ''))) = 'pro'
+			LIMIT 1
+		),
+		source_pool AS (
+			SELECT
+				description,
+				rate_multiplier,
+				default_validity_days,
+				allow_image_generation,
+				image_rate_independent,
+				image_rate_multiplier,
+				claude_code_only,
+				COALESCE(model_routing, '{}'::jsonb) AS model_routing,
+				model_routing_enabled,
+				mcp_xml_inject,
+				COALESCE(supported_model_scopes, '[]'::jsonb) AS supported_model_scopes,
+				sort_order,
+				allow_messages_dispatch,
+				require_oauth_only,
+				require_privacy_set,
+				default_mapped_model,
+				COALESCE(messages_dispatch_model_config, '{}'::jsonb) AS messages_dispatch_model_config,
+				rpm_limit
+			FROM groups
+			WHERE deleted_at IS NULL
+				AND platform = 'openai'
+				AND status = 'active'
+				AND owner_user_id IS NULL
+				AND scope = 'public'
+				AND is_exclusive = FALSE
+				AND COALESCE(subscription_type, '') IN ('', 'standard')
+				AND lower(btrim(COALESCE(required_account_level, ''))) IN ('plus', 'free', '')
+			ORDER BY CASE lower(btrim(COALESCE(required_account_level, '')))
+				WHEN 'plus' THEN 0
+				WHEN 'free' THEN 1
+				ELSE 2
+			END, sort_order, id
+			LIMIT 1
+		),
+		template_pool AS (
+			SELECT * FROM source_pool
+			UNION ALL
+			SELECT
+				'OpenAI Pro public shared pool'::text,
+				1.0::numeric,
+				30::integer,
+				FALSE,
+				FALSE,
+				1.0::numeric,
+				FALSE,
+				'{}'::jsonb,
+				FALSE,
+				TRUE,
+				'[]'::jsonb,
+				0::integer,
+				FALSE,
+				FALSE,
+				FALSE,
+				''::text,
+				'{}'::jsonb,
+				0::integer
+			WHERE NOT EXISTS (SELECT 1 FROM source_pool)
+			LIMIT 1
+		),
+		candidate_name AS (
+			SELECT CASE
+				WHEN NOT EXISTS (SELECT 1 FROM groups WHERE deleted_at IS NULL AND name = 'PRO共享号池')
+					THEN 'PRO共享号池'
+				WHEN NOT EXISTS (SELECT 1 FROM groups WHERE deleted_at IS NULL AND name = 'OpenAI PRO共享号池')
+					THEN 'OpenAI PRO共享号池'
+				WHEN NOT EXISTS (SELECT 1 FROM groups WHERE deleted_at IS NULL AND name = 'OpenAI PRO共享号池(公共)')
+					THEN 'OpenAI PRO共享号池(公共)'
+				ELSE 'OpenAI PRO共享号池-' || ((SELECT COALESCE(MAX(id), 0) FROM groups) + 1)::text
+			END AS name
+		),
+		inserted_pro_pool AS (
+			INSERT INTO groups (
+				name,
+				description,
+				rate_multiplier,
+				is_exclusive,
+				status,
+				owner_user_id,
+				scope,
+				platform,
+				required_account_level,
+				subscription_type,
+				default_validity_days,
+				allow_image_generation,
+				image_rate_independent,
+				image_rate_multiplier,
+				claude_code_only,
+				model_routing,
+				model_routing_enabled,
+				mcp_xml_inject,
+				supported_model_scopes,
+				sort_order,
+				allow_messages_dispatch,
+				require_oauth_only,
+				require_privacy_set,
+				default_mapped_model,
+				messages_dispatch_model_config,
+				rpm_limit,
+				created_at,
+				updated_at
+			)
+			SELECT
+				candidate_name.name,
+				COALESCE(NULLIF(template_pool.description, ''), 'OpenAI Pro public shared pool'),
+				template_pool.rate_multiplier,
+				FALSE,
+				'active',
+				NULL,
+				'public',
+				'openai',
+				'pro',
+				'standard',
+				template_pool.default_validity_days,
+				template_pool.allow_image_generation,
+				template_pool.image_rate_independent,
+				template_pool.image_rate_multiplier,
+				template_pool.claude_code_only,
+				template_pool.model_routing,
+				template_pool.model_routing_enabled,
+				template_pool.mcp_xml_inject,
+				template_pool.supported_model_scopes,
+				template_pool.sort_order + 1,
+				template_pool.allow_messages_dispatch,
+				template_pool.require_oauth_only,
+				template_pool.require_privacy_set,
+				template_pool.default_mapped_model,
+				template_pool.messages_dispatch_model_config,
+				template_pool.rpm_limit,
+				NOW(),
+				NOW()
+			FROM candidate_name
+			CROSS JOIN template_pool
+			WHERE EXISTS (SELECT 1 FROM effective_pro_accounts)
+				AND NOT EXISTS (SELECT 1 FROM existing_pro_pool)
+			RETURNING id
+		),
+		changed_groups AS (
+			SELECT id FROM normalized_pro_pool
+			UNION
+			SELECT id FROM inserted_pro_pool
+		)
+		SELECT COALESCE((SELECT array_agg(id ORDER BY id) FROM changed_groups), '{}'::bigint[])
+	`, []any{pq.Array(accountIDs)}, &groupIDs)
+	if err != nil {
+		return nil, fmt.Errorf("ensure openai pro shared pool: %w", err)
+	}
+	return append([]int64(nil), groupIDs...), nil
+}
+
+func mergeInt64Slices(values ...[]int64) []int64 {
+	seen := make(map[int64]struct{})
+	out := make([]int64, 0)
+	for _, slice := range values {
+		for _, value := range slice {
+			if value <= 0 {
+				continue
+			}
+			if _, ok := seen[value]; ok {
+				continue
+			}
+			seen[value] = struct{}{}
+			out = append(out, value)
+		}
+	}
+	return out
 }
 
 type accountGroupQueryOptions struct {
