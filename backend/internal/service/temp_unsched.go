@@ -40,6 +40,10 @@ func markTempUnschedRuntimeState(ctx context.Context, cache TempUnschedCache, ac
 	if account == nil || state == nil {
 		return
 	}
+	if !shouldApplyRuntimeTempUnschedState(account, state) {
+		slog.Info("runtime_temp_unsched_state_skipped", "account_id", account.ID, "source", source, "status_code", state.StatusCode)
+		return
+	}
 	account.TempUnschedulableUntil = &until
 	account.TempUnschedulableReason = reason
 	setTempUnschedCacheBestEffort(ctx, cache, account.ID, state, source)
@@ -49,6 +53,10 @@ func markAccountErrorRuntimeEvicted(ctx context.Context, cache TempUnschedCache,
 	if account == nil {
 		return
 	}
+	if !shouldApplyLocalSystemErrorState(account) {
+		slog.Info("runtime_account_error_eviction_skipped", "account_id", account.ID, "source", source)
+		return
+	}
 	account.Status = StatusError
 	account.ErrorMessage = errorMsg
 	account.Schedulable = false
@@ -56,6 +64,13 @@ func markAccountErrorRuntimeEvicted(ctx context.Context, cache TempUnschedCache,
 	until := time.Now().Add(runtimeAccountErrorEvictionTTL)
 	state := newTempUnschedState(until, 0, "account_error", truncateTempUnschedMessage([]byte(errorMsg), tempUnschedMessageMaxBytes))
 	setTempUnschedCacheBestEffort(ctx, cache, account.ID, state, source)
+}
+
+func shouldApplyRuntimeTempUnschedState(account *Account, state *TempUnschedState) bool {
+	if state != nil && state.StatusCode > 0 {
+		return shouldApplyLocalErrorState(account, state.StatusCode)
+	}
+	return shouldApplyLocalSystemErrorState(account)
 }
 
 func setTempUnschedCacheBestEffort(ctx context.Context, cache TempUnschedCache, accountID int64, state *TempUnschedState, source string) {

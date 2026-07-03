@@ -3,6 +3,7 @@
 package service
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -71,6 +72,96 @@ func TestMatchTempUnschedKeyword(t *testing.T) {
 			require.Equal(t, tt.want, got)
 		})
 	}
+}
+
+func TestMarkTempUnschedRuntimeState_PoolModeDefaultSkipsLocalState(t *testing.T) {
+	cache := &runtimeTempUnschedCacheStub{}
+	account := &Account{
+		ID:          901,
+		Type:        AccountTypeAPIKey,
+		Platform:    PlatformOpenAI,
+		Status:      StatusActive,
+		Schedulable: true,
+		Credentials: map[string]any{
+			"pool_mode": true,
+		},
+	}
+	until := time.Now().Add(time.Minute)
+	state := newTempUnschedState(until, 429, "rate_limit", "rate limited")
+
+	markTempUnschedRuntimeState(context.Background(), cache, account, until, "rate limited", state, "test")
+
+	require.Nil(t, account.TempUnschedulableUntil)
+	require.Empty(t, account.TempUnschedulableReason)
+	require.Nil(t, cache.states[901])
+}
+
+func TestMarkTempUnschedRuntimeState_PoolModeCustomStatusHitWrites(t *testing.T) {
+	cache := &runtimeTempUnschedCacheStub{}
+	account := &Account{
+		ID:          902,
+		Type:        AccountTypeAPIKey,
+		Platform:    PlatformOpenAI,
+		Status:      StatusActive,
+		Schedulable: true,
+		Credentials: map[string]any{
+			"pool_mode":                  true,
+			"custom_error_codes_enabled": true,
+			"custom_error_codes":         []any{float64(429)},
+		},
+	}
+	until := time.Now().Add(time.Minute)
+	state := newTempUnschedState(until, 429, "rate_limit", "rate limited")
+
+	markTempUnschedRuntimeState(context.Background(), cache, account, until, "rate limited", state, "test")
+
+	require.NotNil(t, account.TempUnschedulableUntil)
+	require.Equal(t, "rate limited", account.TempUnschedulableReason)
+	require.NotNil(t, cache.states[902])
+}
+
+func TestMarkAccountErrorRuntimeEvicted_PoolModeDefaultSkipsLocalState(t *testing.T) {
+	cache := &runtimeTempUnschedCacheStub{}
+	account := &Account{
+		ID:          903,
+		Type:        AccountTypeAPIKey,
+		Platform:    PlatformOpenAI,
+		Status:      StatusActive,
+		Schedulable: true,
+		Credentials: map[string]any{
+			"pool_mode": true,
+		},
+	}
+
+	markAccountErrorRuntimeEvicted(context.Background(), cache, account, "auth failed", "test")
+
+	require.Equal(t, StatusActive, account.Status)
+	require.True(t, account.Schedulable)
+	require.Empty(t, account.ErrorMessage)
+	require.Nil(t, cache.states[903])
+}
+
+func TestMarkAccountErrorRuntimeEvicted_PoolModeCustomPolicyWrites(t *testing.T) {
+	cache := &runtimeTempUnschedCacheStub{}
+	account := &Account{
+		ID:          904,
+		Type:        AccountTypeAPIKey,
+		Platform:    PlatformOpenAI,
+		Status:      StatusActive,
+		Schedulable: true,
+		Credentials: map[string]any{
+			"pool_mode":                  true,
+			"custom_error_codes_enabled": true,
+		},
+	}
+
+	markAccountErrorRuntimeEvicted(context.Background(), cache, account, "auth failed", "test")
+
+	require.Equal(t, StatusError, account.Status)
+	require.False(t, account.Schedulable)
+	require.Equal(t, "auth failed", account.ErrorMessage)
+	require.NotNil(t, cache.states[904])
+	require.Equal(t, "account_error", cache.states[904].MatchedKeyword)
 }
 
 // TestAccountIsSchedulable_TempUnschedulable 测试临时限流账号不可调度
