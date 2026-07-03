@@ -160,7 +160,10 @@ func (s *OpenAIGatewayService) setStickySessionAccountID(ctx context.Context, gr
 		return nil
 	}
 
-	if err := s.cache.SetSessionAccountID(ctx, derefGroupID(groupID), primaryKey, accountID, ttl); err != nil {
+	writeCtx, cancel := rateLimitStateContext(ctx)
+	defer cancel()
+
+	if err := s.cache.SetSessionAccountID(writeCtx, derefGroupID(groupID), primaryKey, accountID, ttl); err != nil {
 		return err
 	}
 
@@ -171,7 +174,7 @@ func (s *OpenAIGatewayService) setStickySessionAccountID(ctx context.Context, gr
 	if legacyKey == "" {
 		return nil
 	}
-	if err := s.cache.SetSessionAccountID(ctx, derefGroupID(groupID), legacyKey, accountID, s.openAIStickyLegacyTTL(ttl)); err != nil {
+	if err := s.cache.SetSessionAccountID(writeCtx, derefGroupID(groupID), legacyKey, accountID, s.openAIStickyLegacyTTL(ttl)); err != nil {
 		return err
 	}
 	openAIStickyLegacyDualWriteTotal.Add(1)
@@ -187,14 +190,17 @@ func (s *OpenAIGatewayService) refreshStickySessionTTL(ctx context.Context, grou
 		return nil
 	}
 
-	err := s.cache.RefreshSessionTTL(ctx, derefGroupID(groupID), primaryKey, ttl)
+	writeCtx, cancel := rateLimitStateContext(ctx)
+	defer cancel()
+
+	err := s.cache.RefreshSessionTTL(writeCtx, derefGroupID(groupID), primaryKey, ttl)
 	if !s.openAISessionHashReadOldFallbackEnabled() && !s.openAISessionHashDualWriteOldEnabled() {
 		return err
 	}
 
 	legacyKey := s.openAILegacySessionCacheKey(ctx, sessionHash)
 	if legacyKey != "" {
-		_ = s.cache.RefreshSessionTTL(ctx, derefGroupID(groupID), legacyKey, s.openAIStickyLegacyTTL(ttl))
+		_ = s.cache.RefreshSessionTTL(writeCtx, derefGroupID(groupID), legacyKey, s.openAIStickyLegacyTTL(ttl))
 	}
 	return err
 }
@@ -208,14 +214,17 @@ func (s *OpenAIGatewayService) deleteStickySessionAccountID(ctx context.Context,
 		return nil
 	}
 
-	err := s.cache.DeleteSessionAccountID(ctx, derefGroupID(groupID), primaryKey)
+	writeCtx, cancel := rateLimitStateContext(ctx)
+	defer cancel()
+
+	err := s.cache.DeleteSessionAccountID(writeCtx, derefGroupID(groupID), primaryKey)
 	if !s.openAISessionHashReadOldFallbackEnabled() && !s.openAISessionHashDualWriteOldEnabled() {
 		return err
 	}
 
 	legacyKey := s.openAILegacySessionCacheKey(ctx, sessionHash)
 	if legacyKey != "" {
-		_ = s.cache.DeleteSessionAccountID(ctx, derefGroupID(groupID), legacyKey)
+		_ = s.cache.DeleteSessionAccountID(writeCtx, derefGroupID(groupID), legacyKey)
 	}
 	return err
 }
