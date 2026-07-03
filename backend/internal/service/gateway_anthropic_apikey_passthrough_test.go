@@ -70,6 +70,16 @@ func (u *anthropicHTTPUpstreamRecorder) DoWithTLS(req *http.Request, proxyURL st
 	return u.Do(req, proxyURL, accountID, accountConcurrency)
 }
 
+func reqBodyBytesForTest(t *testing.T, req *http.Request) []byte {
+	t.Helper()
+	require.NotNil(t, req)
+	require.NotNil(t, req.Body)
+	body, err := io.ReadAll(req.Body)
+	require.NoError(t, err)
+	req.Body = io.NopCloser(bytes.NewReader(body))
+	return body
+}
+
 type streamReadCloser struct {
 	payload []byte
 	sent    bool
@@ -1051,8 +1061,81 @@ func TestGatewayService_AnthropicAPIKeyPassthrough_BuildRequestRejectsInvalidBas
 		},
 	}
 
-	_, err := svc.buildUpstreamRequestAnthropicAPIKeyPassthrough(context.Background(), c, account, []byte(`{}`), "k")
+	_, err := svc.buildUpstreamRequestAnthropicAPIKeyPassthrough(context.Background(), c, account, []byte(`{}`), "k", false)
 	require.Error(t, err)
+}
+
+func TestGatewayService_AnthropicAPIKeyPassthrough_BridgesClaudeCodeContinuationForUpstreamSubapi(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	c.Request.Header.Set("User-Agent", "Claude Code/2.1.199 Node.js/24.3.0")
+	c.Request.Header.Set("X-App", "cli")
+	c.Request.Header.Set("Anthropic-Beta", "claude-code-20250219,interleaved-thinking-2025-05-14")
+	c.Request.Header.Set("Anthropic-Version", "2023-06-01")
+	c.Request.Header.Set("X-Claude-Code-Session-Id", "123e4567-e89b-12d3-a456-426614174000")
+
+	body := []byte(`{"model":"claude-opus-4-8","messages":[{"role":"user","content":[{"type":"text","text":"second turn"}]}]}`)
+	svc := &GatewayService{
+		cfg: &config.Config{
+			Security: config.SecurityConfig{
+				URLAllowlist: config.URLAllowlistConfig{Enabled: false},
+			},
+		},
+	}
+	account := newAnthropicAPIKeyAccountForTest()
+	account.Credentials["base_url"] = "https://claude-max-subapi.example"
+
+	ctx := SetClaudeCodeClient(context.Background(), true)
+	req, err := svc.buildUpstreamRequestAnthropicAPIKeyPassthrough(ctx, c, account, body, "upstream-key", true)
+
+	require.NoError(t, err)
+	require.NotNil(t, req)
+	require.Equal(t, "upstream-key", getHeaderRaw(req.Header, "x-api-key"))
+	require.Empty(t, getHeaderRaw(req.Header, "authorization"))
+	require.Equal(t, "claude-cli/"+claude.CLICurrentVersion+" (external, cli)", getHeaderRaw(req.Header, "User-Agent"))
+	require.Equal(t, "cli", getHeaderRaw(req.Header, "X-App"))
+	require.Equal(t, "123e4567-e89b-12d3-a456-426614174000", getHeaderRaw(req.Header, "X-Claude-Code-Session-Id"))
+	require.Equal(t, "claude-code-20250219,interleaved-thinking-2025-05-14", getHeaderRaw(req.Header, "Anthropic-Beta"))
+	require.Equal(t, "stream", getHeaderRaw(req.Header, "x-stainless-helper-method"))
+
+	upstreamBody := reqBodyBytesForTest(t, req)
+	require.NotEmpty(t, gjson.GetBytes(upstreamBody, "metadata.user_id").String())
+	require.Contains(t, string(upstreamBody), "Claude Code")
+	require.Contains(t, string(upstreamBody), "x-anthropic-billing-header")
+}
+
+func TestGatewayService_AnthropicAPIKeyPassthrough_DoesNotBridgeOfficialAnthropicBaseURL(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	c.Request.Header.Set("User-Agent", "Claude Code/2.1.199 Node.js/24.3.0")
+	c.Request.Header.Set("X-App", "cli")
+	c.Request.Header.Set("Anthropic-Beta", "claude-code-20250219")
+	c.Request.Header.Set("Anthropic-Version", "2023-06-01")
+	c.Request.Header.Set("X-Claude-Code-Session-Id", "123e4567-e89b-12d3-a456-426614174000")
+
+	body := []byte(`{"model":"claude-opus-4-8","messages":[{"role":"user","content":[{"type":"text","text":"second turn"}]}]}`)
+	svc := &GatewayService{
+		cfg: &config.Config{
+			Security: config.SecurityConfig{
+				URLAllowlist: config.URLAllowlistConfig{Enabled: false},
+			},
+		},
+	}
+	account := newAnthropicAPIKeyAccountForTest()
+
+	ctx := SetClaudeCodeClient(context.Background(), true)
+	req, err := svc.buildUpstreamRequestAnthropicAPIKeyPassthrough(ctx, c, account, body, "upstream-key", true)
+
+	require.NoError(t, err)
+	upstreamBody := reqBodyBytesForTest(t, req)
+	require.False(t, gjson.GetBytes(upstreamBody, "metadata.user_id").Exists())
+	require.False(t, gjson.GetBytes(upstreamBody, "system").Exists())
+	require.Equal(t, "Claude Code/2.1.199 Node.js/24.3.0", getHeaderRaw(req.Header, "User-Agent"))
+	require.Empty(t, getHeaderRaw(req.Header, "x-stainless-helper-method"))
 }
 
 func TestGatewayService_AnthropicOAuth_NotAffectedByAPIKeyPassthroughToggle(t *testing.T) {

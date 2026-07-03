@@ -21,6 +21,8 @@ var (
 	// 带捕获组的版本提取正则
 	claudeCodeUAVersionPattern = regexp.MustCompile(`(?i)^(?:claude-cli|claude code)/(\d+\.\d+\.\d+)`)
 
+	claudeCodeSessionIDPattern = regexp.MustCompile(`(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
+
 	// System prompt 相似度阈值（默认 0.5，和 claude-relay-service 一致）
 	systemPromptThreshold = 0.5
 )
@@ -136,6 +138,58 @@ func (v *ClaudeCodeValidator) Validate(r *http.Request, body map[string]any) boo
 	}
 
 	return true
+}
+
+// ValidateTransportSignature accepts newer Claude Code continuation requests
+// that may omit metadata.user_id or the full system prompt, while still requiring
+// official Claude Code transport headers. It is intentionally separate from
+// Validate so the strict validator remains available for compatibility tests.
+func (v *ClaudeCodeValidator) ValidateTransportSignature(r *http.Request, body map[string]any) bool {
+	if r == nil {
+		return false
+	}
+	if !v.ValidateUserAgent(r.Header.Get("User-Agent")) {
+		return false
+	}
+
+	path := r.URL.Path
+	if !strings.Contains(path, "messages") || isMessagesCountTokensPath(path) {
+		return true
+	}
+
+	if !v.hasRequiredClaudeCodeHeaders(r) {
+		return false
+	}
+
+	if body != nil {
+		if metadata, ok := body["metadata"].(map[string]any); ok {
+			if userID, ok := metadata["user_id"].(string); ok && ParseMetadataUserID(userID) != nil {
+				return true
+			}
+		}
+		if v.hasClaudeCodeSystemPrompt(body) {
+			return true
+		}
+	}
+
+	return isValidClaudeCodeSessionHeader(r)
+}
+
+func (v *ClaudeCodeValidator) hasRequiredClaudeCodeHeaders(r *http.Request) bool {
+	if r == nil {
+		return false
+	}
+	return strings.TrimSpace(getHeaderRaw(r.Header, "x-app")) != "" &&
+		strings.TrimSpace(getHeaderRaw(r.Header, "anthropic-beta")) != "" &&
+		strings.TrimSpace(getHeaderRaw(r.Header, "anthropic-version")) != ""
+}
+
+func isValidClaudeCodeSessionHeader(r *http.Request) bool {
+	if r == nil {
+		return false
+	}
+	sessionID := strings.TrimSpace(getHeaderRaw(r.Header, "X-Claude-Code-Session-Id"))
+	return claudeCodeSessionIDPattern.MatchString(sessionID)
 }
 
 func isMessagesCountTokensPath(path string) bool {

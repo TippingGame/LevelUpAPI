@@ -6432,7 +6432,7 @@ func (s *GatewayService) forwardAnthropicAPIKeyPassthroughWithInput(
 	retryStart := time.Now()
 	for attempt := 1; attempt <= maxRetryAttempts; attempt++ {
 		upstreamCtx, releaseUpstreamCtx := detachStreamUpstreamContext(ctx, input.RequestStream)
-		upstreamReq, err := s.buildUpstreamRequestAnthropicAPIKeyPassthrough(upstreamCtx, c, account, input.Body, token)
+		upstreamReq, err := s.buildUpstreamRequestAnthropicAPIKeyPassthrough(upstreamCtx, c, account, input.Body, token, input.RequestStream)
 		releaseUpstreamCtx()
 		if err != nil {
 			return nil, err
@@ -6663,6 +6663,7 @@ func (s *GatewayService) buildUpstreamRequestAnthropicAPIKeyPassthrough(
 	account *Account,
 	body []byte,
 	token string,
+	reqStream bool,
 ) (*http.Request, error) {
 	targetURL := claudeAPIURL
 	baseURL := account.GetBaseURL()
@@ -6674,9 +6675,17 @@ func (s *GatewayService) buildUpstreamRequestAnthropicAPIKeyPassthrough(
 		targetURL = validatedURL + "/v1/messages?beta=true"
 	}
 
+	bridgeClaudeCode := s.shouldBridgeClaudeCodeForAnthropicAPIKeyPassthrough(ctx, c, account, body)
+	if bridgeClaudeCode {
+		body = s.ensureAnthropicAPIKeyPassthroughClaudeCodeBody(body, c.Request)
+	}
+
 	clientBeta := ""
 	if c != nil && c.Request != nil {
 		clientBeta = getHeaderRaw(c.Request.Header, "anthropic-beta")
+	}
+	if bridgeClaudeCode && strings.TrimSpace(clientBeta) == "" {
+		clientBeta = defaultAPIKeyBetaHeader(body)
 	}
 	if sanitized, changed := sanitizeAnthropicBodyForBetaTokens(body, clientBeta); changed {
 		body = sanitized
@@ -6713,8 +6722,119 @@ func (s *GatewayService) buildUpstreamRequestAnthropicAPIKeyPassthrough(
 	if getHeaderRaw(req.Header, "anthropic-version") == "" {
 		setHeaderRaw(req.Header, "anthropic-version", "2023-06-01")
 	}
+	if bridgeClaudeCode {
+		applyClaudeCodeMimicHeaders(req, reqStream)
+		if strings.TrimSpace(clientBeta) != "" {
+			deleteHeaderAllForms(req.Header, "anthropic-beta")
+			setHeaderRaw(req.Header, "anthropic-beta", clientBeta)
+		}
+		if uid := gjson.GetBytes(body, "metadata.user_id").String(); uid != "" {
+			if parsed := ParseMetadataUserID(uid); parsed != nil && parsed.SessionID != "" {
+				setHeaderRaw(req.Header, "X-Claude-Code-Session-Id", parsed.SessionID)
+			}
+		}
+	}
 
 	return req, nil
+}
+
+func (s *GatewayService) shouldBridgeClaudeCodeForAnthropicAPIKeyPassthrough(ctx context.Context, c *gin.Context, account *Account, body []byte) bool {
+	if c == nil || c.Request == nil {
+		return false
+	}
+	if !usesCustomAnthropicAPIKeyPassthroughBaseURL(account) {
+		return false
+	}
+	if IsClaudeCodeClient(ctx) {
+		return true
+	}
+	bodyMap := map[string]any(nil)
+	if len(body) > 0 {
+		_ = json.Unmarshal(body, &bodyMap)
+	}
+	validator := NewClaudeCodeValidator()
+	return validator.Validate(c.Request, bodyMap) || validator.ValidateTransportSignature(c.Request, bodyMap)
+}
+
+func usesCustomAnthropicAPIKeyPassthroughBaseURL(account *Account) bool {
+	if account == nil || account.Platform != PlatformAnthropic || account.Type != AccountTypeAPIKey {
+		return false
+	}
+	baseURL := strings.TrimSpace(account.GetCredential("base_url"))
+	if baseURL == "" {
+		return false
+	}
+	parsed, err := url.Parse(baseURL)
+	if err != nil {
+		return true
+	}
+	host := strings.ToLower(strings.TrimSpace(parsed.Hostname()))
+	return host != "" && host != "api.anthropic.com"
+}
+
+func (s *GatewayService) ensureAnthropicAPIKeyPassthroughClaudeCodeBody(body []byte, r *http.Request) []byte {
+	if len(body) == 0 {
+		return body
+	}
+	out := body
+	if !bodyHasClaudeCodeSystemMarker(out) {
+		var system any
+		if sys := gjson.GetBytes(out, "system"); sys.Exists() && sys.Type != gjson.Null {
+			_ = json.Unmarshal([]byte(sys.Raw), &system)
+		}
+		out = rewriteSystemForNonClaudeCodeWithPromptBlocks(out, system, "", "")
+	}
+	if strings.TrimSpace(gjson.GetBytes(out, "metadata.user_id").String()) == "" {
+		if userID := buildClaudeCodePassthroughMetadataUserID(r); userID != "" {
+			if next, ok := ensureClaudeOAuthMetadataUserID(out, userID); ok {
+				out = next
+			}
+		}
+	}
+	return out
+}
+
+func bodyHasClaudeCodeSystemMarker(body []byte) bool {
+	sys := gjson.GetBytes(body, "system")
+	if !sys.Exists() || sys.Type == gjson.Null {
+		return false
+	}
+	if sys.Type == gjson.String {
+		return hasClaudeCodeSystemTextMarker(sys.String())
+	}
+	if !sys.IsArray() {
+		return false
+	}
+	found := false
+	sys.ForEach(func(_, item gjson.Result) bool {
+		text := item.Get("text").String()
+		if hasClaudeCodeSystemTextMarker(text) {
+			found = true
+			return false
+		}
+		return true
+	})
+	return found
+}
+
+func hasClaudeCodeSystemTextMarker(text string) bool {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return false
+	}
+	return hasClaudeCodePrefix(text) ||
+		(strings.HasPrefix(text, claudeCodeBillingHeaderPrefix) && strings.Contains(text, claudeCodeEntrypointMarker))
+}
+
+func buildClaudeCodePassthroughMetadataUserID(r *http.Request) string {
+	if r == nil {
+		return ""
+	}
+	sessionID := strings.TrimSpace(getHeaderRaw(r.Header, "X-Claude-Code-Session-Id"))
+	if !claudeCodeSessionIDPattern.MatchString(sessionID) {
+		sessionID = uuid.NewString()
+	}
+	return FormatMetadataUserID(generateClientID(), "", sessionID, ExtractCLIVersion(r.Header.Get("User-Agent")))
 }
 
 func (s *GatewayService) handleStreamingResponseAnthropicAPIKeyPassthrough(

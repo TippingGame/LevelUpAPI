@@ -52,6 +52,9 @@ func SetClaudeCodeClientContext(c *gin.Context, body []byte, parsedReq *service.
 			_ = json.Unmarshal(body, &bodyMap)
 		}
 		isClaudeCode = claudeCodeValidator.Validate(c.Request, bodyMap)
+		if !isClaudeCode {
+			isClaudeCode = claudeCodeValidator.ValidateTransportSignature(c.Request, bodyMap)
+		}
 	}
 
 	// 更新 request context
