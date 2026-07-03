@@ -674,6 +674,40 @@ func TestOpenAISelectAccountForModelWithExclusions_StickyUnschedulableClearsSess
 	}
 }
 
+func TestOpenAISelectAccountForModelWithExclusions_StickyModelMismatchClearsSession(t *testing.T) {
+	sessionHash := "session-model-mismatch"
+	repo := stubOpenAIAccountRepo{
+		accounts: []Account{
+			{
+				ID:          1,
+				Platform:    PlatformOpenAI,
+				Status:      StatusActive,
+				Schedulable: true,
+				Concurrency: 1,
+				Credentials: map[string]any{
+					"model_mapping": map[string]any{"gpt-4o": "gpt-4o"},
+				},
+			},
+			{ID: 2, Platform: PlatformOpenAI, Status: StatusActive, Schedulable: true, Concurrency: 1},
+		},
+	}
+	cache := &stubGatewayCache{
+		sessionBindings: map[string]int64{"openai:" + sessionHash: 1},
+	}
+
+	svc := &OpenAIGatewayService{
+		accountRepo: repo,
+		cache:       cache,
+	}
+
+	acc, err := svc.SelectAccountForModelWithExclusions(context.Background(), nil, sessionHash, "gpt-5.2", nil)
+	require.NoError(t, err)
+	require.NotNil(t, acc)
+	require.Equal(t, int64(2), acc.ID)
+	require.Equal(t, 1, cache.deletedSessions["openai:"+sessionHash])
+	require.Equal(t, int64(2), cache.sessionBindings["openai:"+sessionHash])
+}
+
 func TestOpenAISelectAccountWithLoadAwareness_StickyUnschedulableClearsSession(t *testing.T) {
 	sessionHash := "session-2"
 	groupID := int64(1)
@@ -706,6 +740,47 @@ func TestOpenAISelectAccountWithLoadAwareness_StickyUnschedulableClearsSession(t
 	if cache.sessionBindings["openai:"+sessionHash] != 2 {
 		t.Fatalf("expected sticky session to bind to account 2")
 	}
+	if selection.ReleaseFunc != nil {
+		selection.ReleaseFunc()
+	}
+}
+
+func TestOpenAISelectAccountWithLoadAwareness_StickyModelMismatchClearsSession(t *testing.T) {
+	sessionHash := "session-load-model-mismatch"
+	groupID := int64(1)
+	repo := stubOpenAIAccountRepo{
+		accounts: []Account{
+			{
+				ID:          1,
+				Platform:    PlatformOpenAI,
+				Status:      StatusActive,
+				Schedulable: true,
+				Concurrency: 1,
+				Priority:    0,
+				Credentials: map[string]any{
+					"model_mapping": map[string]any{"gpt-4o": "gpt-4o"},
+				},
+			},
+			{ID: 2, Platform: PlatformOpenAI, Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 1},
+		},
+	}
+	cache := &stubGatewayCache{
+		sessionBindings: map[string]int64{"openai:" + sessionHash: 1},
+	}
+
+	svc := &OpenAIGatewayService{
+		accountRepo:        repo,
+		cache:              cache,
+		concurrencyService: NewConcurrencyService(stubConcurrencyCache{}),
+	}
+
+	selection, err := svc.SelectAccountWithLoadAwareness(context.Background(), &groupID, sessionHash, "gpt-5.2", nil)
+	require.NoError(t, err)
+	require.NotNil(t, selection)
+	require.NotNil(t, selection.Account)
+	require.Equal(t, int64(2), selection.Account.ID)
+	require.Equal(t, 1, cache.deletedSessions["openai:"+sessionHash])
+	require.Equal(t, int64(2), cache.sessionBindings["openai:"+sessionHash])
 	if selection.ReleaseFunc != nil {
 		selection.ReleaseFunc()
 	}

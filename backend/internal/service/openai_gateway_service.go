@@ -1559,6 +1559,25 @@ func isOpenAIAccountEligibleForRequest(account *Account, requestedModel string, 
 	return true
 }
 
+func shouldClearOpenAISessionStickyForRequest(account *Account, requestedModel string, requireCompact bool, requiredCapability OpenAIEndpointCapability) bool {
+	if account == nil {
+		return false
+	}
+	if shouldClearStickySession(account, requestedModel) || !account.IsOpenAI() {
+		return true
+	}
+	if requestedModel != "" && !account.IsModelSupported(requestedModel) {
+		return true
+	}
+	if !account.SupportsOpenAIEndpointCapability(requiredCapability) {
+		return true
+	}
+	if requireCompact && openAICompactSupportTier(account) == 0 {
+		return true
+	}
+	return false
+}
+
 func (s *OpenAIGatewayService) isOpenAIAccountProxyHealthSchedulable(ctx context.Context, account *Account) bool {
 	if s == nil || s.proxyLatencyCache == nil || account == nil || !account.IsOpenAI() || !account.RequiresProxyForScheduling() {
 		return true
@@ -1762,7 +1781,7 @@ func (s *OpenAIGatewayService) tryStickySessionHit(ctx context.Context, groupID 
 	}
 
 	// 妫€鏌ヨ处鍙锋槸鍚﹂渶瑕佹竻鐞嗙矘鎬т細璇?	// Check if sticky session should be cleared
-	if shouldClearStickySession(account, requestedModel) {
+	if shouldClearOpenAISessionStickyForRequest(account, requestedModel, requireCompact, requiredCapability) {
 		_ = s.deleteStickySessionAccountID(ctx, groupID, sessionHash)
 		return nil
 	}
@@ -1990,11 +2009,11 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 		if accountID > 0 && !isExcluded(accountID) {
 			account, err := s.getSchedulableAccount(ctx, accountID)
 			if err == nil {
-				clearSticky := shouldClearStickySession(account, requestedModel)
+				clearSticky := shouldClearOpenAISessionStickyForRequest(account, requestedModel, requireCompact, requiredCapability)
 				if clearSticky {
 					_ = s.deleteStickySessionAccountID(ctx, groupID, sessionHash)
 				}
-				if !clearSticky && isOpenAIAccountEligibleForRequest(account, requestedModel, false, requiredCapability) {
+				if !clearSticky && isOpenAIAccountEligibleForRequest(account, requestedModel, requireCompact, requiredCapability) {
 					account = s.recheckSelectedOpenAIAccountFromDB(ctx, groupID, account, requestedModel, requireCompact, requiredCapability)
 					if account == nil {
 						_ = s.deleteStickySessionAccountID(ctx, groupID, sessionHash)
