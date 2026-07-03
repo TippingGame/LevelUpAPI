@@ -14,7 +14,8 @@ import (
 const (
 	internal500PenaltyTier1Duration  = 30 * time.Minute // 第 1 轮：临时不可调度 30 分钟
 	internal500PenaltyTier2Duration  = 2 * time.Hour    // 第 2 轮：临时不可调度 2 小时
-	internal500PenaltyTier3Threshold = 3                // 第 3+ 轮：永久禁用
+	internal500PenaltyTier3Duration  = 12 * time.Hour   // 第 3+ 轮：临时不可调度 12 小时
+	internal500PenaltyTier3Threshold = 3
 )
 
 // isAntigravityInternalServerError 检测特定的 INTERNAL 500 错误
@@ -45,28 +46,26 @@ func (s *AntigravityGatewayService) syncInternal500TempUnschedState(ctx context.
 }
 
 // applyInternal500Penalty 根据连续 INTERNAL 500 轮次数应用渐进惩罚
-// count=1: temp_unschedulable 10 分钟
-// count=2: temp_unschedulable 10 小时
-// count>=3: SetError 永久禁用
+// count=1: temp_unschedulable 30 分钟
+// count=2: temp_unschedulable 2 小时
+// count>=3: temp_unschedulable 12 小时
 func (s *AntigravityGatewayService) applyInternal500Penalty(
 	ctx context.Context, prefix string, account *Account, count int64,
 ) {
 	switch {
 	case count >= int64(internal500PenaltyTier3Threshold):
-		reason := fmt.Sprintf("INTERNAL 500 consecutive failures: %d rounds", count)
+		until := time.Now().Add(internal500PenaltyTier3Duration)
+		reason := fmt.Sprintf("INTERNAL 500 x%d (temp unsched %v)", count, internal500PenaltyTier3Duration)
 		writeCtx, cancel := rateLimitStateContext(ctx)
 		defer cancel()
-		if err := s.accountRepo.SetError(writeCtx, account.ID, reason); err != nil {
-			slog.Error("internal500_set_error_failed", "account_id", account.ID, "error", err)
+		if err := s.accountRepo.SetTempUnschedulable(writeCtx, account.ID, until, reason); err != nil {
+			slog.Error("internal500_temp_unsched_failed", "account_id", account.ID, "error", err)
 			return
 		}
-		var cache TempUnschedCache
-		if s != nil && s.rateLimitService != nil {
-			cache = s.rateLimitService.tempUnschedCache
-		}
-		markAccountErrorRuntimeEvicted(writeCtx, cache, account, reason, "antigravity_internal_500_error")
-		slog.Warn("internal500_account_disabled",
-			"account_id", account.ID, "account_name", account.Name, "consecutive_count", count)
+		s.syncInternal500TempUnschedState(writeCtx, account, until, reason, count)
+		slog.Warn("internal500_temp_unschedulable",
+			"account_id", account.ID, "account_name", account.Name,
+			"duration", internal500PenaltyTier3Duration, "consecutive_count", count)
 	case count == 2:
 		until := time.Now().Add(internal500PenaltyTier2Duration)
 		reason := fmt.Sprintf("INTERNAL 500 x%d (temp unsched %v)", count, internal500PenaltyTier2Duration)

@@ -117,7 +117,7 @@ func TestIsAntigravityInternalServerError(t *testing.T) {
 // =============================================================================
 
 func TestApplyInternal500Penalty(t *testing.T) {
-	t.Run("count=1 → SetTempUnschedulable 10 分钟", func(t *testing.T) {
+	t.Run("count=1 → SetTempUnschedulable 30 分钟", func(t *testing.T) {
 		repo := &internal500AccountRepoStub{}
 		tempCache := &runtimeTempUnschedCacheStub{}
 		svc := &AntigravityGatewayService{
@@ -136,7 +136,7 @@ func TestApplyInternal500Penalty(t *testing.T) {
 		call := repo.tempUnschedCalls[0]
 		require.Equal(t, int64(1), call.accountID)
 		require.Contains(t, call.reason, "INTERNAL 500")
-		// until 应在 [before+10m, after+10m] 范围内
+		// until 应在 [before+30m, after+30m] 范围内
 		require.True(t, call.until.After(before.Add(internal500PenaltyTier1Duration).Add(-time.Second)))
 		require.True(t, call.until.Before(after.Add(internal500PenaltyTier1Duration).Add(time.Second)))
 		require.NotNil(t, account.TempUnschedulableUntil)
@@ -146,7 +146,7 @@ func TestApplyInternal500Penalty(t *testing.T) {
 		require.Equal(t, 1, tempCache.states[1].ConsecutiveCount)
 	})
 
-	t.Run("count=2 → SetTempUnschedulable 10 小时", func(t *testing.T) {
+	t.Run("count=2 → SetTempUnschedulable 2 小时", func(t *testing.T) {
 		repo := &internal500AccountRepoStub{}
 		tempCache := &runtimeTempUnschedCacheStub{}
 		svc := &AntigravityGatewayService{
@@ -174,7 +174,7 @@ func TestApplyInternal500Penalty(t *testing.T) {
 		require.Equal(t, 2, tempCache.states[2].ConsecutiveCount)
 	})
 
-	t.Run("count=3 → SetError 永久禁用", func(t *testing.T) {
+	t.Run("count=3 → SetTempUnschedulable 12 小时", func(t *testing.T) {
 		repo := &internal500AccountRepoStub{}
 		tempCache := &runtimeTempUnschedCacheStub{}
 		svc := &AntigravityGatewayService{
@@ -183,33 +183,51 @@ func TestApplyInternal500Penalty(t *testing.T) {
 		}
 		account := &Account{ID: 3, Name: "acc-3", Status: StatusActive, Schedulable: true}
 
+		before := time.Now()
 		svc.applyInternal500Penalty(context.Background(), "[test]", account, 3)
+		after := time.Now()
 
-		require.Empty(t, repo.tempUnschedCalls)
-		require.Len(t, repo.setErrorCalls, 1)
+		require.Len(t, repo.tempUnschedCalls, 1)
+		require.Empty(t, repo.setErrorCalls)
 
-		call := repo.setErrorCalls[0]
+		call := repo.tempUnschedCalls[0]
 		require.Equal(t, int64(3), call.accountID)
-		require.Contains(t, call.reason, "INTERNAL 500 consecutive failures: 3")
-		require.Equal(t, StatusError, account.Status)
-		require.False(t, account.Schedulable)
+		require.Contains(t, call.reason, "INTERNAL 500")
+		require.True(t, call.until.After(before.Add(internal500PenaltyTier3Duration).Add(-time.Second)))
+		require.True(t, call.until.Before(after.Add(internal500PenaltyTier3Duration).Add(time.Second)))
+		require.Equal(t, StatusActive, account.Status)
+		require.True(t, account.Schedulable)
+		require.NotNil(t, account.TempUnschedulableUntil)
+		require.Equal(t, call.reason, account.TempUnschedulableReason)
 		require.NotNil(t, tempCache.states[3])
-		require.Equal(t, "account_error", tempCache.states[3].MatchedKeyword)
+		require.Equal(t, "antigravity_internal_500", tempCache.states[3].MatchedKeyword)
+		require.Equal(t, 3, tempCache.states[3].ConsecutiveCount)
 	})
 
-	t.Run("count=5 → SetError 永久禁用（>=3 都走永久禁用）", func(t *testing.T) {
+	t.Run("count=5 → SetTempUnschedulable 长冷却（>=3 都走长冷却）", func(t *testing.T) {
 		repo := &internal500AccountRepoStub{}
-		svc := &AntigravityGatewayService{accountRepo: repo}
+		tempCache := &runtimeTempUnschedCacheStub{}
+		svc := &AntigravityGatewayService{
+			accountRepo:      repo,
+			rateLimitService: &RateLimitService{tempUnschedCache: tempCache},
+		}
 		account := &Account{ID: 5, Name: "acc-5"}
 
+		before := time.Now()
 		svc.applyInternal500Penalty(context.Background(), "[test]", account, 5)
+		after := time.Now()
 
-		require.Empty(t, repo.tempUnschedCalls)
-		require.Len(t, repo.setErrorCalls, 1)
+		require.Len(t, repo.tempUnschedCalls, 1)
+		require.Empty(t, repo.setErrorCalls)
 
-		call := repo.setErrorCalls[0]
+		call := repo.tempUnschedCalls[0]
 		require.Equal(t, int64(5), call.accountID)
-		require.Contains(t, call.reason, "INTERNAL 500 consecutive failures: 5")
+		require.Contains(t, call.reason, "INTERNAL 500")
+		require.True(t, call.until.After(before.Add(internal500PenaltyTier3Duration).Add(-time.Second)))
+		require.True(t, call.until.Before(after.Add(internal500PenaltyTier3Duration).Add(time.Second)))
+		require.NotNil(t, tempCache.states[5])
+		require.Equal(t, "antigravity_internal_500", tempCache.states[5].MatchedKeyword)
+		require.Equal(t, 5, tempCache.states[5].ConsecutiveCount)
 	})
 
 	t.Run("count=0 → 不调用任何方法", func(t *testing.T) {
@@ -241,7 +259,7 @@ func TestApplyInternal500Penalty(t *testing.T) {
 		require.NotNil(t, tempCache.states[11])
 	})
 
-	t.Run("count=3 canceled context still sets error", func(t *testing.T) {
+	t.Run("count=3 canceled context still temp unschedules", func(t *testing.T) {
 		repo := &internal500AccountRepoStub{}
 		tempCache := &runtimeTempUnschedCacheStub{}
 		svc := &AntigravityGatewayService{
@@ -254,9 +272,10 @@ func TestApplyInternal500Penalty(t *testing.T) {
 
 		svc.applyInternal500Penalty(ctx, "[test]", account, 3)
 
-		require.Len(t, repo.setErrorCalls, 1)
-		require.NoError(t, repo.setErrorCalls[0].ctxErr)
-		require.Equal(t, StatusError, account.Status)
+		require.Len(t, repo.tempUnschedCalls, 1)
+		require.Empty(t, repo.setErrorCalls)
+		require.NoError(t, repo.tempUnschedCalls[0].ctxErr)
+		require.Equal(t, StatusActive, account.Status)
 		require.NotNil(t, tempCache.states[12])
 	})
 }
@@ -322,7 +341,7 @@ func TestHandleInternal500RetryExhausted(t *testing.T) {
 		require.Empty(t, repo.setErrorCalls)
 	})
 
-	t.Run("IncrementInternal500Count 返回 count=3 → 触发 tier3 永久禁用", func(t *testing.T) {
+	t.Run("IncrementInternal500Count 返回 count=3 → 触发 tier3 长冷却", func(t *testing.T) {
 		repo := &internal500AccountRepoStub{}
 		cache := &mockInternal500Cache{
 			incrementCount: 3,
@@ -336,9 +355,9 @@ func TestHandleInternal500RetryExhausted(t *testing.T) {
 		svc.handleInternal500RetryExhausted(context.Background(), "[test]", account)
 
 		require.Len(t, cache.incrementCalls, 1)
-		require.Empty(t, repo.tempUnschedCalls)
-		require.Len(t, repo.setErrorCalls, 1)
-		require.Equal(t, int64(4), repo.setErrorCalls[0].accountID)
+		require.Len(t, repo.tempUnschedCalls, 1)
+		require.Empty(t, repo.setErrorCalls)
+		require.Equal(t, int64(4), repo.tempUnschedCalls[0].accountID)
 	})
 }
 
