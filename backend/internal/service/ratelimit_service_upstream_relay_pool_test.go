@@ -81,6 +81,37 @@ func TestHandleUpstreamErrorRelayNoAvailableRoutesTempUnschedulable(t *testing.T
 	require.Contains(t, repo.lastTempReason, "upstream_relay_pool_unavailable")
 }
 
+func TestHandleUpstreamErrorRelayNoAvailableAccountsHonorsRetryAfter(t *testing.T) {
+	repo := &permanentKeywordAccountRepoStub{}
+	svc := &RateLimitService{accountRepo: repo}
+	account := &Account{
+		ID:          7206,
+		Platform:    PlatformAnthropic,
+		Type:        AccountTypeAPIKey,
+		Status:      StatusActive,
+		Schedulable: true,
+	}
+	headers := http.Header{}
+	headers.Set("Retry-After", "37")
+
+	before := time.Now()
+	shouldDisable := svc.HandleUpstreamError(
+		context.Background(),
+		account,
+		http.StatusServiceUnavailable,
+		headers,
+		[]byte(`{"error":{"message":"No available accounts: no available accounts"}}`),
+	)
+	after := time.Now()
+
+	require.True(t, shouldDisable)
+	require.Equal(t, 1, repo.tempCalls)
+	require.False(t, repo.lastTempUntil.Before(before.Add(37*time.Second)))
+	require.False(t, repo.lastTempUntil.After(after.Add(37*time.Second)))
+	require.NotNil(t, account.TempUnschedulableUntil)
+	require.Equal(t, repo.lastTempUntil.Unix(), account.TempUnschedulableUntil.Unix())
+}
+
 func TestHandleUpstreamErrorRelayClaudeCodeOnlyIsNotPoolUnavailable(t *testing.T) {
 	repo := &permanentKeywordAccountRepoStub{}
 	svc := &RateLimitService{accountRepo: repo}

@@ -26,6 +26,10 @@ type permanentKeywordAccountRepoStub struct {
 	lastRateLimitID int64
 	lastRateReset   time.Time
 	lastRateCtxErr  error
+	overloadCalls   int
+	lastOverloadID  int64
+	lastOverloadEnd time.Time
+	lastOverloadErr error
 }
 
 func (r *permanentKeywordAccountRepoStub) SetError(ctx context.Context, _ int64, errorMsg string) error {
@@ -48,6 +52,14 @@ func (r *permanentKeywordAccountRepoStub) SetRateLimited(ctx context.Context, id
 	r.lastRateLimitID = id
 	r.lastRateReset = resetAt
 	r.lastRateCtxErr = ctx.Err()
+	return nil
+}
+
+func (r *permanentKeywordAccountRepoStub) SetOverloaded(ctx context.Context, id int64, until time.Time) error {
+	r.overloadCalls++
+	r.lastOverloadID = id
+	r.lastOverloadEnd = until
+	r.lastOverloadErr = ctx.Err()
 	return nil
 }
 

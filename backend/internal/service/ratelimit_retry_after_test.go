@@ -100,3 +100,36 @@ func TestHandle429RetryAfterTooLargeFallsBackToDefault(t *testing.T) {
 	require.False(t, repo.lastRateReset.Before(before.Add(time.Duration(defaultRateLimit429CooldownSeconds)*time.Second)))
 	require.False(t, repo.lastRateReset.After(after.Add(time.Duration(defaultRateLimit429CooldownSeconds)*time.Second)))
 }
+
+func TestHandle529RetryAfterSetsOverloadCooldown(t *testing.T) {
+	repo := &permanentKeywordAccountRepoStub{}
+	svc := &RateLimitService{accountRepo: repo}
+	account := &Account{
+		ID:          7305,
+		Platform:    PlatformAnthropic,
+		Type:        AccountTypeOAuth,
+		Status:      StatusActive,
+		Schedulable: true,
+	}
+	headers := http.Header{}
+	headers.Set("Retry-After", "23")
+
+	before := time.Now()
+	shouldDisable := svc.HandleUpstreamError(
+		context.Background(),
+		account,
+		529,
+		headers,
+		[]byte(`{"error":{"type":"overloaded_error","message":"overloaded"}}`),
+	)
+	after := time.Now()
+
+	require.False(t, shouldDisable)
+	require.Equal(t, 1, repo.overloadCalls)
+	require.Equal(t, account.ID, repo.lastOverloadID)
+	require.NoError(t, repo.lastOverloadErr)
+	require.False(t, repo.lastOverloadEnd.Before(before.Add(23*time.Second)))
+	require.False(t, repo.lastOverloadEnd.After(after.Add(23*time.Second)))
+	require.NotNil(t, account.OverloadUntil)
+	require.Equal(t, repo.lastOverloadEnd.Unix(), account.OverloadUntil.Unix())
+}

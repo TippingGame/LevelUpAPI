@@ -455,7 +455,7 @@ func (s *RateLimitService) HandleUpstreamError(ctx context.Context, account *Acc
 		return true
 	}
 
-	if s.handleUpstreamRelayPoolUnavailable(ctx, account, statusCode, upstreamMsg, responseBody) {
+	if s.handleUpstreamRelayPoolUnavailable(ctx, account, statusCode, upstreamMsg, responseBody, headers) {
 		return true
 	}
 
@@ -600,7 +600,7 @@ func (s *RateLimitService) HandleUpstreamError(ctx context.Context, account *Acc
 		s.handle429(ctx, account, headers, responseBody)
 		shouldDisable = false
 	case 529:
-		s.handle529(ctx, account)
+		s.handle529WithHeaders(ctx, account, headers)
 		shouldDisable = false
 	default:
 		// 自定义错误码启用时：在列表中的错误码都应该停止调度
@@ -1489,7 +1489,7 @@ func permanentAccountKeywordErrorMessageFromBody(account *Account, statusCode in
 	return permanentAccountKeywordErrorMessage(account, statusCode, upstreamMsg, responseBody)
 }
 
-func (s *RateLimitService) handleUpstreamRelayPoolUnavailable(ctx context.Context, account *Account, statusCode int, upstreamMsg string, responseBody []byte) bool {
+func (s *RateLimitService) handleUpstreamRelayPoolUnavailable(ctx context.Context, account *Account, statusCode int, upstreamMsg string, responseBody []byte, headers http.Header) bool {
 	if account == nil {
 		return false
 	}
@@ -1508,6 +1508,9 @@ func (s *RateLimitService) handleUpstreamRelayPoolUnavailable(ctx context.Contex
 	msg = fmt.Sprintf("Upstream relay pool unavailable (%d): %s", statusCode, msg)
 
 	until := time.Now().Add(upstreamRelayPoolUnavailableCooldown)
+	if retryAfterUntil := parseRetryAfterResetTime(headers, time.Now(), time.Duration(maxRateLimit429CooldownSeconds)*time.Second); retryAfterUntil != nil {
+		until = *retryAfterUntil
+	}
 	state := newTempUnschedState(until, statusCode, "upstream_relay_pool_unavailable", msg)
 	if bodyMsg := truncateTempUnschedMessage(responseBody, tempUnschedMessageMaxBytes); bodyMsg != "" {
 		state.ErrorMessage = bodyMsg
@@ -2608,6 +2611,10 @@ func normalizeOpenAIRateLimitResetUnix(ts int64, now time.Time) (int64, bool) {
 // handle529 处理529过载错误
 // 根据配置决定是否暂停账号调度及冷却时长
 func (s *RateLimitService) handle529(ctx context.Context, account *Account) {
+	s.handle529WithHeaders(ctx, account, nil)
+}
+
+func (s *RateLimitService) handle529WithHeaders(ctx context.Context, account *Account, headers http.Header) {
 	if account == nil {
 		return
 	}
@@ -2640,6 +2647,9 @@ func (s *RateLimitService) handle529(ctx context.Context, account *Account) {
 	}
 
 	until := time.Now().Add(time.Duration(cooldownMinutes) * time.Minute)
+	if retryAfterUntil := parseRetryAfterResetTime(headers, time.Now(), time.Duration(maxRateLimit429CooldownSeconds)*time.Second); retryAfterUntil != nil {
+		until = *retryAfterUntil
+	}
 	if err := s.persistOverloadedState(ctx, account, until); err != nil {
 		slog.Warn("overload_set_failed", "account_id", account.ID, "error", err)
 		return
