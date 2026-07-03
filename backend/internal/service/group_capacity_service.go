@@ -82,7 +82,7 @@ func filterPublicBalanceGroups(groups []Group) []Group {
 		if group.IsExclusive || group.OwnerUserID != nil || NormalizeGroupScope(group.Scope) != GroupScopePublic {
 			continue
 		}
-		if group.SubscriptionType != "" && group.SubscriptionType != SubscriptionTypeStandard {
+		if !IsStandardSubscriptionType(group.SubscriptionType) {
 			continue
 		}
 		out = append(out, group)

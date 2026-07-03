@@ -46,3 +46,20 @@ func TestGroupCapacityIncludesCodexProtectedOpenAIAccount(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 3, capacity.ConcurrencyMax)
 }
+
+func TestFilterPublicBalanceGroupsNormalizesLegacyMetadata(t *testing.T) {
+	ownerID := int64(42)
+	groups := []Group{
+		{ID: 1, Scope: " Public ", SubscriptionType: " STANDARD "},
+		{ID: 2, Scope: GroupScopePublic, SubscriptionType: ""},
+		{ID: 3, Scope: GroupScopePublic, SubscriptionType: SubscriptionTypeSubscription},
+		{ID: 4, Scope: GroupScopeUserPrivate, OwnerUserID: &ownerID, SubscriptionType: SubscriptionTypeStandard},
+		{ID: 5, Scope: GroupScopePublic, SubscriptionType: SubscriptionTypeStandard, IsExclusive: true},
+	}
+
+	filtered := filterPublicBalanceGroups(groups)
+
+	require.Len(t, filtered, 2)
+	require.Equal(t, int64(1), filtered[0].ID)
+	require.Equal(t, int64(2), filtered[1].ID)
+}

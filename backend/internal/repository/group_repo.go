@@ -463,17 +463,17 @@ func (r *groupRepository) ListActiveVisibleToUser(ctx context.Context, userID in
 
 	predicates := []predicate.Group{
 		group.And(
-			group.ScopeEQ(service.GroupScopePublic),
+			groupNormalizedStringEqualPredicate(group.FieldScope, service.GroupScopePublic),
 			publicStandardGroupSubscriptionTypePredicate(),
 		),
 		group.And(
-			group.ScopeEQ(service.GroupScopeUserPrivate),
+			groupNormalizedStringEqualPredicate(group.FieldScope, service.GroupScopeUserPrivate),
 			group.OwnerUserIDEQ(userID),
 		),
 	}
 	if subscribedGroupIDs := uniquePositiveInt64s(subscribedGroupIDs); len(subscribedGroupIDs) > 0 {
 		predicates = append(predicates, group.And(
-			group.ScopeEQ(service.GroupScopePublic),
+			groupNormalizedStringEqualPredicate(group.FieldScope, service.GroupScopePublic),
 			group.IDIn(subscribedGroupIDs...),
 		))
 	}
@@ -499,12 +499,25 @@ func (r *groupRepository) ListActiveVisibleToUser(ctx context.Context, userID in
 }
 
 func publicStandardGroupSubscriptionTypePredicate() predicate.Group {
+	return groupNormalizedStringInPredicate(group.FieldSubscriptionType, "", service.SubscriptionTypeStandard)
+}
+
+func groupNormalizedStringEqualPredicate(fieldName, value string) predicate.Group {
+	return groupNormalizedStringInPredicate(fieldName, value)
+}
+
+func groupNormalizedStringInPredicate(fieldName string, values ...string) predicate.Group {
 	return predicate.Group(func(s *entsql.Selector) {
-		col := s.C(group.FieldSubscriptionType)
+		col := s.C(fieldName)
 		s.Where(entsql.P(func(b *entsql.Builder) {
-			b.WriteString("COALESCE(").Ident(col).WriteString(", ").Arg("").WriteString(") IN (").
-				Arg("").WriteString(", ").
-				Arg(service.SubscriptionTypeStandard).WriteString(")")
+			b.WriteString("LOWER(BTRIM(COALESCE(").Ident(col).WriteString(", ").Arg("").WriteString("))) IN (")
+			for i, value := range values {
+				if i > 0 {
+					b.WriteString(", ")
+				}
+				b.Arg(strings.ToLower(strings.TrimSpace(value)))
+			}
+			b.WriteString(")")
 		}))
 	})
 }
