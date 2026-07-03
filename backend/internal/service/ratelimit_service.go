@@ -1947,19 +1947,14 @@ func calculateOpenAI429ResetTime(headers http.Header) *time.Time {
 		return &resetAt
 	}
 
-	// 都未达到100%但收到429，使用较长的重置时间
-	var maxResetSecs int
-	if normalized.Reset7dSeconds != nil && *normalized.Reset7dSeconds > maxResetSecs {
-		maxResetSecs = *normalized.Reset7dSeconds
-	}
-	if normalized.Reset5hSeconds != nil && *normalized.Reset5hSeconds > maxResetSecs {
-		maxResetSecs = *normalized.Reset5hSeconds
-	}
-	if maxResetSecs > 0 {
-		resetAt := now.Add(time.Duration(maxResetSecs) * time.Second)
-		slog.Info("openai_429_using_max_reset", "max_reset_seconds", maxResetSecs, "reset_at", resetAt)
-		return &resetAt
-	}
+	// If neither window is exhausted, avoid turning an ambiguous 429 into a
+	// multi-hour/day account cooldown. The caller will use the short 429
+	// fallback instead.
+	slog.Info(
+		"openai_429_codex_headers_not_exhausted",
+		"used_5h_percent", normalized.Used5hPercent,
+		"used_7d_percent", normalized.Used7dPercent,
+	)
 
 	return nil
 }

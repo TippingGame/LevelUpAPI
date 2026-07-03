@@ -4,6 +4,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"testing"
 	"time"
@@ -73,10 +74,11 @@ func TestCalculateOpenAI429ResetTime_5hExhausted(t *testing.T) {
 	}
 }
 
-func TestCalculateOpenAI429ResetTime_NeitherExhausted_UsesMax(t *testing.T) {
+func TestCalculateOpenAI429ResetTime_NeitherExhaustedUsesFallback(t *testing.T) {
 	svc := &RateLimitService{}
 
-	// Neither limit at 100%, should use the longer reset time
+	// Neither limit is at 100%, so the Codex headers are only a usage snapshot.
+	// The caller should use the short 429 fallback instead of a long reset time.
 	headers := http.Header{}
 	headers.Set("x-codex-primary-used-percent", "80")
 	headers.Set("x-codex-primary-reset-after-seconds", "100000")
@@ -85,22 +87,9 @@ func TestCalculateOpenAI429ResetTime_NeitherExhausted_UsesMax(t *testing.T) {
 	headers.Set("x-codex-secondary-reset-after-seconds", "5000")
 	headers.Set("x-codex-secondary-window-minutes", "300")
 
-	before := time.Now()
 	resetAt := svc.calculateOpenAI429ResetTime(headers)
-	after := time.Now()
 
-	if resetAt == nil {
-		t.Fatal("expected non-nil resetAt")
-	}
-
-	// Should use the max (100000 seconds from 7d window)
-	expectedDuration := 100000 * time.Second
-	minExpected := before.Add(expectedDuration)
-	maxExpected := after.Add(expectedDuration)
-
-	if resetAt.Before(minExpected) || resetAt.After(maxExpected) {
-		t.Errorf("resetAt %v not in expected range [%v, %v]", resetAt, minExpected, maxExpected)
-	}
+	require.Nil(t, resetAt)
 }
 
 func TestCalculateOpenAI429ResetTime_NoCodexHeaders(t *testing.T) {
@@ -232,6 +221,36 @@ func TestHandle429_OpenAISyncsObservedPlanType(t *testing.T) {
 	require.Equal(t, "free", repo.bulkUpdatedPayload.Credentials["plan_type"])
 	require.Equal(t, "free", account.Credentials["plan_type"])
 	require.Equal(t, account.ID, repo.rateLimitedID)
+}
+
+func TestHandle429_OpenAICodexHeadersNotExhaustedUseFallback(t *testing.T) {
+	repo := &openAI429SnapshotRepo{}
+	settingRepo := newMockSettingRepo()
+	data, _ := json.Marshal(RateLimit429CooldownSettings{Enabled: true, CooldownSeconds: 9})
+	settingRepo.data[SettingKeyRateLimit429CooldownSettings] = string(data)
+	settingSvc := NewSettingService(settingRepo, &config.Config{})
+	svc := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+	svc.SetSettingService(settingSvc)
+	account := &Account{ID: 125, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+
+	headers := http.Header{}
+	headers.Set("x-codex-primary-used-percent", "80")
+	headers.Set("x-codex-primary-reset-after-seconds", "100000")
+	headers.Set("x-codex-primary-window-minutes", "10080")
+	headers.Set("x-codex-secondary-used-percent", "90")
+	headers.Set("x-codex-secondary-reset-after-seconds", "5000")
+	headers.Set("x-codex-secondary-window-minutes", "300")
+
+	before := time.Now()
+	svc.handle429(context.Background(), account, headers, []byte(`{"error":{"type":"rate_limit_error","message":"slow down"}}`))
+	after := time.Now()
+
+	require.Equal(t, account.ID, repo.rateLimitedID)
+	require.False(t, account.RateLimitResetAt.Before(before.Add(9*time.Second)))
+	require.False(t, account.RateLimitResetAt.After(after.Add(9*time.Second)))
+	require.NotEmpty(t, repo.updatedExtra)
+	require.Equal(t, 80.0, repo.updatedExtra["codex_7d_used_percent"])
+	require.Equal(t, 90.0, repo.updatedExtra["codex_5h_used_percent"])
 }
 
 func TestNormalizedCodexLimits(t *testing.T) {
