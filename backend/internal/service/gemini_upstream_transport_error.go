@@ -92,6 +92,9 @@ func (s *GeminiMessagesCompatService) tempUnscheduleGeminiTransportError(ctx con
 	if account.Platform != PlatformGemini && account.Platform != PlatformAntigravity {
 		return
 	}
+	if !shouldApplyLocalSystemErrorState(account) {
+		return
+	}
 
 	until := time.Now().Add(geminiTransportErrorTempUnschedDuration)
 	reason := "upstream transport error (proxy/network): " + strings.TrimSpace(safeErr)

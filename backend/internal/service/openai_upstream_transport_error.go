@@ -86,6 +86,9 @@ func (s *OpenAIGatewayService) tempUnscheduleOpenAITransportError(ctx context.Co
 	if s == nil || account == nil || s.accountRepo == nil {
 		return
 	}
+	if !shouldApplyLocalSystemErrorState(account) {
+		return
+	}
 	until := time.Now().Add(openAITransportErrorTempUnschedDuration)
 	reason := "upstream transport error (proxy/network): " + safeErr
 	var cache TempUnschedCache

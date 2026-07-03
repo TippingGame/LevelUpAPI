@@ -102,6 +102,57 @@ func TestTempUnscheduleGeminiTransportError_PersistFailureUsesRuntimeFallback(t 
 	require.Equal(t, "gemini_transport_error", tempCache.states[46].MatchedKeyword)
 }
 
+func TestTempUnscheduleGeminiTransportError_PoolModeDefaultSkipsLocalState(t *testing.T) {
+	repo := &geminiTransportAccountRepoStub{}
+	tempCache := &runtimeTempUnschedCacheStub{}
+	svc := &GeminiMessagesCompatService{
+		accountRepo:      repo,
+		rateLimitService: &RateLimitService{tempUnschedCache: tempCache},
+	}
+	account := &Account{
+		ID:       47,
+		Name:     "gemini-pool",
+		Platform: PlatformGemini,
+		Type:     AccountTypeAPIKey,
+		Credentials: map[string]any{
+			"pool_mode": true,
+		},
+	}
+
+	svc.tempUnscheduleGeminiTransportError(context.Background(), account, "proxy authentication required")
+
+	require.Equal(t, 0, repo.tempCalls)
+	require.Nil(t, account.TempUnschedulableUntil)
+	require.Nil(t, tempCache.states[47])
+}
+
+func TestTempUnscheduleGeminiTransportError_PoolModeCustomPolicyStillWrites(t *testing.T) {
+	repo := &geminiTransportAccountRepoStub{}
+	tempCache := &runtimeTempUnschedCacheStub{}
+	svc := &GeminiMessagesCompatService{
+		accountRepo:      repo,
+		rateLimitService: &RateLimitService{tempUnschedCache: tempCache},
+	}
+	account := &Account{
+		ID:       48,
+		Name:     "gemini-pool-custom",
+		Platform: PlatformGemini,
+		Type:     AccountTypeAPIKey,
+		Credentials: map[string]any{
+			"pool_mode":                  true,
+			"custom_error_codes_enabled": true,
+		},
+	}
+
+	svc.tempUnscheduleGeminiTransportError(context.Background(), account, "proxy authentication required")
+
+	require.Equal(t, 1, repo.tempCalls)
+	require.Equal(t, int64(48), repo.lastAccountID)
+	require.NotNil(t, account.TempUnschedulableUntil)
+	require.NotNil(t, tempCache.states[48])
+	require.Equal(t, "gemini_transport_error", tempCache.states[48].MatchedKeyword)
+}
+
 func TestHandleGeminiUpstreamTransportError_TransientFailsOverWithoutEviction(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	repo := &geminiTransportAccountRepoStub{}

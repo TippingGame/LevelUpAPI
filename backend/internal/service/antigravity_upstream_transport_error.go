@@ -93,6 +93,9 @@ func (s *AntigravityGatewayService) tempUnscheduleAntigravityTransportError(ctx 
 	if account.Platform != PlatformAntigravity {
 		return
 	}
+	if !shouldApplyLocalSystemErrorState(account) {
+		return
+	}
 
 	until := time.Now().Add(antigravityTransportErrorTempUnschedDuration)
 	reason := "upstream transport error (proxy/network): " + strings.TrimSpace(safeErr)

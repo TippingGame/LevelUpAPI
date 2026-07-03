@@ -109,6 +109,57 @@ func TestTempUnscheduleOpenAITransportError_PersistFailureUsesRuntimeFallback(t 
 	require.Equal(t, "openai_transport_error", tempCache.states[4628].MatchedKeyword)
 }
 
+func TestTempUnscheduleOpenAITransportError_PoolModeDefaultSkipsLocalState(t *testing.T) {
+	repo := &openaiTransportAccountRepoStub{}
+	tempCache := &runtimeTempUnschedCacheStub{}
+	svc := &OpenAIGatewayService{
+		accountRepo:      repo,
+		rateLimitService: &RateLimitService{tempUnschedCache: tempCache},
+	}
+	account := &Account{
+		ID:       4629,
+		Name:     "openai-pool",
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeAPIKey,
+		Credentials: map[string]any{
+			"pool_mode": true,
+		},
+	}
+
+	svc.tempUnscheduleOpenAITransportError(context.Background(), account, "proxy authentication required")
+
+	require.Empty(t, repo.tempUnschedCalls)
+	require.Nil(t, account.TempUnschedulableUntil)
+	require.Nil(t, tempCache.states[4629])
+}
+
+func TestTempUnscheduleOpenAITransportError_PoolModeCustomPolicyStillWrites(t *testing.T) {
+	repo := &openaiTransportAccountRepoStub{}
+	tempCache := &runtimeTempUnschedCacheStub{}
+	svc := &OpenAIGatewayService{
+		accountRepo:      repo,
+		rateLimitService: &RateLimitService{tempUnschedCache: tempCache},
+	}
+	account := &Account{
+		ID:       4630,
+		Name:     "openai-pool-custom",
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeAPIKey,
+		Credentials: map[string]any{
+			"pool_mode":                  true,
+			"custom_error_codes_enabled": true,
+		},
+	}
+
+	svc.tempUnscheduleOpenAITransportError(context.Background(), account, "proxy authentication required")
+
+	require.Len(t, repo.tempUnschedCalls, 1)
+	require.Equal(t, int64(4630), repo.tempUnschedCalls[0].accountID)
+	require.NotNil(t, account.TempUnschedulableUntil)
+	require.NotNil(t, tempCache.states[4630])
+	require.Equal(t, "openai_transport_error", tempCache.states[4630].MatchedKeyword)
+}
+
 func TestHandleOpenAIUpstreamTransportError_TransientFailsOverWithoutEviction(t *testing.T) {
 	repo := &openaiTransportAccountRepoStub{}
 	svc := &OpenAIGatewayService{accountRepo: repo}

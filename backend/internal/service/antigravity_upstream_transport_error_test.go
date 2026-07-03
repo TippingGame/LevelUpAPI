@@ -102,6 +102,57 @@ func TestTempUnscheduleAntigravityTransportError_PersistFailureUsesRuntimeFallba
 	require.Equal(t, "antigravity_transport_error", tempCache.states[47].MatchedKeyword)
 }
 
+func TestTempUnscheduleAntigravityTransportError_PoolModeDefaultSkipsLocalState(t *testing.T) {
+	repo := &antigravityTransportAccountRepoStub{}
+	tempCache := &runtimeTempUnschedCacheStub{}
+	svc := &AntigravityGatewayService{
+		accountRepo:      repo,
+		rateLimitService: &RateLimitService{tempUnschedCache: tempCache},
+	}
+	account := &Account{
+		ID:       48,
+		Name:     "ag-pool",
+		Platform: PlatformAntigravity,
+		Type:     AccountTypeAPIKey,
+		Credentials: map[string]any{
+			"pool_mode": true,
+		},
+	}
+
+	svc.tempUnscheduleAntigravityTransportError(context.Background(), account, "proxy authentication required")
+
+	require.Equal(t, 0, repo.tempCalls)
+	require.Nil(t, account.TempUnschedulableUntil)
+	require.Nil(t, tempCache.states[48])
+}
+
+func TestTempUnscheduleAntigravityTransportError_PoolModeCustomPolicyStillWrites(t *testing.T) {
+	repo := &antigravityTransportAccountRepoStub{}
+	tempCache := &runtimeTempUnschedCacheStub{}
+	svc := &AntigravityGatewayService{
+		accountRepo:      repo,
+		rateLimitService: &RateLimitService{tempUnschedCache: tempCache},
+	}
+	account := &Account{
+		ID:       49,
+		Name:     "ag-pool-custom",
+		Platform: PlatformAntigravity,
+		Type:     AccountTypeAPIKey,
+		Credentials: map[string]any{
+			"pool_mode":                  true,
+			"custom_error_codes_enabled": true,
+		},
+	}
+
+	svc.tempUnscheduleAntigravityTransportError(context.Background(), account, "proxy authentication required")
+
+	require.Equal(t, 1, repo.tempCalls)
+	require.Equal(t, int64(49), repo.lastAccountID)
+	require.NotNil(t, account.TempUnschedulableUntil)
+	require.NotNil(t, tempCache.states[49])
+	require.Equal(t, "antigravity_transport_error", tempCache.states[49].MatchedKeyword)
+}
+
 func TestAntigravityRetryErrorToFailover(t *testing.T) {
 	switchErr := &AntigravityAccountSwitchError{OriginalAccountID: 7, RateLimitedModel: "gemini-3.1-pro", IsStickySession: true}
 	failoverErr, ok := antigravityRetryErrorToFailover(switchErr)
