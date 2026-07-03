@@ -717,9 +717,13 @@ var (
 					OR (
 						(a.rate_limit_reset_at IS NULL OR a.rate_limit_reset_at <= NOW())
 						AND (a.overload_until IS NULL OR a.overload_until <= NOW())
-						AND (a.temp_unschedulable_until IS NULL OR a.temp_unschedulable_until <= NOW())
+						AND (
+							a.temp_unschedulable_until IS NULL
+							OR a.temp_unschedulable_until <= NOW()
+							OR %[2]s
+						)
 					)
-				)`, accountRespectsLocalSystemErrorStateSQL("a"))
+				)`, accountRespectsLocalSystemErrorStateSQL("a"), accountOpenAIOAuthRelayPoolTempUnschedIgnoredRawSQL("a"))
 
 	groupAccountTemporarilyLimitedSQL = fmt.Sprintf(`a.deleted_at IS NULL
 				AND a.status = 'active'
@@ -729,8 +733,8 @@ var (
 				AND (
 					a.rate_limit_reset_at > NOW() OR
 					a.overload_until > NOW() OR
-					a.temp_unschedulable_until > NOW()
-				)`, accountRespectsLocalSystemErrorStateSQL("a"))
+					(a.temp_unschedulable_until > NOW() AND NOT %[2]s)
+				)`, accountRespectsLocalSystemErrorStateSQL("a"), accountOpenAIOAuthRelayPoolTempUnschedIgnoredRawSQL("a"))
 )
 
 func (r *groupRepository) loadAccountCounts(ctx context.Context, groupIDs []int64) (counts map[int64]groupAccountCounts, err error) {

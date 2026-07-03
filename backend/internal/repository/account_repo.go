@@ -1115,7 +1115,15 @@ const (
 )
 
 func accountTempUnschedulableInactivePredicate() dbpredicate.Account {
-	return accountLocalSystemStateInactivePredicate(dbaccount.FieldTempUnschedulableUntil)
+	return dbpredicate.Account(func(s *entsql.Selector) {
+		col := s.C(dbaccount.FieldTempUnschedulableUntil)
+		s.Where(entsql.Or(
+			accountIgnoresLocalSystemErrorStateSQL(s),
+			accountOpenAIOAuthRelayPoolTempUnschedIgnoredSQL(s),
+			entsql.IsNull(col),
+			entsql.LTE(col, entsql.Expr("NOW()")),
+		))
+	})
 }
 
 func accountRateLimitInactivePredicate() dbpredicate.Account {
@@ -1131,7 +1139,15 @@ func accountRateLimitActivePredicate() dbpredicate.Account {
 }
 
 func accountTempUnschedulableActivePredicate() dbpredicate.Account {
-	return accountLocalSystemStateActivePredicate(dbaccount.FieldTempUnschedulableUntil)
+	return dbpredicate.Account(func(s *entsql.Selector) {
+		col := s.C(dbaccount.FieldTempUnschedulableUntil)
+		s.Where(entsql.And(
+			entsql.Not(accountIgnoresLocalSystemErrorStateSQL(s)),
+			entsql.Not(accountOpenAIOAuthRelayPoolTempUnschedIgnoredSQL(s)),
+			entsql.Not(entsql.IsNull(col)),
+			entsql.GT(col, entsql.Expr("NOW()")),
+		))
+	})
 }
 
 func accountLocalSystemStateInactivePredicate(field string) dbpredicate.Account {
@@ -1173,6 +1189,23 @@ func accountIgnoresLocalSystemErrorStateSQL(s *entsql.Selector) *entsql.Predicat
 		b.WriteString(" AND NOT ")
 		accountCustomErrorPolicyActiveEntSQL(b, credentialsCol)
 		b.WriteString(")")
+	})
+}
+
+func accountOpenAIOAuthRelayPoolTempUnschedIgnoredSQL(s *entsql.Selector) *entsql.Predicate {
+	return entsql.P(func(b *entsql.Builder) {
+		platformCol := s.C(dbaccount.FieldPlatform)
+		typeCol := s.C(dbaccount.FieldType)
+		reasonCol := s.C(dbaccount.FieldTempUnschedulableReason)
+		b.WriteString("(")
+		b.Ident(platformCol).WriteString(" = ").Arg(service.PlatformOpenAI)
+		b.WriteString(" AND ")
+		b.Ident(typeCol).WriteString(" = ").Arg(service.AccountTypeOAuth)
+		b.WriteString(" AND (")
+		b.WriteString("COALESCE(").Ident(reasonCol).WriteString(", ").Arg("").WriteString(") LIKE ").Arg(`%"matched_keyword":"` + service.TempUnschedKeywordUpstreamRelayPoolUnavailable + `"%`)
+		b.WriteString(" OR ")
+		b.WriteString("COALESCE(").Ident(reasonCol).WriteString(", ").Arg("").WriteString(") ILIKE ").Arg("%upstream relay pool unavailable%")
+		b.WriteString("))")
 	})
 }
 

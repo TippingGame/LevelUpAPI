@@ -1495,6 +1495,9 @@ func (s *RateLimitService) handleUpstreamRelayPoolUnavailable(ctx context.Contex
 	if account == nil {
 		return false
 	}
+	if !accountSupportsUpstreamRelayPoolCooldown(account) {
+		return false
+	}
 	if !isUpstreamRelayPoolUnavailableError(statusCode, upstreamMsg, responseBody) {
 		return false
 	}
@@ -1531,6 +1534,10 @@ func (s *RateLimitService) handleUpstreamRelayPoolUnavailable(ctx context.Contex
 
 	slog.Warn("upstream_relay_pool_unavailable_temp_unschedulable", "account_id", account.ID, "status_code", statusCode, "until", until, "error", msg)
 	return true
+}
+
+func accountSupportsUpstreamRelayPoolCooldown(account *Account) bool {
+	return account != nil && account.IsAPIKeyOrBedrock()
 }
 
 func (s *RateLimitService) handleUpstreamRetryAfterBackoff(ctx context.Context, account *Account, statusCode int, upstreamMsg string, responseBody []byte, headers http.Header) bool {

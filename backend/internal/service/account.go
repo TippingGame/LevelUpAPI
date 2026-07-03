@@ -468,7 +468,8 @@ func (a *Account) isSchedulableAt(now time.Time, includeCodexQuotaProtection boo
 		return false
 	}
 	if shouldApplyLocalSystemErrorState(a) {
-		if a.TempUnschedulableUntil != nil && now.Before(*a.TempUnschedulableUntil) {
+		if a.TempUnschedulableUntil != nil && now.Before(*a.TempUnschedulableUntil) &&
+			!shouldIgnoreTempUnschedulableForAccount(a, nil, a.TempUnschedulableReason) {
 			return false
 		}
 	}

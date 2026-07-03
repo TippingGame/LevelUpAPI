@@ -2,9 +2,13 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
+	"strings"
 	"time"
 )
+
+const TempUnschedKeywordUpstreamRelayPoolUnavailable = "upstream_relay_pool_unavailable"
 
 // TempUnschedState 临时不可调度状态
 type TempUnschedState struct {
@@ -67,10 +71,48 @@ func markAccountErrorRuntimeEvicted(ctx context.Context, cache TempUnschedCache,
 }
 
 func shouldApplyRuntimeTempUnschedState(account *Account, state *TempUnschedState) bool {
+	if shouldIgnoreTempUnschedulableForAccount(account, state, "") {
+		return false
+	}
 	if state != nil && state.StatusCode > 0 {
 		return shouldApplyLocalErrorState(account, state.StatusCode)
 	}
 	return shouldApplyLocalSystemErrorState(account)
+}
+
+func shouldIgnoreTempUnschedulableForAccount(account *Account, state *TempUnschedState, reason string) bool {
+	if account == nil {
+		return false
+	}
+	matchedKeyword := ""
+	if state != nil {
+		matchedKeyword = state.MatchedKeyword
+	}
+	return shouldIgnoreOpenAIOAuthTempUnschedulable(account.Platform, account.Type, matchedKeyword, reason)
+}
+
+func shouldIgnoreOpenAIOAuthTempUnschedulable(platform, accountType, matchedKeyword, reason string) bool {
+	if platform != PlatformOpenAI || accountType != AccountTypeOAuth {
+		return false
+	}
+	return tempUnschedReasonIsUpstreamRelayPoolUnavailable(matchedKeyword, reason)
+}
+
+func tempUnschedReasonIsUpstreamRelayPoolUnavailable(matchedKeyword, reason string) bool {
+	if strings.TrimSpace(matchedKeyword) == TempUnschedKeywordUpstreamRelayPoolUnavailable {
+		return true
+	}
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		return false
+	}
+	var state TempUnschedState
+	if err := json.Unmarshal([]byte(reason), &state); err == nil && strings.TrimSpace(state.MatchedKeyword) == TempUnschedKeywordUpstreamRelayPoolUnavailable {
+		return true
+	}
+	normalized := strings.ToLower(reason)
+	return strings.Contains(normalized, TempUnschedKeywordUpstreamRelayPoolUnavailable) ||
+		strings.Contains(normalized, "upstream relay pool unavailable")
 }
 
 func setTempUnschedCacheBestEffort(ctx context.Context, cache TempUnschedCache, accountID int64, state *TempUnschedState, source string) {

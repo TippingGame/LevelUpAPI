@@ -212,6 +212,18 @@ func TestAccountIsSchedulable_TempUnschedulable(t *testing.T) {
 			},
 			want: false, // 临时限流生效
 		},
+		{
+			name: "openai_oauth_ignores_relay_pool_temp_unschedulable",
+			account: &Account{
+				Platform:                PlatformOpenAI,
+				Type:                    AccountTypeOAuth,
+				Status:                  StatusActive,
+				Schedulable:             true,
+				TempUnschedulableUntil:  &future,
+				TempUnschedulableReason: `{"matched_keyword":"upstream_relay_pool_unavailable","error_message":"No available accounts"}`,
+			},
+			want: true,
+		},
 	}
 
 	for _, tt := range tests {

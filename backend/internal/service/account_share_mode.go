@@ -216,6 +216,8 @@ type AccountShareListing struct {
 	Codex7dLimitPercent            float64                   `json:"codex_7d_limit_percent"`
 	AccountLevel                   string                    `json:"account_level,omitempty"`
 	AccountPlanType                string                    `json:"account_plan_type,omitempty"`
+	AccountPlatform                string                    `json:"-"`
+	AccountType                    string                    `json:"-"`
 	AccountStatus                  string                    `json:"account_status,omitempty"`
 	AccountSchedulable             bool                      `json:"account_schedulable"`
 	AccountPoolMode                bool                      `json:"-"`
@@ -1654,7 +1656,8 @@ func accountShareListingAccountUnavailableAt(listing *AccountShareListing, now t
 		if listing.RateLimitResetAt != nil && now.Before(*listing.RateLimitResetAt) {
 			return true
 		}
-		if listing.TempUnschedulableUntil != nil && now.Before(*listing.TempUnschedulableUntil) {
+		if listing.TempUnschedulableUntil != nil && now.Before(*listing.TempUnschedulableUntil) &&
+			!shouldIgnoreOpenAIOAuthTempUnschedulable(listing.AccountPlatform, listing.AccountType, "", listing.TempUnschedulableReason) {
 			return true
 		}
 	}

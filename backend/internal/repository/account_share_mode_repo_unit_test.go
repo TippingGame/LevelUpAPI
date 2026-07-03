@@ -726,6 +726,8 @@ func TestAccountShareUnavailableConditionGatesLocalStateForDefaultPoolMode(t *te
 		"and a.overload_until is not null",
 		"and a.rate_limit_reset_at is not null",
 		"and a.temp_unschedulable_until is not null",
+		"matched_keyword",
+		"upstream_relay_pool_unavailable",
 	} {
 		if !strings.Contains(sql, required) {
 			t.Fatalf("unavailable condition missing %q in SQL:\n%s", required, sql)

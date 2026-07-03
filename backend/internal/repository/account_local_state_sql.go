@@ -27,6 +27,27 @@ func accountIgnoresLocalSystemErrorStateRawSQL(tableAlias string) string {
 	)
 }
 
+func accountOpenAIOAuthRelayPoolTempUnschedIgnoredRawSQL(tableAlias string) string {
+	platformCol := qualifyAccountSQLColumn(tableAlias, "platform")
+	typeCol := qualifyAccountSQLColumn(tableAlias, "type")
+	reasonCol := qualifyAccountSQLColumn(tableAlias, "temp_unschedulable_reason")
+	return fmt.Sprintf(`(
+		%[1]s = '%[2]s'
+		AND %[3]s = '%[4]s'
+		AND (
+			COALESCE(%[5]s, '') LIKE '%%"matched_keyword":"%[6]s"%%'
+			OR COALESCE(%[5]s, '') ILIKE '%%upstream relay pool unavailable%%'
+		)
+	)`,
+		platformCol,
+		service.PlatformOpenAI,
+		typeCol,
+		service.AccountTypeOAuth,
+		reasonCol,
+		service.TempUnschedKeywordUpstreamRelayPoolUnavailable,
+	)
+}
+
 func accountCustomErrorPolicyActiveRawSQL(credentialsCol string) string {
 	return fmt.Sprintf(`(
 		LOWER(COALESCE(%[1]s->>'custom_error_codes_enabled', '')) = 'true'

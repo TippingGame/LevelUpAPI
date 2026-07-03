@@ -81,6 +81,31 @@ func TestHandleUpstreamErrorRelayNoAvailableRoutesTempUnschedulable(t *testing.T
 	require.Contains(t, repo.lastTempReason, "upstream_relay_pool_unavailable")
 }
 
+func TestHandleUpstreamErrorRelayNoAvailableAccountsSkipsOpenAIOAuth(t *testing.T) {
+	repo := &permanentKeywordAccountRepoStub{}
+	svc := &RateLimitService{accountRepo: repo}
+	account := &Account{
+		ID:          7209,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeOAuth,
+		Status:      StatusActive,
+		Schedulable: true,
+	}
+
+	shouldDisable := svc.HandleUpstreamError(
+		context.Background(),
+		account,
+		http.StatusServiceUnavailable,
+		http.Header{},
+		[]byte(`{"error":{"message":"No available accounts: no available accounts","type":"api_error"},"type":"error"}`),
+	)
+
+	require.False(t, shouldDisable)
+	require.Zero(t, repo.setErrorCalls)
+	require.Zero(t, repo.tempCalls)
+	require.Nil(t, account.TempUnschedulableUntil)
+}
+
 func TestHandleUpstreamErrorRelayNoAvailableAccountsHonorsRetryAfter(t *testing.T) {
 	repo := &permanentKeywordAccountRepoStub{}
 	svc := &RateLimitService{accountRepo: repo}

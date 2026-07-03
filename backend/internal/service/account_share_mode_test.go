@@ -1088,6 +1088,30 @@ func TestAccountShareListingUnavailableIgnoresDefaultPoolModeLocalState(t *testi
 	}
 }
 
+func TestAccountShareListingUnavailableIgnoresOpenAIOAuthRelayPoolTempState(t *testing.T) {
+	now := time.Now().UTC()
+	future := now.Add(time.Hour)
+	reason := `{"matched_keyword":"upstream_relay_pool_unavailable","error_message":"No available accounts"}`
+	listing := &AccountShareListing{
+		AccountPlatform:                PlatformOpenAI,
+		AccountType:                    AccountTypeOAuth,
+		AccountStatus:                  StatusActive,
+		AccountSchedulable:             true,
+		TempUnschedulableUntil:         &future,
+		TempUnschedulableReason:        reason,
+		AccountCustomErrorCodesEnabled: false,
+	}
+
+	if accountShareListingAccountUnavailableAt(listing, now) {
+		t.Fatal("OpenAI OAuth listing should ignore relay-pool temp state written by upstream channel errors")
+	}
+
+	listing.AccountType = AccountTypeAPIKey
+	if !accountShareListingAccountUnavailableAt(listing, now) {
+		t.Fatal("API key listing should still respect relay-pool temp state")
+	}
+}
+
 func TestAccountShareModeResolveBindingCachesNonModeGroup(t *testing.T) {
 	repo := &accountShareModeRepoStub{modeGroup: accountShareModeBoolPtr(false)}
 	svc := &AccountShareModeService{repo: repo}

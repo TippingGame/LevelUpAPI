@@ -2011,7 +2011,11 @@ func (r *accountShareModeRepository) accountShareAccountUnavailableDetailsInTx(c
 			(a.auto_pause_on_expired = TRUE AND a.expires_at IS NOT NULL AND a.expires_at <= $2) AS expired,
 			(a.overload_until IS NOT NULL AND a.overload_until > $2) AS overload,
 			(a.rate_limit_reset_at IS NOT NULL AND a.rate_limit_reset_at > $2) AS rate_limited,
-			(a.temp_unschedulable_until IS NOT NULL AND a.temp_unschedulable_until > $2) AS temp_unschedulable,
+			(
+				a.temp_unschedulable_until IS NOT NULL
+				AND a.temp_unschedulable_until > $2
+				AND NOT %s
+			) AS temp_unschedulable,
 			%s AS codex_5h_protected,
 			%s AS codex_7d_protected,
 			COALESCE(a.extra->>'codex_5h_used_percent', '') AS codex_5h_used_percent,
@@ -2022,7 +2026,8 @@ func (r *accountShareModeRepository) accountShareAccountUnavailableDetailsInTx(c
 			COALESCE(a.extra->>'codex_7d_reset_at', '') AS codex_7d_reset_at
 		FROM accounts a
 		WHERE a.id = $1
-	`, accountShareCodexQuotaProtectedSQL("codex_5h_used_percent", "codex_5h_reset_at", "codex_5h_limit_percent", "$2"),
+	`, accountShareOpenAIOAuthRelayPoolTempUnschedIgnoredSQL("a"),
+		accountShareCodexQuotaProtectedSQL("codex_5h_used_percent", "codex_5h_reset_at", "codex_5h_limit_percent", "$2"),
 		accountShareCodexQuotaProtectedSQL("codex_7d_used_percent", "codex_7d_reset_at", "codex_7d_limit_percent", "$2"))
 	var status, used5h, used7d, limit5h, limit7d, reset5h, reset7d string
 	var schedulable, expired, overload, rateLimited, tempUnschedulable, codex5hProtected, codex7dProtected bool
@@ -2789,7 +2794,7 @@ func accountShareAccountUnavailableConditionSQL(nowExpr string) string {
 		OR (a.auto_pause_on_expired = TRUE AND a.expires_at IS NOT NULL AND a.expires_at <= %s)
 		OR (%s AND a.overload_until IS NOT NULL AND a.overload_until > %s)
 		OR (%s AND a.rate_limit_reset_at IS NOT NULL AND a.rate_limit_reset_at > %s)
-		OR (%s AND a.temp_unschedulable_until IS NOT NULL AND a.temp_unschedulable_until > %s)
+		OR (%s AND a.temp_unschedulable_until IS NOT NULL AND a.temp_unschedulable_until > %s AND NOT %s)
 		OR %s
 	)`,
 		service.StatusActive,
@@ -2800,12 +2805,17 @@ func accountShareAccountUnavailableConditionSQL(nowExpr string) string {
 		nowExpr,
 		respectLocalStateSQL,
 		nowExpr,
+		accountShareOpenAIOAuthRelayPoolTempUnschedIgnoredSQL("a"),
 		codexProtectedSQL,
 	)
 }
 
 func accountShareAccountRespectsLocalSystemErrorStateSQL() string {
 	return accountRespectsLocalSystemErrorStateSQL("a")
+}
+
+func accountShareOpenAIOAuthRelayPoolTempUnschedIgnoredSQL(alias string) string {
+	return accountOpenAIOAuthRelayPoolTempUnschedIgnoredRawSQL(alias)
 }
 
 func accountShareListingAvailableConditionSQL(nowExpr string) string {
@@ -3102,6 +3112,8 @@ func scanAccountShareListing(scanner accountShareListingScanner) (*service.Accou
 	now := time.Now()
 	listing.AccountLevel = service.NormalizeOpenAIAccountLevel(account.Platform, account.AccountLevel, account.Credentials, account.Extra)
 	listing.AccountPlanType = service.OpenAIAccountPlanType(account.Credentials, account.Extra)
+	listing.AccountPlatform = account.Platform
+	listing.AccountType = account.Type
 	listing.AccountStatus = account.Status
 	listing.AccountSchedulable = account.Schedulable
 	listing.AccountPoolMode = account.IsPoolMode()
