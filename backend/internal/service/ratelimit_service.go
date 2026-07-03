@@ -2720,12 +2720,13 @@ func (s *RateLimitService) tryTempUnschedulable(ctx context.Context, account *Ac
 		return false
 	}
 	// 401 首次命中可临时不可调度（给 token 刷新窗口）；
-	// 若历史上已因 401 进入过临时不可调度，则本次应升级为 error（返回 false 交由默认错误逻辑处理）。
+	// 非 OAuth 账号若历史上已因 401 进入过临时不可调度，则本次升级为 error。
+	// OAuth / setup-token 账号可能只是刷新窗口、代理或上游认证抖动，保持临时冷却以避免误伤。
 	// Antigravity 跳过：其 401 由 applyErrorPolicy 的 temp_unschedulable_rules 自行控制，无需升级逻辑。
-	if statusCode == http.StatusUnauthorized && account.Platform != PlatformAntigravity {
+	if statusCode == http.StatusUnauthorized && account.Platform != PlatformAntigravity && !account.IsOAuth() {
 		reason := account.TempUnschedulableReason
 		// 缓存可能没有 reason，从 DB 回退读取
-		if reason == "" {
+		if reason == "" && s != nil && s.accountRepo != nil {
 			if dbAcc, err := s.accountRepo.GetByID(ctx, account.ID); err == nil && dbAcc != nil {
 				reason = dbAcc.TempUnschedulableReason
 			}

@@ -28,9 +28,10 @@ func (r *dbFallbackRepoStub) GetByID(ctx context.Context, id int64) (*Account, e
 func TestCheckErrorPolicy_401_DBFallback_Escalates(t *testing.T) {
 	// Scenario: cache account has empty TempUnschedulableReason (cache miss),
 	// but DB account has a previous 401 record.
-	// Non-Antigravity: should escalate to ErrorPolicyNone (second 401 = permanent error).
+	// Non-OAuth / non-Antigravity: should escalate to ErrorPolicyNone (second 401 = default hard-error path).
+	// OAuth / setup-token accounts stay temp-unscheduled to avoid misclassifying refresh windows as permanent failures.
 	// Antigravity: skips escalation logic (401 handled by applyErrorPolicy rules).
-	t.Run("gemini_escalates", func(t *testing.T) {
+	t.Run("gemini_apikey_escalates", func(t *testing.T) {
 		repo := &dbFallbackRepoStub{
 			dbAccount: &Account{
 				ID:                      20,
@@ -41,6 +42,36 @@ func TestCheckErrorPolicy_401_DBFallback_Escalates(t *testing.T) {
 
 		account := &Account{
 			ID:                      20,
+			Type:                    AccountTypeAPIKey,
+			Platform:                PlatformGemini,
+			TempUnschedulableReason: "",
+			Credentials: map[string]any{
+				"temp_unschedulable_enabled": true,
+				"temp_unschedulable_rules": []any{
+					map[string]any{
+						"error_code":       float64(401),
+						"keywords":         []any{"unauthorized"},
+						"duration_minutes": float64(10),
+					},
+				},
+			},
+		}
+
+		result := svc.CheckErrorPolicy(context.Background(), account, http.StatusUnauthorized, []byte(`unauthorized`))
+		require.Equal(t, ErrorPolicyNone, result, "gemini API key 401 with DB fallback showing previous 401 should escalate")
+	})
+
+	t.Run("gemini_oauth_stays_temp", func(t *testing.T) {
+		repo := &dbFallbackRepoStub{
+			dbAccount: &Account{
+				ID:                      23,
+				TempUnschedulableReason: `{"status_code":401,"until_unix":1735689600}`,
+			},
+		}
+		svc := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+
+		account := &Account{
+			ID:                      23,
 			Type:                    AccountTypeOAuth,
 			Platform:                PlatformGemini,
 			TempUnschedulableReason: "",
@@ -57,7 +88,7 @@ func TestCheckErrorPolicy_401_DBFallback_Escalates(t *testing.T) {
 		}
 
 		result := svc.CheckErrorPolicy(context.Background(), account, http.StatusUnauthorized, []byte(`unauthorized`))
-		require.Equal(t, ErrorPolicyNone, result, "gemini 401 with DB fallback showing previous 401 should escalate")
+		require.Equal(t, ErrorPolicyTempUnscheduled, result, "gemini OAuth 401 should stay temp-unscheduled even after a previous 401 cooldown")
 	})
 
 	t.Run("antigravity_stays_temp", func(t *testing.T) {

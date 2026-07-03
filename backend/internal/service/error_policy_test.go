@@ -134,6 +134,52 @@ func TestCheckErrorPolicy(t *testing.T) {
 			expected:   ErrorPolicyTempUnscheduled,
 		},
 		{
+			// OAuth 账号的 401 可能来自刷新窗口、代理抖动或上游临时认证异常，
+			// 即使之前已经 401 临时摘除过，也继续按临时不可调度处理，避免误升级成坏账号。
+			name: "temp_unschedulable_401_second_hit_oauth_stays_temp",
+			account: &Account{
+				ID:                      17,
+				Type:                    AccountTypeOAuth,
+				Platform:                PlatformGemini,
+				TempUnschedulableReason: `{"status_code":401,"until_unix":1735689600}`,
+				Credentials: map[string]any{
+					"temp_unschedulable_enabled": true,
+					"temp_unschedulable_rules": []any{
+						map[string]any{
+							"error_code":       float64(401),
+							"keywords":         []any{"unauthorized"},
+							"duration_minutes": float64(10),
+						},
+					},
+				},
+			},
+			statusCode: 401,
+			body:       []byte(`unauthorized`),
+			expected:   ErrorPolicyTempUnscheduled,
+		},
+		{
+			name: "temp_unschedulable_401_second_hit_apikey_escalates",
+			account: &Account{
+				ID:                      18,
+				Type:                    AccountTypeAPIKey,
+				Platform:                PlatformGemini,
+				TempUnschedulableReason: `{"status_code":401,"until_unix":1735689600}`,
+				Credentials: map[string]any{
+					"temp_unschedulable_enabled": true,
+					"temp_unschedulable_rules": []any{
+						map[string]any{
+							"error_code":       float64(401),
+							"keywords":         []any{"unauthorized"},
+							"duration_minutes": float64(10),
+						},
+					},
+				},
+			},
+			statusCode: 401,
+			body:       []byte(`unauthorized`),
+			expected:   ErrorPolicyNone,
+		},
+		{
 			name: "temp_unschedulable_body_miss_returns_none",
 			account: &Account{
 				ID:       5,
