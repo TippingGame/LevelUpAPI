@@ -138,6 +138,12 @@ func TestAuthPaymentPermissionStatusesFailoverWithoutSameAccountRetry(t *testing
 		"This request has been flagged for potentially high-risk cyber activity.",
 		[]byte(`{"error":{"type":"safety_error","message":"This request has been flagged for potentially high-risk cyber activity."}}`),
 	))
+	require.False(t, shouldFailoverOpenAIPassthroughResponse(
+		customRetryAccount,
+		http.StatusForbidden,
+		"Permission denied",
+		[]byte(`{"error":{"message":"Permission denied","type":"invalid_request_error"}}`),
+	))
 	require.True(t, (&OpenAIGatewayService{}).shouldFailoverOpenAIUpstreamResponse(
 		http.StatusForbidden,
 		"This account has been disabled after policy review.",

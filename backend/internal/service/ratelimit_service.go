@@ -1167,11 +1167,7 @@ func permanentAccountKeywordErrorMessage(account *Account, statusCode int, upstr
 		"billing is not enabled",
 		"billing not enabled",
 		"billing disabled",
-		"permission denied",
 		"the security token included in the request is invalid",
-		"operation not allowed",
-		"your account is not authorized",
-		"account is not authorized",
 		"identity verification is required",
 		"deactivated workspace",
 	}

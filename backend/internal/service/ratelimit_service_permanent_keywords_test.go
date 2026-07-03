@@ -93,13 +93,6 @@ func TestRateLimitServiceHandleUpstreamErrorAPIKeyPermanentKeywordsDisable(t *te
 		want       string
 	}{
 		{
-			name:       "openai permission denied",
-			platform:   PlatformOpenAI,
-			statusCode: http.StatusForbidden,
-			body:       []byte(`{"error":{"message":"Permission denied","type":"invalid_request_error"}}`),
-			want:       "Permission denied",
-		},
-		{
 			name:       "openai quota exhausted",
 			platform:   PlatformOpenAI,
 			statusCode: http.StatusTooManyRequests,
@@ -205,6 +198,57 @@ func TestRateLimitServiceHandleUpstreamErrorAPIKeyPermanentKeywordsDisable(t *te
 			require.Equal(t, 0, repo.tempCalls)
 			require.Contains(t, repo.lastErrorMsg, "Permanent account error")
 			require.Contains(t, repo.lastErrorMsg, tt.want)
+		})
+	}
+}
+
+func TestRateLimitServiceHandleUpstreamErrorAmbiguousPermissionDoesNotSetPermanentError(t *testing.T) {
+	tests := []struct {
+		name string
+		body []byte
+		want string
+	}{
+		{
+			name: "permission denied",
+			body: []byte(`{"error":{"message":"Permission denied","type":"invalid_request_error"}}`),
+			want: "Permission denied",
+		},
+		{
+			name: "operation not allowed",
+			body: []byte(`{"error":{"message":"Operation not allowed for this request"}}`),
+			want: "Operation not allowed",
+		},
+		{
+			name: "account not authorized",
+			body: []byte(`{"error":{"message":"Your account is not authorized for this operation"}}`),
+			want: "not authorized",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := &permanentKeywordAccountRepoStub{}
+			svc := &RateLimitService{accountRepo: repo}
+			svc.SetOpenAI403CounterCache(permanentKeywordOpenAI403CounterStub{})
+			account := &Account{
+				ID:       2071,
+				Platform: PlatformOpenAI,
+				Type:     AccountTypeAPIKey,
+			}
+
+			shouldDisable := svc.HandleUpstreamError(
+				context.Background(),
+				account,
+				http.StatusForbidden,
+				http.Header{},
+				tt.body,
+			)
+
+			require.True(t, shouldDisable)
+			require.Equal(t, 0, repo.setErrorCalls)
+			require.Equal(t, 1, repo.tempCalls)
+			require.Contains(t, repo.lastTempReason, tt.want)
+			require.Contains(t, repo.lastTempReason, "openai_403")
 		})
 	}
 }
