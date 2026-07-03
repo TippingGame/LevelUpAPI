@@ -64,15 +64,16 @@ const (
 )
 
 const (
-	openAI403CooldownMinutesDefault = 10
-	openAI403DisableThreshold       = 3
-	openAI403CounterWindowMinutes   = 180
-	openAIModelCapacityCooldown     = time.Minute
-	upstreamModelNotFoundCooldown   = 30 * time.Minute
-	oAuth401CooldownMinutesDefault  = 10
-	overloadCooldownMinutesDefault  = 10
-	runtimeAccountErrorEvictionTTL  = 24 * time.Hour
-	rateLimitStateUpdateTimeout     = 3 * time.Second
+	openAI403CooldownMinutesDefault   = 10
+	openAI403DisableThreshold         = 3
+	openAI403CounterWindowMinutes     = 180
+	anthropicOAuth403DisableThreshold = 3
+	openAIModelCapacityCooldown       = time.Minute
+	upstreamModelNotFoundCooldown     = 30 * time.Minute
+	oAuth401CooldownMinutesDefault    = 10
+	overloadCooldownMinutesDefault    = 10
+	runtimeAccountErrorEvictionTTL    = 24 * time.Hour
+	rateLimitStateUpdateTimeout       = 3 * time.Second
 )
 
 var cloudflareChallengeCooldownSteps = []time.Duration{
@@ -1220,23 +1221,31 @@ func (s *RateLimitService) handleAnthropicOAuth403(ctx context.Context, account 
 		"temporary access rejection or account permission issue",
 	)
 
-	if wasTempUnschedByStatusCode(account.TempUnschedulableReason, http.StatusForbidden) {
-		msg = "Claude OAuth repeated 403 after cooldown: " + msg
+	now := time.Now()
+	count := nextTempUnschedConsecutiveCount(
+		account,
+		now,
+		http.StatusForbidden,
+		"anthropic_oauth_403",
+		time.Duration(openAI403CounterWindowMinutes)*time.Minute,
+	)
+	if count >= anthropicOAuth403DisableThreshold {
+		msg = fmt.Sprintf("Claude OAuth repeated 403 threshold reached (%d/%d): %s", count, anthropicOAuth403DisableThreshold, msg)
 		s.handleAuthError(ctx, account, msg)
 		return true
 	}
 
-	now := time.Now()
 	until := now.Add(time.Duration(anthropicOAuthDefaultCooldownMinutes) * time.Minute)
 	state := &TempUnschedState{
-		UntilUnix:       until.Unix(),
-		TriggeredAtUnix: now.Unix(),
-		StatusCode:      http.StatusForbidden,
-		MatchedKeyword:  "anthropic_oauth_403",
-		RuleIndex:       -1,
-		ErrorMessage:    msg,
+		UntilUnix:        until.Unix(),
+		TriggeredAtUnix:  now.Unix(),
+		StatusCode:       http.StatusForbidden,
+		MatchedKeyword:   "anthropic_oauth_403",
+		RuleIndex:        -1,
+		ErrorMessage:     fmt.Sprintf("Claude OAuth 403 temporary cooldown (%d/%d): %s", count, anthropicOAuth403DisableThreshold, msg),
+		ConsecutiveCount: count,
 	}
-	reason := msg
+	reason := state.ErrorMessage
 	if raw, err := json.Marshal(state); err == nil {
 		reason = string(raw)
 	}
@@ -1247,7 +1256,7 @@ func (s *RateLimitService) handleAnthropicOAuth403(ctx context.Context, account 
 		return true
 	}
 
-	slog.Warn("anthropic_oauth_403_temp_unschedulable", "account_id", account.ID, "until", until)
+	slog.Warn("anthropic_oauth_403_temp_unschedulable", "account_id", account.ID, "until", until, "count", count, "threshold", anthropicOAuth403DisableThreshold)
 	return true
 }
 
@@ -1291,27 +1300,38 @@ func (s *RateLimitService) setOpenAI403TempUnschedulable(ctx context.Context, ac
 	if account == nil {
 		return false
 	}
-	if wasTempUnschedByStatusCode(account.TempUnschedulableReason, http.StatusForbidden) {
-		repeatedMsg := "OpenAI repeated 403 after cooldown: " + msg
+	now := time.Now()
+	if count <= 0 {
+		count = int64(nextTempUnschedConsecutiveCount(
+			account,
+			now,
+			http.StatusForbidden,
+			"openai_403",
+			time.Duration(openAI403CounterWindowMinutes)*time.Minute,
+		))
+	}
+	if count >= openAI403DisableThreshold {
+		repeatedMsg := fmt.Sprintf("OpenAI repeated 403 threshold reached (%d/%d): %s", count, openAI403DisableThreshold, msg)
 		s.handleAuthError(ctx, account, repeatedMsg)
 		return true
 	}
 
-	until := time.Now().Add(time.Duration(openAI403CooldownMinutesDefault) * time.Minute)
+	until := now.Add(time.Duration(openAI403CooldownMinutesDefault) * time.Minute)
 	state := &TempUnschedState{
-		UntilUnix:       until.Unix(),
-		TriggeredAtUnix: time.Now().Unix(),
-		StatusCode:      http.StatusForbidden,
-		MatchedKeyword:  "openai_403",
-		RuleIndex:       -1,
-		ErrorMessage:    msg,
+		UntilUnix:        until.Unix(),
+		TriggeredAtUnix:  now.Unix(),
+		StatusCode:       http.StatusForbidden,
+		MatchedKeyword:   "openai_403",
+		RuleIndex:        -1,
+		ErrorMessage:     msg,
+		ConsecutiveCount: int(count),
 	}
-	if count > 0 {
+	if strings.TrimSpace(reasonLabel) != "" {
+		state.MatchedKeyword = "openai_403_" + strings.TrimSpace(reasonLabel)
+		state.ErrorMessage = fmt.Sprintf("OpenAI 403 temporary cooldown (%s, %d/%d): %s", strings.TrimSpace(reasonLabel), count, openAI403DisableThreshold, msg)
+	} else if count > 0 {
 		state.MatchedKeyword = fmt.Sprintf("openai_403_%d_%d", count, openAI403DisableThreshold)
 		state.ErrorMessage = fmt.Sprintf("OpenAI 403 temporary cooldown (%d/%d): %s", count, openAI403DisableThreshold, msg)
-	} else if strings.TrimSpace(reasonLabel) != "" {
-		state.MatchedKeyword = "openai_403_" + strings.TrimSpace(reasonLabel)
-		state.ErrorMessage = "OpenAI 403 temporary cooldown (" + strings.TrimSpace(reasonLabel) + "): " + msg
 	}
 
 	reason := state.ErrorMessage
@@ -1332,6 +1352,42 @@ func (s *RateLimitService) setOpenAI403TempUnschedulable(ctx context.Context, ac
 		"reason_label", reasonLabel,
 	)
 	return true
+}
+
+func nextTempUnschedConsecutiveCount(account *Account, now time.Time, statusCode int, matchedKeywordPrefix string, window time.Duration) int {
+	if account == nil || statusCode <= 0 {
+		return 1
+	}
+	reason := strings.TrimSpace(account.TempUnschedulableReason)
+	if reason == "" {
+		return 1
+	}
+
+	var previous TempUnschedState
+	if err := json.Unmarshal([]byte(reason), &previous); err != nil {
+		return 1
+	}
+	if previous.StatusCode != statusCode {
+		return 1
+	}
+	prefix := strings.TrimSpace(matchedKeywordPrefix)
+	if prefix != "" && previous.MatchedKeyword != prefix && !strings.HasPrefix(previous.MatchedKeyword, prefix+"_") {
+		return 1
+	}
+	if previous.TriggeredAtUnix > 0 && window > 0 {
+		triggeredAt := time.Unix(previous.TriggeredAtUnix, 0)
+		if now.Sub(triggeredAt) > window {
+			return 1
+		}
+	} else if account.TempUnschedulableUntil != nil && window > 0 {
+		if now.Sub(*account.TempUnschedulableUntil) > window {
+			return 1
+		}
+	}
+	if previous.ConsecutiveCount < 1 {
+		return 2
+	}
+	return previous.ConsecutiveCount + 1
 }
 
 // handleAntigravity403 处理 Antigravity 平台的 403 错误
