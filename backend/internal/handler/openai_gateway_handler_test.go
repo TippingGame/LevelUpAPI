@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -89,6 +90,15 @@ func TestOpenAIHandleStreamingAwareError_JSONEscaping(t *testing.T) {
 			assert.Equal(t, tt.message, errorObj["message"])
 		})
 	}
+}
+
+func TestOpenAIAccountSelectionUnavailableMessage(t *testing.T) {
+	require.Equal(t, "Service temporarily unavailable", openAIAccountSelectionUnavailableMessage(errors.New("database unavailable")))
+	require.Equal(t, "No available accounts", openAIAccountSelectionUnavailableMessage(service.ErrNoAvailableAccounts))
+	require.Equal(t,
+		"No available OpenAI accounts supporting model: gpt-5: no available accounts",
+		openAIAccountSelectionUnavailableMessage(fmt.Errorf("no available OpenAI accounts supporting model: gpt-5: %w", service.ErrNoAvailableAccounts)),
+	)
 }
 
 func TestResolveOpenAIMessagesMetadataSession_DoesNotDerivePromptCacheKey(t *testing.T) {

@@ -39,6 +39,30 @@ type OpenAIGatewayHandler struct {
 	cfg                      *config.Config
 }
 
+func openAIAccountSelectionUnavailableMessage(err error) string {
+	if err == nil || !errors.Is(err, service.ErrNoAvailableAccounts) {
+		return "Service temporarily unavailable"
+	}
+	msg := strings.TrimSpace(err.Error())
+	if msg == "" || msg == service.ErrNoAvailableAccounts.Error() {
+		return "No available accounts"
+	}
+	if strings.HasPrefix(strings.ToLower(msg), "no available ") {
+		return uppercaseASCIIInitial(msg)
+	}
+	return "No available accounts: " + msg
+}
+
+func uppercaseASCIIInitial(msg string) string {
+	if msg == "" {
+		return msg
+	}
+	if msg[0] >= 'a' && msg[0] <= 'z' {
+		return string(msg[0]-('a'-'A')) + msg[1:]
+	}
+	return msg
+}
+
 func resolveOpenAIMessagesDispatchMappedModel(apiKey *service.APIKey, requestedModel string) string {
 	if apiKey == nil || apiKey.Group == nil {
 		return ""
@@ -376,7 +400,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 					h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "compact_not_supported", "No available OpenAI accounts support /responses/compact", streamStarted)
 					return
 				}
-				h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "api_error", "Service temporarily unavailable", streamStarted)
+				h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "api_error", openAIAccountSelectionUnavailableMessage(err), streamStarted)
 				return
 			}
 			if lastFailoverErr != nil {
@@ -848,7 +872,7 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 						lastFailoverErr = nil
 						continue
 					}
-					h.anthropicStreamingAwareError(c, http.StatusServiceUnavailable, "api_error", "Service temporarily unavailable", streamStarted)
+					h.anthropicStreamingAwareError(c, http.StatusServiceUnavailable, "api_error", openAIAccountSelectionUnavailableMessage(err), streamStarted)
 					return
 				}
 			} else {
@@ -1467,7 +1491,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 			return
 		}
 		if !routeCursor.switchToNextWithoutCooldown(apiKey.ID, "account_select_failed", reqLog, zap.Error(selectErr), zap.Int64p("group_id", currentAPIKey.GroupID)) {
-			closeOpenAIClientWS(wsConn, coderws.StatusTryAgainLater, "no available account")
+			closeOpenAIClientWS(wsConn, coderws.StatusTryAgainLater, openAIAccountSelectionUnavailableMessage(selectErr))
 			return
 		}
 	}

@@ -195,7 +195,7 @@ routeLoop:
 					lastFailoverErr = nil
 					continue
 				}
-				h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "api_error", "Service temporarily unavailable", streamStarted)
+				h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "api_error", openAIAccountSelectionUnavailableMessage(err), streamStarted)
 				return
 			} else {
 				if lastFailoverErr != nil {
