@@ -1589,6 +1589,52 @@ func TestGatewayService_AnthropicAPIKeyPassthrough_ForwardDirect_EmptyResponseBo
 	require.Contains(t, err.Error(), "empty response")
 }
 
+func TestGatewayService_AnthropicAPIKeyPassthrough_ModelNotFoundMarksModelCooldownAndFailsOver(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+
+	model := "claude-3-5-haiku-20241022"
+	body := []byte(`{"model":"claude-3-5-haiku-20241022","messages":[{"role":"user","content":[{"type":"text","text":"hello"}]}]}`)
+	parsed := &ParsedRequest{
+		Body:  body,
+		Model: model,
+	}
+	upstreamBody := `{"error":{"message":"Model \"claude-3-5-haiku-20241022\" is not supported by any configured account in this group","type":"model_not_found"},"type":"error"}`
+	upstream := &anthropicHTTPUpstreamRecorder{
+		resp: &http.Response{
+			StatusCode: http.StatusNotFound,
+			Header: http.Header{
+				"Content-Type": []string{"application/json"},
+				"X-Request-Id": []string{"rid-model-not-found"},
+			},
+			Body: io.NopCloser(strings.NewReader(upstreamBody)),
+		},
+	}
+	repo := &openAIPassthroughFailoverRepo{}
+	svc := &GatewayService{
+		cfg:              &config.Config{},
+		httpUpstream:     upstream,
+		rateLimitService: NewRateLimitService(repo, nil, &config.Config{}, nil, nil),
+	}
+	account := newAnthropicAPIKeyAccountForTest()
+
+	result, err := svc.Forward(context.Background(), c, account, parsed)
+
+	require.Nil(t, result)
+	var failoverErr *UpstreamFailoverError
+	require.ErrorAs(t, err, &failoverErr)
+	require.Equal(t, http.StatusNotFound, failoverErr.StatusCode)
+	require.Contains(t, string(failoverErr.ResponseBody), "model_not_found")
+	require.Len(t, repo.modelRateLimitCalls, 1)
+	require.Equal(t, account.ID, repo.modelRateLimitCalls[0].accountID)
+	require.Equal(t, model, repo.modelRateLimitCalls[0].modelKey)
+	require.True(t, account.isModelRateLimitedWithContext(context.Background(), model))
+	require.Empty(t, rec.Body.String(), "model_not_found should fail over before committing a client response")
+}
+
 func TestExtractAnthropicSSEDataLine(t *testing.T) {
 	t.Run("valid data line with spaces", func(t *testing.T) {
 		data, ok := extractAnthropicSSEDataLine("data:   {\"type\":\"message_start\"}")

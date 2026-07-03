@@ -6178,7 +6178,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 		upstreamMsg := strings.TrimSpace(extractUpstreamErrorMessage(respBody))
 		upstreamMsg = sanitizeUpstreamErrorMessage(upstreamMsg)
 		if !s.shouldFailoverGatewayUpstreamResponse(account, resp.StatusCode, upstreamMsg, respBody) {
-			return s.handleErrorResponse(ctx, resp, c, account)
+			return s.handleErrorResponse(ctx, resp, c, account, reqModel)
 		}
 
 		// 调试日志：打印上游错误响应
@@ -6212,7 +6212,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 			respBody, readErr := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
 			if readErr != nil {
 				// ReadAll failed, fall back to normal error handling without consuming the stream
-				return s.handleErrorResponse(ctx, resp, c, account)
+				return s.handleErrorResponse(ctx, resp, c, account, reqModel)
 			}
 			_ = resp.Body.Close()
 			resp.Body = io.NopCloser(bytes.NewReader(respBody))
@@ -6252,7 +6252,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 				return nil, &UpstreamFailoverError{StatusCode: resp.StatusCode, ResponseBody: respBody}
 			}
 		}
-		return s.handleErrorResponse(ctx, resp, c, account)
+		return s.handleErrorResponse(ctx, resp, c, account, reqModel)
 	}
 
 	// 处理正常响应
@@ -6574,7 +6574,7 @@ func (s *GatewayService) forwardAnthropicAPIKeyPassthroughWithInput(
 		upstreamMsg := strings.TrimSpace(extractUpstreamErrorMessage(respBody))
 		upstreamMsg = sanitizeUpstreamErrorMessage(upstreamMsg)
 		if !s.shouldFailoverGatewayUpstreamResponse(account, resp.StatusCode, upstreamMsg, respBody) {
-			return s.handleErrorResponse(ctx, resp, c, account)
+			return s.handleErrorResponse(ctx, resp, c, account, input.RequestModel)
 		}
 
 		logger.LegacyPrintf("service.gateway", "[Anthropic Passthrough] Upstream error (failover): Account=%d(%s) Status=%d RequestID=%s Body=%s",
@@ -6605,7 +6605,7 @@ func (s *GatewayService) forwardAnthropicAPIKeyPassthroughWithInput(
 	}
 
 	if resp.StatusCode >= 400 {
-		return s.handleErrorResponse(ctx, resp, c, account)
+		return s.handleErrorResponse(ctx, resp, c, account, input.RequestModel)
 	}
 
 	var usage *ClaudeUsage
@@ -7314,7 +7314,7 @@ func (s *GatewayService) forwardBedrock(
 
 	// 错误/failover 处理
 	if resp.StatusCode >= 400 {
-		return s.handleBedrockUpstreamErrors(ctx, resp, c, account)
+		return s.handleBedrockUpstreamErrors(ctx, resp, c, account, reqModel)
 	}
 
 	// 响应处理
@@ -7481,6 +7481,7 @@ func (s *GatewayService) handleBedrockUpstreamErrors(
 	resp *http.Response,
 	c *gin.Context,
 	account *Account,
+	requestedModel string,
 ) (*ForwardResult, error) {
 	// retry exhausted + failover
 	if s.shouldRetryUpstreamError(account, resp.StatusCode) {
@@ -7523,7 +7524,7 @@ func (s *GatewayService) handleBedrockUpstreamErrors(
 		upstreamMsg := strings.TrimSpace(extractUpstreamErrorMessage(respBody))
 		upstreamMsg = sanitizeUpstreamErrorMessage(upstreamMsg)
 		if !s.shouldFailoverGatewayUpstreamResponse(account, resp.StatusCode, upstreamMsg, respBody) {
-			return s.handleErrorResponse(ctx, resp, c, account)
+			return s.handleErrorResponse(ctx, resp, c, account, requestedModel)
 		}
 
 		s.handleFailoverSideEffects(ctx, resp, account)
@@ -7543,7 +7544,7 @@ func (s *GatewayService) handleBedrockUpstreamErrors(
 	}
 
 	// other errors
-	return s.handleErrorResponse(ctx, resp, c, account)
+	return s.handleErrorResponse(ctx, resp, c, account, requestedModel)
 }
 
 // buildUpstreamRequestBedrock 构建 Bedrock 上游请求
@@ -8638,7 +8639,7 @@ func isCountTokensUnsupported404(statusCode int, body []byte) bool {
 	return strings.Contains(msg, "count_tokens") && strings.Contains(msg, "not found")
 }
 
-func (s *GatewayService) handleErrorResponse(ctx context.Context, resp *http.Response, c *gin.Context, account *Account) (*ForwardResult, error) {
+func (s *GatewayService) handleErrorResponse(ctx context.Context, resp *http.Response, c *gin.Context, account *Account, requestedModel ...string) (*ForwardResult, error) {
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
 
 	// 调试日志：打印上游错误响应
@@ -8685,7 +8686,15 @@ func (s *GatewayService) handleErrorResponse(ctx context.Context, resp *http.Res
 	// 处理上游错误，标记账号状态
 	shouldDisable := false
 	if s.rateLimitService != nil {
-		shouldDisable = s.rateLimitService.HandleUpstreamError(ctx, account, resp.StatusCode, resp.Header, body)
+		model := ""
+		if len(requestedModel) > 0 {
+			model = strings.TrimSpace(requestedModel[0])
+		}
+		if model != "" {
+			shouldDisable = s.rateLimitService.HandleUpstreamErrorForModel(ctx, account, model, resp.StatusCode, resp.Header, body)
+		} else {
+			shouldDisable = s.rateLimitService.HandleUpstreamError(ctx, account, resp.StatusCode, resp.Header, body)
+		}
 	}
 	if shouldDisable {
 		return nil, &UpstreamFailoverError{StatusCode: resp.StatusCode, ResponseBody: body}

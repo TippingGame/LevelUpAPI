@@ -667,6 +667,32 @@ func TestRateLimitService_HandleUpstreamErrorForModel_OpenAI404UnknownModelDoesN
 	require.Equal(t, 0, repo.tempCalls)
 }
 
+func TestRateLimitService_HandleUpstreamErrorForModel_ExplicitModelNotFoundTypeCooldownsUnknownModel(t *testing.T) {
+	repo := &rateLimitAccountRepoStub{}
+	service := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+	account := &Account{
+		ID:       2074,
+		Platform: PlatformAnthropic,
+		Type:     AccountTypeAPIKey,
+	}
+
+	shouldDisable := service.HandleUpstreamErrorForModel(
+		context.Background(),
+		account,
+		"claude-3-5-haiku-20241022",
+		http.StatusNotFound,
+		http.Header{},
+		[]byte(`{"error":{"message":"Model \"claude-3-5-haiku-20241022\" is not supported by any configured account in this group","type":"model_not_found"},"type":"error"}`),
+	)
+
+	require.True(t, shouldDisable)
+	require.Len(t, repo.modelRateLimitCalls, 1)
+	require.Equal(t, account.ID, repo.modelRateLimitCalls[0].accountID)
+	require.Equal(t, "claude-3-5-haiku-20241022", repo.modelRateLimitCalls[0].modelKey)
+	require.Equal(t, 0, repo.setErrorCalls)
+	require.Equal(t, 0, repo.tempCalls)
+}
+
 func TestRateLimitService_HandleUpstreamErrorForModel_OpenAI404SkipsPoolMode(t *testing.T) {
 	repo := &rateLimitAccountRepoStub{}
 	service := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)

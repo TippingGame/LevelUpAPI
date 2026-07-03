@@ -634,7 +634,7 @@ func (s *RateLimitService) handleUpstreamModelNotFound(ctx context.Context, acco
 	if !isUpstreamModelNotFoundError(statusCode, responseBody) {
 		return false
 	}
-	modelKey, shouldCooldown := modelRateLimitKeyForUpstreamModelNotFound(ctx, account, requestedModel)
+	modelKey, shouldCooldown := modelRateLimitKeyForUpstreamModelNotFound(ctx, account, requestedModel, hasExplicitModelNotFoundErrorType(responseBody))
 	if !shouldCooldown || modelKey == "" {
 		return false
 	}
@@ -670,7 +670,24 @@ func normalizeModelNotFoundBody(body []byte) string {
 	return strings.Join(strings.Fields(normalized), " ")
 }
 
-func modelRateLimitKeyForUpstreamModelNotFound(ctx context.Context, account *Account, requestedModel string) (string, bool) {
+func hasExplicitModelNotFoundErrorType(body []byte) bool {
+	if len(body) == 0 {
+		return false
+	}
+	for _, path := range []string{"error.type", "error.code", "response.error.type", "response.error.code"} {
+		value := strings.TrimSpace(gjson.GetBytes(body, path).String())
+		if value == "" {
+			continue
+		}
+		normalized := strings.ToLower(strings.NewReplacer("_", " ", "-", " ").Replace(value))
+		if strings.Contains(strings.Join(strings.Fields(normalized), " "), "model not found") {
+			return true
+		}
+	}
+	return false
+}
+
+func modelRateLimitKeyForUpstreamModelNotFound(ctx context.Context, account *Account, requestedModel string, explicitModelNotFoundType bool) (string, bool) {
 	modelKey := strings.TrimSpace(requestedModel)
 	if account == nil || modelKey == "" {
 		return modelKey, false
@@ -690,6 +707,9 @@ func modelRateLimitKeyForUpstreamModelNotFound(ctx context.Context, account *Acc
 	if mappingMatched ||
 		isKnownDefaultModelForPlatform(account.Platform, requestedModel) ||
 		isKnownDefaultModelForPlatform(account.Platform, modelKey) {
+		return modelKey, true
+	}
+	if explicitModelNotFoundType {
 		return modelKey, true
 	}
 	return "", false

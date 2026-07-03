@@ -93,10 +93,17 @@ func TestOpenAIGatewayService_ResponsesUnknownModelDoesNotFallbackToGPT54(t *tes
 
 type openAIPassthroughFailoverRepo struct {
 	stubOpenAIAccountRepo
-	rateLimitCalls []time.Time
-	overloadCalls  []time.Time
-	tempCalls      []time.Time
-	tempReasons    []string
+	rateLimitCalls      []time.Time
+	overloadCalls       []time.Time
+	tempCalls           []time.Time
+	tempReasons         []string
+	modelRateLimitCalls []passthroughModelRateLimitCall
+}
+
+type passthroughModelRateLimitCall struct {
+	accountID int64
+	modelKey  string
+	resetAt   time.Time
 }
 
 func (r *openAIPassthroughFailoverRepo) SetRateLimited(_ context.Context, _ int64, resetAt time.Time) error {
@@ -112,6 +119,15 @@ func (r *openAIPassthroughFailoverRepo) SetOverloaded(_ context.Context, _ int64
 func (r *openAIPassthroughFailoverRepo) SetTempUnschedulable(_ context.Context, _ int64, until time.Time, reason string) error {
 	r.tempCalls = append(r.tempCalls, until)
 	r.tempReasons = append(r.tempReasons, reason)
+	return nil
+}
+
+func (r *openAIPassthroughFailoverRepo) SetModelRateLimit(_ context.Context, id int64, modelKey string, resetAt time.Time) error {
+	r.modelRateLimitCalls = append(r.modelRateLimitCalls, passthroughModelRateLimitCall{
+		accountID: id,
+		modelKey:  modelKey,
+		resetAt:   resetAt,
+	})
 	return nil
 }
 
