@@ -61,6 +61,16 @@ func (s *GroupCapacityService) GetAllGroupCapacity(ctx context.Context) ([]Group
 
 // GetUserVisibleGroupCapacity returns capacity summary for groups the current user may see.
 func (s *GroupCapacityService) GetUserVisibleGroupCapacity(ctx context.Context, userID int64) ([]GroupCapacitySummary, error) {
+	groups, err := s.GetUserVisiblePublicBalanceGroups(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+
+	return s.getCapacityForGroups(ctx, groups)
+}
+
+// GetUserVisiblePublicBalanceGroups returns public, standard billing groups visible to the current user.
+func (s *GroupCapacityService) GetUserVisiblePublicBalanceGroups(ctx context.Context, userID int64) ([]Group, error) {
 	if userID <= 0 {
 		return nil, ErrUserNotFound
 	}
@@ -73,7 +83,7 @@ func (s *GroupCapacityService) GetUserVisibleGroupCapacity(ctx context.Context, 
 		return nil, err
 	}
 
-	return s.getCapacityForGroups(ctx, filterPublicBalanceGroups(groups))
+	return filterPublicBalanceGroups(groups), nil
 }
 
 func filterPublicBalanceGroups(groups []Group) []Group {

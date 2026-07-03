@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"strings"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/handler/admin"
@@ -161,6 +162,63 @@ func channelMonitorCapacitySummary(items []service.GroupCapacitySummary) channel
 	}
 }
 
+func visibleGroupNameSet(groups []service.Group) map[string]struct{} {
+	out := make(map[string]struct{}, len(groups))
+	for _, group := range groups {
+		if normalized := normalizeMonitorGroupName(group.Name); normalized != "" {
+			out[normalized] = struct{}{}
+		}
+	}
+	return out
+}
+
+func normalizeMonitorGroupName(name string) string {
+	return strings.ToLower(strings.TrimSpace(name))
+}
+
+func monitorGroupVisible(groupName string, visibleGroupNames map[string]struct{}) bool {
+	normalized := normalizeMonitorGroupName(groupName)
+	if normalized == "" {
+		return false
+	}
+	_, ok := visibleGroupNames[normalized]
+	return ok
+}
+
+func filterUserMonitorViewsByVisibleGroups(views []*service.UserMonitorView, visibleGroupNames map[string]struct{}) []*service.UserMonitorView {
+	if len(views) == 0 || len(visibleGroupNames) == 0 {
+		return []*service.UserMonitorView{}
+	}
+	filtered := make([]*service.UserMonitorView, 0, len(views))
+	for _, view := range views {
+		if view == nil || !monitorGroupVisible(view.GroupName, visibleGroupNames) {
+			continue
+		}
+		filtered = append(filtered, view)
+	}
+	return filtered
+}
+
+func (h *ChannelMonitorUserHandler) visiblePublicBalanceGroupNames(c *gin.Context) (map[string]struct{}, bool) {
+	if h.groupCapacityService == nil {
+		response.Error(c, 500, "Group capacity service is unavailable")
+		return nil, false
+	}
+
+	subject, ok := middleware2.GetAuthSubjectFromContext(c)
+	if !ok {
+		response.Unauthorized(c, "User not authenticated")
+		return nil, false
+	}
+
+	groups, err := h.groupCapacityService.GetUserVisiblePublicBalanceGroups(c.Request.Context(), subject.UserID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return nil, false
+	}
+	return visibleGroupNameSet(groups), true
+}
+
 // --- Handlers ---
 
 // List GET /api/v1/channel-monitors
@@ -169,11 +227,16 @@ func (h *ChannelMonitorUserHandler) List(c *gin.Context) {
 		response.Success(c, gin.H{"items": []channelMonitorUserListItem{}})
 		return
 	}
+	visibleGroupNames, ok := h.visiblePublicBalanceGroupNames(c)
+	if !ok {
+		return
+	}
 	views, err := h.monitorService.ListUserView(c.Request.Context())
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
 	}
+	views = filterUserMonitorViewsByVisibleGroups(views, visibleGroupNames)
 	items := make([]channelMonitorUserListItem, 0, len(views))
 	for _, v := range views {
 		items = append(items, userMonitorViewToItem(v))
@@ -217,9 +280,17 @@ func (h *ChannelMonitorUserHandler) GetStatus(c *gin.Context) {
 	if !ok {
 		return
 	}
+	visibleGroupNames, ok := h.visiblePublicBalanceGroupNames(c)
+	if !ok {
+		return
+	}
 	detail, err := h.monitorService.GetUserDetail(c.Request.Context(), id)
 	if err != nil {
 		response.ErrorFrom(c, err)
+		return
+	}
+	if !monitorGroupVisible(detail.GroupName, visibleGroupNames) {
+		response.ErrorFrom(c, service.ErrChannelMonitorNotFound)
 		return
 	}
 	response.Success(c, userMonitorDetailToResponse(detail))

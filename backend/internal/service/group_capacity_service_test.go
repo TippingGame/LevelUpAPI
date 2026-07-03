@@ -19,6 +19,19 @@ func (s *groupCapacityAccountRepoStub) ListSchedulableByGroupID(context.Context,
 	return out, nil
 }
 
+type groupCapacityVisibleGroupRepoStub struct {
+	groupRepoNoop
+	groups []Group
+	userID int64
+}
+
+func (s *groupCapacityVisibleGroupRepoStub) ListActiveVisibleToUser(_ context.Context, userID int64, _ []int64) ([]Group, error) {
+	s.userID = userID
+	out := make([]Group, len(s.groups))
+	copy(out, s.groups)
+	return out, nil
+}
+
 func TestGroupCapacityIncludesCodexProtectedOpenAIAccount(t *testing.T) {
 	resetAt := time.Now().Add(time.Hour).UTC().Format(time.RFC3339)
 	svc := &GroupCapacityService{
@@ -62,4 +75,26 @@ func TestFilterPublicBalanceGroupsNormalizesLegacyMetadata(t *testing.T) {
 	require.Len(t, filtered, 2)
 	require.Equal(t, int64(1), filtered[0].ID)
 	require.Equal(t, int64(2), filtered[1].ID)
+}
+
+func TestGetUserVisiblePublicBalanceGroupsFiltersSharedPoolMetadata(t *testing.T) {
+	ownerID := int64(99)
+	groupRepo := &groupCapacityVisibleGroupRepoStub{
+		groups: []Group{
+			{ID: 1, Name: "OpenAI Pro", Scope: " Public ", SubscriptionType: " STANDARD "},
+			{ID: 2, Name: "legacy standard", Scope: GroupScopePublic, SubscriptionType: ""},
+			{ID: 3, Name: "subscription", Scope: GroupScopePublic, SubscriptionType: SubscriptionTypeSubscription},
+			{ID: 4, Name: "private", Scope: GroupScopeUserPrivate, OwnerUserID: &ownerID, SubscriptionType: SubscriptionTypeStandard},
+			{ID: 5, Name: "exclusive", Scope: GroupScopePublic, SubscriptionType: SubscriptionTypeStandard, IsExclusive: true},
+		},
+	}
+	svc := &GroupCapacityService{groupRepo: groupRepo}
+
+	groups, err := svc.GetUserVisiblePublicBalanceGroups(context.Background(), 42)
+
+	require.NoError(t, err)
+	require.Equal(t, int64(42), groupRepo.userID)
+	require.Len(t, groups, 2)
+	require.Equal(t, int64(1), groups[0].ID)
+	require.Equal(t, int64(2), groups[1].ID)
 }
