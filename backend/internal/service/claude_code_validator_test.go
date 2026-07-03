@@ -72,6 +72,37 @@ func TestClaudeCodeValidator_CountTokensPathRequiresUA(t *testing.T) {
 	require.False(t, ok)
 }
 
+func TestClaudeCodeValidator_TransportSignatureAcceptsHeadersOnlyContinuation(t *testing.T) {
+	validator := NewClaudeCodeValidator()
+	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/messages", nil)
+	req.Header.Set("User-Agent", "Claude Code/2.1.199 Node.js/24.3.0")
+	req.Header.Set("X-App", "cli")
+	req.Header.Set("anthropic-beta", "claude-code-20250219")
+	req.Header.Set("anthropic-version", "2023-06-01")
+
+	ok := validator.ValidateTransportSignature(req, map[string]any{
+		"model": "claude-opus-4-8",
+		"messages": []any{
+			map[string]any{"role": "user", "content": "second turn"},
+		},
+	})
+	require.True(t, ok)
+}
+
+func TestClaudeCodeValidator_TransportSignatureRequiresClaudeCodeUA(t *testing.T) {
+	validator := NewClaudeCodeValidator()
+	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/messages", nil)
+	req.Header.Set("User-Agent", "Claude/1.0.0")
+	req.Header.Set("X-App", "cli")
+	req.Header.Set("anthropic-beta", "claude-code-20250219")
+	req.Header.Set("anthropic-version", "2023-06-01")
+
+	ok := validator.ValidateTransportSignature(req, map[string]any{
+		"model": "claude-opus-4-8",
+	})
+	require.False(t, ok)
+}
+
 func TestClaudeCodeValidator_NonMessagesPathUAOnly(t *testing.T) {
 	validator := NewClaudeCodeValidator()
 	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/models", nil)

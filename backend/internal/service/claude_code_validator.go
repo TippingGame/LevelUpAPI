@@ -141,9 +141,9 @@ func (v *ClaudeCodeValidator) Validate(r *http.Request, body map[string]any) boo
 }
 
 // ValidateTransportSignature accepts newer Claude Code continuation requests
-// that may omit metadata.user_id or the full system prompt, while still requiring
-// official Claude Code transport headers. It is intentionally separate from
-// Validate so the strict validator remains available for compatibility tests.
+// that may omit metadata.user_id, the full system prompt, and the explicit
+// session header. It still requires a Claude Code UA plus the official transport
+// headers so ordinary clients are not treated as Claude Code.
 func (v *ClaudeCodeValidator) ValidateTransportSignature(r *http.Request, body map[string]any) bool {
 	if r == nil {
 		return false
@@ -161,18 +161,9 @@ func (v *ClaudeCodeValidator) ValidateTransportSignature(r *http.Request, body m
 		return false
 	}
 
-	if body != nil {
-		if metadata, ok := body["metadata"].(map[string]any); ok {
-			if userID, ok := metadata["user_id"].(string); ok && ParseMetadataUserID(userID) != nil {
-				return true
-			}
-		}
-		if v.hasClaudeCodeSystemPrompt(body) {
-			return true
-		}
-	}
-
-	return isValidClaudeCodeSessionHeader(r)
+	// Newer continuation requests can be body-light after the first turn. The
+	// UA + required transport headers are the stable client signal here.
+	return true
 }
 
 func (v *ClaudeCodeValidator) hasRequiredClaudeCodeHeaders(r *http.Request) bool {
@@ -182,14 +173,6 @@ func (v *ClaudeCodeValidator) hasRequiredClaudeCodeHeaders(r *http.Request) bool
 	return strings.TrimSpace(getHeaderRaw(r.Header, "x-app")) != "" &&
 		strings.TrimSpace(getHeaderRaw(r.Header, "anthropic-beta")) != "" &&
 		strings.TrimSpace(getHeaderRaw(r.Header, "anthropic-version")) != ""
-}
-
-func isValidClaudeCodeSessionHeader(r *http.Request) bool {
-	if r == nil {
-		return false
-	}
-	sessionID := strings.TrimSpace(getHeaderRaw(r.Header, "X-Claude-Code-Session-Id"))
-	return claudeCodeSessionIDPattern.MatchString(sessionID)
 }
 
 func isMessagesCountTokensPath(path string) bool {

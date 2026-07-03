@@ -1106,6 +1106,46 @@ func TestGatewayService_AnthropicAPIKeyPassthrough_BridgesClaudeCodeContinuation
 	require.Contains(t, string(upstreamBody), "x-anthropic-billing-header")
 }
 
+func TestGatewayService_AnthropicAPIKeyPassthrough_BridgesHeadersOnlyContinuationForUpstreamSubapi(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	c.Request.Header.Set("User-Agent", "Claude Code/2.1.199 Node.js/24.3.0")
+	c.Request.Header.Set("X-App", "cli")
+	c.Request.Header.Set("Anthropic-Beta", "claude-code-20250219,interleaved-thinking-2025-05-14")
+	c.Request.Header.Set("Anthropic-Version", "2023-06-01")
+
+	body := []byte(`{"model":"claude-opus-4-8","messages":[{"role":"user","content":[{"type":"text","text":"second turn"}]}]}`)
+	svc := &GatewayService{
+		cfg: &config.Config{
+			Security: config.SecurityConfig{
+				URLAllowlist: config.URLAllowlistConfig{Enabled: false},
+			},
+		},
+	}
+	account := newAnthropicAPIKeyAccountForTest()
+	account.Credentials["base_url"] = "https://claude-max-subapi.example"
+
+	req, err := svc.buildUpstreamRequestAnthropicAPIKeyPassthrough(context.Background(), c, account, body, "upstream-key", true)
+
+	require.NoError(t, err)
+	require.NotNil(t, req)
+	require.Equal(t, "claude-cli/"+claude.CLICurrentVersion+" (external, cli)", getHeaderRaw(req.Header, "User-Agent"))
+	require.Equal(t, "cli", getHeaderRaw(req.Header, "X-App"))
+	require.Equal(t, "stream", getHeaderRaw(req.Header, "x-stainless-helper-method"))
+	require.Equal(t, "claude-code-20250219,interleaved-thinking-2025-05-14", getHeaderRaw(req.Header, "Anthropic-Beta"))
+
+	upstreamBody := reqBodyBytesForTest(t, req)
+	metadataUserID := gjson.GetBytes(upstreamBody, "metadata.user_id").String()
+	require.NotEmpty(t, metadataUserID)
+	parsedUserID := ParseMetadataUserID(metadataUserID)
+	require.NotNil(t, parsedUserID)
+	require.Equal(t, parsedUserID.SessionID, getHeaderRaw(req.Header, "X-Claude-Code-Session-Id"))
+	require.Contains(t, string(upstreamBody), "Claude Code")
+	require.Contains(t, string(upstreamBody), "x-anthropic-billing-header")
+}
+
 func TestGatewayService_AnthropicAPIKeyPassthrough_DoesNotBridgeOfficialAnthropicBaseURL(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()

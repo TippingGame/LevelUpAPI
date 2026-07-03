@@ -206,6 +206,19 @@ func TestSetClaudeCodeClientContext_FastPathAndStrictPath(t *testing.T) {
 		require.True(t, service.IsClaudeCodeClient(c.Request.Context()))
 		require.Equal(t, "2.1.199", service.GetClaudeCodeVersion(c.Request.Context()))
 	})
+
+	t.Run("cli_messages_continuation_headers_only_sets_true", func(t *testing.T) {
+		c, _ := newHelperTestContext(http.MethodPost, "/v1/messages")
+		c.Request.Header.Set("User-Agent", "Claude Code/2.1.199 Node.js/24.3.0")
+		c.Request.Header.Set("X-App", "cli")
+		c.Request.Header.Set("anthropic-beta", "claude-code-20250219")
+		c.Request.Header.Set("anthropic-version", "2023-06-01")
+
+		body := []byte(`{"model":"claude-opus-4-8","messages":[{"role":"user","content":[{"type":"text","text":"second turn"}]}]}`)
+		SetClaudeCodeClientContext(c, body, nil)
+		require.True(t, service.IsClaudeCodeClient(c.Request.Context()))
+		require.Equal(t, "2.1.199", service.GetClaudeCodeVersion(c.Request.Context()))
+	})
 }
 
 func TestSetClaudeCodeClientContext_ReuseParsedRequestAndContextCache(t *testing.T) {
