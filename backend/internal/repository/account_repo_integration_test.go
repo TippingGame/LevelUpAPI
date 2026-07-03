@@ -1640,6 +1640,42 @@ func (s *AccountRepoSuite) TestListSchedulableByGroupIDAndPlatform_RequireOAuthO
 	s.Require().Equal(oauthAcc.ID, accounts[0].ID)
 }
 
+func (s *AccountRepoSuite) TestListSchedulableByGroupIDAndPlatform_RequirePrivacySetExcludesUnreadyOpenAI() {
+	group := mustCreateGroup(s.T(), s.client, &service.Group{
+		Name:              "g-openai-privacy-required",
+		Platform:          service.PlatformOpenAI,
+		RequirePrivacySet: true,
+	})
+	ready := mustCreateAccount(s.T(), s.client, &service.Account{
+		Name:        "privacy-ready",
+		Platform:    service.PlatformOpenAI,
+		Type:        service.AccountTypeOAuth,
+		Schedulable: true,
+		Extra:       map[string]any{"privacy_mode": service.PrivacyModeTrainingOff},
+	})
+	unset := mustCreateAccount(s.T(), s.client, &service.Account{
+		Name:        "privacy-unset",
+		Platform:    service.PlatformOpenAI,
+		Type:        service.AccountTypeOAuth,
+		Schedulable: true,
+	})
+	failed := mustCreateAccount(s.T(), s.client, &service.Account{
+		Name:        "privacy-failed",
+		Platform:    service.PlatformOpenAI,
+		Type:        service.AccountTypeOAuth,
+		Schedulable: true,
+		Extra:       map[string]any{"privacy_mode": service.PrivacyModeFailed},
+	})
+	mustBindAccountToGroup(s.T(), s.client, ready.ID, group.ID, 1)
+	mustBindAccountToGroup(s.T(), s.client, unset.ID, group.ID, 2)
+	mustBindAccountToGroup(s.T(), s.client, failed.ID, group.ID, 3)
+
+	accounts, err := s.repo.ListSchedulableByGroupIDAndPlatform(s.ctx, group.ID, service.PlatformOpenAI)
+	s.Require().NoError(err)
+	s.Require().Len(accounts, 1)
+	s.Require().Equal(ready.ID, accounts[0].ID)
+}
+
 func (s *AccountRepoSuite) TestListSchedulableByGroupIDAndPlatform_RequiredAccountLevelIgnoredForNonOpenAI() {
 	group := mustCreateGroup(s.T(), s.client, &service.Group{
 		Name:                 "g-anthropic-plus",

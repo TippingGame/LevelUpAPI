@@ -3339,6 +3339,9 @@ func (r *accountRepository) queryAccountsByGroup(ctx context.Context, groupID in
 		if group.RequireOauthOnly {
 			preds = append(preds, dbaccount.TypeIn(service.AccountTypeOAuth, service.AccountTypeSetupToken))
 		}
+		if group.RequirePrivacySet {
+			preds = append(preds, accountPrivacySetPredicate())
+		}
 	}
 	if opts.status != "" {
 		preds = append(preds, dbaccount.StatusEQ(opts.status))
@@ -3426,6 +3429,26 @@ func accountPublicShareApprovedPredicate() dbpredicate.Account {
 			b.Ident(shareStatusCol).WriteString(", ").Arg("").WriteString("))) NOT IN (")
 			b.Arg(service.AccountShareStatusPending).WriteString(", ").Arg(service.AccountShareStatusSuspended).WriteString(")")
 		}))
+	})
+}
+
+func accountPrivacySetPredicate() dbpredicate.Account {
+	return dbaccount.Or(
+		dbaccount.And(
+			dbaccount.PlatformEQ(service.PlatformOpenAI),
+			accountPrivacyModePredicate(service.PrivacyModeTrainingOff),
+		),
+		dbaccount.And(
+			dbaccount.PlatformEQ(service.PlatformAntigravity),
+			accountPrivacyModePredicate(service.AntigravityPrivacySet),
+		),
+		dbaccount.Not(dbaccount.PlatformIn(service.PlatformOpenAI, service.PlatformAntigravity)),
+	)
+}
+
+func accountPrivacyModePredicate(mode string) dbpredicate.Account {
+	return dbpredicate.Account(func(s *entsql.Selector) {
+		s.Where(sqljson.ValueEQ(dbaccount.FieldExtra, mode, sqljson.Path("privacy_mode")))
 	})
 }
 

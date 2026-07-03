@@ -266,7 +266,7 @@ func AccountFromServiceShallow(a *service.Account) *Account {
 		Name:                      a.Name,
 		Notes:                     a.Notes,
 		Platform:                  a.Platform,
-		AccountLevel:              service.NormalizeAccountLevel(a.AccountLevel),
+		AccountLevel:              accountResponseLevel(a),
 		Type:                      a.Type,
 		Credentials:               redactedCredentials,
 		CredentialsStatus:         credentialsStatus,
@@ -455,6 +455,16 @@ func AccountFromServiceShallow(a *service.Account) *Account {
 	}
 
 	return out
+}
+
+func accountResponseLevel(a *service.Account) string {
+	if a == nil {
+		return service.AccountLevelUnknown
+	}
+	if a.Platform == service.PlatformOpenAI && (a.Type == service.AccountTypeOAuth || a.Type == service.AccountTypeSetupToken) {
+		return service.EffectiveOpenAISharedPoolAccountLevel(a.Platform, a.AccountLevel, a.Credentials, a.Extra)
+	}
+	return service.NormalizeAccountLevel(a.AccountLevel)
 }
 
 func AccountFromService(a *service.Account) *Account {

@@ -81,3 +81,37 @@ func TestAccountFromServiceShallow_HidesIgnoredOpenAIOAuthRelayPoolTempState(t *
 	require.Nil(t, out.TempUnschedulableUntil)
 	require.Empty(t, out.TempUnschedulableReason)
 }
+
+func TestAccountFromServiceShallow_UsesEffectiveOpenAILevelForOAuthDisplay(t *testing.T) {
+	t.Parallel()
+
+	out := AccountFromServiceShallow(&service.Account{
+		ID:           4,
+		Platform:     service.PlatformOpenAI,
+		Type:         service.AccountTypeOAuth,
+		AccountLevel: service.AccountLevelPlus,
+		Credentials:  map[string]any{"plan_type": "chatgpt_pro"},
+		Status:       service.StatusActive,
+		Schedulable:  true,
+	})
+
+	require.NotNil(t, out)
+	require.Equal(t, service.AccountLevelPro, out.AccountLevel)
+}
+
+func TestAccountFromServiceShallow_KeepsOpenAIAPIKeyStoredLevel(t *testing.T) {
+	t.Parallel()
+
+	out := AccountFromServiceShallow(&service.Account{
+		ID:           5,
+		Platform:     service.PlatformOpenAI,
+		Type:         service.AccountTypeAPIKey,
+		AccountLevel: service.AccountLevelPlus,
+		Credentials:  map[string]any{"plan_type": "chatgpt_pro"},
+		Status:       service.StatusActive,
+		Schedulable:  true,
+	})
+
+	require.NotNil(t, out)
+	require.Equal(t, service.AccountLevelPlus, out.AccountLevel)
+}
