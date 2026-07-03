@@ -1740,8 +1740,10 @@ func (s *GeminiMessagesCompatService) shouldRetryGeminiUpstreamError(account *Ac
 		return false
 	}
 	switch statusCode {
-	case 429, 500, 502, 503, 529:
+	case 500, 502, 503, 529:
 		return true
+	case 429:
+		return false
 	case 403:
 		// GeminiCli OAuth occasionally returns 403 transiently (activation/quota propagation); allow retry.
 		if account == nil || account.Type != AccountTypeOAuth {
@@ -2924,6 +2926,9 @@ func asInt(v any) (int, bool) {
 }
 
 func (s *GeminiMessagesCompatService) handleGeminiUpstreamError(ctx context.Context, account *Account, statusCode int, headers http.Header, body []byte) {
+	if account == nil || s == nil {
+		return
+	}
 	// 遵守自定义错误码策略：未命中则跳过所有限流处理
 	if !account.ShouldHandleErrorCode(statusCode) {
 		return
@@ -2958,29 +2963,42 @@ func (s *GeminiMessagesCompatService) handleGeminiUpstreamError(ctx context.Cont
 				logger.LegacyPrintf("service.gemini_messages_compat", "[Gemini 429] Account %d (Google One OAuth, tier=%s, project=%s) rate limited, cooldown=%v", account.ID, tierID, projectID, time.Until(ra).Truncate(time.Second))
 			}
 		} else {
-			// API Key / AI Studio OAuth: PST 午夜
-			if ts := nextGeminiDailyResetUnix(); ts != nil {
-				ra = time.Unix(*ts, 0)
-				logger.LegacyPrintf("service.gemini_messages_compat", "[Gemini 429] Account %d (API Key/AI Studio, type=%s) rate limited, reset at PST midnight (%v)", account.ID, account.Type, ra)
-			} else {
-				// 兜底：5 分钟
-				ra = time.Now().Add(5 * time.Minute)
-				logger.LegacyPrintf("service.gemini_messages_compat", "[Gemini 429] Account %d rate limited, fallback to 5min", account.ID)
+			// API Key / AI Studio OAuth: without a structured reset signal, use a short
+			// local cooldown instead of assuming daily quota exhaustion until PST midnight.
+			if s.rateLimitService != nil {
+				s.rateLimitService.apply429FallbackRateLimit(ctx, account, "gemini_no_reset_time")
+				return
 			}
+			ra = time.Now().Add(time.Duration(defaultRateLimit429CooldownSeconds) * time.Second)
+			logger.LegacyPrintf("service.gemini_messages_compat", "[Gemini 429] Account %d (API Key/AI Studio, type=%s) no reset signal, fallback cooldown=%v", account.ID, account.Type, time.Until(ra).Truncate(time.Second))
 		}
-		writeCtx, cancel := rateLimitStateContext(ctx)
-		_ = s.accountRepo.SetRateLimited(writeCtx, account.ID, ra)
-		cancel()
+		s.setGeminiRateLimited(ctx, account, ra)
 		return
 	}
 
 	// 使用解析到的重置时间
 	resetTime := time.Unix(*resetAt, 0)
-	writeCtx, cancel := rateLimitStateContext(ctx)
-	_ = s.accountRepo.SetRateLimited(writeCtx, account.ID, resetTime)
-	cancel()
+	s.setGeminiRateLimited(ctx, account, resetTime)
 	logger.LegacyPrintf("service.gemini_messages_compat", "[Gemini 429] Account %d rate limited until %v (oauth_type=%s, tier=%s)",
 		account.ID, resetTime, oauthType, tierID)
+}
+
+func (s *GeminiMessagesCompatService) setGeminiRateLimited(ctx context.Context, account *Account, resetAt time.Time) {
+	if s == nil || account == nil {
+		return
+	}
+	if s.rateLimitService != nil {
+		if err := s.rateLimitService.persistRateLimitedState(ctx, account, resetAt); err != nil {
+			logger.LegacyPrintf("service.gemini_messages_compat", "[Gemini 429] Account %d rate limit persist failed: %v", account.ID, err)
+		}
+		return
+	}
+	if s.accountRepo == nil {
+		return
+	}
+	writeCtx, cancel := rateLimitStateContext(ctx)
+	_ = s.accountRepo.SetRateLimited(writeCtx, account.ID, resetAt)
+	cancel()
 }
 
 // ParseGeminiRateLimitResetTime 解析 Gemini 格式的 429 响应，返回重置时间的 Unix 时间戳

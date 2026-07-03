@@ -56,6 +56,19 @@ func TestTransientUpstreamStatusesStillFailover(t *testing.T) {
 	}
 }
 
+func TestGemini429FailoversWithoutSameAccountRetry(t *testing.T) {
+	account := &Account{Type: AccountTypeAPIKey, Platform: PlatformGemini}
+	svc := &GeminiMessagesCompatService{}
+
+	require.False(t, svc.shouldRetryGeminiUpstreamError(account, http.StatusTooManyRequests))
+	require.True(t, svc.shouldFailoverGeminiUpstreamError(http.StatusTooManyRequests))
+	require.True(t, svc.shouldFailoverGeminiUpstreamResponse(
+		http.StatusTooManyRequests,
+		"rate limit",
+		[]byte(`{"error":{"code":429,"message":"rate limit","status":"RESOURCE_EXHAUSTED"}}`),
+	))
+}
+
 func TestCustomErrorCodeOmittedClientStatusesDoNotRetry(t *testing.T) {
 	statuses := []int{
 		http.StatusBadRequest,

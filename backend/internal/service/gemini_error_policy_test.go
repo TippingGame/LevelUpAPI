@@ -429,6 +429,29 @@ func TestHandleGeminiUpstreamError_GoogleOneCapacityExhaustedUsesTierCooldown(t 
 	require.True(t, repo.lastRateLimitedReset.Before(after.Add(5*time.Minute).Add(2*time.Second)))
 }
 
+func TestHandleGeminiUpstreamError_APIKey429NoResetUsesShortFallback(t *testing.T) {
+	repo := &geminiErrorPolicyRepo{}
+	rlSvc := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+	svc := &GeminiMessagesCompatService{
+		accountRepo:      repo,
+		rateLimitService: rlSvc,
+	}
+	account := &Account{
+		ID:       512,
+		Platform: PlatformGemini,
+		Type:     AccountTypeAPIKey,
+	}
+	body := []byte(`{"error":{"code":429,"message":"rate limit","status":"RESOURCE_EXHAUSTED"}}`)
+
+	before := time.Now()
+	svc.handleGeminiUpstreamError(context.Background(), account, http.StatusTooManyRequests, http.Header{}, body)
+
+	require.Equal(t, 1, repo.setRateLimitedCalls)
+	require.Equal(t, int64(512), repo.lastRateLimitedID)
+	require.WithinDuration(t, before.Add(time.Duration(defaultRateLimit429CooldownSeconds)*time.Second), repo.lastRateLimitedReset, 2*time.Second)
+	require.True(t, repo.lastRateLimitedReset.Before(before.Add(time.Minute)))
+}
+
 // ---------------------------------------------------------------------------
 // geminiErrorPolicyRepo — minimal AccountRepository stub for Gemini error
 // policy tests. Embeds mockAccountRepoForGemini and adds tracking.
