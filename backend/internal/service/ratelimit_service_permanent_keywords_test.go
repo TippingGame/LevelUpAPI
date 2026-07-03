@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"testing"
 	"time"
@@ -18,6 +19,7 @@ type permanentKeywordAccountRepoStub struct {
 	tempCalls       int
 	lastTempReason  string
 	lastTempCtxErr  error
+	tempErr         error
 }
 
 func (r *permanentKeywordAccountRepoStub) SetError(ctx context.Context, _ int64, errorMsg string) error {
@@ -31,7 +33,7 @@ func (r *permanentKeywordAccountRepoStub) SetTempUnschedulable(ctx context.Conte
 	r.tempCalls++
 	r.lastTempReason = reason
 	r.lastTempCtxErr = ctx.Err()
-	return nil
+	return r.tempErr
 }
 
 type permanentKeywordOpenAI403CounterStub struct{}
@@ -331,6 +333,82 @@ func TestRateLimitServiceHandleUpstreamErrorAmbiguousPermissionDoesNotSetPermane
 			require.Equal(t, 1, repo.tempCalls)
 			require.Contains(t, repo.lastTempReason, tt.want)
 			require.Contains(t, repo.lastTempReason, "openai_403")
+		})
+	}
+}
+
+func TestRateLimitServiceRecoverable403TempPersistFailureDoesNotSetPermanentError(t *testing.T) {
+	tests := []struct {
+		name        string
+		account     *Account
+		headers     http.Header
+		body        []byte
+		wantKeyword string
+	}{
+		{
+			name: "openai 403",
+			account: &Account{
+				ID:          2076,
+				Platform:    PlatformOpenAI,
+				Type:        AccountTypeAPIKey,
+				Status:      StatusActive,
+				Schedulable: true,
+			},
+			body:        []byte(`{"error":{"message":"Permission denied","type":"invalid_request_error"}}`),
+			wantKeyword: "openai_403",
+		},
+		{
+			name: "anthropic oauth 403",
+			account: &Account{
+				ID:          2077,
+				Platform:    PlatformAnthropic,
+				Type:        AccountTypeOAuth,
+				Status:      StatusActive,
+				Schedulable: true,
+			},
+			body:        []byte(`{"error":{"message":"temporary access rejection"}}`),
+			wantKeyword: "anthropic_oauth_403",
+		},
+		{
+			name: "cloudflare challenge",
+			account: &Account{
+				ID:          2078,
+				Platform:    PlatformOpenAI,
+				Type:        AccountTypeAPIKey,
+				Status:      StatusActive,
+				Schedulable: true,
+			},
+			headers:     http.Header{"cf-mitigated": []string{"challenge"}},
+			body:        []byte(`<html><title>Just a moment...</title></html>`),
+			wantKeyword: "cloudflare_challenge",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := &permanentKeywordAccountRepoStub{tempErr: errors.New("temporary state write failed")}
+			cache := &runtimeTempUnschedCacheStub{}
+			svc := NewRateLimitService(repo, nil, nil, nil, cache)
+			svc.SetOpenAI403CounterCache(permanentKeywordOpenAI403CounterStub{})
+
+			shouldDisable := svc.HandleUpstreamError(
+				context.Background(),
+				tt.account,
+				http.StatusForbidden,
+				tt.headers,
+				tt.body,
+			)
+
+			require.True(t, shouldDisable)
+			require.Equal(t, 0, repo.setErrorCalls)
+			require.Equal(t, 1, repo.tempCalls)
+			require.Equal(t, StatusActive, tt.account.Status)
+			require.True(t, tt.account.Schedulable)
+			require.NotNil(t, tt.account.TempUnschedulableUntil)
+			require.NotEmpty(t, tt.account.TempUnschedulableReason)
+			require.NotNil(t, cache.states[tt.account.ID])
+			require.Contains(t, cache.states[tt.account.ID].MatchedKeyword, tt.wantKeyword)
+			require.Equal(t, http.StatusForbidden, cache.states[tt.account.ID].StatusCode)
 		})
 	}
 }

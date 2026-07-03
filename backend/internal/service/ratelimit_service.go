@@ -221,6 +221,17 @@ func (s *RateLimitService) persistTempUnschedulableState(ctx context.Context, ac
 	return nil
 }
 
+func (s *RateLimitService) markTempUnschedRuntimeFallback(ctx context.Context, account *Account, until time.Time, reason string, state *TempUnschedState, source string) {
+	if account == nil || state == nil {
+		return
+	}
+	account.TempUnschedulableUntil = &until
+	account.TempUnschedulableReason = reason
+	if s != nil {
+		setTempUnschedCacheBestEffort(ctx, s.tempUnschedCache, account.ID, state, source)
+	}
+}
+
 func (s *RateLimitService) persistRateLimitedState(ctx context.Context, account *Account, resetAt time.Time) error {
 	if account == nil {
 		return nil
@@ -472,6 +483,7 @@ func (s *RateLimitService) HandleUpstreamError(ctx context.Context, account *Acc
 			state := newTempUnschedState(until, http.StatusUnauthorized, "oauth_401", msg)
 			if err := s.persistTempUnschedulableState(ctx, account, until, msg, state, "oauth_401"); err != nil {
 				slog.Warn("oauth_401_set_temp_unschedulable_failed", "account_id", account.ID, "error", err)
+				s.markTempUnschedRuntimeFallback(ctx, account, until, msg, state, "oauth_401_runtime_fallback")
 			}
 			shouldDisable = true
 		} else {
@@ -631,7 +643,8 @@ func (s *RateLimitService) handleOpenAIModelCapacityError(ctx context.Context, a
 
 	if err := s.persistTempUnschedulableState(ctx, account, until, reason, state, "openai_model_capacity"); err != nil {
 		slog.Warn("openai_model_capacity_temp_unsched_failed", "account_id", account.ID, "status_code", statusCode, "error", err)
-		return false
+		s.markTempUnschedRuntimeFallback(ctx, account, until, reason, state, "openai_model_capacity_runtime_fallback")
+		return true
 	}
 
 	slog.Info("openai_model_capacity_temp_unscheduled", "account_id", account.ID, "status_code", statusCode, "until", until)
@@ -1032,6 +1045,7 @@ func (s *RateLimitService) handleBillingQuotaTempUnschedulable(ctx context.Conte
 	}
 	if err := s.persistTempUnschedulableState(ctx, account, until, reason, state, "billing_quota"); err != nil {
 		slog.Warn("billing_quota_temp_unschedulable_failed", "account_id", account.ID, "status_code", statusCode, "error", err)
+		s.markTempUnschedRuntimeFallback(ctx, account, until, reason, state, "billing_quota_runtime_fallback")
 		return
 	}
 	slog.Warn("billing_quota_temp_unschedulable", "account_id", account.ID, "status_code", statusCode, "until", until, "error", msg)
@@ -1067,7 +1081,7 @@ func (s *RateLimitService) handleCloudflareChallenge(ctx context.Context, accoun
 
 	if err := s.persistTempUnschedulableState(ctx, account, until, reason, state, "cloudflare_challenge"); err != nil {
 		slog.Warn("cloudflare_challenge_temp_unschedulable_failed", "account_id", account.ID, "status_code", statusCode, "error", err)
-		s.handleAuthError(ctx, account, msg)
+		s.markTempUnschedRuntimeFallback(ctx, account, until, reason, state, "cloudflare_challenge_runtime_fallback")
 		return true
 	}
 
@@ -1325,6 +1339,7 @@ func (s *RateLimitService) handleGeneric403TempUnschedulable(ctx context.Context
 
 	if err := s.persistTempUnschedulableState(ctx, account, until, reason, state, "generic_403"); err != nil {
 		slog.Warn("generic_403_set_temp_unschedulable_failed", "account_id", account.ID, "error", err)
+		s.markTempUnschedRuntimeFallback(ctx, account, until, reason, state, "generic_403_runtime_fallback")
 		return
 	}
 
@@ -1388,7 +1403,7 @@ func (s *RateLimitService) handleAnthropicOAuth403(ctx context.Context, account 
 
 	if err := s.persistTempUnschedulableState(ctx, account, until, reason, state, "anthropic_oauth_403"); err != nil {
 		slog.Warn("anthropic_oauth_403_set_temp_unschedulable_failed", "account_id", account.ID, "error", err)
-		s.handleAuthError(ctx, account, msg)
+		s.markTempUnschedRuntimeFallback(ctx, account, until, reason, state, "anthropic_oauth_403_runtime_fallback")
 		return true
 	}
 
@@ -1423,24 +1438,18 @@ func (s *RateLimitService) handleOpenAI403(ctx context.Context, account *Account
 	)
 
 	if s.openAI403CounterCache == nil {
-		if !s.setOpenAI403TempUnschedulable(ctx, account, msg, 0, "counter_unavailable") {
-			s.handleAuthError(ctx, account, msg)
-		}
+		s.setOpenAI403TempUnschedulable(ctx, account, msg, 0, "counter_unavailable")
 		return true
 	}
 
 	count, err := s.openAI403CounterCache.IncrementOpenAI403Count(ctx, account.ID, openAI403CounterWindowMinutes)
 	if err != nil {
 		slog.Warn("openai_403_increment_failed", "account_id", account.ID, "error", err)
-		if !s.setOpenAI403TempUnschedulable(ctx, account, msg, 0, "counter_error") {
-			s.handleAuthError(ctx, account, msg)
-		}
+		s.setOpenAI403TempUnschedulable(ctx, account, msg, 0, "counter_error")
 		return true
 	}
 
-	if !s.setOpenAI403TempUnschedulable(ctx, account, msg, count, "") {
-		s.handleAuthError(ctx, account, msg)
-	}
+	s.setOpenAI403TempUnschedulable(ctx, account, msg, count, "")
 	return true
 }
 
@@ -1490,6 +1499,7 @@ func (s *RateLimitService) setOpenAI403TempUnschedulable(ctx context.Context, ac
 	}
 	if err := s.persistTempUnschedulableState(ctx, account, until, reason, state, "openai_403"); err != nil {
 		slog.Warn("openai_403_set_temp_unschedulable_failed", "account_id", account.ID, "error", err)
+		s.markTempUnschedRuntimeFallback(ctx, account, until, reason, state, "openai_403_runtime_fallback")
 		return false
 	}
 
@@ -1631,6 +1641,7 @@ func (s *RateLimitService) handleAntigravityGeneric403TempUnschedulable(ctx cont
 
 	if err := s.persistTempUnschedulableState(ctx, account, until, reason, state, "antigravity_403"); err != nil {
 		slog.Warn("antigravity_403_set_temp_unschedulable_failed", "account_id", account.ID, "error", err)
+		s.markTempUnschedRuntimeFallback(ctx, account, until, reason, state, "antigravity_403_runtime_fallback")
 		return
 	}
 
@@ -1654,6 +1665,7 @@ func (s *RateLimitService) handleCustomErrorCode(ctx context.Context, account *A
 	}
 	if err := s.persistTempUnschedulableState(ctx, account, until, reason, state, "custom_error_code"); err != nil {
 		slog.Warn("custom_error_code_temp_unschedulable_failed", "account_id", account.ID, "status_code", statusCode, "error", err)
+		s.markTempUnschedRuntimeFallback(ctx, account, until, reason, state, "custom_error_code_runtime_fallback")
 		return
 	}
 	slog.Warn("custom_error_code_temp_unschedulable", "account_id", account.ID, "status_code", statusCode, "until", until, "error", errorMsg)
@@ -2723,7 +2735,8 @@ func (s *RateLimitService) triggerTempUnschedulable(ctx context.Context, account
 
 	if err := s.persistTempUnschedulableState(ctx, account, until, reason, state, "temp_unsched_rule"); err != nil {
 		slog.Warn("temp_unsched_set_failed", "account_id", account.ID, "error", err)
-		return false
+		s.markTempUnschedRuntimeFallback(ctx, account, until, reason, state, "temp_unsched_rule_runtime_fallback")
+		return true
 	}
 
 	slog.Info("account_temp_unschedulable", "account_id", account.ID, "until", until, "rule_index", ruleIndex, "status_code", statusCode)
@@ -2827,7 +2840,8 @@ func (s *RateLimitService) triggerStreamTimeoutTempUnsched(ctx context.Context, 
 
 	if err := s.persistTempUnschedulableState(ctx, account, until, reason, state, "stream_timeout_temp_unsched"); err != nil {
 		slog.Warn("stream_timeout_set_temp_unsched_failed", "account_id", account.ID, "error", err)
-		return false
+		s.markTempUnschedRuntimeFallback(ctx, account, until, reason, state, "stream_timeout_temp_unsched_runtime_fallback")
+		return true
 	}
 
 	// 重置超时计数
