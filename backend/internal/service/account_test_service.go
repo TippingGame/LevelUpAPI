@@ -152,12 +152,16 @@ func (s *AccountTestService) handleAccountTestUpstreamError(ctx context.Context,
 	if s.accountRepo == nil {
 		return
 	}
-	if account.IsPoolMode() && !account.IsCustomErrorCodesEnabled() {
-		slog.Info("account_test_pool_mode_error_skipped", "account_id", account.ID, "status_code", statusCode)
-		return
-	}
-	if account.IsCustomErrorCodesEnabled() && !account.ShouldHandleErrorCode(statusCode) {
-		slog.Info("account_test_error_code_skipped", "account_id", account.ID, "status_code", statusCode)
+	if !shouldApplyLocalErrorState(account, statusCode) {
+		if account.IsPoolMode() && !account.HasActiveCustomErrorCodePolicy() {
+			slog.Info("account_test_pool_mode_error_skipped", "account_id", account.ID, "status_code", statusCode)
+			return
+		}
+		if account.IsCustomErrorCodesEnabled() {
+			slog.Info("account_test_error_code_skipped", "account_id", account.ID, "status_code", statusCode)
+			return
+		}
+		slog.Info("account_test_error_persist_skipped", "account_id", account.ID, "status_code", statusCode)
 		return
 	}
 	switch statusCode {

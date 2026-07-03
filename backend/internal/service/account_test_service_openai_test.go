@@ -197,6 +197,41 @@ func TestAccountTestService_UpstreamErrorFallbackSkipsPoolMode(t *testing.T) {
 	require.True(t, account.Schedulable)
 }
 
+func TestAccountTestService_UpstreamErrorFallbackSkipsPoolModeEmptyCustomPolicy(t *testing.T) {
+	ctx, _ := newTestContext()
+
+	repo := &openAIAccountTestRepo{}
+	svc := &AccountTestService{accountRepo: repo}
+	account := &Account{
+		ID:          86,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Status:      StatusActive,
+		Schedulable: true,
+		Credentials: map[string]any{
+			"api_key":                    "sk-test",
+			"pool_mode":                  true,
+			"custom_error_codes_enabled": true,
+		},
+	}
+
+	svc.handleAccountTestUpstreamError(
+		ctx.Request.Context(),
+		account,
+		"gpt-5.4",
+		http.StatusUnauthorized,
+		http.Header{},
+		[]byte(`{"error":{"message":"invalid api key"}}`),
+		"Authentication failed (401): invalid api key",
+		"account_test_openai_401",
+	)
+
+	require.Zero(t, repo.setErrorID)
+	require.Empty(t, repo.setErrorMsg)
+	require.Equal(t, StatusActive, account.Status)
+	require.True(t, account.Schedulable)
+}
+
 func TestAccountTestService_MarkAccountErrorFromTestSkipsPoolModeDefault(t *testing.T) {
 	ctx, _ := newTestContext()
 
