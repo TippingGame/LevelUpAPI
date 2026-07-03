@@ -42,6 +42,7 @@ func TestValidate_ClaudeCLIUserAgent(t *testing.T) {
 		{"标准版本号", "claude-cli/1.0.0", true},
 		{"多位版本号", "claude-cli/12.34.56", true},
 		{"大写开头", "Claude-CLI/1.0.0", true},
+		{"Claude Code 产品 UA", "Claude Code/2.1.199 Node.js/24.3.0", true},
 		{"非 claude-cli", "curl/7.64.1", false},
 		{"空 User-Agent", "", false},
 		{"部分匹配", "not-claude-cli/1.0.0", false},

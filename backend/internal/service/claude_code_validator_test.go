@@ -10,6 +10,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+const testClaudeCodeMetadataUserIDJSON = `{"device_id":"a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2","account_uuid":"","session_id":"123e4567-e89b-12d3-a456-426614174000"}`
+
 func TestClaudeCodeValidator_ProbeBypass(t *testing.T) {
 	validator := NewClaudeCodeValidator()
 	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/messages", nil)
@@ -102,6 +104,30 @@ func TestClaudeCodeValidator_BillingBlockVSCodeEntrypointRecognized(t *testing.T
 	require.True(t, ok)
 }
 
+func TestClaudeCodeValidator_ClaudeCodeProductUserAgentRecognized(t *testing.T) {
+	validator := NewClaudeCodeValidator()
+	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/messages", nil)
+	req.Header.Set("User-Agent", "Claude Code/2.1.199 Node.js/24.3.0")
+	req.Header.Set("X-App", "cli")
+	req.Header.Set("anthropic-beta", "claude-code-20250219")
+	req.Header.Set("anthropic-version", "2023-06-01")
+
+	ok := validator.Validate(req, map[string]any{
+		"model": "claude-opus-4-8",
+		"system": []any{
+			map[string]any{
+				"type": "text",
+				"text": "x-anthropic-billing-header: cc_version=2.1.199.f17; cc_entrypoint=cli;",
+			},
+		},
+		"metadata": map[string]any{
+			"user_id": testClaudeCodeMetadataUserIDJSON,
+		},
+	})
+	require.True(t, ok)
+	require.Equal(t, "2.1.199", validator.ExtractVersion(req.Header.Get("User-Agent")))
+}
+
 func TestClaudeCodeValidator_BillingBlockWithoutEntrypointFallsThrough(t *testing.T) {
 	validator := NewClaudeCodeValidator()
 	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/messages", nil)
@@ -134,10 +160,11 @@ func TestExtractVersion(t *testing.T) {
 		{"claude-cli/2.1.22 (darwin; arm64)", "2.1.22"},
 		{"claude-cli/1.0.0", "1.0.0"},
 		{"Claude-CLI/3.10.5 (linux; x86_64)", "3.10.5"}, // 大小写不敏感
-		{"curl/8.0.0", ""},                              // 非 Claude CLI
-		{"", ""},                                        // 空字符串
-		{"claude-cli/", ""},                             // 无版本号
-		{"claude-cli/2.1.22-beta", "2.1.22"},            // 带后缀仍提取主版本号
+		{"Claude Code/2.1.199 Node.js/24.3.0", "2.1.199"},
+		{"curl/8.0.0", ""},                   // 非 Claude CLI
+		{"", ""},                             // 空字符串
+		{"claude-cli/", ""},                  // 无版本号
+		{"claude-cli/2.1.22-beta", "2.1.22"}, // 带后缀仍提取主版本号
 	}
 	for _, tt := range tests {
 		got := v.ExtractVersion(tt.ua)

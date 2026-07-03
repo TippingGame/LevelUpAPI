@@ -168,6 +168,23 @@ func TestSetClaudeCodeClientContext_FastPathAndStrictPath(t *testing.T) {
 		require.True(t, service.IsClaudeCodeClient(c.Request.Context()))
 	})
 
+	t.Run("claude_code_product_user_agent_sets_true", func(t *testing.T) {
+		c, _ := newHelperTestContext(http.MethodPost, "/v1/messages")
+		c.Request.Header.Set("User-Agent", "Claude Code/2.1.199 Node.js/24.3.0")
+		c.Request.Header.Set("X-App", "cli")
+		c.Request.Header.Set("anthropic-beta", "claude-code-20250219")
+		c.Request.Header.Set("anthropic-version", "2023-06-01")
+
+		body := []byte(`{
+			"model":"claude-3-5-sonnet-20241022",
+			"system":[{"type":"text","text":"x-anthropic-billing-header: cc_version=2.1.199.f17; cc_entrypoint=cli;"}],
+			"metadata":{"user_id":"{\"device_id\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"account_uuid\":\"\",\"session_id\":\"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa\"}"}
+		}`)
+		SetClaudeCodeClientContext(c, body, nil)
+		require.True(t, service.IsClaudeCodeClient(c.Request.Context()))
+		require.Equal(t, "2.1.199", service.GetClaudeCodeVersion(c.Request.Context()))
+	})
+
 	t.Run("cli_messages_path_invalid_body_sets_false", func(t *testing.T) {
 		c, _ := newHelperTestContext(http.MethodPost, "/v1/messages")
 		c.Request.Header.Set("User-Agent", "claude-cli/1.0.1")

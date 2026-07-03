@@ -33,6 +33,12 @@ func TestIsClaudeCodeClient(t *testing.T) {
 			want:           true,
 		},
 		{
+			name:           "Claude Code product UA with JSON user_id",
+			userAgent:      "Claude Code/2.1.199 Node.js/24.3.0",
+			metadataUserID: jsonUserID,
+			want:           true,
+		},
+		{
 			name:           "Claude Code case insensitive UA",
 			userAgent:      "Claude-CLI/2.0.0",
 			metadataUserID: legacyUserID,

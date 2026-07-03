@@ -358,8 +358,7 @@ func isClaudeCodeCredentialScopeError(msg string) bool {
 // sseDataRe matches SSE data lines with optional whitespace after colon.
 // Some upstream APIs return non-standard "data:" without space (should be "data: ").
 var (
-	sseDataRe            = regexp.MustCompile(`^data:\s*`)
-	claudeCliUserAgentRe = regexp.MustCompile(`(?i)^claude-cli/\d+\.\d+\.\d+`)
+	sseDataRe = regexp.MustCompile(`^data:\s*`)
 
 	// claudeCodePromptPrefixes 用于检测 Claude Code 系统提示词的前缀列表
 	// 支持多种变体：标准版、Agent SDK 版、Explore Agent 版、Compact 版等
@@ -4981,14 +4980,14 @@ func sleepWithContext(ctx context.Context, d time.Duration) error {
 
 // isClaudeCodeClient 判断请求是否来自真正的 Claude Code 客户端。
 // 判定条件：
-//  1. User-Agent 匹配 claude-cli/X.Y.Z（大小写不敏感）
+//  1. User-Agent 匹配 Claude Code 官方客户端 UA（大小写不敏感）
 //  2. metadata.user_id 符合 Claude Code 格式（legacy 或 JSON 格式）
 //
 // 只检查 metadata.user_id 非空不够严格：第三方工具（opencode 等）可能伪造 UA
 // 并附带任意 metadata.user_id 字符串，从而绕过 mimicry。必须通过 ParseMetadataUserID
 // 验证格式才能确认是真正的 Claude Code 客户端。
 func isClaudeCodeClient(userAgent string, metadataUserID string) bool {
-	if !claudeCliUserAgentRe.MatchString(userAgent) {
+	if !claudeCodeUAPattern.MatchString(userAgent) {
 		return false
 	}
 	return ParseMetadataUserID(metadataUserID) != nil
