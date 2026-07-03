@@ -405,13 +405,12 @@ func (s *RateLimitService) HandleUpstreamError(ctx context.Context, account *Acc
 		return false
 	}
 
-	customErrorCodesEnabled := account.IsCustomErrorCodesEnabled()
-
 	// 池模式默认不标记本地账号状态；仅当用户显式配置自定义错误码时按本地策略处理。
-	if account.IsPoolMode() && !customErrorCodesEnabled {
+	if account.IsPoolMode() && !account.HasActiveCustomErrorCodePolicy() {
 		slog.Info("pool_mode_error_skipped", "account_id", account.ID, "status_code", statusCode)
 		return false
 	}
+	customErrorCodesEnabled := account.IsCustomErrorCodesEnabled()
 
 	if account.Platform == PlatformOpenAI && isOpenAIModelCapacityError(statusCode, "", responseBody) {
 		return s.handleOpenAIModelCapacityError(ctx, account, statusCode, responseBody)

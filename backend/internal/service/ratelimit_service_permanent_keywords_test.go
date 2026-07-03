@@ -645,6 +645,38 @@ func TestRateLimitServiceHandleUpstreamErrorPermanentErrorRuntimeFallbackOnSetEr
 	require.Equal(t, "account_error", cache.states[551].MatchedKeyword)
 }
 
+func TestRateLimitServiceHandleUpstreamErrorPoolModeEmptyCustomPolicySkipsPermanentKeyword(t *testing.T) {
+	repo := &permanentKeywordAccountRepoStub{}
+	cache := &runtimeTempUnschedCacheStub{}
+	svc := NewRateLimitService(repo, nil, nil, nil, cache)
+	account := &Account{
+		ID:          552,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Status:      StatusActive,
+		Schedulable: true,
+		Credentials: map[string]any{
+			"pool_mode":                  true,
+			"custom_error_codes_enabled": true,
+		},
+	}
+
+	shouldDisable := svc.HandleUpstreamError(
+		context.Background(),
+		account,
+		http.StatusUnauthorized,
+		http.Header{},
+		[]byte(`{"error":{"message":"The API key has been revoked."}}`),
+	)
+
+	require.False(t, shouldDisable)
+	require.Equal(t, 0, repo.setErrorCalls)
+	require.Equal(t, 0, repo.tempCalls)
+	require.Equal(t, StatusActive, account.Status)
+	require.True(t, account.Schedulable)
+	require.Nil(t, cache.states[552])
+}
+
 func TestRateLimitServiceHandleUpstreamErrorCustomErrorSetsTempUnschedulable(t *testing.T) {
 	repo := &permanentKeywordAccountRepoStub{}
 	cache := &runtimeTempUnschedCacheStub{}
