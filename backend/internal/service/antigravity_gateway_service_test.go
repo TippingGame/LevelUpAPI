@@ -122,6 +122,17 @@ func TestIsPromptTooLongError(t *testing.T) {
 	require.False(t, isPromptTooLongError([]byte(`{"error":{"message":"other"}}`)))
 }
 
+func TestAntigravityIsModelNotFoundError(t *testing.T) {
+	require.True(t, isModelNotFoundError(http.StatusNotFound, []byte(`{"error":{"message":"Model not found"}}`)))
+	require.True(t, isModelNotFoundError(http.StatusNotFound, []byte(`{"error":{"message":"unknown model gemini-x"}}`)))
+	require.True(t, isModelNotFoundError(http.StatusNotFound, []byte(`{"error":{"message":"Publisher Model resource not found"}}`)))
+
+	require.False(t, isModelNotFoundError(http.StatusNotFound, nil))
+	require.False(t, isModelNotFoundError(http.StatusNotFound, []byte(`{"error":{"message":"Endpoint not found"}}`)))
+	require.False(t, isModelNotFoundError(http.StatusNotFound, []byte(`{"error":{"message":"Project not found"}}`)))
+	require.False(t, isModelNotFoundError(http.StatusBadRequest, []byte(`{"error":{"message":"Model not found"}}`)))
+}
+
 type httpUpstreamStub struct {
 	resp *http.Response
 	err  error
