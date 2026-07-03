@@ -2698,7 +2698,9 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	if apiKey != nil {
 		imageGenerationAllowed = GroupAllowsImageGeneration(apiKey.Group)
 	}
-	codexImageGenerationBridgeEnabled := isCodexCLI && imageGenerationAllowed && s.isCodexImageGenerationBridgeEnabled(ctx, account, apiKey)
+	// /responses/compact is a session compaction request; upstream rejects
+	// tool_choice there, and image_generation bridge injection is meaningless.
+	codexImageGenerationBridgeEnabled := isCodexCLI && imageGenerationAllowed && !isOpenAIResponsesCompactPath(c) && s.isCodexImageGenerationBridgeEnabled(ctx, account, apiKey)
 
 	if codexImageGenerationBridgeEnabled && ensureOpenAIResponsesImageGenerationTool(reqBody) {
 		bodyModified = true
