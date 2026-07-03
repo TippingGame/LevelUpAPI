@@ -838,6 +838,9 @@ func (r *accountRepository) ListOwnedWithFilters(ctx context.Context, ownerUserI
 	if ownerUserID <= 0 {
 		return nil, nil, service.ErrUserNotFound
 	}
+	if _, err := r.repairQuotaPoolOwnerOpenAISharedPoolBindings(ctx, ownerUserID); err != nil {
+		return nil, nil, err
+	}
 	return r.listWithFilters(ctx, params, &ownerUserID, platform, accountType, status, search, "", groupID, proxyID, privacyMode)
 }
 
