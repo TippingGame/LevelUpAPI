@@ -269,18 +269,27 @@ func (p *OpenAITokenProvider) GetAccessToken(ctx context.Context, account *Accou
 }
 
 func (p *OpenAITokenProvider) disableAccountMissingRefreshToken(account *Account, reason string) {
-	if p == nil || p.accountRepo == nil || account == nil {
+	if p == nil || account == nil {
 		return
 	}
 	bgCtx := context.Background()
-	if err := p.accountRepo.SetError(bgCtx, account.ID, reason); err != nil {
+	var setErr error
+	if p.accountRepo != nil {
+		setErr = p.accountRepo.SetError(bgCtx, account.ID, reason)
+	} else {
+		setErr = errors.New("account repository is nil")
+	}
+	if setErr != nil {
 		slog.Warn("openai_token_provider.set_error_failed",
 			"account_id", account.ID,
-			"error", err,
+			"error", setErr,
 		)
-		return
 	}
-	markAccountErrorRuntimeEvicted(bgCtx, p.tempUnschedCache, account, reason, "openai_token_provider_missing_refresh_token")
+	source := "openai_token_provider_missing_refresh_token"
+	if setErr != nil {
+		source = "openai_token_provider_missing_refresh_token_runtime_fallback"
+	}
+	markAccountErrorRuntimeEvicted(bgCtx, p.tempUnschedCache, account, reason, source)
 	if p.tokenCache != nil {
 		cacheKey := OpenAITokenCacheKey(account)
 		if err := p.tokenCache.DeleteAccessToken(bgCtx, cacheKey); err != nil {
@@ -289,6 +298,9 @@ func (p *OpenAITokenProvider) disableAccountMissingRefreshToken(account *Account
 				"error", err,
 			)
 		}
+	}
+	if setErr != nil {
+		return
 	}
 	slog.Warn("openai_token_provider.account_disabled_missing_refresh_token",
 		"account_id", account.ID,

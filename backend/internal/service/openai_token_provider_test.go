@@ -965,3 +965,39 @@ func TestOpenAITokenProvider_NoRefreshTokenExpired_DisablesAccount(t *testing.T)
 	require.Equal(t, "account_error", tempCache.states[2881].MatchedKeyword)
 	require.NotContains(t, cache.tokens, cacheKey)
 }
+
+func TestOpenAITokenProvider_NoRefreshTokenExpired_RuntimeFallbackOnSetErrorFailure(t *testing.T) {
+	cache := newOpenAITokenCacheStub()
+	repo := &rateLimitAccountRepoStub{setErrorErr: errors.New("db timeout")}
+	tempCache := &runtimeTempUnschedCacheStub{}
+	expiresAt := time.Now().Add(-time.Minute).UTC().Format(time.RFC3339)
+	account := &Account{
+		ID:          2882,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeOAuth,
+		Status:      StatusActive,
+		Schedulable: true,
+		Credentials: map[string]any{
+			"access_token": "expired-access-token",
+			"expires_at":   expiresAt,
+		},
+	}
+	cacheKey := OpenAITokenCacheKey(account)
+	cache.tokens[cacheKey] = "stale-cached-token"
+	cache.getErr = errors.New("simulated cache miss")
+
+	provider := NewOpenAITokenProvider(repo, cache, nil)
+	provider.SetTempUnschedCache(tempCache)
+
+	token, err := provider.GetAccessToken(context.Background(), account)
+
+	require.Error(t, err)
+	require.Empty(t, token)
+	require.Contains(t, err.Error(), "refresh_token is missing")
+	require.Equal(t, 1, repo.setErrorCalls)
+	require.Equal(t, StatusError, account.Status)
+	require.False(t, account.Schedulable)
+	require.NotNil(t, tempCache.states[2882])
+	require.Equal(t, "account_error", tempCache.states[2882].MatchedKeyword)
+	require.NotContains(t, cache.tokens, cacheKey)
+}
