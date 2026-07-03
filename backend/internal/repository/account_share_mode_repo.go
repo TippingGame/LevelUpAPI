@@ -2769,6 +2769,7 @@ func accountShareMembershipIdleDeadline(membership *service.AccountShareMembersh
 }
 
 func accountShareAccountUnavailableConditionSQL(nowExpr string) string {
+	respectLocalStateSQL := accountShareAccountRespectsLocalSystemErrorStateSQL()
 	codexProtectedSQL := fmt.Sprintf(`(
 		a.platform = '%s'
 		AND a.type = '%s'
@@ -2786,18 +2787,29 @@ func accountShareAccountUnavailableConditionSQL(nowExpr string) string {
 		a.status <> '%s'
 		OR a.schedulable = FALSE
 		OR (a.auto_pause_on_expired = TRUE AND a.expires_at IS NOT NULL AND a.expires_at <= %s)
-		OR (a.overload_until IS NOT NULL AND a.overload_until > %s)
-		OR (a.rate_limit_reset_at IS NOT NULL AND a.rate_limit_reset_at > %s)
-		OR (a.temp_unschedulable_until IS NOT NULL AND a.temp_unschedulable_until > %s)
+		OR (%s AND a.overload_until IS NOT NULL AND a.overload_until > %s)
+		OR (%s AND a.rate_limit_reset_at IS NOT NULL AND a.rate_limit_reset_at > %s)
+		OR (%s AND a.temp_unschedulable_until IS NOT NULL AND a.temp_unschedulable_until > %s)
 		OR %s
 	)`,
 		service.StatusActive,
 		nowExpr,
+		respectLocalStateSQL,
 		nowExpr,
+		respectLocalStateSQL,
 		nowExpr,
+		respectLocalStateSQL,
 		nowExpr,
 		codexProtectedSQL,
 	)
+}
+
+func accountShareAccountRespectsLocalSystemErrorStateSQL() string {
+	return fmt.Sprintf(`NOT (
+		a.type IN ('%s', '%s')
+		AND LOWER(COALESCE(a.credentials->>'pool_mode', '')) = 'true'
+		AND LOWER(COALESCE(a.credentials->>'custom_error_codes_enabled', '')) <> 'true'
+	)`, service.AccountTypeAPIKey, service.AccountTypeBedrock)
 }
 
 func accountShareListingAvailableConditionSQL(nowExpr string) string {
@@ -3096,14 +3108,18 @@ func scanAccountShareListing(scanner accountShareListingScanner) (*service.Accou
 	listing.AccountPlanType = service.OpenAIAccountPlanType(account.Credentials, account.Extra)
 	listing.AccountStatus = account.Status
 	listing.AccountSchedulable = account.Schedulable
+	listing.AccountPoolMode = account.IsPoolMode()
+	listing.AccountCustomErrorCodesEnabled = account.IsCustomErrorCodesEnabled()
 	listing.AccountExpiresAt = account.ExpiresAt
 	listing.SubscriptionExpiresAt = parseAccountShareTime(subscriptionExpiresAtRaw.String)
 	listing.AccountLastUsedAt = account.LastUsedAt
-	listing.RateLimitedAt = account.RateLimitedAt
-	listing.RateLimitResetAt = account.RateLimitResetAt
-	listing.OverloadUntil = account.OverloadUntil
-	listing.TempUnschedulableUntil = account.TempUnschedulableUntil
-	listing.TempUnschedulableReason = account.TempUnschedulableReason
+	if account.RespectsLocalSystemErrorState() {
+		listing.RateLimitedAt = account.RateLimitedAt
+		listing.RateLimitResetAt = account.RateLimitResetAt
+		listing.OverloadUntil = account.OverloadUntil
+		listing.TempUnschedulableUntil = account.TempUnschedulableUntil
+		listing.TempUnschedulableReason = account.TempUnschedulableReason
+	}
 	if reason := account.CodexQuotaProtectionReasonAt(now); reason != "" {
 		listing.CodexQuotaProtectionReason = &reason
 		listing.CodexQuotaProtectionResetAt = account.CodexQuotaProtectionResetAt(now)

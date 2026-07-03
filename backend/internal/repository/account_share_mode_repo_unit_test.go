@@ -717,6 +717,25 @@ func TestAccountShareModeRepositoryDisablePermanentlyUnavailableListingsUsesPerm
 	}
 }
 
+func TestAccountShareUnavailableConditionGatesLocalStateForDefaultPoolMode(t *testing.T) {
+	sql := strings.ToLower(accountShareAccountUnavailableConditionSQL("now()"))
+	for _, required := range []string{
+		"a.type in ('apikey', 'bedrock')",
+		"credentials->>'pool_mode'",
+		"credentials->>'custom_error_codes_enabled'",
+		"and a.overload_until is not null",
+		"and a.rate_limit_reset_at is not null",
+		"and a.temp_unschedulable_until is not null",
+	} {
+		if !strings.Contains(sql, required) {
+			t.Fatalf("unavailable condition missing %q in SQL:\n%s", required, sql)
+		}
+	}
+	if count := strings.Count(sql, "credentials->>'pool_mode'"); count < 3 {
+		t.Fatalf("expected each transient local state condition to be gated by pool mode policy, found pool_mode %d times in SQL:\n%s", count, sql)
+	}
+}
+
 func TestAccountShareListingUsesApproximatePagination(t *testing.T) {
 	if accountShareListingUsesApproximatePagination(service.AccountShareListingFilters{}) {
 		t.Fatal("default listing filters should keep exact pagination")

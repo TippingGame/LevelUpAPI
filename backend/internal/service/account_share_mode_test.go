@@ -1065,6 +1065,29 @@ func TestAccountShareModeResolveBindingClearsUnavailableAccount(t *testing.T) {
 	}
 }
 
+func TestAccountShareListingUnavailableIgnoresDefaultPoolModeLocalState(t *testing.T) {
+	now := time.Now().UTC()
+	future := now.Add(time.Hour)
+	listing := &AccountShareListing{
+		AccountStatus:           StatusActive,
+		AccountSchedulable:      true,
+		AccountPoolMode:         true,
+		RateLimitResetAt:        &future,
+		OverloadUntil:           &future,
+		TempUnschedulableUntil:  &future,
+		TempUnschedulableReason: "stale local cooldown",
+	}
+
+	if accountShareListingAccountUnavailableAt(listing, now) {
+		t.Fatal("default pool mode listing should ignore stale local cooldown state")
+	}
+
+	listing.AccountCustomErrorCodesEnabled = true
+	if !accountShareListingAccountUnavailableAt(listing, now) {
+		t.Fatal("pool mode with custom error policy should still respect local cooldown state")
+	}
+}
+
 func TestAccountShareModeResolveBindingCachesNonModeGroup(t *testing.T) {
 	repo := &accountShareModeRepoStub{modeGroup: accountShareModeBoolPtr(false)}
 	svc := &AccountShareModeService{repo: repo}

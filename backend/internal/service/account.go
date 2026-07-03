@@ -529,6 +529,10 @@ func (a *Account) IsOverloadedAt(now time.Time) bool {
 	return now.Before(*a.OverloadUntil)
 }
 
+func (a *Account) RespectsLocalSystemErrorState() bool {
+	return shouldApplyLocalSystemErrorState(a)
+}
+
 func (a *Account) IsOAuth() bool {
 	return a.Type == AccountTypeOAuth || a.Type == AccountTypeSetupToken
 }

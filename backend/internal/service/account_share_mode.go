@@ -194,61 +194,63 @@ func (s *accountShareModeRequestState) set(userID, apiKeyID, groupID int64, memb
 }
 
 type AccountShareListing struct {
-	ID                          int64                     `json:"id"`
-	AccountID                   int64                     `json:"account_id"`
-	OwnerUserID                 int64                     `json:"owner_user_id"`
-	OwnerUsername               string                    `json:"owner_username,omitempty"`
-	AccountName                 string                    `json:"account_name,omitempty"`
-	ProxyID                     *int64                    `json:"proxy_id,omitempty"`
-	Proxy                       *AccountShareListingProxy `json:"proxy,omitempty"`
-	Status                      string                    `json:"status"`
-	SeatLimit                   int                       `json:"seat_limit"`
-	ActiveSeats                 int                       `json:"active_seats"`
-	RateMultiplier              float64                   `json:"rate_multiplier"`
-	AllowedModels               []string                  `json:"allowed_models"`
-	PerUserConcurrency          int                       `json:"per_user_concurrency"`
-	AccountConcurrency          int                       `json:"account_concurrency"`
-	HourlyRate                  float64                   `json:"hourly_rate"`
-	HourlyFeeWaiverMinimum      float64                   `json:"hourly_fee_waiver_minimum"`
-	MinBalanceRequired          float64                   `json:"min_balance_required"`
-	CodexCLIOnly                bool                      `json:"codex_cli_only"`
-	Codex5hLimitPercent         float64                   `json:"codex_5h_limit_percent"`
-	Codex7dLimitPercent         float64                   `json:"codex_7d_limit_percent"`
-	AccountLevel                string                    `json:"account_level,omitempty"`
-	AccountPlanType             string                    `json:"account_plan_type,omitempty"`
-	AccountStatus               string                    `json:"account_status,omitempty"`
-	AccountSchedulable          bool                      `json:"account_schedulable"`
-	CurrentConcurrency          int                       `json:"current_concurrency"`
-	AccountExpiresAt            *time.Time                `json:"account_expires_at,omitempty"`
-	SubscriptionExpiresAt       *time.Time                `json:"subscription_expires_at,omitempty"`
-	AccountLastUsedAt           *time.Time                `json:"account_last_used_at,omitempty"`
-	RateLimitedAt               *time.Time                `json:"rate_limited_at,omitempty"`
-	RateLimitResetAt            *time.Time                `json:"rate_limit_reset_at,omitempty"`
-	OverloadUntil               *time.Time                `json:"overload_until,omitempty"`
-	TempUnschedulableUntil      *time.Time                `json:"temp_unschedulable_until,omitempty"`
-	TempUnschedulableReason     string                    `json:"temp_unschedulable_reason,omitempty"`
-	CodexQuotaProtectionReason  *string                   `json:"codex_quota_protection_reason,omitempty"`
-	CodexQuotaProtectionResetAt *time.Time                `json:"codex_quota_protection_reset_at,omitempty"`
-	Codex5hUsage                *UsageProgress            `json:"codex_5h_usage,omitempty"`
-	Codex7dUsage                *UsageProgress            `json:"codex_7d_usage,omitempty"`
-	CodexUsageUpdatedAt         *time.Time                `json:"codex_usage_updated_at,omitempty"`
-	CurrentMembershipID         *int64                    `json:"current_membership_id,omitempty"`
-	CurrentAPIKeyID             *int64                    `json:"current_api_key_id,omitempty"`
-	CurrentJoinedAt             *time.Time                `json:"current_joined_at,omitempty"`
-	CurrentPaidUntil            *time.Time                `json:"current_paid_until,omitempty"`
-	CurrentBilledUntil          *time.Time                `json:"current_billed_until,omitempty"`
-	CurrentIdleTimeoutMinutes   *int                      `json:"current_idle_timeout_minutes,omitempty"`
-	CurrentLastRequestAt        *time.Time                `json:"current_last_request_at,omitempty"`
-	CurrentIdleExpiresAt        *time.Time                `json:"current_idle_expires_at,omitempty"`
-	LastUsedMembershipID        *int64                    `json:"last_used_membership_id,omitempty"`
-	LastUsedAt                  *time.Time                `json:"last_used_at,omitempty"`
-	EditingByUserID             *int64                    `json:"editing_by_user_id,omitempty"`
-	EditingByUsername           string                    `json:"editing_by_username,omitempty"`
-	EditingExpiresAt            *time.Time                `json:"editing_expires_at,omitempty"`
-	EditingMine                 bool                      `json:"editing_mine"`
-	EditSessionID               string                    `json:"edit_session_id,omitempty"`
-	CreatedAt                   time.Time                 `json:"created_at"`
-	UpdatedAt                   time.Time                 `json:"updated_at"`
+	ID                             int64                     `json:"id"`
+	AccountID                      int64                     `json:"account_id"`
+	OwnerUserID                    int64                     `json:"owner_user_id"`
+	OwnerUsername                  string                    `json:"owner_username,omitempty"`
+	AccountName                    string                    `json:"account_name,omitempty"`
+	ProxyID                        *int64                    `json:"proxy_id,omitempty"`
+	Proxy                          *AccountShareListingProxy `json:"proxy,omitempty"`
+	Status                         string                    `json:"status"`
+	SeatLimit                      int                       `json:"seat_limit"`
+	ActiveSeats                    int                       `json:"active_seats"`
+	RateMultiplier                 float64                   `json:"rate_multiplier"`
+	AllowedModels                  []string                  `json:"allowed_models"`
+	PerUserConcurrency             int                       `json:"per_user_concurrency"`
+	AccountConcurrency             int                       `json:"account_concurrency"`
+	HourlyRate                     float64                   `json:"hourly_rate"`
+	HourlyFeeWaiverMinimum         float64                   `json:"hourly_fee_waiver_minimum"`
+	MinBalanceRequired             float64                   `json:"min_balance_required"`
+	CodexCLIOnly                   bool                      `json:"codex_cli_only"`
+	Codex5hLimitPercent            float64                   `json:"codex_5h_limit_percent"`
+	Codex7dLimitPercent            float64                   `json:"codex_7d_limit_percent"`
+	AccountLevel                   string                    `json:"account_level,omitempty"`
+	AccountPlanType                string                    `json:"account_plan_type,omitempty"`
+	AccountStatus                  string                    `json:"account_status,omitempty"`
+	AccountSchedulable             bool                      `json:"account_schedulable"`
+	AccountPoolMode                bool                      `json:"-"`
+	AccountCustomErrorCodesEnabled bool                      `json:"-"`
+	CurrentConcurrency             int                       `json:"current_concurrency"`
+	AccountExpiresAt               *time.Time                `json:"account_expires_at,omitempty"`
+	SubscriptionExpiresAt          *time.Time                `json:"subscription_expires_at,omitempty"`
+	AccountLastUsedAt              *time.Time                `json:"account_last_used_at,omitempty"`
+	RateLimitedAt                  *time.Time                `json:"rate_limited_at,omitempty"`
+	RateLimitResetAt               *time.Time                `json:"rate_limit_reset_at,omitempty"`
+	OverloadUntil                  *time.Time                `json:"overload_until,omitempty"`
+	TempUnschedulableUntil         *time.Time                `json:"temp_unschedulable_until,omitempty"`
+	TempUnschedulableReason        string                    `json:"temp_unschedulable_reason,omitempty"`
+	CodexQuotaProtectionReason     *string                   `json:"codex_quota_protection_reason,omitempty"`
+	CodexQuotaProtectionResetAt    *time.Time                `json:"codex_quota_protection_reset_at,omitempty"`
+	Codex5hUsage                   *UsageProgress            `json:"codex_5h_usage,omitempty"`
+	Codex7dUsage                   *UsageProgress            `json:"codex_7d_usage,omitempty"`
+	CodexUsageUpdatedAt            *time.Time                `json:"codex_usage_updated_at,omitempty"`
+	CurrentMembershipID            *int64                    `json:"current_membership_id,omitempty"`
+	CurrentAPIKeyID                *int64                    `json:"current_api_key_id,omitempty"`
+	CurrentJoinedAt                *time.Time                `json:"current_joined_at,omitempty"`
+	CurrentPaidUntil               *time.Time                `json:"current_paid_until,omitempty"`
+	CurrentBilledUntil             *time.Time                `json:"current_billed_until,omitempty"`
+	CurrentIdleTimeoutMinutes      *int                      `json:"current_idle_timeout_minutes,omitempty"`
+	CurrentLastRequestAt           *time.Time                `json:"current_last_request_at,omitempty"`
+	CurrentIdleExpiresAt           *time.Time                `json:"current_idle_expires_at,omitempty"`
+	LastUsedMembershipID           *int64                    `json:"last_used_membership_id,omitempty"`
+	LastUsedAt                     *time.Time                `json:"last_used_at,omitempty"`
+	EditingByUserID                *int64                    `json:"editing_by_user_id,omitempty"`
+	EditingByUsername              string                    `json:"editing_by_username,omitempty"`
+	EditingExpiresAt               *time.Time                `json:"editing_expires_at,omitempty"`
+	EditingMine                    bool                      `json:"editing_mine"`
+	EditSessionID                  string                    `json:"edit_session_id,omitempty"`
+	CreatedAt                      time.Time                 `json:"created_at"`
+	UpdatedAt                      time.Time                 `json:"updated_at"`
 }
 
 type AccountShareListingProxy struct {
@@ -1645,19 +1647,28 @@ func accountShareListingAccountUnavailableAt(listing *AccountShareListing, now t
 			return true
 		}
 	}
-	if listing.OverloadUntil != nil && now.Before(*listing.OverloadUntil) {
-		return true
-	}
-	if listing.RateLimitResetAt != nil && now.Before(*listing.RateLimitResetAt) {
-		return true
-	}
-	if listing.TempUnschedulableUntil != nil && now.Before(*listing.TempUnschedulableUntil) {
-		return true
+	if accountShareListingRespectsLocalSystemErrorState(listing) {
+		if listing.OverloadUntil != nil && now.Before(*listing.OverloadUntil) {
+			return true
+		}
+		if listing.RateLimitResetAt != nil && now.Before(*listing.RateLimitResetAt) {
+			return true
+		}
+		if listing.TempUnschedulableUntil != nil && now.Before(*listing.TempUnschedulableUntil) {
+			return true
+		}
 	}
 	if listing.CodexQuotaProtectionReason != nil && strings.TrimSpace(*listing.CodexQuotaProtectionReason) != "" {
 		return listing.CodexQuotaProtectionResetAt == nil || now.Before(*listing.CodexQuotaProtectionResetAt)
 	}
 	return false
+}
+
+func accountShareListingRespectsLocalSystemErrorState(listing *AccountShareListing) bool {
+	if listing == nil {
+		return false
+	}
+	return !listing.AccountPoolMode || listing.AccountCustomErrorCodesEnabled
 }
 
 func accountShareLogTimePtr(value *time.Time) string {
