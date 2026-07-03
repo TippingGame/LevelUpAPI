@@ -358,11 +358,12 @@ func (s *RateLimitService) persistSessionWindowState(ctx context.Context, accoun
 	return s.accountRepo.UpdateSessionWindow(writeCtx, accountID, start, end, status)
 }
 
-// HandlePermanentAccountError marks non-pool API key accounts as errored when
-// upstream returns an unambiguous permanent account/key/billing failure. It is
-// intentionally narrower than HandleUpstreamError so early-return paths such as
-// error passthrough can still protect accounts without changing ordinary
-// passthrough or retry behavior.
+// HandlePermanentAccountError marks accounts as errored when upstream returns an
+// unambiguous permanent account/key/billing failure. Pool-mode accounts keep the
+// default local-state shield unless they have an active custom error policy.
+// The function is intentionally narrower than HandleUpstreamError so early-return
+// paths such as error passthrough can still protect accounts without changing
+// ordinary passthrough or retry behavior.
 func (s *RateLimitService) HandlePermanentAccountError(ctx context.Context, account *Account, statusCode int, responseBody []byte) bool {
 	if s == nil || account == nil {
 		return false
@@ -377,6 +378,10 @@ func (s *RateLimitService) HandlePermanentAccountError(ctx context.Context, acco
 		return false
 	}
 	if account.Platform == PlatformAntigravity && isGeminiRequestPolicyError(statusCode, responseBody, "") {
+		return false
+	}
+	if account.IsPoolMode() && !account.HasActiveCustomErrorCodePolicy() {
+		slog.Info("permanent_account_error_pool_mode_skipped", "account_id", account.ID, "status_code", statusCode)
 		return false
 	}
 	msg, ok := permanentAccountKeywordErrorMessageFromBody(account, statusCode, responseBody)
@@ -2872,6 +2877,9 @@ func (s *RateLimitService) activeTempUnschedStateFromCache(ctx context.Context, 
 
 func (s *RateLimitService) HandleTempUnschedulable(ctx context.Context, account *Account, statusCode int, responseBody []byte) bool {
 	if account == nil {
+		return false
+	}
+	if !shouldApplyLocalErrorState(account, statusCode) {
 		return false
 	}
 	if !account.ShouldHandleErrorCode(statusCode) {

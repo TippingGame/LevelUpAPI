@@ -173,3 +173,55 @@ func TestTempUnschedulableRule_StatusCodeRangeMiss(t *testing.T) {
 	require.Zero(t, repo.tempCalls)
 	require.Nil(t, account.TempUnschedulableUntil)
 }
+
+func TestHandleTempUnschedulable_PoolModeDefaultSkipsLocalState(t *testing.T) {
+	repo := &statusRangeAccountRepoStub{}
+	svc := NewRateLimitService(repo, nil, nil, nil, nil)
+	account := &Account{
+		ID:       79,
+		Type:     AccountTypeAPIKey,
+		Platform: PlatformGemini,
+		Credentials: map[string]any{
+			"pool_mode":                  true,
+			"temp_unschedulable_enabled": true,
+			"temp_unschedulable_rules": []any{
+				map[string]any{
+					"error_code":       "500-503",
+					"keywords":         []any{"overloaded"},
+					"duration_minutes": float64(10),
+				},
+			},
+		},
+	}
+
+	require.False(t, svc.HandleTempUnschedulable(context.Background(), account, 502, []byte("server overloaded")))
+	require.Zero(t, repo.tempCalls)
+	require.Nil(t, account.TempUnschedulableUntil)
+}
+
+func TestHandleTempUnschedulable_PoolModeActiveCustomPolicyAllowsLocalState(t *testing.T) {
+	repo := &statusRangeAccountRepoStub{}
+	svc := NewRateLimitService(repo, nil, nil, nil, nil)
+	account := &Account{
+		ID:       80,
+		Type:     AccountTypeAPIKey,
+		Platform: PlatformGemini,
+		Credentials: map[string]any{
+			"pool_mode":                  true,
+			"custom_error_codes_enabled": true,
+			"custom_error_codes":         []any{float64(502)},
+			"temp_unschedulable_enabled": true,
+			"temp_unschedulable_rules": []any{
+				map[string]any{
+					"error_code":       "500-503",
+					"keywords":         []any{"overloaded"},
+					"duration_minutes": float64(10),
+				},
+			},
+		},
+	}
+
+	require.True(t, svc.HandleTempUnschedulable(context.Background(), account, 502, []byte("server overloaded")))
+	require.Equal(t, 1, repo.tempCalls)
+	require.Equal(t, int64(80), repo.lastAccountID)
+}

@@ -677,6 +677,36 @@ func TestRateLimitServiceHandleUpstreamErrorPoolModeEmptyCustomPolicySkipsPerman
 	require.Nil(t, cache.states[552])
 }
 
+func TestRateLimitServiceHandlePermanentAccountErrorPoolModeEmptyCustomPolicySkips(t *testing.T) {
+	repo := &permanentKeywordAccountRepoStub{}
+	cache := &runtimeTempUnschedCacheStub{}
+	svc := NewRateLimitService(repo, nil, nil, nil, cache)
+	account := &Account{
+		ID:          553,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Status:      StatusActive,
+		Schedulable: true,
+		Credentials: map[string]any{
+			"pool_mode":                  true,
+			"custom_error_codes_enabled": true,
+		},
+	}
+
+	handled := svc.HandlePermanentAccountError(
+		context.Background(),
+		account,
+		http.StatusUnauthorized,
+		[]byte(`{"error":{"message":"The API key has been revoked."}}`),
+	)
+
+	require.False(t, handled)
+	require.Equal(t, 0, repo.setErrorCalls)
+	require.Equal(t, StatusActive, account.Status)
+	require.True(t, account.Schedulable)
+	require.Nil(t, cache.states[553])
+}
+
 func TestRateLimitServiceHandleUpstreamErrorCustomErrorSetsTempUnschedulable(t *testing.T) {
 	repo := &permanentKeywordAccountRepoStub{}
 	cache := &runtimeTempUnschedCacheStub{}

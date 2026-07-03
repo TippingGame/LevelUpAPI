@@ -294,6 +294,31 @@ func TestCheckErrorPolicy_PermanentKeywordBypassesCustomErrorCodeFilter(t *testi
 	require.Contains(t, repo.lastErrorMsg, "API key has been disabled")
 }
 
+func TestCheckErrorPolicy_PoolModeEmptyCustomPolicySkipsPermanentKeyword(t *testing.T) {
+	repo := &errorPolicyRepoStub{}
+	svc := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+	account := &Account{
+		ID:       20,
+		Type:     AccountTypeAPIKey,
+		Platform: PlatformGemini,
+		Credentials: map[string]any{
+			"pool_mode":                  true,
+			"custom_error_codes_enabled": true,
+		},
+	}
+
+	result := svc.CheckErrorPolicy(
+		context.Background(),
+		account,
+		http.StatusForbidden,
+		[]byte(`{"error":{"message":"This API key has been disabled"}}`),
+	)
+
+	require.Equal(t, ErrorPolicySkipped, result)
+	require.Equal(t, 0, repo.setErrCalls)
+	require.Equal(t, 0, repo.tempCalls)
+}
+
 func TestCheckErrorPolicy_OpenAIRequestPolicyBypassesCustomErrorCodeFilter(t *testing.T) {
 	repo := &errorPolicyRepoStub{}
 	svc := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
