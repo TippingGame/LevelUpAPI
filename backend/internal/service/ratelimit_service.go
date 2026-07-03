@@ -1443,7 +1443,7 @@ var upstreamRelayPoolUnavailableKeywords = []string{
 }
 
 func isUpstreamRelayPoolUnavailableError(statusCode int, upstreamMsg string, responseBody []byte) bool {
-	if statusCode != http.StatusServiceUnavailable {
+	if !isRetryableRelayPoolUnavailableStatus(statusCode) {
 		return false
 	}
 
@@ -1466,6 +1466,18 @@ func isUpstreamRelayPoolUnavailableError(statusCode int, upstreamMsg string, res
 		}
 	}
 	return false
+}
+
+func isRetryableRelayPoolUnavailableStatus(statusCode int) bool {
+	if IsUpstreamReplayUnsafeTimeoutStatus(statusCode) {
+		return false
+	}
+	switch statusCode {
+	case http.StatusTooManyRequests, http.StatusInternalServerError, http.StatusBadGateway, http.StatusServiceUnavailable, 529:
+		return true
+	default:
+		return false
+	}
 }
 
 func permanentAccountKeywordErrorMessageFromBody(account *Account, statusCode int, responseBody []byte) (string, bool) {

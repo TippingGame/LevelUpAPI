@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"testing"
 	"time"
 
@@ -11,36 +12,48 @@ import (
 )
 
 func TestHandleUpstreamErrorRelayNoAvailableAccountsTempUnschedulable(t *testing.T) {
-	repo := &permanentKeywordAccountRepoStub{}
-	svc := &RateLimitService{accountRepo: repo}
-	account := &Account{
-		ID:          7201,
-		Platform:    PlatformAnthropic,
-		Type:        AccountTypeAPIKey,
-		Status:      StatusActive,
-		Schedulable: true,
+	statuses := []int{
+		http.StatusTooManyRequests,
+		http.StatusInternalServerError,
+		http.StatusBadGateway,
+		http.StatusServiceUnavailable,
+		529,
 	}
 
-	shouldDisable := svc.HandleUpstreamError(
-		context.Background(),
-		account,
-		http.StatusServiceUnavailable,
-		http.Header{},
-		[]byte(`{"type":"error","error":{"type":"api_error","message":"No available accounts: no available accounts"}}`),
-	)
+	for _, status := range statuses {
+		t.Run("status_"+strconv.Itoa(status), func(t *testing.T) {
+			repo := &permanentKeywordAccountRepoStub{}
+			svc := &RateLimitService{accountRepo: repo}
+			account := &Account{
+				ID:          int64(7201 + status),
+				Platform:    PlatformAnthropic,
+				Type:        AccountTypeAPIKey,
+				Status:      StatusActive,
+				Schedulable: true,
+			}
 
-	require.True(t, shouldDisable)
-	require.Zero(t, repo.setErrorCalls)
-	require.Equal(t, 1, repo.tempCalls)
-	require.WithinDuration(t, time.Now().Add(upstreamRelayPoolUnavailableCooldown), repo.lastTempUntil, 2*time.Second)
-	require.NoError(t, repo.lastTempCtxErr)
-	require.NotNil(t, account.TempUnschedulableUntil)
+			shouldDisable := svc.HandleUpstreamError(
+				context.Background(),
+				account,
+				status,
+				http.Header{},
+				[]byte(`{"type":"error","error":{"type":"api_error","message":"No available accounts: no available accounts"}}`),
+			)
 
-	var state TempUnschedState
-	require.NoError(t, json.Unmarshal([]byte(repo.lastTempReason), &state))
-	require.Equal(t, http.StatusServiceUnavailable, state.StatusCode)
-	require.Equal(t, "upstream_relay_pool_unavailable", state.MatchedKeyword)
-	require.Contains(t, state.ErrorMessage, "No available accounts")
+			require.True(t, shouldDisable)
+			require.Zero(t, repo.setErrorCalls)
+			require.Equal(t, 1, repo.tempCalls)
+			require.WithinDuration(t, time.Now().Add(upstreamRelayPoolUnavailableCooldown), repo.lastTempUntil, 2*time.Second)
+			require.NoError(t, repo.lastTempCtxErr)
+			require.NotNil(t, account.TempUnschedulableUntil)
+
+			var state TempUnschedState
+			require.NoError(t, json.Unmarshal([]byte(repo.lastTempReason), &state))
+			require.Equal(t, status, state.StatusCode)
+			require.Equal(t, "upstream_relay_pool_unavailable", state.MatchedKeyword)
+			require.Contains(t, state.ErrorMessage, "No available accounts")
+		})
+	}
 }
 
 func TestHandleUpstreamErrorRelayNoAvailableRoutesTempUnschedulable(t *testing.T) {
@@ -85,6 +98,31 @@ func TestHandleUpstreamErrorRelayClaudeCodeOnlyIsNotPoolUnavailable(t *testing.T
 		http.StatusServiceUnavailable,
 		http.Header{},
 		[]byte(`{"type":"error","error":{"type":"api_error","message":"No available accounts: this group only allows Claude Code clients"}}`),
+	)
+
+	require.False(t, shouldDisable)
+	require.Zero(t, repo.setErrorCalls)
+	require.Zero(t, repo.tempCalls)
+	require.Nil(t, account.TempUnschedulableUntil)
+}
+
+func TestHandleUpstreamErrorRelayNoAvailableAccountsSkipsReplayUnsafeTimeout(t *testing.T) {
+	repo := &permanentKeywordAccountRepoStub{}
+	svc := &RateLimitService{accountRepo: repo}
+	account := &Account{
+		ID:          7205,
+		Platform:    PlatformAnthropic,
+		Type:        AccountTypeAPIKey,
+		Status:      StatusActive,
+		Schedulable: true,
+	}
+
+	shouldDisable := svc.HandleUpstreamError(
+		context.Background(),
+		account,
+		http.StatusGatewayTimeout,
+		http.Header{},
+		[]byte(`{"error":{"message":"No available accounts: no available accounts"}}`),
 	)
 
 	require.False(t, shouldDisable)
