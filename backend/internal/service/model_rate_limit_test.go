@@ -443,3 +443,46 @@ func TestModelRateLimitRespectsPoolModePolicy(t *testing.T) {
 		require.True(t, shouldClearStickySession(account, "claude-sonnet-4-5"))
 	})
 }
+
+func TestIsModelRateLimited_AnthropicFableFamilyKey(t *testing.T) {
+	future := time.Now().Add(48 * time.Hour).Format(time.RFC3339)
+
+	account := &Account{
+		Platform: PlatformAnthropic,
+		Extra: map[string]any{
+			modelRateLimitsKey: map[string]any{
+				anthropicFableRateLimitKey: map[string]any{
+					"rate_limit_reset_at": future,
+				},
+			},
+		},
+	}
+
+	tests := []struct {
+		requestedModel string
+		expected       bool
+	}{
+		{requestedModel: "claude-fable-5", expected: true},
+		{requestedModel: "claude-fable-5[1m]", expected: true},
+		{requestedModel: "Claude-Fable-5-20260601", expected: true},
+		{requestedModel: "claude-sonnet-4-6", expected: false},
+		{requestedModel: "claude-opus-4-8", expected: false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.requestedModel, func(t *testing.T) {
+			got := account.isModelRateLimitedWithContext(context.Background(), tc.requestedModel)
+			require.Equal(t, tc.expected, got)
+			remaining := account.GetModelRateLimitRemainingTimeWithContext(context.Background(), tc.requestedModel)
+			require.Equal(t, tc.expected, remaining > 0)
+		})
+	}
+}
+
+func TestIsAnthropicFableModel(t *testing.T) {
+	require.True(t, isAnthropicFableModel("claude-fable-5"))
+	require.True(t, isAnthropicFableModel("claude-fable-5[1m]"))
+	require.True(t, isAnthropicFableModel("Claude-Fable-5"))
+	require.False(t, isAnthropicFableModel("claude-sonnet-4-6"))
+	require.False(t, isAnthropicFableModel(""))
+}

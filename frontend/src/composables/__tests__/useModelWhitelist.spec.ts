@@ -4,7 +4,7 @@ vi.mock('@/api/admin/accounts', () => ({
   getAntigravityDefaultModelMapping: vi.fn()
 }))
 
-import { buildModelMappingObject, getModelsByPlatform } from '../useModelWhitelist'
+import { buildModelMappingObject, getModelsByPlatform, getPresetMappingsByPlatform } from '../useModelWhitelist'
 
 describe('useModelWhitelist', () => {
   it('openai 模型列表包含 GPT-5.4 官方快照', () => {
@@ -42,6 +42,25 @@ describe('useModelWhitelist', () => {
   it('Claude/Antigravity 模型列表包含 Fable 5', () => {
     expect(getModelsByPlatform('anthropic')).toContain('claude-fable-5')
     expect(getModelsByPlatform('antigravity')).toContain('claude-fable-5')
+  })
+
+  it('Claude 模型列表和预设映射包含 Sonnet 5', () => {
+    expect(getModelsByPlatform('anthropic')).toContain('claude-sonnet-5')
+
+    expect(getPresetMappingsByPlatform('anthropic')).toContainEqual(
+      expect.objectContaining({
+        label: 'Sonnet 5',
+        from: 'claude-sonnet-5',
+        to: 'claude-sonnet-5'
+      })
+    )
+    expect(getPresetMappingsByPlatform('bedrock')).toContainEqual(
+      expect.objectContaining({
+        label: 'Sonnet 5',
+        from: 'claude-sonnet-5',
+        to: 'us.anthropic.claude-sonnet-5-v1'
+      })
+    )
   })
 
   it('gemini 模型列表包含原生生图模型', () => {

@@ -48,3 +48,15 @@ func TestDefaultAntigravityModelMapping_IncludesFable5(t *testing.T) {
 		t.Fatalf("DefaultAntigravityModelMapping[claude-fable-5] = %q, want claude-fable-5", got)
 	}
 }
+
+func TestDefaultBedrockModelMapping_IncludesSonnet5(t *testing.T) {
+	t.Parallel()
+
+	got, ok := DefaultBedrockModelMapping["claude-sonnet-5"]
+	if !ok {
+		t.Fatal("expected claude-sonnet-5 in DefaultBedrockModelMapping")
+	}
+	if got != "us.anthropic.claude-sonnet-5-v1" {
+		t.Fatalf("DefaultBedrockModelMapping[claude-sonnet-5] = %q, want us.anthropic.claude-sonnet-5-v1", got)
+	}
+}

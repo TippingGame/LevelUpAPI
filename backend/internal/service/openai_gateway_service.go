@@ -3213,6 +3213,9 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 				wsAttempts,
 			)
 			wsResult.UpstreamModel = upstreamModel
+			if wsResult.BillingModel == "" {
+				wsResult.BillingModel = billingModel
+			}
 			return wsResult, nil
 		}
 		if failoverErr := s.openAIWSCapacityFailoverError(c, account, wsErr); failoverErr != nil {
@@ -3348,6 +3351,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			ResponseID:      responseID,
 			Usage:           *usage,
 			Model:           originalModel,
+			BillingModel:    billingModel,
 			UpstreamModel:   upstreamModel,
 			ServiceTier:     serviceTier,
 			ReasoningEffort: reasoningEffort,

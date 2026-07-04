@@ -242,3 +242,55 @@ func TestIsCountTokensUnsupported404(t *testing.T) {
 		})
 	}
 }
+
+func TestDefaultBetaPolicy_Context1M_Sonnet5Whitelist(t *testing.T) {
+	settings := DefaultBetaPolicySettings()
+
+	var rule *BetaPolicyRule
+	for i := range settings.Rules {
+		if settings.Rules[i].BetaToken == "context-1m-2025-08-07" {
+			rule = &settings.Rules[i]
+			break
+		}
+	}
+
+	require.NotNil(t, rule)
+	require.Equal(t, BetaPolicyActionPass, rule.Action)
+	require.Equal(t, BetaPolicyActionFilter, rule.FallbackAction)
+	require.NotEmpty(t, rule.ModelWhitelist)
+
+	cases := []struct {
+		model string
+		want  string
+	}{
+		{"claude-sonnet-5", BetaPolicyActionPass},
+		{"claude-sonnet-5-20260701", BetaPolicyActionPass},
+		{"claude-sonnet-5-thinking", BetaPolicyActionPass},
+		{"claude-sonnet-5@20260701", BetaPolicyActionPass},
+		{"us.anthropic.claude-sonnet-5-v1", BetaPolicyActionPass},
+		{"eu.anthropic.claude-sonnet-5-20260701-v1:0", BetaPolicyActionPass},
+		{"apac.anthropic.claude-sonnet-5-v1", BetaPolicyActionPass},
+		{"jp.anthropic.claude-sonnet-5-v1", BetaPolicyActionPass},
+		{"au.anthropic.claude-sonnet-5-v1", BetaPolicyActionPass},
+		{"us-gov.anthropic.claude-sonnet-5-v1", BetaPolicyActionPass},
+		{"global.anthropic.claude-sonnet-5-v1", BetaPolicyActionPass},
+		{"anthropic.claude-sonnet-5-v1", BetaPolicyActionPass},
+		{"claude-sonnet-4-6", BetaPolicyActionFilter},
+		{"claude-sonnet-4-5-20250929", BetaPolicyActionFilter},
+		{"claude-sonnet-4-5@20250929", BetaPolicyActionFilter},
+		{"us.anthropic.claude-sonnet-4-6", BetaPolicyActionFilter},
+		{"us.anthropic.claude-sonnet-4-5-20250929-v1:0", BetaPolicyActionFilter},
+		{"claude-opus-4-8", BetaPolicyActionFilter},
+		{"us.anthropic.claude-opus-4-8-v1", BetaPolicyActionFilter},
+		{"claude-haiku-4-5", BetaPolicyActionFilter},
+		{"claude-3-5-sonnet-20241022", BetaPolicyActionFilter},
+		{"claude-sonnet-50", BetaPolicyActionFilter},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.model, func(t *testing.T) {
+			action, _ := resolveRuleAction(*rule, tc.model)
+			require.Equal(t, tc.want, action)
+		})
+	}
+}

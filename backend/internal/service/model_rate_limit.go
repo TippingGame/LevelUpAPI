@@ -6,7 +6,12 @@ import (
 	"time"
 )
 
-const modelRateLimitsKey = "model_rate_limits"
+const (
+	modelRateLimitsKey = "model_rate_limits"
+	// Anthropic 7d_oi is a Fable-family window; rate limiting this scope should
+	// exclude all Fable variants without blocking the whole account.
+	anthropicFableRateLimitKey = "claude-fable-5"
+)
 
 // isRateLimitActiveForKey 检查指定 key 的限流是否生效
 func (a *Account) isRateLimitActiveForKey(key string) bool {
@@ -32,15 +37,12 @@ func (a *Account) isModelRateLimitedWithContext(ctx context.Context, requestedMo
 		return false
 	}
 
-	modelKey := a.GetMappedModel(requestedModel)
-	if a.Platform == PlatformAntigravity {
-		modelKey = resolveFinalAntigravityModelKey(ctx, a, requestedModel)
+	for _, modelKey := range a.modelRateLimitKeysForRequest(ctx, requestedModel) {
+		if a.isRateLimitActiveForKey(modelKey) {
+			return true
+		}
 	}
-	modelKey = strings.TrimSpace(modelKey)
-	if modelKey == "" {
-		return false
-	}
-	return a.isRateLimitActiveForKey(modelKey)
+	return false
 }
 
 // GetModelRateLimitRemainingTime 获取模型限流剩余时间
@@ -54,15 +56,36 @@ func (a *Account) GetModelRateLimitRemainingTimeWithContext(ctx context.Context,
 		return 0
 	}
 
+	var maxRemaining time.Duration
+	for _, modelKey := range a.modelRateLimitKeysForRequest(ctx, requestedModel) {
+		if remaining := a.getRateLimitRemainingForKey(modelKey); remaining > maxRemaining {
+			maxRemaining = remaining
+		}
+	}
+	return maxRemaining
+}
+
+func (a *Account) modelRateLimitKeysForRequest(ctx context.Context, requestedModel string) []string {
+	if a == nil {
+		return nil
+	}
 	modelKey := a.GetMappedModel(requestedModel)
 	if a.Platform == PlatformAntigravity {
 		modelKey = resolveFinalAntigravityModelKey(ctx, a, requestedModel)
 	}
 	modelKey = strings.TrimSpace(modelKey)
 	if modelKey == "" {
-		return 0
+		return nil
 	}
-	return a.getRateLimitRemainingForKey(modelKey)
+	keys := []string{modelKey}
+	if a.Platform == PlatformAnthropic && isAnthropicFableModel(modelKey) && modelKey != anthropicFableRateLimitKey {
+		keys = append(keys, anthropicFableRateLimitKey)
+	}
+	return keys
+}
+
+func isAnthropicFableModel(model string) bool {
+	return strings.Contains(strings.ToLower(model), "fable")
 }
 
 func resolveFinalAntigravityModelKey(ctx context.Context, account *Account, requestedModel string) string {

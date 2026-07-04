@@ -1,10 +1,15 @@
 package service
 
 import (
+	"context"
 	"encoding/json"
+	"io"
+	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
@@ -136,6 +141,51 @@ func TestGetOpenAIRequestBodyMap_DoesNotWriteBackContextCache(t *testing.T) {
 
 	_, ok := c.Get("openai_parsed_request_body")
 	require.False(t, ok)
+}
+
+func TestOpenAIGatewayServiceForward_TextResponsesSetsBillingModelToMappedModel(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	upstream := &httpUpstreamRecorder{
+		resp: &http.Response{
+			StatusCode: http.StatusOK,
+			Header: http.Header{
+				"Content-Type": []string{"application/json"},
+				"x-request-id": []string{"rid_text_mapped_billing"},
+			},
+			Body: io.NopCloser(strings.NewReader(
+				`{"id":"resp_text_mapped","object":"response","model":"gpt-5.5","status":"completed","usage":{"input_tokens":20,"output_tokens":10,"total_tokens":30}}`,
+			)),
+		},
+	}
+	cfg := &config.Config{}
+	cfg.Security.URLAllowlist.Enabled = false
+	svc := &OpenAIGatewayService{cfg: cfg, httpUpstream: upstream}
+	account := &Account{
+		ID:          4,
+		Name:        "openai-apikey",
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Concurrency: 1,
+		Credentials: map[string]any{
+			"api_key":       "sk-test",
+			"base_url":      "https://example.com",
+			"model_mapping": map[string]any{"gpt-5.4": "gpt-5.5"},
+		},
+		Extra: map[string]any{"use_responses_api": true},
+	}
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/openai/v1/responses", nil)
+	SetOpenAIClientTransport(c, OpenAIClientTransportHTTP)
+
+	result, err := svc.Forward(context.Background(), c, account, []byte(`{"model":"gpt-5.4","stream":false,"input":"hello"}`))
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, "gpt-5.4", result.Model)
+	require.Equal(t, "gpt-5.5", result.BillingModel)
+	require.Equal(t, "gpt-5.5", result.UpstreamModel)
 }
 
 func TestSanitizeEmptyBase64InputImagesInOpenAIRequestBodyMap(t *testing.T) {
