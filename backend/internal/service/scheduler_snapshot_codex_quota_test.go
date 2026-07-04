@@ -4,7 +4,52 @@ import (
 	"context"
 	"testing"
 	"time"
+
+	"github.com/Wei-Shaw/sub2api/internal/config"
 )
+
+func TestSchedulerSnapshotCacheUsesPartialCandidatesWhenProxyRepairFallbackUnavailable(t *testing.T) {
+	ownerID := int64(10)
+	proxyID := int64(20)
+	groupID := int64(30)
+	cache := &schedulerSnapshotQuotaCache{
+		snapshotAccounts: []*Account{
+			{
+				ID:          1,
+				Platform:    PlatformOpenAI,
+				Type:        AccountTypeAPIKey,
+				Status:      StatusActive,
+				Schedulable: true,
+				Concurrency: 1,
+			},
+			{
+				ID:           2,
+				Platform:     PlatformOpenAI,
+				AccountLevel: AccountLevelPro,
+				Type:         AccountTypeOAuth,
+				OwnerUserID:  &ownerID,
+				ShareMode:    AccountShareModePublic,
+				ShareStatus:  AccountShareStatusApproved,
+				ProxyID:      &proxyID,
+				Status:       StatusActive,
+				Schedulable:  true,
+				Concurrency:  1,
+			},
+		},
+	}
+	repo := &schedulerSnapshotQuotaAccountRepo{}
+	cfg := &config.Config{}
+	cfg.Gateway.Scheduling.DbFallbackEnabled = false
+	svc := NewSchedulerSnapshotService(cache, nil, repo, nil, cfg)
+
+	accounts, _, err := svc.ListSchedulableAccounts(context.Background(), &groupID, PlatformOpenAI, false)
+	if err != nil {
+		t.Fatalf("ListSchedulableAccounts error: %v", err)
+	}
+	if len(accounts) != 1 || accounts[0].ID != 1 {
+		t.Fatalf("returned accounts = %+v, want already schedulable cached account", accounts)
+	}
+}
 
 func TestFilterSchedulableAccountsExcludesCodexQuotaProtectedAccount(t *testing.T) {
 	resetAt := time.Now().Add(time.Hour).UTC().Format(time.RFC3339)

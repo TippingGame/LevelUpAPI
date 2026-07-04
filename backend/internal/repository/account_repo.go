@@ -1551,27 +1551,27 @@ func openAIAccountsFallbackPlanSQL(jsonValue, selectedAccountID string) string {
 	FROM (
 		SELECT account_entry.value #>> '{account,plan_type}' AS raw_token,
 			CASE WHEN lower(btrim(COALESCE(account_entry.value #>> '{account,is_default}', ''))) = 'true' THEN 0 ELSE 1 END AS account_ord
-		FROM jsonb_each(COALESCE(({{JSON_VALUE}})->'accounts', '{}'::jsonb)) AS account_entry(key, value)
+		FROM jsonb_each({{ACCOUNTS_JSON}}) AS account_entry(key, value)
 		UNION ALL
 		SELECT account_entry.value #>> '{account,chatgpt_plan_type}' AS raw_token,
 			CASE WHEN lower(btrim(COALESCE(account_entry.value #>> '{account,is_default}', ''))) = 'true' THEN 0 ELSE 1 END AS account_ord
-		FROM jsonb_each(COALESCE(({{JSON_VALUE}})->'accounts', '{}'::jsonb)) AS account_entry(key, value)
+		FROM jsonb_each({{ACCOUNTS_JSON}}) AS account_entry(key, value)
 		UNION ALL
 		SELECT account_entry.value #>> '{account,subscription_plan}' AS raw_token,
 			CASE WHEN lower(btrim(COALESCE(account_entry.value #>> '{account,is_default}', ''))) = 'true' THEN 0 ELSE 1 END AS account_ord
-		FROM jsonb_each(COALESCE(({{JSON_VALUE}})->'accounts', '{}'::jsonb)) AS account_entry(key, value)
+		FROM jsonb_each({{ACCOUNTS_JSON}}) AS account_entry(key, value)
 		UNION ALL
 		SELECT account_entry.value #>> '{entitlement,plan_type}' AS raw_token,
 			CASE WHEN lower(btrim(COALESCE(account_entry.value #>> '{account,is_default}', ''))) = 'true' THEN 0 ELSE 1 END AS account_ord
-		FROM jsonb_each(COALESCE(({{JSON_VALUE}})->'accounts', '{}'::jsonb)) AS account_entry(key, value)
+		FROM jsonb_each({{ACCOUNTS_JSON}}) AS account_entry(key, value)
 		UNION ALL
 		SELECT account_entry.value #>> '{entitlement,chatgpt_plan_type}' AS raw_token,
 			CASE WHEN lower(btrim(COALESCE(account_entry.value #>> '{account,is_default}', ''))) = 'true' THEN 0 ELSE 1 END AS account_ord
-		FROM jsonb_each(COALESCE(({{JSON_VALUE}})->'accounts', '{}'::jsonb)) AS account_entry(key, value)
+		FROM jsonb_each({{ACCOUNTS_JSON}}) AS account_entry(key, value)
 		UNION ALL
 		SELECT account_entry.value #>> '{entitlement,subscription_plan}' AS raw_token,
 			CASE WHEN lower(btrim(COALESCE(account_entry.value #>> '{account,is_default}', ''))) = 'true' THEN 0 ELSE 1 END AS account_ord
-		FROM jsonb_each(COALESCE(({{JSON_VALUE}})->'accounts', '{}'::jsonb)) AS account_entry(key, value)
+		FROM jsonb_each({{ACCOUNTS_JSON}}) AS account_entry(key, value)
 	) account_plan
 	CROSS JOIN LATERAL (
 		SELECT regexp_replace(lower(btrim(COALESCE(raw_token, ''))), '[[:space:]_-]+', '', 'g') AS token
@@ -1589,7 +1589,9 @@ func openAIAccountsFallbackPlanSQL(jsonValue, selectedAccountID string) string {
 		END DESC
 	LIMIT 1
 )`
+	accountsJSON := fmt.Sprintf("(CASE WHEN jsonb_typeof((%[1]s)->'accounts') = 'object' THEN (%[1]s)->'accounts' ELSE '{}'::jsonb END)", jsonValue)
 	query = strings.ReplaceAll(query, "{{JSON_VALUE}}", jsonValue)
+	query = strings.ReplaceAll(query, "{{ACCOUNTS_JSON}}", accountsJSON)
 	query = strings.ReplaceAll(query, "{{SELECTED_ACCOUNT_ID}}", selectedAccountID)
 	return query
 }
@@ -2226,6 +2228,96 @@ func (r *accountRepository) syncSchedulerAccountSnapshots(ctx context.Context, a
 	}
 }
 
+func (r *accountRepository) syncSchedulerAccountAndGroupSnapshots(ctx context.Context, accountID int64, groupIDs []int64) {
+	if r == nil || r.schedulerCache == nil || accountID <= 0 {
+		return
+	}
+	account, err := r.GetByID(ctx, accountID)
+	if err != nil {
+		logger.LegacyPrintf("repository.account", "[Scheduler] sync account/group snapshot read failed: id=%d err=%v", accountID, err)
+		return
+	}
+	if err := r.schedulerCache.SetAccount(ctx, account); err != nil {
+		logger.LegacyPrintf("repository.account", "[Scheduler] sync account/group snapshot write failed: id=%d err=%v", accountID, err)
+	}
+	r.syncSchedulerGroupSnapshotsForAccount(ctx, account, groupIDs)
+}
+
+func (r *accountRepository) syncSchedulerGroupSnapshotsForAccount(ctx context.Context, account *service.Account, groupIDs []int64) {
+	if r == nil || r.schedulerCache == nil || account == nil || len(groupIDs) == 0 {
+		return
+	}
+	platforms := []string{account.Platform}
+	if account.Platform == service.PlatformAntigravity && account.IsMixedSchedulingEnabled() {
+		platforms = append(platforms, service.PlatformAnthropic, service.PlatformGemini)
+	}
+	for _, platform := range platforms {
+		r.syncSchedulerGroupPlatformSnapshots(ctx, groupIDs, platform)
+	}
+}
+
+func (r *accountRepository) syncSchedulerGroupPlatformSnapshots(ctx context.Context, groupIDs []int64, platform string) {
+	if r == nil || r.schedulerCache == nil || len(groupIDs) == 0 || platform == "" {
+		return
+	}
+	for _, groupID := range uniquePositiveInt64s(groupIDs) {
+		accounts, err := r.ListSchedulableByGroupIDAndPlatform(ctx, groupID, platform)
+		if err != nil {
+			logger.LegacyPrintf("repository.account", "[Scheduler] sync group snapshot read failed: group=%d platform=%s err=%v", groupID, platform, err)
+			continue
+		}
+		accounts = filterSchedulerSnapshotAccounts(accounts)
+		for _, mode := range []string{service.SchedulerModeSingle, service.SchedulerModeForced} {
+			bucket := service.SchedulerBucket{GroupID: groupID, Platform: platform, Mode: mode}
+			if err := r.schedulerCache.SetSnapshot(ctx, bucket, accounts); err != nil {
+				logger.LegacyPrintf("repository.account", "[Scheduler] sync group snapshot write failed: bucket=%s err=%v", bucket.String(), err)
+			}
+		}
+		if platform == service.PlatformAnthropic || platform == service.PlatformGemini {
+			mixedAccounts, err := r.ListSchedulableByGroupIDAndPlatforms(ctx, groupID, []string{platform, service.PlatformAntigravity})
+			if err != nil {
+				logger.LegacyPrintf("repository.account", "[Scheduler] sync mixed group snapshot read failed: group=%d platform=%s err=%v", groupID, platform, err)
+				continue
+			}
+			mixedAccounts = filterSchedulerMixedSnapshotAccounts(mixedAccounts)
+			bucket := service.SchedulerBucket{GroupID: groupID, Platform: platform, Mode: service.SchedulerModeMixed}
+			if err := r.schedulerCache.SetSnapshot(ctx, bucket, mixedAccounts); err != nil {
+				logger.LegacyPrintf("repository.account", "[Scheduler] sync mixed group snapshot write failed: bucket=%s err=%v", bucket.String(), err)
+			}
+		}
+	}
+}
+
+func filterSchedulerSnapshotAccounts(accounts []service.Account) []service.Account {
+	if len(accounts) == 0 {
+		return accounts
+	}
+	filtered := accounts[:0]
+	for _, account := range accounts {
+		if account.IsSchedulableWithoutCodexQuotaProtection() {
+			filtered = append(filtered, account)
+		}
+	}
+	return filtered
+}
+
+func filterSchedulerMixedSnapshotAccounts(accounts []service.Account) []service.Account {
+	if len(accounts) == 0 {
+		return accounts
+	}
+	filtered := accounts[:0]
+	for _, account := range accounts {
+		if !account.IsSchedulableWithoutCodexQuotaProtection() {
+			continue
+		}
+		if account.Platform == service.PlatformAntigravity && !account.IsMixedSchedulingEnabled() {
+			continue
+		}
+		filtered = append(filtered, account)
+	}
+	return filtered
+}
+
 func (r *accountRepository) ClearError(ctx context.Context, id int64) error {
 	_, err := r.sql.ExecContext(ctx, `
 		UPDATE accounts
@@ -2285,7 +2377,7 @@ func (r *accountRepository) AddToGroup(ctx context.Context, accountID, groupID i
 	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventAccountGroupsChanged, &accountID, nil, payload); err != nil {
 		logger.LegacyPrintf("repository.account", "[SchedulerOutbox] enqueue add to group failed: account=%d group=%d err=%v", accountID, groupID, err)
 	}
-	r.syncSchedulerAccountSnapshot(ctx, accountID)
+	r.syncSchedulerAccountAndGroupSnapshots(ctx, accountID, []int64{groupID})
 	return nil
 }
 
@@ -2303,7 +2395,7 @@ func (r *accountRepository) RemoveFromGroup(ctx context.Context, accountID, grou
 	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventAccountGroupsChanged, &accountID, nil, payload); err != nil {
 		logger.LegacyPrintf("repository.account", "[SchedulerOutbox] enqueue remove from group failed: account=%d group=%d err=%v", accountID, groupID, err)
 	}
-	r.syncSchedulerAccountSnapshot(ctx, accountID)
+	r.syncSchedulerAccountAndGroupSnapshots(ctx, accountID, []int64{groupID})
 	return nil
 }
 
@@ -2372,7 +2464,7 @@ func (r *accountRepository) BindGroups(ctx context.Context, accountID int64, gro
 	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventAccountGroupsChanged, &accountID, nil, payload); err != nil {
 		logger.LegacyPrintf("repository.account", "[SchedulerOutbox] enqueue bind groups failed: account=%d err=%v", accountID, err)
 	}
-	r.syncSchedulerAccountSnapshot(ctx, accountID)
+	r.syncSchedulerAccountAndGroupSnapshots(ctx, accountID, mergeGroupIDs(existingGroupIDs, groupIDs))
 	return nil
 }
 
@@ -3040,6 +3132,7 @@ func (r *accountRepository) repairOpenAISharedPoolBindings(ctx context.Context, 
 				logger.LegacyPrintf("repository.account", "[SchedulerOutbox] enqueue shared pool group repair failed: group=%d err=%v", gid, err)
 			}
 		}
+		r.syncSchedulerOpenAIGroupSnapshots(ctx, affectedGroupIDs)
 		return true, nil
 	}
 	payload := map[string]any{"account_ids": changedAccountIDs}
@@ -3049,7 +3142,13 @@ func (r *accountRepository) repairOpenAISharedPoolBindings(ctx context.Context, 
 	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventAccountBulkChanged, nil, nil, payload); err != nil {
 		logger.LegacyPrintf("repository.account", "[SchedulerOutbox] enqueue shared pool binding repair failed: err=%v", err)
 	}
+	r.syncSchedulerAccountSnapshots(ctx, changedAccountIDs)
+	r.syncSchedulerOpenAIGroupSnapshots(ctx, affectedGroupIDs)
 	return true, nil
+}
+
+func (r *accountRepository) syncSchedulerOpenAIGroupSnapshots(ctx context.Context, groupIDs []int64) {
+	r.syncSchedulerGroupPlatformSnapshots(ctx, groupIDs, service.PlatformOpenAI)
 }
 
 func repairOpenAISharedPoolBindingsForAccounts(ctx context.Context, exec sqlExecutor, accountIDs []int64) ([]int64, []int64, error) {

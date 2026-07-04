@@ -23,9 +23,15 @@ type AccountRepoSuite struct {
 }
 
 type schedulerCacheRecorder struct {
-	setAccounts []*service.Account
-	deletedIDs  []int64
-	accounts    map[int64]*service.Account
+	setAccounts  []*service.Account
+	setSnapshots []schedulerCacheSnapshotRecord
+	deletedIDs   []int64
+	accounts     map[int64]*service.Account
+}
+
+type schedulerCacheSnapshotRecord struct {
+	bucket   service.SchedulerBucket
+	accounts []service.Account
 }
 
 func (s *schedulerCacheRecorder) GetSnapshot(ctx context.Context, bucket service.SchedulerBucket) ([]*service.Account, bool, error) {
@@ -33,6 +39,10 @@ func (s *schedulerCacheRecorder) GetSnapshot(ctx context.Context, bucket service
 }
 
 func (s *schedulerCacheRecorder) SetSnapshot(ctx context.Context, bucket service.SchedulerBucket, accounts []service.Account) error {
+	s.setSnapshots = append(s.setSnapshots, schedulerCacheSnapshotRecord{
+		bucket:   bucket,
+		accounts: append([]service.Account(nil), accounts...),
+	})
 	return nil
 }
 
@@ -84,6 +94,41 @@ func (s *schedulerCacheRecorder) GetOutboxWatermark(ctx context.Context) (int64,
 
 func (s *schedulerCacheRecorder) SetOutboxWatermark(ctx context.Context, id int64) error {
 	return nil
+}
+
+func (s *schedulerCacheRecorder) findSnapshotAccount(bucket service.SchedulerBucket, accountID int64) *service.Account {
+	if s == nil || accountID <= 0 {
+		return nil
+	}
+	for i := range s.setSnapshots {
+		record := &s.setSnapshots[i]
+		if record.bucket != bucket {
+			continue
+		}
+		for j := range record.accounts {
+			if record.accounts[j].ID == accountID {
+				return &record.accounts[j]
+			}
+		}
+	}
+	return nil
+}
+
+func accountHasGroupID(account *service.Account, groupID int64) bool {
+	if account == nil || groupID <= 0 {
+		return false
+	}
+	for _, id := range account.GroupIDs {
+		if id == groupID {
+			return true
+		}
+	}
+	for _, accountGroup := range account.AccountGroups {
+		if accountGroup.GroupID == groupID {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *AccountRepoSuite) accountHasGroup(accountID, groupID int64) bool {
@@ -709,6 +754,47 @@ func (s *AccountRepoSuite) TestBindGroups_EmptyList() {
 	s.Require().Equal(1, outboxCount)
 }
 
+func (s *AccountRepoSuite) TestBindGroupsRefreshesOpenAIProSharedSchedulerBuckets() {
+	owner := mustCreateUser(s.T(), s.client, &service.User{Email: "bind-pro-shared-owner@example.com"})
+	proxy := mustCreateProxy(s.T(), s.client, &service.Proxy{
+		Name:   "bind-pro-shared-proxy",
+		Status: service.StatusActive,
+	})
+	group := mustCreateGroup(s.T(), s.client, &service.Group{
+		Name:                 "bind-pro-shared-pool",
+		Platform:             service.PlatformOpenAI,
+		Scope:                service.GroupScopePublic,
+		SubscriptionType:     service.SubscriptionTypeStandard,
+		RequiredAccountLevel: service.AccountLevelPro,
+	})
+	account := mustCreateAccount(s.T(), s.client, &service.Account{
+		Name:         "bind-pro-shared-account",
+		Platform:     service.PlatformOpenAI,
+		Type:         service.AccountTypeOAuth,
+		AccountLevel: service.AccountLevelPro,
+		OwnerUserID:  &owner.ID,
+		ShareMode:    service.AccountShareModePublic,
+		ShareStatus:  service.AccountShareStatusApproved,
+		ProxyID:      &proxy.ID,
+		Schedulable:  true,
+		Concurrency:  3,
+		Credentials:  map[string]any{"plan_type": "chatgpt_pro"},
+	})
+	cacheRecorder := &schedulerCacheRecorder{}
+	s.repo.schedulerCache = cacheRecorder
+
+	s.Require().NoError(s.repo.BindGroups(s.ctx, account.ID, []int64{group.ID}))
+
+	s.Require().Len(cacheRecorder.setAccounts, 1)
+	s.Require().Equal(account.ID, cacheRecorder.setAccounts[0].ID)
+	s.Require().True(accountHasGroupID(cacheRecorder.setAccounts[0], group.ID))
+	s.Require().NotNil(cacheRecorder.setAccounts[0].Proxy)
+	singleBucket := service.SchedulerBucket{GroupID: group.ID, Platform: service.PlatformOpenAI, Mode: service.SchedulerModeSingle}
+	forcedBucket := service.SchedulerBucket{GroupID: group.ID, Platform: service.PlatformOpenAI, Mode: service.SchedulerModeForced}
+	s.Require().NotNil(cacheRecorder.findSnapshotAccount(singleBucket, account.ID), "BindGroups should immediately refresh OpenAI shared pool single scheduler bucket")
+	s.Require().NotNil(cacheRecorder.findSnapshotAccount(forcedBucket, account.ID), "BindGroups should immediately refresh OpenAI shared pool forced scheduler bucket")
+}
+
 // --- Schedulable ---
 
 func (s *AccountRepoSuite) TestListSchedulable() {
@@ -1262,6 +1348,34 @@ func (s *AccountRepoSuite) TestListQuotaPoolAccountsHydratesProxyForPublicOpenAI
 	s.Require().True(found.IsSchedulableWithoutCodexQuotaProtection(), "public Pro share account with an active proxy should stay schedulable in quota pool dashboard")
 }
 
+func (s *AccountRepoSuite) TestListQuotaPoolAccountsToleratesNonObjectOpenAIAccountsPlanMetadata() {
+	owner := mustCreateUser(s.T(), s.client, &service.User{Email: "quota-pool-non-object-accounts-owner@example.com"})
+	account := mustCreateAccount(s.T(), s.client, &service.Account{
+		Name:         "quota-pool-non-object-accounts-plan",
+		Platform:     service.PlatformOpenAI,
+		Type:         service.AccountTypeOAuth,
+		AccountLevel: service.AccountLevelPlus,
+		OwnerUserID:  &owner.ID,
+		Credentials: map[string]any{
+			"accounts": []any{},
+		},
+		Schedulable: true,
+	})
+
+	accounts, err := s.repo.ListQuotaPoolAccounts(s.ctx, owner.ID)
+
+	s.Require().NoError(err)
+	var found *service.Account
+	for i := range accounts {
+		if accounts[i].ID == account.ID {
+			found = &accounts[i]
+			break
+		}
+	}
+	s.Require().NotNil(found, "quota pool list should tolerate non-object OpenAI accounts metadata")
+	s.Require().Equal(service.AccountLevelPlus, found.AccountLevel)
+}
+
 func (s *AccountRepoSuite) TestListQuotaPoolAccountsRepairsApprovedOpenAIProShareBinding() {
 	owner := mustCreateUser(s.T(), s.client, &service.User{Email: "quota-pool-pro-repair-owner@example.com"})
 	proxy := mustCreateProxy(s.T(), s.client, &service.Proxy{
@@ -1550,6 +1664,8 @@ func (s *AccountRepoSuite) TestListQuotaPoolAccountsRepairsVisibleOtherOwnerOpen
 		SetShareStatus(service.AccountShareStatusApproved).
 		Exec(s.ctx))
 	s.Require().False(s.accountHasGroup(account.ID, proGroup.ID), "test setup should start without a Pro public pool binding")
+	cacheRecorder := &schedulerCacheRecorder{}
+	s.repo.schedulerCache = cacheRecorder
 
 	accounts, err := s.repo.ListQuotaPoolAccounts(s.ctx, viewer.ID)
 
@@ -1577,6 +1693,20 @@ func (s *AccountRepoSuite) TestListQuotaPoolAccountsRepairsVisibleOtherOwnerOpen
 		}
 	}
 	s.Require().True(hasProSharedGroup, "quota pool account rows should include the repaired Pro shared group")
+	var cached *service.Account
+	for _, setAccount := range cacheRecorder.setAccounts {
+		if setAccount != nil && setAccount.ID == account.ID {
+			cached = setAccount
+			break
+		}
+	}
+	s.Require().NotNil(cached, "visible Pro shared pool repair should immediately sync scheduler account snapshot")
+	s.Require().NotNil(cached.Proxy, "synced scheduler snapshot should preserve Pro proxy hydration")
+	s.Require().True(accountHasGroupID(cached, proGroup.ID), "synced scheduler snapshot should include repaired Pro group binding")
+	singleBucket := service.SchedulerBucket{GroupID: proGroup.ID, Platform: service.PlatformOpenAI, Mode: service.SchedulerModeSingle}
+	forcedBucket := service.SchedulerBucket{GroupID: proGroup.ID, Platform: service.PlatformOpenAI, Mode: service.SchedulerModeForced}
+	s.Require().NotNil(cacheRecorder.findSnapshotAccount(singleBucket, account.ID), "visible Pro shared pool repair should refresh the OpenAI single scheduler bucket")
+	s.Require().NotNil(cacheRecorder.findSnapshotAccount(forcedBucket, account.ID), "visible Pro shared pool repair should refresh the OpenAI forced scheduler bucket")
 }
 
 func (s *AccountRepoSuite) TestListQuotaPoolAccountsRepairsVisibleOpenAIProShareFromNestedPlanType() {

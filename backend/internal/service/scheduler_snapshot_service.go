@@ -111,6 +111,12 @@ func (s *SchedulerSnapshotService) ListSchedulableAccounts(ctx context.Context, 
 	useMixed := (platform == PlatformAnthropic || platform == PlatformGemini) && !hasForcePlatform
 	mode := s.resolveMode(platform, hasForcePlatform)
 	bucket := s.bucketFor(groupID, platform, mode)
+	var staleFiltered []Account
+	rememberStaleFiltered := func(accounts []Account) {
+		if len(accounts) > 0 && len(staleFiltered) == 0 {
+			staleFiltered = append([]Account(nil), accounts...)
+		}
+	}
 
 	if s.cache != nil {
 		if candidateCache, ok := s.cache.(SchedulerCandidateCache); ok {
@@ -124,6 +130,7 @@ func (s *SchedulerSnapshotService) ListSchedulableAccounts(ctx context.Context, 
 					if !stale {
 						return filtered, useMixed, nil
 					}
+					rememberStaleFiltered(filtered)
 				}
 			}
 		}
@@ -135,10 +142,15 @@ func (s *SchedulerSnapshotService) ListSchedulableAccounts(ctx context.Context, 
 			if !stale {
 				return filtered, useMixed, nil
 			}
+			rememberStaleFiltered(filtered)
 		}
 	}
 
 	if err := s.guardFallback(ctx); err != nil {
+		if len(staleFiltered) > 0 {
+			logger.LegacyPrintf("service.scheduler_snapshot", "[Scheduler] using partial cached accounts after fallback guard failed: bucket=%s err=%v", bucket.String(), err)
+			return staleFiltered, useMixed, nil
+		}
 		return nil, useMixed, err
 	}
 
@@ -147,6 +159,10 @@ func (s *SchedulerSnapshotService) ListSchedulableAccounts(ctx context.Context, 
 
 	accounts, err := s.loadAccountsFromDB(fallbackCtx, bucket, useMixed)
 	if err != nil {
+		if len(staleFiltered) > 0 {
+			logger.LegacyPrintf("service.scheduler_snapshot", "[Scheduler] using partial cached accounts after fallback load failed: bucket=%s err=%v", bucket.String(), err)
+			return staleFiltered, useMixed, nil
+		}
 		return nil, useMixed, err
 	}
 
