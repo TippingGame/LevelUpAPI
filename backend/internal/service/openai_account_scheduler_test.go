@@ -740,6 +740,62 @@ func TestOpenAIGatewayService_SelectAccountForModelWithExclusions_SkipsFreshlyRa
 	require.Equal(t, int64(32002), account.ID)
 }
 
+func TestOpenAIGatewayService_SelectAccountForModelWithExclusions_UsesPublicSharePrivatePriorityForConsumer(t *testing.T) {
+	ownerID := int64(42)
+	consumerID := int64(99)
+	groupID := int64(10103)
+	privatePriority := 1
+	proxyID := int64(70103)
+	ctx := context.WithValue(context.Background(), ctxkey.AuthenticatedUserID, consumerID)
+	sharedPro := Account{
+		ID:              32101,
+		Platform:        PlatformOpenAI,
+		Type:            AccountTypeOAuth,
+		AccountLevel:    AccountLevelPro,
+		OwnerUserID:     &ownerID,
+		ProxyID:         &proxyID,
+		Proxy:           &Proxy{ID: proxyID, Status: StatusActive},
+		ShareMode:       AccountShareModePublic,
+		ShareStatus:     AccountShareStatusApproved,
+		Status:          StatusActive,
+		Schedulable:     true,
+		Concurrency:     1,
+		Priority:        50,
+		PrivatePriority: &privatePriority,
+	}
+	standard := Account{
+		ID:          32102,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Status:      StatusActive,
+		Schedulable: true,
+		Concurrency: 1,
+		Priority:    10,
+	}
+	groupedSharedPro := openAITestAccountWithGroupIfUnset(sharedPro, groupID)
+	groupedStandard := openAITestAccountWithGroupIfUnset(standard, groupID)
+	svc := &OpenAIGatewayService{
+		accountRepo: schedulerTestOpenAIAccountRepo{accounts: []Account{sharedPro, standard}},
+		cfg:         &config.Config{},
+	}
+
+	require.Equal(t, privatePriority, sharedPro.EffectivePriorityForRequest(ctx))
+	require.Equal(t, privatePriority, groupedSharedPro.EffectivePriorityForRequest(ctx))
+	require.Equal(t, standard.Priority, standard.EffectivePriorityForRequest(ctx))
+	require.Equal(t, standard.Priority, groupedStandard.EffectivePriorityForRequest(ctx))
+	require.False(t, svc.isBetterAccount(ctx, &groupedStandard, &groupedSharedPro))
+	require.NotNil(t, svc.resolveFreshSchedulableOpenAIAccount(ctx, &groupedSharedPro, "", false, ""))
+	selected, compactBlocked := svc.selectBestAccount(ctx, &groupID, []Account{groupedSharedPro, groupedStandard}, "", nil, false, "")
+	require.False(t, compactBlocked)
+	require.NotNil(t, selected)
+	require.Equal(t, sharedPro.ID, selected.ID)
+
+	account, err := svc.SelectAccountForModelWithExclusions(ctx, &groupID, "", "", nil)
+	require.NoError(t, err)
+	require.NotNil(t, account)
+	require.Equal(t, sharedPro.ID, account.ID)
+}
+
 func TestOpenAIGatewayService_SelectAccountForModelWithExclusions_SkipsProxyFailedProAccount(t *testing.T) {
 	groupID := int64(10112)
 	ownerID := int64(42)
