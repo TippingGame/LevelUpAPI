@@ -109,11 +109,57 @@ func TestSchedulerSnapshotFallbackCachesButDoesNotReturnCodexQuotaProtectedAccou
 	}
 }
 
+func TestSchedulerSnapshotCacheHydratesRequiredProxyMetadata(t *testing.T) {
+	ownerID := int64(10)
+	proxyID := int64(20)
+	groupID := int64(30)
+	cached := &Account{
+		ID:           1,
+		Platform:     PlatformOpenAI,
+		AccountLevel: AccountLevelPro,
+		Type:         AccountTypeOAuth,
+		OwnerUserID:  &ownerID,
+		ShareMode:    AccountShareModePublic,
+		ShareStatus:  AccountShareStatusApproved,
+		ProxyID:      &proxyID,
+		Status:       StatusActive,
+		Schedulable:  true,
+		Concurrency:  1,
+	}
+	full := *cached
+	full.Proxy = &Proxy{ID: proxyID, Status: StatusActive}
+	cache := &schedulerSnapshotQuotaCache{
+		snapshotAccounts: []*Account{cached},
+		fullAccounts: map[int64]*Account{
+			full.ID: &full,
+		},
+	}
+	repo := &schedulerSnapshotQuotaAccountRepo{}
+	svc := NewSchedulerSnapshotService(cache, nil, repo, nil, nil)
+
+	accounts, _, err := svc.ListSchedulableAccounts(context.Background(), &groupID, PlatformOpenAI, false)
+	if err != nil {
+		t.Fatalf("ListSchedulableAccounts error: %v", err)
+	}
+	if len(accounts) != 1 || accounts[0].ID != full.ID {
+		t.Fatalf("returned accounts = %+v, want hydrated Pro account", accounts)
+	}
+	if len(cache.setAccountIDs) != 1 || cache.setAccountIDs[0] != full.ID {
+		t.Fatalf("set account IDs = %+v, want metadata refresh for account %d", cache.setAccountIDs, full.ID)
+	}
+}
+
 type schedulerSnapshotQuotaCache struct {
-	cachedAccounts []Account
+	cachedAccounts   []Account
+	snapshotAccounts []*Account
+	fullAccounts     map[int64]*Account
+	setAccountIDs    []int64
 }
 
 func (c *schedulerSnapshotQuotaCache) GetSnapshot(context.Context, SchedulerBucket) ([]*Account, bool, error) {
+	if c.snapshotAccounts != nil {
+		return c.snapshotAccounts, true, nil
+	}
 	return nil, false, nil
 }
 
@@ -122,11 +168,22 @@ func (c *schedulerSnapshotQuotaCache) SetSnapshot(_ context.Context, _ Scheduler
 	return nil
 }
 
-func (c *schedulerSnapshotQuotaCache) GetAccount(context.Context, int64) (*Account, error) {
-	return nil, nil
+func (c *schedulerSnapshotQuotaCache) GetAccount(_ context.Context, id int64) (*Account, error) {
+	if c.fullAccounts == nil {
+		return nil, nil
+	}
+	return c.fullAccounts[id], nil
 }
 
-func (c *schedulerSnapshotQuotaCache) SetAccount(context.Context, *Account) error {
+func (c *schedulerSnapshotQuotaCache) SetAccount(_ context.Context, account *Account) error {
+	if account != nil {
+		c.setAccountIDs = append(c.setAccountIDs, account.ID)
+		if c.fullAccounts == nil {
+			c.fullAccounts = map[int64]*Account{}
+		}
+		copyAccount := *account
+		c.fullAccounts[account.ID] = &copyAccount
+	}
 	return nil
 }
 

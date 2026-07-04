@@ -120,7 +120,10 @@ func (s *SchedulerSnapshotService) ListSchedulableAccounts(ctx context.Context, 
 				if err != nil {
 					logger.LegacyPrintf("service.scheduler_snapshot", "[Scheduler] candidate cache read failed: bucket=%s err=%v", bucket.String(), err)
 				} else if hit {
-					return filterSchedulableAccounts(derefAccounts(cached)), useMixed, nil
+					filtered, stale := s.filterCachedSchedulableAccounts(ctx, bucket, cached, "candidate")
+					if !stale {
+						return filtered, useMixed, nil
+					}
 				}
 			}
 		}
@@ -128,7 +131,10 @@ func (s *SchedulerSnapshotService) ListSchedulableAccounts(ctx context.Context, 
 		if err != nil {
 			logger.LegacyPrintf("service.scheduler_snapshot", "[Scheduler] cache read failed: bucket=%s err=%v", bucket.String(), err)
 		} else if hit {
-			return filterSchedulableAccounts(derefAccounts(cached)), useMixed, nil
+			filtered, stale := s.filterCachedSchedulableAccounts(ctx, bucket, cached, "snapshot")
+			if !stale {
+				return filtered, useMixed, nil
+			}
 		}
 	}
 
@@ -737,6 +743,55 @@ func filterSchedulableAccounts(accounts []Account) []Account {
 		}
 	}
 	return filtered
+}
+
+func (s *SchedulerSnapshotService) filterCachedSchedulableAccounts(ctx context.Context, bucket SchedulerBucket, cached []*Account, source string) ([]Account, bool) {
+	accounts := derefAccounts(cached)
+	accounts, stale := s.repairCachedAccountsMissingRequiredProxy(ctx, accounts)
+	filtered := filterSchedulableAccounts(accounts)
+	if stale {
+		logger.LegacyPrintf("service.scheduler_snapshot", "[Scheduler] cached account metadata missing required proxy hydration: bucket=%s source=%s", bucket.String(), source)
+	}
+	return filtered, stale
+}
+
+func (s *SchedulerSnapshotService) repairCachedAccountsMissingRequiredProxy(ctx context.Context, accounts []Account) ([]Account, bool) {
+	if len(accounts) == 0 || s == nil || s.cache == nil {
+		return accounts, false
+	}
+
+	stale := false
+	for i := range accounts {
+		if !accountMissingRequiredProxyHydration(&accounts[i]) {
+			continue
+		}
+		full, err := s.cache.GetAccount(ctx, accounts[i].ID)
+		if err != nil {
+			stale = true
+			continue
+		}
+		if full == nil {
+			stale = true
+			continue
+		}
+		if accountMissingRequiredProxyHydration(full) {
+			stale = true
+			continue
+		}
+		accounts[i] = *full
+		if err := s.cache.SetAccount(ctx, full); err != nil {
+			logger.LegacyPrintf("service.scheduler_snapshot", "[Scheduler] refresh account metadata after proxy hydration failed: account=%d err=%v", full.ID, err)
+		}
+	}
+	return accounts, stale
+}
+
+func accountMissingRequiredProxyHydration(account *Account) bool {
+	return account != nil &&
+		account.RequiresProxyForScheduling() &&
+		account.ProxyID != nil &&
+		*account.ProxyID > 0 &&
+		account.Proxy == nil
 }
 
 func filterSchedulableAccountsForSnapshot(accounts []Account) []Account {
