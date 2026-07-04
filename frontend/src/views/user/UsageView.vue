@@ -1,6 +1,6 @@
 <template>
   <AppLayout>
-    <TablePageLayout>
+    <TablePageLayout class="user-usage-layout">
       <template #actions>
         <div v-if="activeTab === 'requests'" class="space-y-4">
         <div class="grid grid-cols-2 gap-4 lg:grid-cols-4">
@@ -90,10 +90,20 @@
         </div>
         </div>
         <div class="card p-4">
-          <div class="flex flex-wrap items-center justify-end gap-3">
-            <span class="text-sm font-medium text-gray-700 dark:text-gray-300">{{ t('admin.dashboard.granularity') }}:</span>
-            <div class="w-28">
-              <Select v-model="granularity" :options="granularityOptions" @change="loadChartData" />
+          <div class="flex flex-wrap items-center gap-4">
+            <div class="flex items-center gap-2">
+              <span class="text-sm font-medium text-gray-700 dark:text-gray-300">{{ t('admin.dashboard.timeRange') }}:</span>
+              <DateRangePicker
+                v-model:start-date="startDate"
+                v-model:end-date="endDate"
+                @change="onDateRangeChange"
+              />
+            </div>
+            <div class="ml-auto flex items-center gap-2">
+              <span class="text-sm font-medium text-gray-700 dark:text-gray-300">{{ t('admin.dashboard.granularity') }}:</span>
+              <div class="w-28">
+                <Select v-model="granularity" :options="granularityOptions" @change="loadChartData" />
+              </div>
             </div>
           </div>
         </div>
@@ -175,17 +185,14 @@
               />
             </div>
 
-            <!-- Group ID Filter -->
-            <div class="min-w-[140px]">
+            <!-- Group Filter -->
+            <div class="min-w-[200px]">
               <label class="input-label">{{ t('admin.usage.group') }}</label>
-              <input
-                v-model.number="filters.group_id"
-                type="number"
-                min="1"
-                step="1"
-                class="input"
-                placeholder="ID"
-                @keyup.enter="applyFilters"
+              <Select
+                v-model="filters.group_id"
+                :options="groupFilterOptions"
+                searchable
+                @change="applyFilters"
               />
             </div>
 
@@ -205,16 +212,6 @@
             <div class="min-w-[190px]">
               <label class="input-label">{{ t('admin.usage.billingMode') }}</label>
               <Select v-model="filters.billing_mode" :options="billingModeOptions" @change="applyFilters" />
-            </div>
-
-            <!-- Date Range Filter -->
-            <div>
-              <label class="input-label">{{ t('usage.timeRange') }}</label>
-              <DateRangePicker
-                v-model:start-date="startDate"
-                v-model:end-date="endDate"
-                @change="onDateRangeChange"
-              />
             </div>
 
             <!-- Actions -->
@@ -363,7 +360,9 @@
           </template>
 
           <template #cell-group_id="{ row }">
-            <span v-if="row.group_id" class="text-sm font-mono text-gray-600 dark:text-gray-400">#{{ row.group_id }}</span>
+            <span v-if="row.group_id" class="text-sm text-gray-700 dark:text-gray-300">
+              {{ getGroupLabel(row.group_id) }}
+            </span>
             <span v-else class="text-sm text-gray-400 dark:text-gray-500">-</span>
           </template>
 
@@ -787,7 +786,7 @@
 import { ref, computed, reactive, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
-import { usageAPI, keysAPI } from '@/api'
+import { usageAPI, keysAPI, userGroupsAPI } from '@/api'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import TablePageLayout from '@/components/layout/TablePageLayout.vue'
 import DataTable from '@/components/common/DataTable.vue'
@@ -802,6 +801,7 @@ import TokenUsageTrend from '@/components/charts/TokenUsageTrend.vue'
 import type {
   ApiKey,
   BalanceLedgerDirection,
+  Group,
   ModelStat,
   TrendDataPoint,
   UsageLog,
@@ -934,6 +934,7 @@ const ledgerColumns = computed<Column[]>(() => [
 const usageLogs = ref<UsageLog[]>([])
 const balanceLedger = ref<UserBalanceLedgerEntry[]>([])
 const apiKeys = ref<ApiKey[]>([])
+const groups = ref<Group[]>([])
 const loading = ref(false)
 const ledgerLoading = ref(false)
 const ledgerLoaded = ref(false)
@@ -967,6 +968,31 @@ const modelFilterOptions = computed(() => {
     }))
   ]
 })
+
+const groupFilterOptions = computed(() => [
+  { value: null, label: t('admin.usage.allGroups') },
+  ...groups.value
+    .slice()
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .map((group) => ({
+      value: group.id,
+      label: group.name
+    }))
+])
+
+const groupNameById = computed(() => {
+  const map = new Map<number, string>()
+  groups.value.forEach((group) => {
+    map.set(group.id, group.name)
+  })
+  return map
+})
+
+const getGroupLabel = (groupId: number | string | null | undefined): string => {
+  const id = Number(groupId)
+  if (!Number.isFinite(id) || id <= 0) return '-'
+  return groupNameById.value.get(id) || `#${id}`
+}
 
 const requestTypeOptions = computed(() => [
   { value: null, label: t('admin.usage.allTypes') },
@@ -1417,6 +1443,15 @@ const loadApiKeys = async () => {
     apiKeys.value = response.items
   } catch (error) {
     console.error('Failed to load API keys:', error)
+  }
+}
+
+const loadGroups = async () => {
+  try {
+    groups.value = await userGroupsAPI.getAvailable()
+  } catch (error) {
+    console.error('Failed to load groups:', error)
+    groups.value = []
   }
 }
 
@@ -1947,6 +1982,7 @@ const handleColumnClickOutside = (event: MouseEvent) => {
 onMounted(() => {
   loadSavedColumns()
   loadApiKeys()
+  loadGroups()
   loadUsageLogs()
   loadUsageStats()
   loadChartData()
@@ -1965,3 +2001,19 @@ onUnmounted(() => {
   document.removeEventListener('click', handleColumnClickOutside)
 })
 </script>
+
+<style scoped>
+:deep(.user-usage-layout.table-page-layout) {
+  height: auto !important;
+  min-height: 0;
+}
+
+:deep(.user-usage-layout .layout-section-scrollable) {
+  flex: none !important;
+  min-height: 0;
+}
+
+:deep(.user-usage-layout:not(.mobile-mode) .table-scroll-container) {
+  height: clamp(420px, 56vh, 720px);
+}
+</style>

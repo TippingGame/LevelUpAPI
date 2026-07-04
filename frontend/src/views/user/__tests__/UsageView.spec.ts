@@ -4,13 +4,14 @@ import { nextTick } from 'vue'
 
 import UsageView from '../UsageView.vue'
 
-const { query, queryBalanceLedger, getStatsByDateRange, getDashboardTrend, getDashboardModels, list, showError, showWarning, showSuccess, showInfo } = vi.hoisted(() => ({
+const { query, queryBalanceLedger, getStatsByDateRange, getDashboardTrend, getDashboardModels, list, getAvailable, showError, showWarning, showSuccess, showInfo } = vi.hoisted(() => ({
   query: vi.fn(),
   queryBalanceLedger: vi.fn(),
   getStatsByDateRange: vi.fn(),
   getDashboardTrend: vi.fn(),
   getDashboardModels: vi.fn(),
   list: vi.fn(),
+  getAvailable: vi.fn(),
   showError: vi.fn(),
   showWarning: vi.fn(),
   showSuccess: vi.fn(),
@@ -70,6 +71,9 @@ vi.mock('@/api', () => ({
   keysAPI: {
     list,
   },
+  userGroupsAPI: {
+    getAvailable,
+  },
 }))
 
 vi.mock('@/stores/app', () => ({
@@ -99,6 +103,7 @@ describe('user UsageView tooltip', () => {
     getDashboardTrend.mockReset()
     getDashboardModels.mockReset()
     list.mockReset()
+    getAvailable.mockReset()
     showError.mockReset()
     showWarning.mockReset()
     showSuccess.mockReset()
@@ -123,6 +128,7 @@ describe('user UsageView tooltip', () => {
 
     getDashboardTrend.mockResolvedValue({ trend: [], start_date: '2026-03-02', end_date: '2026-03-08', granularity: 'day' })
     getDashboardModels.mockResolvedValue({ models: [], start_date: '2026-03-02', end_date: '2026-03-08' })
+    getAvailable.mockResolvedValue([])
   })
 
   it('shows fast service tier and unit prices in user tooltip', async () => {
