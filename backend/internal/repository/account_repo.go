@@ -1498,6 +1498,12 @@ func openAIPlanCandidateValueRowsSQL(jsonExpr string, startOrder int) []string {
 		"COALESCE(NULLIF((%[1]s)->>'chatgpt_account_id', ''), NULLIF((%[1]s)->>'organization_id', ''), NULLIF((%[1]s)->>'account_id', ''), '')",
 		jsonValue,
 	)
+	accountInfoJSON := fmt.Sprintf("COALESCE((%s)->'account_info', '{}'::jsonb)", jsonValue)
+	selectedAccountInfoID := fmt.Sprintf(
+		"COALESCE(NULLIF((%[1]s)->>'chatgpt_account_id', ''), NULLIF((%[1]s)->>'organization_id', ''), NULLIF((%[1]s)->>'account_id', ''), %[2]s)",
+		accountInfoJSON,
+		selectedAccountID,
+	)
 	exprs := []string{
 		fmt.Sprintf("(%s)->>'plan_type'", jsonValue),
 		fmt.Sprintf("(%s)->>'chatgpt_plan_type'", jsonValue),
@@ -1524,6 +1530,13 @@ func openAIPlanCandidateValueRowsSQL(jsonExpr string, startOrder int) []string {
 		fmt.Sprintf("jsonb_extract_path_text((%s)->'accounts', %s, 'entitlement', 'chatgpt_plan_type')", jsonValue, selectedAccountID),
 		fmt.Sprintf("jsonb_extract_path_text((%s)->'accounts', %s, 'entitlement', 'subscription_plan')", jsonValue, selectedAccountID),
 		openAIAccountsFallbackPlanSQL(jsonValue, selectedAccountID),
+		fmt.Sprintf("jsonb_extract_path_text((%s)->'accounts', %s, 'account', 'plan_type')", accountInfoJSON, selectedAccountInfoID),
+		fmt.Sprintf("jsonb_extract_path_text((%s)->'accounts', %s, 'account', 'chatgpt_plan_type')", accountInfoJSON, selectedAccountInfoID),
+		fmt.Sprintf("jsonb_extract_path_text((%s)->'accounts', %s, 'account', 'subscription_plan')", accountInfoJSON, selectedAccountInfoID),
+		fmt.Sprintf("jsonb_extract_path_text((%s)->'accounts', %s, 'entitlement', 'plan_type')", accountInfoJSON, selectedAccountInfoID),
+		fmt.Sprintf("jsonb_extract_path_text((%s)->'accounts', %s, 'entitlement', 'chatgpt_plan_type')", accountInfoJSON, selectedAccountInfoID),
+		fmt.Sprintf("jsonb_extract_path_text((%s)->'accounts', %s, 'entitlement', 'subscription_plan')", accountInfoJSON, selectedAccountInfoID),
+		openAIAccountsFallbackPlanSQL(accountInfoJSON, selectedAccountInfoID),
 	}
 	rows := make([]string, 0, len(exprs))
 	for i, expr := range exprs {

@@ -241,6 +241,7 @@ func openAIAccountPlanCandidates(credentials, extra map[string]any) []string {
 			candidates = appendOpenAIPlanFields(candidates, accountInfo)
 			candidates = appendOpenAIPlanFields(candidates, nestedStringMap(accountInfo, "account"))
 			candidates = appendOpenAIPlanFields(candidates, nestedStringMap(accountInfo, "entitlement"))
+			candidates = appendOpenAIAccountsCheckPlanFields(candidates, accountInfo, values)
 		}
 		candidates = appendOpenAIAccountsCheckPlanFields(candidates, values)
 	}
@@ -259,7 +260,7 @@ func appendOpenAIPlanFields(out []string, values map[string]any) []string {
 	return out
 }
 
-func appendOpenAIAccountsCheckPlanFields(out []string, values map[string]any) []string {
+func appendOpenAIAccountsCheckPlanFields(out []string, values map[string]any, idFallbackSources ...map[string]any) []string {
 	if values == nil {
 		return out
 	}
@@ -267,12 +268,14 @@ func appendOpenAIAccountsCheckPlanFields(out []string, values map[string]any) []
 	if len(accounts) == 0 {
 		return out
 	}
-	for _, idKey := range []string{"chatgpt_account_id", "organization_id", "account_id"} {
-		id, _ := values[idKey].(string)
-		if account := nestedStringMap(accounts, strings.TrimSpace(id)); account != nil {
-			out = appendOpenAIPlanFields(out, nestedStringMap(account, "account"))
-			out = appendOpenAIPlanFields(out, nestedStringMap(account, "entitlement"))
-			return out
+	for _, source := range append([]map[string]any{values}, idFallbackSources...) {
+		for _, idKey := range []string{"chatgpt_account_id", "organization_id", "account_id"} {
+			id, _ := source[idKey].(string)
+			if account := nestedStringMap(accounts, strings.TrimSpace(id)); account != nil {
+				out = appendOpenAIPlanFields(out, nestedStringMap(account, "account"))
+				out = appendOpenAIPlanFields(out, nestedStringMap(account, "entitlement"))
+				return out
+			}
 		}
 	}
 	defaultCandidates := make([]string, 0, 6)
