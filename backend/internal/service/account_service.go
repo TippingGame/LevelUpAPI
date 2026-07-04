@@ -247,6 +247,10 @@ type accountQuotaPoolRepairRepository interface {
 	RepairQuotaPoolOwnerOpenAISharedPoolBindings(ctx context.Context, ownerUserID int64) (bool, error)
 }
 
+type openAIProSharedPoolEnsureRepository interface {
+	EnsureOpenAIProSharedPoolForAccount(ctx context.Context, accountID int64) (bool, error)
+}
+
 type accountShareModeListingAccountRepository interface {
 	IsAccountShareModeListingAccount(ctx context.Context, accountID int64) (bool, error)
 }
@@ -2212,10 +2216,6 @@ func (s *AccountService) resolveOwnedPublicShareGroup(ctx context.Context, accou
 	if platform == "" {
 		return nil, ErrOwnedAccountGroupPlatformMismatch
 	}
-	groups, err := s.groupRepo.ListActiveByPlatform(ctx, platform)
-	if err != nil {
-		return nil, fmt.Errorf("list public share groups: %w", err)
-	}
 	if account.Platform == PlatformOpenAI {
 		accountLevel := EffectiveOpenAISharedPoolAccountLevel(account.Platform, account.AccountLevel, account.Credentials, account.Extra)
 		if OpenAISharedPoolLevelRank(accountLevel) == 0 {
@@ -2224,6 +2224,18 @@ func (s *AccountService) resolveOwnedPublicShareGroup(ctx context.Context, accou
 				"account_level": accountLevel,
 			})
 		}
+		if accountLevel == AccountLevelPro {
+			if err := s.ensureOpenAIProSharedPoolForAccount(ctx, account.ID); err != nil {
+				return nil, err
+			}
+		}
+	}
+	groups, err := s.groupRepo.ListActiveByPlatform(ctx, platform)
+	if err != nil {
+		return nil, fmt.Errorf("list public share groups: %w", err)
+	}
+	if account.Platform == PlatformOpenAI {
+		accountLevel := EffectiveOpenAISharedPoolAccountLevel(account.Platform, account.AccountLevel, account.Credentials, account.Extra)
 		var matchedGroup *Group
 		bestRank := 0
 		for i := range groups {
@@ -2256,6 +2268,20 @@ func (s *AccountService) resolveOwnedPublicShareGroup(ctx context.Context, accou
 	return nil, ErrOwnedAccountPublicPoolUnavailable.WithMetadata(map[string]string{
 		"platform": platform,
 	})
+}
+
+func (s *AccountService) ensureOpenAIProSharedPoolForAccount(ctx context.Context, accountID int64) error {
+	if s == nil || s.accountRepo == nil || accountID <= 0 {
+		return nil
+	}
+	repo, ok := s.accountRepo.(openAIProSharedPoolEnsureRepository)
+	if !ok {
+		return nil
+	}
+	if _, err := repo.EnsureOpenAIProSharedPoolForAccount(ctx, accountID); err != nil {
+		return fmt.Errorf("ensure openai pro shared pool: %w", err)
+	}
+	return nil
 }
 
 func isOwnedPublicSharePoolGroup(group *Group, platform string) bool {

@@ -1664,6 +1664,62 @@ func (s *AccountRepoSuite) TestRepairQuotaPoolVisibleOpenAIProShareReportsGroupM
 	s.Require().Zero(bulkOutboxCount, "metadata-only repair should not emit a misleading account bulk event")
 }
 
+func (s *AccountRepoSuite) TestEnsureOpenAIProSharedPoolForAccountAllowsPendingPublicShare() {
+	_, err := s.repo.sql.ExecContext(s.ctx, `
+		UPDATE groups
+		SET deleted_at = NOW()
+		WHERE deleted_at IS NULL
+			AND platform = 'openai'
+			AND owner_user_id IS NULL
+			AND lower(btrim(COALESCE(scope, ''))) = 'public'
+			AND lower(btrim(COALESCE(required_account_level, ''))) = 'pro'
+	`)
+	s.Require().NoError(err)
+
+	owner := mustCreateUser(s.T(), s.client, &service.User{Email: "quota-pool-pending-pro-owner@example.com"})
+	proxy := mustCreateProxy(s.T(), s.client, &service.Proxy{
+		Name:   "quota-pool-pending-pro-proxy",
+		Status: service.StatusActive,
+	})
+	account := mustCreateAccount(s.T(), s.client, &service.Account{
+		Name:         "quota-pool-pending-pro-share",
+		Platform:     service.PlatformOpenAI,
+		Type:         service.AccountTypeOAuth,
+		AccountLevel: service.AccountLevelPro,
+		OwnerUserID:  &owner.ID,
+		Credentials:  map[string]any{"plan_type": "chatgpt_pro"},
+		ProxyID:      &proxy.ID,
+		Schedulable:  true,
+		Concurrency:  3,
+	})
+	s.Require().NoError(s.client.Account.UpdateOneID(account.ID).
+		SetShareMode(service.AccountShareModePublic).
+		SetShareStatus(service.AccountShareStatusPending).
+		Exec(s.ctx))
+
+	changed, err := s.repo.EnsureOpenAIProSharedPoolForAccount(s.ctx, account.ID)
+
+	s.Require().NoError(err)
+	s.Require().True(changed, "pending Pro public shares should be able to create the target Pro pool before approval")
+
+	var proPoolCount int
+	err = scanSingleRow(s.ctx, s.repo.sql, `
+		SELECT COUNT(*)
+		FROM groups
+		WHERE deleted_at IS NULL
+			AND platform = 'openai'
+			AND status = 'active'
+			AND owner_user_id IS NULL
+			AND lower(btrim(COALESCE(scope, ''))) = 'public'
+			AND is_exclusive = FALSE
+			AND lower(btrim(COALESCE(subscription_type, ''))) IN ('', 'standard')
+			AND lower(btrim(COALESCE(required_account_level, ''))) = 'pro'
+	`, nil, &proPoolCount)
+	s.Require().NoError(err)
+	s.Require().GreaterOrEqual(proPoolCount, 1)
+	s.Require().Equal(0, s.publicOpenAIStandardGroupCount(account.ID), "ensure should not bind a pending share into the public pool")
+}
+
 func (s *AccountRepoSuite) TestListOwnedWithFiltersRepairsApprovedOpenAIProShareBinding() {
 	owner := mustCreateUser(s.T(), s.client, &service.User{Email: "owned-list-pro-repair-owner@example.com"})
 	privateGroup := mustCreateGroup(s.T(), s.client, &service.Group{

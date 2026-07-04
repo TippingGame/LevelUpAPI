@@ -135,6 +135,8 @@ type ownedAccountDuplicateRepoStub struct {
 	bulkUpdatePayload          AccountBulkUpdate
 	boundAccountIDs            []int64
 	boundGroupIDs              map[int64][]int64
+	ensureOpenAIProPoolCalls   int
+	ensureOpenAIProPoolFn      func(accountID int64) error
 	getByIDAccounts            map[int64]*Account
 	getByIDsAccounts           map[int64]*Account
 	accountShareModeListingIDs map[int64]int64
@@ -275,6 +277,17 @@ func (s *ownedAccountDuplicateRepoStub) BindGroups(_ context.Context, accountID 
 	}
 	s.boundGroupIDs[accountID] = append([]int64(nil), groupIDs...)
 	return nil
+}
+
+func (s *ownedAccountDuplicateRepoStub) EnsureOpenAIProSharedPoolForAccount(_ context.Context, accountID int64) (bool, error) {
+	s.ensureOpenAIProPoolCalls++
+	if s.ensureOpenAIProPoolFn != nil {
+		if err := s.ensureOpenAIProPoolFn(accountID); err != nil {
+			return false, err
+		}
+		return true, nil
+	}
+	return false, nil
 }
 
 func (s *ownedAccountDuplicateRepoStub) GetByID(_ context.Context, id int64) (*Account, error) {
@@ -631,6 +644,69 @@ func TestAccountServiceResolveOwnedPublicShareGroupRejectsHigherLevelFallbackToL
 	_, err := svc.resolveOwnedPublicShareGroup(context.Background(), &Account{Platform: PlatformOpenAI, AccountLevel: AccountLevelPro})
 
 	require.ErrorIs(t, err, ErrOwnedAccountPublicPoolUnavailable)
+}
+
+func TestAccountServiceApproveOwnedPublicShareEnsuresMissingProSharedPool(t *testing.T) {
+	ownerID := int64(101)
+	accountID := int64(202)
+	proxyID := int64(303)
+	groupRepo := &ownedPublicShareGroupRepoStub{
+		groups: []Group{
+			{ID: 11, Name: "PLUS共享号池", Platform: PlatformOpenAI, Status: StatusActive, Scope: GroupScopePublic, SubscriptionType: SubscriptionTypeStandard, RequiredAccountLevel: AccountLevelPlus},
+		},
+	}
+	repo := &ownedAccountDuplicateRepoStub{
+		getByIDAccounts: map[int64]*Account{
+			accountID: {
+				ID:           accountID,
+				Name:         "pending-pro-share",
+				Platform:     PlatformOpenAI,
+				Type:         AccountTypeOAuth,
+				AccountLevel: AccountLevelPro,
+				Credentials:  map[string]any{"access_token": "token", "plan_type": "chatgpt_pro"},
+				OwnerUserID:  &ownerID,
+				ShareMode:    AccountShareModePublic,
+				ShareStatus:  AccountShareStatusPending,
+				ProxyID:      &proxyID,
+				Proxy:        &Proxy{ID: proxyID, Status: StatusActive},
+				Status:       StatusActive,
+				Schedulable:  true,
+				Concurrency:  OpenAIPlusDefaultConcurrency,
+			},
+		},
+	}
+	repo.ensureOpenAIProPoolFn = func(accountID int64) error {
+		require.Equal(t, int64(202), accountID)
+		groupRepo.groups = append(groupRepo.groups, Group{
+			ID:                   13,
+			Name:                 "PRO共享号池",
+			Platform:             PlatformOpenAI,
+			Status:               StatusActive,
+			Scope:                GroupScopePublic,
+			SubscriptionType:     SubscriptionTypeStandard,
+			RequiredAccountLevel: AccountLevelPro,
+		})
+		return nil
+	}
+	svc := &AccountService{
+		accountRepo: repo,
+		groupRepo:   groupRepo,
+		accountSharePolicyRepo: &ownedPublicSharePolicyRepoStub{
+			policy: &AccountSharePolicy{ID: 1, OwnerShareRatio: 0.7, Enabled: true},
+		},
+		privateGroupProvisioner: &ownedPrivateGroupProvisionerStub{
+			group: &Group{ID: 99, Platform: PlatformOpenAI, Status: StatusActive, Scope: GroupScopeUserPrivate},
+		},
+	}
+
+	account, err := svc.ApproveOwnedPublicShare(context.Background(), ownerID, accountID)
+
+	require.NoError(t, err)
+	require.Equal(t, 1, repo.ensureOpenAIProPoolCalls)
+	require.Equal(t, AccountShareStatusApproved, account.ShareStatus)
+	require.Equal(t, []int64{99, 13}, repo.boundGroupIDs[accountID])
+	require.Len(t, repo.updatedAccounts, 1)
+	require.Equal(t, AccountShareStatusApproved, repo.updatedAccounts[0].ShareStatus)
 }
 
 func TestAccountServiceResolveOwnedPublicShareGroupKeepsTeamPoolStrict(t *testing.T) {

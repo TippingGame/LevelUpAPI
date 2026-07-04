@@ -880,6 +880,26 @@ func (r *accountRepository) RepairQuotaPoolVisibleOpenAISharedPoolBindings(ctx c
 	return r.repairQuotaPoolVisibleOpenAISharedPoolBindings(ctx, ownerUserID)
 }
 
+func (r *accountRepository) EnsureOpenAIProSharedPoolForAccount(ctx context.Context, accountID int64) (bool, error) {
+	if r == nil || r.sql == nil || accountID <= 0 {
+		return false, nil
+	}
+	groupIDs, err := ensureOpenAIProSharedPoolForAccounts(ctx, r.sql, []int64{accountID}, true)
+	if err != nil {
+		return false, err
+	}
+	if len(groupIDs) == 0 {
+		return false, nil
+	}
+	for _, groupID := range uniquePositiveInt64s(groupIDs) {
+		gid := groupID
+		if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventGroupChanged, nil, &gid, nil); err != nil {
+			logger.LegacyPrintf("repository.account", "[SchedulerOutbox] enqueue pro shared pool ensure failed: group=%d err=%v", gid, err)
+		}
+	}
+	return true, nil
+}
+
 func (r *accountRepository) repairQuotaPoolOwnerOpenAISharedPoolBindings(ctx context.Context, ownerUserID int64) (bool, error) {
 	if r == nil || r.sql == nil || ownerUserID <= 0 {
 		return false, nil
@@ -2912,7 +2932,7 @@ func repairOpenAISharedPoolBindingsForAccounts(ctx context.Context, exec sqlExec
 	if exec == nil || len(accountIDs) == 0 {
 		return nil, nil, nil
 	}
-	ensuredGroupIDs, err := ensureOpenAIProSharedPoolForAccounts(ctx, exec, accountIDs)
+	ensuredGroupIDs, err := ensureOpenAIProSharedPoolForAccounts(ctx, exec, accountIDs, false)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -3044,7 +3064,7 @@ func repairOpenAISharedPoolBindingsForAccounts(ctx context.Context, exec sqlExec
 	return append([]int64(nil), changedAccountIDs...), mergeInt64Slices(affectedGroupIDs, ensuredGroupIDs), nil
 }
 
-func ensureOpenAIProSharedPoolForAccounts(ctx context.Context, exec sqlExecutor, accountIDs []int64) ([]int64, error) {
+func ensureOpenAIProSharedPoolForAccounts(ctx context.Context, exec sqlExecutor, accountIDs []int64, includePending bool) ([]int64, error) {
 	if exec == nil || len(accountIDs) == 0 {
 		return nil, nil
 	}
@@ -3070,7 +3090,8 @@ func ensureOpenAIProSharedPoolForAccounts(ctx context.Context, exec sqlExecutor,
 				AND a.type = 'oauth'
 				AND a.owner_user_id IS NOT NULL
 				AND lower(btrim(COALESCE(a.share_mode, ''))) = 'public'
-				AND lower(btrim(COALESCE(a.share_status, ''))) NOT IN ('pending', 'suspended')
+				AND lower(btrim(COALESCE(a.share_status, ''))) <> 'suspended'
+				AND ($2::boolean OR lower(btrim(COALESCE(a.share_status, ''))) <> 'pending')
 				AND NOT (
 					lower(btrim(COALESCE(a.account_level, ''))) = 'team'
 					OR plan.token IN ('team', 'chatgptteam')
@@ -3267,7 +3288,7 @@ func ensureOpenAIProSharedPoolForAccounts(ctx context.Context, exec sqlExecutor,
 			SELECT id FROM inserted_pro_pool
 		)
 		SELECT COALESCE((SELECT array_agg(id ORDER BY id) FROM changed_groups), '{}'::bigint[])
-	`, []any{pq.Array(accountIDs)}, &groupIDs)
+	`, []any{pq.Array(accountIDs), includePending}, &groupIDs)
 	if err != nil {
 		return nil, fmt.Errorf("ensure openai pro shared pool: %w", err)
 	}
