@@ -25,9 +25,6 @@ func (a *Account) EffectivePriorityForUser(userID int64) int {
 	if userID > 0 && a.OwnerUserID != nil && *a.OwnerUserID == userID && a.PrivatePriority != nil && *a.PrivatePriority > 0 {
 		return *a.PrivatePriority
 	}
-	if a.IsPublicShareApproved() && a.PrivatePriority != nil && *a.PrivatePriority > 0 {
-		return *a.PrivatePriority
-	}
 	return a.Priority
 }
 

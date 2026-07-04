@@ -850,6 +850,59 @@ func buildOpenAIWeightedSelectionOrder(
 	return order
 }
 
+func groupOpenAICandidatesByPriority(candidates []openAIAccountCandidateScore) [][]openAIAccountCandidateScore {
+	if len(candidates) == 0 {
+		return nil
+	}
+	groups := make(map[int][]openAIAccountCandidateScore)
+	priorities := make([]int, 0)
+	for _, candidate := range candidates {
+		priority := openAICandidatePriority(candidate)
+		if _, exists := groups[priority]; !exists {
+			priorities = append(priorities, priority)
+		}
+		groups[priority] = append(groups[priority], candidate)
+	}
+	sort.Ints(priorities)
+
+	ordered := make([][]openAIAccountCandidateScore, 0, len(priorities))
+	for _, priority := range priorities {
+		ordered = append(ordered, groups[priority])
+	}
+	return ordered
+}
+
+func buildOpenAIPriorityLayeredSelectionOrders(
+	candidates []openAIAccountCandidateScore,
+	topK int,
+	req OpenAIAccountScheduleRequest,
+) ([]openAIAccountCandidateScore, []openAIAccountCandidateScore) {
+	if len(candidates) == 0 || topK <= 0 {
+		return nil, nil
+	}
+	selectionOrder := make([]openAIAccountCandidateScore, 0, len(candidates))
+	acquireOrder := make([]openAIAccountCandidateScore, 0, len(candidates))
+	for _, priorityGroup := range groupOpenAICandidatesByPriority(candidates) {
+		groupTopK := topK
+		if groupTopK > len(priorityGroup) {
+			groupTopK = len(priorityGroup)
+		}
+		ranked := selectHybridTopKOpenAICandidates(priorityGroup, groupTopK, req)
+		layerSelection := buildOpenAIWeightedSelectionOrder(ranked, req)
+		selectionOrder = append(selectionOrder, layerSelection...)
+		acquireOrder = append(acquireOrder, layerSelection...)
+
+		overflowLimit := openAIHybridOverflowProbeCount(groupTopK, len(priorityGroup))
+		if overflowLimit <= 0 {
+			continue
+		}
+		if overflow := selectOpenAIOverflowProbeCandidates(priorityGroup, layerSelection, overflowLimit, req); len(overflow) > 0 {
+			acquireOrder = append(acquireOrder, overflow...)
+		}
+	}
+	return selectionOrder, acquireOrder
+}
+
 func (s *defaultOpenAIAccountScheduler) selectByLoadBalance(
 	ctx context.Context,
 	req OpenAIAccountScheduleRequest,
@@ -992,16 +1045,11 @@ func (s *defaultOpenAIAccountScheduler) selectByLoadBalance(
 		topK = effectiveOpenAIHybridTopK(s.service.openAIWSLBTopK(), len(candidates))
 	}
 
-	buildSelectionOrder := func(pool []openAIAccountCandidateScore) []openAIAccountCandidateScore {
+	buildSelectionOrders := func(pool []openAIAccountCandidateScore) ([]openAIAccountCandidateScore, []openAIAccountCandidateScore) {
 		if len(pool) == 0 || topK <= 0 {
-			return nil
+			return nil, nil
 		}
-		groupTopK := topK
-		if groupTopK > len(pool) {
-			groupTopK = len(pool)
-		}
-		ranked := selectHybridTopKOpenAICandidates(pool, groupTopK, req)
-		return buildOpenAIWeightedSelectionOrder(ranked, req)
+		return buildOpenAIPriorityLayeredSelectionOrders(pool, topK, req)
 	}
 	sortCompactRetryCandidates := func(pool []openAIAccountCandidateScore) []openAIAccountCandidateScore {
 		if len(pool) == 0 {
@@ -1036,6 +1084,12 @@ func (s *defaultOpenAIAccountScheduler) selectByLoadBalance(
 	}
 
 	selectionOrder := make([]openAIAccountCandidateScore, 0, len(allCandidates))
+	acquireOrder := make([]openAIAccountCandidateScore, 0, len(allCandidates))
+	appendOrders := func(pool []openAIAccountCandidateScore) {
+		selection, acquire := buildSelectionOrders(pool)
+		selectionOrder = append(selectionOrder, selection...)
+		acquireOrder = append(acquireOrder, acquire...)
+	}
 	if req.RequireCompact {
 		supported := make([]openAIAccountCandidateScore, 0, len(candidates))
 		unknown := make([]openAIAccountCandidateScore, 0, len(candidates))
@@ -1050,23 +1104,18 @@ func (s *defaultOpenAIAccountScheduler) selectByLoadBalance(
 		if len(supported) == 0 && len(unknown) == 0 && s.service.schedulerSnapshot == nil {
 			return nil, candidateCount, topK, loadSkew, ErrNoAvailableCompactAccounts
 		}
-		selectionOrder = append(selectionOrder, buildSelectionOrder(supported)...)
-		selectionOrder = append(selectionOrder, buildSelectionOrder(unknown)...)
+		appendOrders(supported)
+		appendOrders(unknown)
 		if len(staleSnapshotCompactRetry) > 0 && s.service.schedulerSnapshot != nil {
-			selectionOrder = append(selectionOrder, sortCompactRetryCandidates(staleSnapshotCompactRetry)...)
+			retryOrder := sortCompactRetryCandidates(staleSnapshotCompactRetry)
+			selectionOrder = append(selectionOrder, retryOrder...)
+			acquireOrder = append(acquireOrder, retryOrder...)
 		}
 	} else {
-		selectionOrder = buildSelectionOrder(candidates)
+		selectionOrder, acquireOrder = buildSelectionOrders(candidates)
 	}
 	if len(selectionOrder) == 0 {
 		return nil, candidateCount, topK, loadSkew, noAvailableOpenAISelectionError(req.RequestedModel, req.RequireCompact && len(allCandidates) > 0)
-	}
-
-	acquireOrder := selectionOrder
-	if overflowLimit := openAIHybridOverflowProbeCount(topK, len(candidates)); overflowLimit > 0 {
-		if overflow := selectOpenAIOverflowProbeCandidates(candidates, selectionOrder, overflowLimit, req); len(overflow) > 0 {
-			acquireOrder = append(append([]openAIAccountCandidateScore(nil), selectionOrder...), overflow...)
-		}
 	}
 
 	compactBlocked := false
