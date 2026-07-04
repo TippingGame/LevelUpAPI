@@ -306,7 +306,7 @@ describe('user proxy create entry buttons', () => {
     expect(wrapper.find('[data-testid="user-proxy-create-panel"]').exists()).toBe(true)
   })
 
-  it('shows optional proxy controls for user Gemini and Antigravity account creation', async () => {
+  it('shows required proxy controls for user Gemini and Antigravity account creation', async () => {
     const wrapper = mount(CreateAccountModal, {
       props: {
         show: true,
@@ -332,7 +332,7 @@ describe('user proxy create entry buttons', () => {
     expect(wrapper.find('[data-testid="create-open-user-proxy-panel"]').exists()).toBe(true)
   })
 
-  it('does not require a proxy for user Gemini account creation', async () => {
+  it('requires a proxy for user Gemini account creation', async () => {
     const wrapper = mount(CreateAccountModal, {
       props: {
         show: true,
@@ -354,8 +354,34 @@ describe('user proxy create entry buttons', () => {
     await wrapper.find('form#create-account-form').trigger('submit.prevent')
     await wrapper.vm.$nextTick()
 
-    expect(showErrorMock).not.toHaveBeenCalledWith('userAccounts.importProxyRequired')
-    expect(wrapper.find('[data-testid="oauth-flow"]').exists()).toBe(true)
+    expect(showErrorMock).toHaveBeenCalledWith('userAccounts.importProxyRequired')
+    expect(wrapper.find('[data-testid="oauth-flow"]').exists()).toBe(false)
+  })
+
+  it('requires a proxy for user Antigravity account creation', async () => {
+    const wrapper = mount(CreateAccountModal, {
+      props: {
+        show: true,
+        proxies: [],
+        groups: [],
+        accountScope: 'user',
+        allowProxy: true,
+        allowBillingRate: false
+      },
+      global: {
+        stubs: basicStubs
+      }
+    })
+
+    await wrapper.find('input[placeholder="admin.accounts.enterAccountName"]').setValue('Antigravity Account')
+    await findButtonByText(wrapper, 'Antigravity').trigger('click')
+    await wrapper.vm.$nextTick()
+
+    await wrapper.find('form#create-account-form').trigger('submit.prevent')
+    await wrapper.vm.$nextTick()
+
+    expect(showErrorMock).toHaveBeenCalledWith('userAccounts.importProxyRequired')
+    expect(wrapper.find('[data-testid="oauth-flow"]').exists()).toBe(false)
   })
 
   it('creates a custom proxy from the inline panel and emits the created proxy', async () => {

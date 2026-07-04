@@ -3718,24 +3718,28 @@ const userAnthropicProxyRequired = computed(() =>
   form.platform === 'anthropic'
 )
 
-const userAccountProxyRequired = computed(() =>
-  userOpenAIProxyLoginRequired.value || userAnthropicProxyRequired.value
-)
-
-const userOptionalProxyAvailable = computed(() =>
+const userGeminiProxyRequired = computed(() =>
   isUserScope.value &&
-  (form.platform === 'gemini' || form.platform === 'antigravity')
+  form.platform === 'gemini'
 )
 
-const userAccountProxyAvailable = computed(() =>
-  userAccountProxyRequired.value || userOptionalProxyAvailable.value
+const userAntigravityProxyRequired = computed(() =>
+  isUserScope.value &&
+  form.platform === 'antigravity'
+)
+
+const userAccountProxyRequired = computed(() =>
+  userOpenAIProxyLoginRequired.value ||
+  userAnthropicProxyRequired.value ||
+  userGeminiProxyRequired.value ||
+  userAntigravityProxyRequired.value
 )
 
 const canManageProxy = computed(() =>
-  props.allowProxy !== false && (!isUserScope.value || userAccountProxyAvailable.value)
+  props.allowProxy !== false && (!isUserScope.value || userAccountProxyRequired.value)
 )
 
-const PROXY_PURCHASE_URL = 'https://www.seekproxy.com/user/reg?invite_id=105978'
+const PROXY_PURCHASE_URL = 'https://www.seekproxy.com/user/reg?invite_id=106509'
 const showUserProxyCreatePanel = ref(false)
 const createdUserProxies = ref<Proxy[]>([])
 

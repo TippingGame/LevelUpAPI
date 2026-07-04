@@ -1477,7 +1477,7 @@ const MAX_ACCOUNT_CONCURRENCY = 50
 const ACCOUNT_SHARE_MIN_SEATS = 2
 const ACCOUNT_SHARE_MAX_SEATS = 12
 const ACCOUNT_NAME_BASE = 'OpenAI共享账号'
-const PROXY_PURCHASE_URL = 'https://www.seekproxy.com/user/reg?invite_id=105978'
+const PROXY_PURCHASE_URL = 'https://www.seekproxy.com/user/reg?invite_id=106509'
 const DEFAULT_ACCOUNT_SHARE_ALLOWED_MODELS = ['gpt-5.5', 'gpt-5.4', 'gpt-5.4-mini', 'codex-auto-review']
 const ACCOUNT_SHARE_PAGE_SIZE = 10
 const MODEL_PREVIEW_LIMIT = 5

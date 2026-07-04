@@ -287,7 +287,7 @@ const { t } = useI18n()
 const appStore = useAppStore()
 const openaiOAuth = useOpenAIOAuth('user')
 
-const PROXY_PURCHASE_URL = 'https://www.seekproxy.com/user/reg?invite_id=105978'
+const PROXY_PURCHASE_URL = 'https://www.seekproxy.com/user/reg?invite_id=106509'
 
 const selectedPlatform = ref<ImportPlatform | ''>('')
 const selectedAccountLevel = ref<SelectableOpenAILevel | ''>('')
