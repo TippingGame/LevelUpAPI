@@ -52,7 +52,6 @@ const messages: Record<string, string> = {
   'usage.balanceLedger.reasons.admin_adjustment': 'Admin balance adjustment',
   'usage.balanceLedger.labels.consumer': 'Consumer',
   'usage.balanceLedger.labels.apiKey': 'API Key',
-  'usage.balanceLedger.labels.account': 'Account',
   'usage.balanceLedger.labels.requestId': 'Request',
   'usage.balanceLedger.labels.notes': 'Notes',
   'usage.balanceLedger.labels.operation': 'Operation',
@@ -378,7 +377,7 @@ describe('user UsageView tooltip', () => {
     expect(setupState.getLedgerReasonLabel('redeem_code')).toBe('Recharge')
     expect(setupState.formatLedgerAmount(row)).toBe('+0.1234567891 coins')
     expect(setupState.formatLedgerCurrency(row.balance_after)).toBe('10.0000000001 coins')
-    expect(setupState.getLedgerRemark(row)).toBe('Consumer: 9 · API Key: 8 · Account: 7 · Request: req-income')
+    expect(setupState.getLedgerRemark(row)).toBe('Consumer: 9 · API Key: 8 · Request: req-income')
 
     const adminRow = {
       ...row,

@@ -171,20 +171,6 @@
               />
             </div>
 
-            <!-- Account ID Filter -->
-            <div class="min-w-[140px]">
-              <label class="input-label">{{ t('admin.usage.account') }}</label>
-              <input
-                v-model.number="filters.account_id"
-                type="number"
-                min="1"
-                step="1"
-                class="input"
-                placeholder="ID"
-                @keyup.enter="applyFilters"
-              />
-            </div>
-
             <!-- Group Filter -->
             <div class="min-w-[200px]">
               <label class="input-label">{{ t('admin.usage.group') }}</label>
@@ -352,11 +338,6 @@
             <span class="text-sm text-gray-900 dark:text-white">{{
               row.api_key?.name || '-'
             }}</span>
-          </template>
-
-          <template #cell-account_id="{ row }">
-            <span v-if="row.account_id" class="text-sm font-mono text-gray-600 dark:text-gray-400">#{{ row.account_id }}</span>
-            <span v-else class="text-sm text-gray-400 dark:text-gray-500">-</span>
           </template>
 
           <template #cell-group_id="{ row }">
@@ -833,7 +814,7 @@ let modelStatsReqSeq = 0
 
 type UsageTab = 'requests' | 'balanceLedger'
 type DistributionMetric = 'tokens' | 'actual_cost'
-type UserUsageFilters = Omit<UsageQueryParams, 'model' | 'request_type' | 'billing_mode'> & {
+type UserUsageFilters = Omit<UsageQueryParams, 'model' | 'request_type' | 'billing_mode' | 'account_id'> & {
   model?: string | null
   request_type?: UsageRequestType | null
   billing_mode?: string | null
@@ -868,12 +849,11 @@ const modelDistributionMetric = ref<DistributionMetric>('tokens')
 const exportProgress = reactive({ show: false, progress: 0, current: 0, total: 0, estimatedTime: '' })
 
 const ALWAYS_VISIBLE_COLUMNS = ['api_key', 'created_at']
-const DEFAULT_HIDDEN_COLUMNS = ['reasoning_effort', 'account_id', 'group_id', 'user_agent']
+const DEFAULT_HIDDEN_COLUMNS = ['reasoning_effort', 'group_id', 'user_agent']
 const HIDDEN_COLUMNS_KEY = 'user-usage-hidden-columns'
 
 const allColumns = computed<Column[]>(() => [
   { key: 'api_key', label: t('usage.apiKeyFilter'), sortable: false },
-  { key: 'account_id', label: t('admin.usage.account'), sortable: false },
   { key: 'group_id', label: t('admin.usage.group'), sortable: false },
   { key: 'model', label: t('usage.model'), sortable: true },
   { key: 'reasoning_effort', label: t('usage.reasoningEffort'), sortable: false },
@@ -1148,7 +1128,6 @@ const endDate = ref(formatLocalDate(now))
 
 const filters = ref<UserUsageFilters>({
   api_key_id: undefined,
-  account_id: undefined,
   group_id: undefined,
   model: null,
   request_type: null,
@@ -1277,14 +1256,12 @@ const positiveNumberOrUndefined = (value: unknown): number | undefined => {
 const buildCommonUsageParams = (): Partial<UsageQueryParams> => {
   const params: Partial<UsageQueryParams> = {}
   const apiKeyId = positiveNumberOrUndefined(filters.value.api_key_id)
-  const accountId = positiveNumberOrUndefined(filters.value.account_id)
   const groupId = positiveNumberOrUndefined(filters.value.group_id)
   const model = typeof filters.value.model === 'string' ? filters.value.model.trim() : ''
   const billingType = filters.value.billing_type
   const billingMode = typeof filters.value.billing_mode === 'string' ? filters.value.billing_mode.trim() : ''
 
   if (apiKeyId) params.api_key_id = apiKeyId
-  if (accountId) params.account_id = accountId
   if (groupId) params.group_id = groupId
   if (model) params.model = model
   if (filters.value.request_type) params.request_type = filters.value.request_type
@@ -1499,7 +1476,6 @@ const loadModelStats = async () => {
       start_date: filters.value.start_date || startDate.value,
       end_date: filters.value.end_date || endDate.value,
       api_key_id: commonParams.api_key_id,
-      account_id: commonParams.account_id,
       group_id: commonParams.group_id,
       request_type: commonParams.request_type || undefined,
       billing_type: commonParams.billing_type ?? undefined,
@@ -1533,7 +1509,6 @@ const applyFilters = () => {
 const resetFilters = () => {
   filters.value = {
     api_key_id: undefined,
-    account_id: undefined,
     group_id: undefined,
     model: null,
     request_type: null,
@@ -1707,8 +1682,7 @@ const getLedgerRemark = (row: UserBalanceLedgerEntry): string => {
     case 'usage_charge':
       return compactLedgerParts([
         ledgerPart('usage.balanceLedger.labels.requestId', metadataString(row, 'request_id')),
-        ledgerPart('usage.balanceLedger.labels.apiKey', metadataString(row, 'api_key_id')),
-        ledgerPart('usage.balanceLedger.labels.account', metadataString(row, 'account_id'))
+        ledgerPart('usage.balanceLedger.labels.apiKey', metadataString(row, 'api_key_id'))
       ])
     case 'private_group_commission':
       return compactLedgerParts([
@@ -1722,30 +1696,26 @@ const getLedgerRemark = (row: UserBalanceLedgerEntry): string => {
         ledgerPart('usage.balanceLedger.labels.hourlyRate', rate == null ? '' : formatLedgerCurrency(rate, 4)),
         ledgerPart('usage.balanceLedger.labels.duration', duration),
         ledgerPart('usage.balanceLedger.labels.paidUntil', formatMetadataDateTime(row, 'paid_until')),
-        ledgerPart('usage.balanceLedger.labels.account', metadataString(row, 'account_id')),
         ledgerPart('usage.balanceLedger.labels.membership', metadataString(row, 'membership_id'))
       ])
     case 'account_share_mode_seat_refund':
       return compactLedgerParts([
         ledgerPart('usage.balanceLedger.labels.hourlyRate', rate == null ? '' : formatLedgerCurrency(rate, 4)),
         ledgerPart('usage.balanceLedger.labels.duration', duration),
-        ledgerPart('usage.balanceLedger.labels.refundUntil', formatMetadataDateTime(row, 'refund_until')),
-        ledgerPart('usage.balanceLedger.labels.account', metadataString(row, 'account_id'))
+        ledgerPart('usage.balanceLedger.labels.refundUntil', formatMetadataDateTime(row, 'refund_until'))
       ])
     case 'account_share_mode_seat_waiver_refund':
       return compactLedgerParts([
         ledgerPart('usage.balanceLedger.labels.period', period),
         ledgerPart('usage.balanceLedger.labels.duration', duration),
         ledgerPart('usage.balanceLedger.labels.waiverRequired', formatOptionalLedgerCurrency(metadataNumber(row, 'waiver_required'))),
-        ledgerPart('usage.balanceLedger.labels.waiverUsage', formatOptionalLedgerCurrency(metadataNumber(row, 'waiver_usage'))),
-        ledgerPart('usage.balanceLedger.labels.account', metadataString(row, 'account_id'))
+        ledgerPart('usage.balanceLedger.labels.waiverUsage', formatOptionalLedgerCurrency(metadataNumber(row, 'waiver_usage')))
       ])
     case 'account_share_mode_income':
       return compactLedgerParts([
         ledgerPart('usage.balanceLedger.labels.consumer', metadataString(row, 'consumer_user_id')),
         ledgerPart('usage.balanceLedger.labels.period', period),
         ledgerPart('usage.balanceLedger.labels.settlement', metadataString(row, 'settlement_id')),
-        ledgerPart('usage.balanceLedger.labels.account', metadataString(row, 'account_id')),
         ledgerPart('usage.balanceLedger.labels.requestId', metadataString(row, 'request_id'))
       ])
     case 'account_share_income':
@@ -1753,7 +1723,6 @@ const getLedgerRemark = (row: UserBalanceLedgerEntry): string => {
       return compactLedgerParts([
         ledgerPart('usage.balanceLedger.labels.consumer', metadataString(row, 'consumer_user_id')),
         ledgerPart('usage.balanceLedger.labels.apiKey', metadataString(row, 'api_key_id')),
-        ledgerPart('usage.balanceLedger.labels.account', metadataString(row, 'account_id')),
         ledgerPart('usage.balanceLedger.labels.requestId', metadataString(row, 'request_id'))
       ])
     case 'redeem_code':
@@ -1852,7 +1821,6 @@ const exportToCSV = async () => {
     const headers = [
       'Time',
       'API Key Name',
-      'Account ID',
       'Group ID',
       'Model',
       'Reasoning Effort',
@@ -1880,7 +1848,6 @@ const exportToCSV = async () => {
       [
         log.created_at,
         log.api_key?.name || '',
-        log.account_id ?? '',
         log.group_id ?? '',
         log.model,
         formatReasoningEffort(log.reasoning_effort),
