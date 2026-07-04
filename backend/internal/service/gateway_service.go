@@ -305,7 +305,7 @@ func buildClaudeMimicDebugLine(req *http.Request, body []byte, account *Account,
 
 	h := make([]string, 0, len(interesting))
 	for _, k := range interesting {
-		if v := req.Header.Get(k); v != "" {
+		if v := getHeaderRaw(req.Header, k); v != "" {
 			h = append(h, fmt.Sprintf("%s=%q", k, safeHeaderValueForLog(k, v)))
 		}
 	}
@@ -355,6 +355,38 @@ func isClaudeCodeCredentialScopeError(msg string) bool {
 	}
 	return strings.Contains(m, "only authorized for use with claude code") &&
 		strings.Contains(m, "cannot be used for other api requests")
+}
+
+func isClaudeCodeClientRestrictionError(statusCode int, upstreamMsg string, responseBody []byte) bool {
+	if statusCode < 400 {
+		return false
+	}
+
+	normalized := normalizedUpstreamErrorText(upstreamMsg, responseBody)
+	if normalized == "" {
+		return false
+	}
+	if isClaudeCodeCredentialScopeError(normalized) {
+		return true
+	}
+	return strings.Contains(normalized, "only allows claude code") ||
+		strings.Contains(normalized, "only supports claude code") ||
+		strings.Contains(normalized, "restricted to claude code")
+}
+
+func logClaudeMimicDebugOnError(c *gin.Context, statusCode int, requestID string) {
+	if c == nil {
+		return
+	}
+	if v, ok := c.Get(claudeMimicDebugInfoKey); ok {
+		if line, ok := v.(string); ok && strings.TrimSpace(line) != "" {
+			logger.LegacyPrintf("service.gateway", "[ClaudeMimicDebugOnError] status=%d request_id=%s %s",
+				statusCode,
+				requestID,
+				line,
+			)
+		}
+	}
 }
 
 // sseDataRe matches SSE data lines with optional whitespace after colon.
@@ -6634,11 +6666,19 @@ func (s *GatewayService) forwardAnthropicAPIKeyPassthroughWithInput(
 			if !s.shouldFailoverGatewayUpstreamResponse(account, resp.StatusCode, upstreamMsg, respBody) {
 				return s.handleRetryExhaustedError(ctx, resp, c, account)
 			}
+			claudeCodeRestriction := isClaudeCodeClientRestrictionError(resp.StatusCode, upstreamMsg, respBody)
+			if claudeCodeRestriction {
+				logClaudeMimicDebugOnError(c, resp.StatusCode, resp.Header.Get("x-request-id"))
+			}
 
 			logger.LegacyPrintf("service.gateway", "[Anthropic Passthrough] Upstream error (retry exhausted, failover): Account=%d(%s) Status=%d RequestID=%s Body=%s",
 				account.ID, account.Name, resp.StatusCode, resp.Header.Get("x-request-id"), truncateString(string(respBody), 1000))
 
 			s.handleRetryExhaustedSideEffects(ctx, resp, account)
+			opsKind := "retry_exhausted_failover"
+			if claudeCodeRestriction {
+				opsKind = "claude_code_client_restriction_retry_exhausted_failover"
+			}
 			appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
 				Platform:           account.Platform,
 				AccountID:          account.ID,
@@ -6646,7 +6686,7 @@ func (s *GatewayService) forwardAnthropicAPIKeyPassthroughWithInput(
 				UpstreamStatusCode: resp.StatusCode,
 				UpstreamRequestID:  resp.Header.Get("x-request-id"),
 				Passthrough:        true,
-				Kind:               "retry_exhausted_failover",
+				Kind:               opsKind,
 				Message:            extractUpstreamErrorMessage(respBody),
 				Detail: func() string {
 					if s.cfg != nil && s.cfg.Gateway.LogUpstreamErrorBody {
@@ -6673,11 +6713,19 @@ func (s *GatewayService) forwardAnthropicAPIKeyPassthroughWithInput(
 		if !s.shouldFailoverGatewayUpstreamResponse(account, resp.StatusCode, upstreamMsg, respBody) {
 			return s.handleErrorResponse(ctx, resp, c, account, input.RequestModel)
 		}
+		claudeCodeRestriction := isClaudeCodeClientRestrictionError(resp.StatusCode, upstreamMsg, respBody)
+		if claudeCodeRestriction {
+			logClaudeMimicDebugOnError(c, resp.StatusCode, resp.Header.Get("x-request-id"))
+		}
 
 		logger.LegacyPrintf("service.gateway", "[Anthropic Passthrough] Upstream error (failover): Account=%d(%s) Status=%d RequestID=%s Body=%s",
 			account.ID, account.Name, resp.StatusCode, resp.Header.Get("x-request-id"), truncateString(string(respBody), 1000))
 
 		s.handleFailoverSideEffects(ctx, resp, account)
+		opsKind := "failover"
+		if claudeCodeRestriction {
+			opsKind = "claude_code_client_restriction_failover"
+		}
 		appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
 			Platform:           account.Platform,
 			AccountID:          account.ID,
@@ -6685,7 +6733,7 @@ func (s *GatewayService) forwardAnthropicAPIKeyPassthroughWithInput(
 			UpstreamStatusCode: resp.StatusCode,
 			UpstreamRequestID:  resp.Header.Get("x-request-id"),
 			Passthrough:        true,
-			Kind:               "failover",
+			Kind:               opsKind,
 			Message:            extractUpstreamErrorMessage(respBody),
 			Detail: func() string {
 				if s.cfg != nil && s.cfg.Gateway.LogUpstreamErrorBody {
@@ -6830,6 +6878,9 @@ func (s *GatewayService) buildUpstreamRequestAnthropicAPIKeyPassthrough(
 				setHeaderRaw(req.Header, "X-Claude-Code-Session-Id", parsed.SessionID)
 			}
 		}
+	}
+	if c != nil {
+		c.Set(claudeMimicDebugInfoKey, buildClaudeMimicDebugLine(req, body, account, "apikey", bridgeClaudeCode))
 	}
 
 	return req, nil
@@ -8887,16 +8938,8 @@ func (s *GatewayService) handleErrorResponse(ctx context.Context, resp *http.Res
 
 	// Print a compact upstream request fingerprint when we hit the Claude Code OAuth
 	// credential scope error. This avoids requiring env-var tweaks in a fixed deploy.
-	if isClaudeCodeCredentialScopeError(upstreamMsg) && c != nil {
-		if v, ok := c.Get(claudeMimicDebugInfoKey); ok {
-			if line, ok := v.(string); ok && strings.TrimSpace(line) != "" {
-				logger.LegacyPrintf("service.gateway", "[ClaudeMimicDebugOnError] status=%d request_id=%s %s",
-					resp.StatusCode,
-					resp.Header.Get("x-request-id"),
-					line,
-				)
-			}
-		}
+	if isClaudeCodeClientRestrictionError(resp.StatusCode, upstreamMsg, body) {
+		logClaudeMimicDebugOnError(c, resp.StatusCode, resp.Header.Get("x-request-id"))
 	}
 
 	// Enrich Ops error logs with upstream status + message, and optionally a truncated body snippet.
@@ -9073,16 +9116,8 @@ func (s *GatewayService) handleRetryExhaustedError(ctx context.Context, resp *ht
 	upstreamMsg := strings.TrimSpace(extractUpstreamErrorMessage(respBody))
 	upstreamMsg = sanitizeUpstreamErrorMessage(upstreamMsg)
 
-	if isClaudeCodeCredentialScopeError(upstreamMsg) && c != nil {
-		if v, ok := c.Get(claudeMimicDebugInfoKey); ok {
-			if line, ok := v.(string); ok && strings.TrimSpace(line) != "" {
-				logger.LegacyPrintf("service.gateway", "[ClaudeMimicDebugOnError] status=%d request_id=%s %s",
-					resp.StatusCode,
-					resp.Header.Get("x-request-id"),
-					line,
-				)
-			}
-		}
+	if isClaudeCodeClientRestrictionError(resp.StatusCode, upstreamMsg, respBody) {
+		logClaudeMimicDebugOnError(c, resp.StatusCode, resp.Header.Get("x-request-id"))
 	}
 
 	upstreamDetail := ""

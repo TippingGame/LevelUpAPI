@@ -320,3 +320,31 @@ func TestAuthPaymentPermissionStatusesFailoverWithoutSameAccountRetry(t *testing
 		[]byte(`{"error":{"code":403,"message":"Permission denied","status":"PERMISSION_DENIED"}}`),
 	))
 }
+
+func TestClaudeCodeClientRestrictionErrorClassification(t *testing.T) {
+	require.True(t, isClaudeCodeClientRestrictionError(
+		http.StatusServiceUnavailable,
+		"",
+		[]byte(`{"type":"error","error":{"type":"api_error","message":"No available accounts: this group only allows Claude Code clients"}}`),
+	))
+	require.True(t, isClaudeCodeClientRestrictionError(
+		http.StatusBadRequest,
+		"OAuth token is only authorized for use with Claude Code and cannot be used for other API requests",
+		nil,
+	))
+	require.True(t, isClaudeCodeClientRestrictionError(
+		http.StatusForbidden,
+		"This group is restricted to Claude Code clients (/v1/messages only)",
+		nil,
+	))
+	require.False(t, isClaudeCodeClientRestrictionError(
+		http.StatusForbidden,
+		"Your request violates Anthropic's Usage Policy.",
+		[]byte(`{"type":"error","error":{"type":"safety_error","message":"Your request violates Anthropic's Usage Policy."}}`),
+	))
+	require.False(t, isClaudeCodeClientRestrictionError(
+		http.StatusOK,
+		"this group only allows Claude Code clients",
+		nil,
+	))
+}
