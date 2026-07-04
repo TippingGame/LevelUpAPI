@@ -990,6 +990,28 @@ func (s *AccountRepoSuite) TestListSchedulableByGroupIDAndPlatform_OpenAIRequire
 		},
 		Schedulable: true,
 	})
+	defaultProAcc := mustCreateAccount(s.T(), s.client, &service.Account{
+		Name:         "default-pro",
+		Platform:     service.PlatformOpenAI,
+		AccountLevel: service.AccountLevelPlus,
+		Credentials: map[string]any{
+			"plan_type": "plus",
+			"accounts": map[string]any{
+				"acct-default-pro": map[string]any{
+					"account": map[string]any{
+						"is_default": true,
+						"plan_type":  "chatgpt_pro",
+					},
+				},
+				"acct-plus": map[string]any{
+					"account": map[string]any{
+						"plan_type": "plus",
+					},
+				},
+			},
+		},
+		Schedulable: true,
+	})
 	stillPlusAcc := mustCreateAccount(s.T(), s.client, &service.Account{
 		Name:         "still-plus",
 		Platform:     service.PlatformOpenAI,
@@ -997,18 +1019,43 @@ func (s *AccountRepoSuite) TestListSchedulableByGroupIDAndPlatform_OpenAIRequire
 		Credentials:  map[string]any{"plan_type": "plus"},
 		Schedulable:  true,
 	})
+	defaultPlusOtherProAcc := mustCreateAccount(s.T(), s.client, &service.Account{
+		Name:         "default-plus-other-pro",
+		Platform:     service.PlatformOpenAI,
+		AccountLevel: service.AccountLevelPlus,
+		Credentials: map[string]any{
+			"accounts": map[string]any{
+				"acct-default-plus": map[string]any{
+					"account": map[string]any{
+						"is_default": true,
+						"plan_type":  "plus",
+					},
+				},
+				"acct-non-default-pro": map[string]any{
+					"account": map[string]any{
+						"plan_type": "chatgpt_pro",
+					},
+				},
+			},
+		},
+		Schedulable: true,
+	})
 	mustBindAccountToGroup(s.T(), s.client, nestedProAcc.ID, group.ID, 1)
 	mustBindAccountToGroup(s.T(), s.client, referencedProAcc.ID, group.ID, 2)
-	mustBindAccountToGroup(s.T(), s.client, stillPlusAcc.ID, group.ID, 3)
+	mustBindAccountToGroup(s.T(), s.client, defaultProAcc.ID, group.ID, 3)
+	mustBindAccountToGroup(s.T(), s.client, stillPlusAcc.ID, group.ID, 4)
+	mustBindAccountToGroup(s.T(), s.client, defaultPlusOtherProAcc.ID, group.ID, 5)
 
 	accounts, err := s.repo.ListSchedulableByGroupIDAndPlatform(s.ctx, group.ID, service.PlatformOpenAI)
 
 	s.Require().NoError(err)
-	s.Require().Len(accounts, 2)
+	s.Require().Len(accounts, 3)
 	s.Require().Equal(nestedProAcc.ID, accounts[0].ID)
 	s.Require().Equal(referencedProAcc.ID, accounts[1].ID)
+	s.Require().Equal(defaultProAcc.ID, accounts[2].ID)
 	s.Require().Equal(service.AccountLevelPro, accounts[0].AccountLevel)
 	s.Require().Equal(service.AccountLevelPro, accounts[1].AccountLevel)
+	s.Require().Equal(service.AccountLevelPro, accounts[2].AccountLevel)
 }
 
 func (s *AccountRepoSuite) TestListSchedulableByGroupIDAndPlatform_PublicSharedPoolRequiresApprovedUserShare() {
@@ -1538,12 +1585,17 @@ func (s *AccountRepoSuite) TestListQuotaPoolAccountsRepairsVisibleOpenAIProShare
 		AccountLevel: service.AccountLevelPlus,
 		OwnerUserID:  &owner.ID,
 		Credentials: map[string]any{
-			"plan_type":          "plus",
-			"chatgpt_account_id": "acct-nested-pro",
+			"plan_type": "plus",
 			"accounts": map[string]any{
 				"acct-nested-pro": map[string]any{
 					"account": map[string]any{
-						"plan_type": "chatgpt_pro",
+						"is_default": true,
+						"plan_type":  "chatgpt_pro",
+					},
+				},
+				"acct-plus": map[string]any{
+					"account": map[string]any{
+						"plan_type": "plus",
 					},
 				},
 			},

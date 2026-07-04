@@ -275,7 +275,26 @@ func appendOpenAIAccountsCheckPlanFields(out []string, values map[string]any) []
 			return out
 		}
 	}
-	return out
+	defaultCandidates := make([]string, 0, 6)
+	allCandidates := make([]string, 0, len(accounts)*6)
+	for _, account := range accounts {
+		acct, ok := account.(map[string]any)
+		if !ok {
+			continue
+		}
+		accountInfo := nestedStringMap(acct, "account")
+		entitlement := nestedStringMap(acct, "entitlement")
+		before := len(allCandidates)
+		allCandidates = appendOpenAIPlanFields(allCandidates, accountInfo)
+		allCandidates = appendOpenAIPlanFields(allCandidates, entitlement)
+		if nestedBool(accountInfo, "is_default") {
+			defaultCandidates = append(defaultCandidates, allCandidates[before:]...)
+		}
+	}
+	if len(defaultCandidates) > 0 {
+		return append(out, defaultCandidates...)
+	}
+	return append(out, allCandidates...)
 }
 
 func nestedStringMap(values map[string]any, key string) map[string]any {
@@ -287,6 +306,20 @@ func nestedStringMap(values map[string]any, key string) map[string]any {
 		return nested
 	default:
 		return nil
+	}
+}
+
+func nestedBool(values map[string]any, key string) bool {
+	if values == nil || key == "" {
+		return false
+	}
+	switch value := values[key].(type) {
+	case bool:
+		return value
+	case string:
+		return strings.EqualFold(strings.TrimSpace(value), "true")
+	default:
+		return false
 	}
 }
 

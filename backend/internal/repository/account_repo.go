@@ -1523,12 +1523,62 @@ func openAIPlanCandidateValueRowsSQL(jsonExpr string, startOrder int) []string {
 		fmt.Sprintf("jsonb_extract_path_text((%s)->'accounts', %s, 'entitlement', 'plan_type')", jsonValue, selectedAccountID),
 		fmt.Sprintf("jsonb_extract_path_text((%s)->'accounts', %s, 'entitlement', 'chatgpt_plan_type')", jsonValue, selectedAccountID),
 		fmt.Sprintf("jsonb_extract_path_text((%s)->'accounts', %s, 'entitlement', 'subscription_plan')", jsonValue, selectedAccountID),
+		openAIAccountsFallbackPlanSQL(jsonValue, selectedAccountID),
 	}
 	rows := make([]string, 0, len(exprs))
 	for i, expr := range exprs {
 		rows = append(rows, fmt.Sprintf("(%d, %s)", startOrder+i, expr))
 	}
 	return rows
+}
+
+func openAIAccountsFallbackPlanSQL(jsonValue, selectedAccountID string) string {
+	query := `(
+	SELECT raw_token
+	FROM (
+		SELECT account_entry.value #>> '{account,plan_type}' AS raw_token,
+			CASE WHEN lower(btrim(COALESCE(account_entry.value #>> '{account,is_default}', ''))) = 'true' THEN 0 ELSE 1 END AS account_ord
+		FROM jsonb_each(COALESCE(({{JSON_VALUE}})->'accounts', '{}'::jsonb)) AS account_entry(key, value)
+		UNION ALL
+		SELECT account_entry.value #>> '{account,chatgpt_plan_type}' AS raw_token,
+			CASE WHEN lower(btrim(COALESCE(account_entry.value #>> '{account,is_default}', ''))) = 'true' THEN 0 ELSE 1 END AS account_ord
+		FROM jsonb_each(COALESCE(({{JSON_VALUE}})->'accounts', '{}'::jsonb)) AS account_entry(key, value)
+		UNION ALL
+		SELECT account_entry.value #>> '{account,subscription_plan}' AS raw_token,
+			CASE WHEN lower(btrim(COALESCE(account_entry.value #>> '{account,is_default}', ''))) = 'true' THEN 0 ELSE 1 END AS account_ord
+		FROM jsonb_each(COALESCE(({{JSON_VALUE}})->'accounts', '{}'::jsonb)) AS account_entry(key, value)
+		UNION ALL
+		SELECT account_entry.value #>> '{entitlement,plan_type}' AS raw_token,
+			CASE WHEN lower(btrim(COALESCE(account_entry.value #>> '{account,is_default}', ''))) = 'true' THEN 0 ELSE 1 END AS account_ord
+		FROM jsonb_each(COALESCE(({{JSON_VALUE}})->'accounts', '{}'::jsonb)) AS account_entry(key, value)
+		UNION ALL
+		SELECT account_entry.value #>> '{entitlement,chatgpt_plan_type}' AS raw_token,
+			CASE WHEN lower(btrim(COALESCE(account_entry.value #>> '{account,is_default}', ''))) = 'true' THEN 0 ELSE 1 END AS account_ord
+		FROM jsonb_each(COALESCE(({{JSON_VALUE}})->'accounts', '{}'::jsonb)) AS account_entry(key, value)
+		UNION ALL
+		SELECT account_entry.value #>> '{entitlement,subscription_plan}' AS raw_token,
+			CASE WHEN lower(btrim(COALESCE(account_entry.value #>> '{account,is_default}', ''))) = 'true' THEN 0 ELSE 1 END AS account_ord
+		FROM jsonb_each(COALESCE(({{JSON_VALUE}})->'accounts', '{}'::jsonb)) AS account_entry(key, value)
+	) account_plan
+	CROSS JOIN LATERAL (
+		SELECT regexp_replace(lower(btrim(COALESCE(raw_token, ''))), '[[:space:]_-]+', '', 'g') AS token
+	) normalized_plan
+	WHERE {{SELECTED_ACCOUNT_ID}} = ''
+		AND token <> ''
+	ORDER BY
+		account_ord,
+		CASE
+			WHEN token IN ('team', 'chatgptteam') OR token LIKE 'team%' THEN 4
+			WHEN token = 'pro' OR token = 'chatgptpro' OR token LIKE 'pro%' OR token LIKE 'chatgptpro%' THEN 3
+			WHEN token = 'plus' OR token = 'chatgptplus' OR token LIKE 'plus%' THEN 2
+			WHEN token IN ('free', 'chatgptfree') THEN 1
+			ELSE 0
+		END DESC
+	LIMIT 1
+)`
+	query = strings.ReplaceAll(query, "{{JSON_VALUE}}", jsonValue)
+	query = strings.ReplaceAll(query, "{{SELECTED_ACCOUNT_ID}}", selectedAccountID)
+	return query
 }
 
 func accountCustomErrorPolicyActiveEntSQL(b *entsql.Builder, credentialsCol string) {
