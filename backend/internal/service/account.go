@@ -180,43 +180,129 @@ func NormalizeOpenAIAccountLevel(platform, accountLevel string, credentials, ext
 	if platform != PlatformOpenAI {
 		return level
 	}
+	inferred := InferOpenAIAccountLevel(credentials, extra)
+	if IsConcreteAccountLevel(inferred) && openAIAccountLevelRank(inferred) > openAIAccountLevelRank(level) {
+		return inferred
+	}
 	if IsConcreteAccountLevel(level) {
 		return level
 	}
-	if inferred := InferOpenAIAccountLevel(credentials, extra); IsConcreteAccountLevel(inferred) {
+	if IsConcreteAccountLevel(inferred) {
 		return inferred
 	}
 	return level
 }
 
 func InferOpenAIAccountLevel(credentials, extra map[string]any) string {
-	for _, values := range []map[string]any{credentials, extra} {
-		for _, key := range []string{"plan_type", "chatgpt_plan_type", "subscription_plan"} {
-			raw, ok := values[key].(string)
-			if !ok {
-				continue
-			}
-			if inferred := NormalizeOpenAIPlanAccountLevel(raw); inferred != AccountLevelUnknown {
-				return inferred
-			}
+	bestLevel := AccountLevelUnknown
+	bestRank := 0
+	for _, raw := range openAIAccountPlanCandidates(credentials, extra) {
+		inferred := NormalizeOpenAIPlanAccountLevel(raw)
+		rank := openAIAccountLevelRank(inferred)
+		if rank > bestRank {
+			bestLevel = inferred
+			bestRank = rank
 		}
 	}
-	return AccountLevelUnknown
+	return bestLevel
 }
 
 func OpenAIAccountPlanType(credentials, extra map[string]any) string {
-	for _, values := range []map[string]any{credentials, extra} {
-		for _, key := range []string{"plan_type", "chatgpt_plan_type", "subscription_plan"} {
-			raw, ok := values[key].(string)
-			if !ok {
-				continue
-			}
-			if trimmed := strings.TrimSpace(raw); trimmed != "" {
-				return trimmed
-			}
+	var first string
+	var best string
+	bestRank := 0
+	for _, raw := range openAIAccountPlanCandidates(credentials, extra) {
+		trimmed := strings.TrimSpace(raw)
+		if trimmed == "" {
+			continue
+		}
+		if first == "" {
+			first = trimmed
+		}
+		rank := openAIAccountLevelRank(NormalizeOpenAIPlanAccountLevel(trimmed))
+		if rank > bestRank {
+			best = trimmed
+			bestRank = rank
 		}
 	}
-	return ""
+	if best != "" {
+		return best
+	}
+	return first
+}
+
+func openAIAccountPlanCandidates(credentials, extra map[string]any) []string {
+	candidates := make([]string, 0, 16)
+	for _, values := range []map[string]any{credentials, extra} {
+		candidates = appendOpenAIPlanFields(candidates, values)
+		candidates = appendOpenAIPlanFields(candidates, nestedStringMap(values, "account"))
+		candidates = appendOpenAIPlanFields(candidates, nestedStringMap(values, "entitlement"))
+		if accountInfo := nestedStringMap(values, "account_info"); accountInfo != nil {
+			candidates = appendOpenAIPlanFields(candidates, accountInfo)
+			candidates = appendOpenAIPlanFields(candidates, nestedStringMap(accountInfo, "account"))
+			candidates = appendOpenAIPlanFields(candidates, nestedStringMap(accountInfo, "entitlement"))
+		}
+		candidates = appendOpenAIAccountsCheckPlanFields(candidates, values)
+	}
+	return candidates
+}
+
+func appendOpenAIPlanFields(out []string, values map[string]any) []string {
+	if values == nil {
+		return out
+	}
+	for _, key := range []string{"plan_type", "chatgpt_plan_type", "subscription_plan"} {
+		if raw, ok := values[key].(string); ok {
+			out = append(out, raw)
+		}
+	}
+	return out
+}
+
+func appendOpenAIAccountsCheckPlanFields(out []string, values map[string]any) []string {
+	if values == nil {
+		return out
+	}
+	accounts := nestedStringMap(values, "accounts")
+	if len(accounts) == 0 {
+		return out
+	}
+	for _, idKey := range []string{"chatgpt_account_id", "organization_id", "account_id"} {
+		id, _ := values[idKey].(string)
+		if account := nestedStringMap(accounts, strings.TrimSpace(id)); account != nil {
+			out = appendOpenAIPlanFields(out, nestedStringMap(account, "account"))
+			out = appendOpenAIPlanFields(out, nestedStringMap(account, "entitlement"))
+			return out
+		}
+	}
+	return out
+}
+
+func nestedStringMap(values map[string]any, key string) map[string]any {
+	if values == nil || key == "" {
+		return nil
+	}
+	switch nested := values[key].(type) {
+	case map[string]any:
+		return nested
+	default:
+		return nil
+	}
+}
+
+func openAIAccountLevelRank(level string) int {
+	switch NormalizeAccountLevel(level) {
+	case AccountLevelFree:
+		return 1
+	case AccountLevelPlus:
+		return 2
+	case AccountLevelPro:
+		return 3
+	case AccountLevelTeam:
+		return 4
+	default:
+		return 0
+	}
 }
 
 func NormalizeOpenAIPlanAccountLevel(planType string) string {

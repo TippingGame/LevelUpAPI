@@ -41,6 +41,33 @@ func TestNormalizeOpenAIAccountLevel_FromPlanType(t *testing.T) {
 		map[string]any{"plan_type": "pro5x"},
 		nil,
 	))
+	require.Equal(t, AccountLevelPro, NormalizeOpenAIAccountLevel(
+		PlatformOpenAI,
+		AccountLevelPlus,
+		map[string]any{
+			"plan_type": "plus",
+			"account": map[string]any{
+				"plan_type": "chatgpt_pro",
+			},
+		},
+		nil,
+	))
+	require.Equal(t, AccountLevelPro, NormalizeOpenAIAccountLevel(
+		PlatformOpenAI,
+		AccountLevelPlus,
+		map[string]any{
+			"plan_type":          "plus",
+			"chatgpt_account_id": "acct-pro",
+			"accounts": map[string]any{
+				"acct-pro": map[string]any{
+					"entitlement": map[string]any{
+						"subscription_plan": "chatgpt_pro",
+					},
+				},
+			},
+		},
+		nil,
+	))
 }
 
 func TestNormalizeOpenAIAccountLevel_ManualLevelTakesPriority(t *testing.T) {
@@ -87,6 +114,19 @@ func TestEffectiveOpenAISharedPoolAccountLevel_UsesHighestKnownLevel(t *testing.
 		PlatformOpenAI,
 		AccountLevelUnknown,
 		map[string]any{"plan_type": "pro5x"},
+		nil,
+	))
+	require.Equal(t, AccountLevelPro, EffectiveOpenAISharedPoolAccountLevel(
+		PlatformOpenAI,
+		AccountLevelPlus,
+		map[string]any{
+			"plan_type": "plus",
+			"account_info": map[string]any{
+				"entitlement": map[string]any{
+					"subscription_plan": "chatgpt_pro",
+				},
+			},
+		},
 		nil,
 	))
 }

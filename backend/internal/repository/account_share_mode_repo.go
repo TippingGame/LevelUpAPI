@@ -2879,15 +2879,7 @@ func accountShareExtraTimeSQL(key string) string {
 }
 
 func accountSharePlanTokenSQL() string {
-	return `regexp_replace(lower(COALESCE(
-		NULLIF(a.credentials->>'plan_type', ''),
-		NULLIF(a.credentials->>'chatgpt_plan_type', ''),
-		NULLIF(a.credentials->>'subscription_plan', ''),
-		NULLIF(a.extra->>'plan_type', ''),
-		NULLIF(a.extra->>'chatgpt_plan_type', ''),
-		NULLIF(a.extra->>'subscription_plan', ''),
-		''
-	)), '[[:space:]_-]+', '', 'g')`
+	return openAIPlanTokenSQL("a.credentials", "a.extra")
 }
 
 func accountShareEffectiveAccountLevelSQL() string {

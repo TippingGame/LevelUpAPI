@@ -864,7 +864,7 @@ func TestScanAccountShareListingUsesEffectiveOpenAISharedPoolLevel(t *testing.T)
 		_ = db.Close()
 	}()
 
-	mock.ExpectQuery("SELECT listing").WillReturnRows(accountShareListingRowsWithPlan(7, 99, 42, "", time.Time{}, service.AccountLevelPlus, `{"plan_type":"chatgpt_pro"}`, `{}`))
+	mock.ExpectQuery("SELECT listing").WillReturnRows(accountShareListingRowsWithPlan(7, 99, 42, "", time.Time{}, service.AccountLevelPlus, `{"plan_type":"plus","account":{"plan_type":"chatgpt_pro"}}`, `{}`))
 	rows, err := db.Query("SELECT listing")
 	if err != nil {
 		t.Fatalf("query listing row: %v", err)

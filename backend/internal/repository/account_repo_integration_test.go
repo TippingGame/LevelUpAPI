@@ -955,6 +955,62 @@ func (s *AccountRepoSuite) TestListSchedulableByGroupIDAndPlatform_OpenAIRequire
 	s.Require().Equal(plusAcc.ID, accounts[2].ID)
 }
 
+func (s *AccountRepoSuite) TestListSchedulableByGroupIDAndPlatform_OpenAIRequiredAccountLevelInfersNestedPlanType() {
+	group := mustCreateGroup(s.T(), s.client, &service.Group{
+		Name:                 "g-openai-nested-pro",
+		Platform:             service.PlatformOpenAI,
+		RequiredAccountLevel: service.AccountLevelPro,
+	})
+	nestedProAcc := mustCreateAccount(s.T(), s.client, &service.Account{
+		Name:         "nested-pro",
+		Platform:     service.PlatformOpenAI,
+		AccountLevel: service.AccountLevelPlus,
+		Credentials: map[string]any{
+			"plan_type": "plus",
+			"account": map[string]any{
+				"plan_type": "chatgpt_pro",
+			},
+		},
+		Schedulable: true,
+	})
+	referencedProAcc := mustCreateAccount(s.T(), s.client, &service.Account{
+		Name:         "referenced-pro",
+		Platform:     service.PlatformOpenAI,
+		AccountLevel: service.AccountLevelPlus,
+		Credentials: map[string]any{
+			"plan_type":          "plus",
+			"chatgpt_account_id": "acct-pro",
+			"accounts": map[string]any{
+				"acct-pro": map[string]any{
+					"entitlement": map[string]any{
+						"subscription_plan": "chatgpt_pro",
+					},
+				},
+			},
+		},
+		Schedulable: true,
+	})
+	stillPlusAcc := mustCreateAccount(s.T(), s.client, &service.Account{
+		Name:         "still-plus",
+		Platform:     service.PlatformOpenAI,
+		AccountLevel: service.AccountLevelPlus,
+		Credentials:  map[string]any{"plan_type": "plus"},
+		Schedulable:  true,
+	})
+	mustBindAccountToGroup(s.T(), s.client, nestedProAcc.ID, group.ID, 1)
+	mustBindAccountToGroup(s.T(), s.client, referencedProAcc.ID, group.ID, 2)
+	mustBindAccountToGroup(s.T(), s.client, stillPlusAcc.ID, group.ID, 3)
+
+	accounts, err := s.repo.ListSchedulableByGroupIDAndPlatform(s.ctx, group.ID, service.PlatformOpenAI)
+
+	s.Require().NoError(err)
+	s.Require().Len(accounts, 2)
+	s.Require().Equal(nestedProAcc.ID, accounts[0].ID)
+	s.Require().Equal(referencedProAcc.ID, accounts[1].ID)
+	s.Require().Equal(service.AccountLevelPro, accounts[0].AccountLevel)
+	s.Require().Equal(service.AccountLevelPro, accounts[1].AccountLevel)
+}
+
 func (s *AccountRepoSuite) TestListSchedulableByGroupIDAndPlatform_PublicSharedPoolRequiresApprovedUserShare() {
 	owner := mustCreateUser(s.T(), s.client, &service.User{Email: "schedulable-share-status-owner@example.com"})
 	group := mustCreateGroup(s.T(), s.client, &service.Group{
@@ -1452,6 +1508,73 @@ func (s *AccountRepoSuite) TestListQuotaPoolAccountsRepairsVisibleOtherOwnerOpen
 		}
 	}
 	s.Require().True(hasProSharedGroup, "quota pool account rows should include the repaired Pro shared group")
+}
+
+func (s *AccountRepoSuite) TestListQuotaPoolAccountsRepairsVisibleOpenAIProShareFromNestedPlanType() {
+	viewer := mustCreateUser(s.T(), s.client, &service.User{Email: "quota-pool-nested-pro-viewer@example.com"})
+	owner := mustCreateUser(s.T(), s.client, &service.User{Email: "quota-pool-nested-pro-owner@example.com"})
+	proxy := mustCreateProxy(s.T(), s.client, &service.Proxy{
+		Name:   "quota-pool-nested-pro-proxy",
+		Status: service.StatusActive,
+	})
+	plusGroup := mustCreateGroup(s.T(), s.client, &service.Group{
+		Name:                 "quota-pool-nested-pro-plus",
+		Platform:             service.PlatformOpenAI,
+		Scope:                service.GroupScopePublic,
+		SubscriptionType:     service.SubscriptionTypeStandard,
+		RequiredAccountLevel: service.AccountLevelPlus,
+	})
+	proGroup := mustCreateGroup(s.T(), s.client, &service.Group{
+		Name:                 "quota-pool-nested-pro-pro",
+		Platform:             service.PlatformOpenAI,
+		Scope:                service.GroupScopePublic,
+		SubscriptionType:     service.SubscriptionTypeStandard,
+		RequiredAccountLevel: service.AccountLevelPro,
+	})
+	account := mustCreateAccount(s.T(), s.client, &service.Account{
+		Name:         "quota-pool-visible-nested-pro-stale-plus",
+		Platform:     service.PlatformOpenAI,
+		Type:         service.AccountTypeOAuth,
+		AccountLevel: service.AccountLevelPlus,
+		OwnerUserID:  &owner.ID,
+		Credentials: map[string]any{
+			"plan_type":          "plus",
+			"chatgpt_account_id": "acct-nested-pro",
+			"accounts": map[string]any{
+				"acct-nested-pro": map[string]any{
+					"account": map[string]any{
+						"plan_type": "chatgpt_pro",
+					},
+				},
+			},
+		},
+		ProxyID:     &proxy.ID,
+		Schedulable: true,
+		Concurrency: 3,
+	})
+	mustBindAccountToGroup(s.T(), s.client, account.ID, plusGroup.ID, 1)
+	s.Require().NoError(s.client.Account.UpdateOneID(account.ID).
+		SetShareMode(service.AccountShareModePublic).
+		SetShareStatus(service.AccountShareStatusApproved).
+		Exec(s.ctx))
+	s.Require().False(s.accountHasGroup(account.ID, proGroup.ID), "test setup should start without a Pro public pool binding")
+
+	accounts, err := s.repo.ListQuotaPoolAccounts(s.ctx, viewer.ID)
+
+	s.Require().NoError(err)
+	s.Require().False(s.accountHasGroup(account.ID, plusGroup.ID), "nested Pro plan should remove stale Plus public binding")
+	s.Require().True(s.accountHasGroup(account.ID, proGroup.ID), "nested Pro plan should repair visible shares into the Pro public pool")
+	s.Require().True(s.accountHasOpenAIStandardPoolLevel(account.ID, service.AccountLevelPro))
+	var found *service.Account
+	for i := range accounts {
+		if accounts[i].ID == account.ID {
+			found = &accounts[i]
+			break
+		}
+	}
+	s.Require().NotNil(found, "platform quota pool should include the repaired nested Pro public share")
+	s.Require().Equal(service.AccountLevelPro, found.AccountLevel)
+	s.Require().True(found.IsSchedulableWithoutCodexQuotaProtection())
 }
 
 func (s *AccountRepoSuite) TestListQuotaPoolAccountsRepairsUnboundOtherOwnerOpenAIProShareBinding() {

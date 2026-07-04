@@ -984,7 +984,7 @@ func (r *accountRepository) repairAllVisibleOpenAISharedPoolBindings(ctx context
 }
 
 func (r *accountRepository) listQuotaPoolAccountRows(ctx context.Context, ownerUserID int64) ([]service.Account, error) {
-	rows, err := r.sql.QueryContext(ctx, `
+	rows, err := r.sql.QueryContext(ctx, fmt.Sprintf(`
 		WITH quota_pool_account_ids AS (
 			SELECT id
 			FROM accounts
@@ -1015,6 +1015,7 @@ func (r *accountRepository) listQuotaPoolAccountRows(ctx context.Context, ownerU
 			a.name,
 			a.platform,
 			a.account_level,
+			%s AS effective_plan_token,
 			a.credentials->>'plan_type',
 			a.credentials->>'chatgpt_plan_type',
 			a.credentials->>'subscription_plan',
@@ -1060,7 +1061,7 @@ func (r *accountRepository) listQuotaPoolAccountRows(ctx context.Context, ownerU
 		FROM accounts a
 		JOIN quota_pool_account_ids q ON q.id = a.id
 		ORDER BY a.id
-	`, ownerUserID)
+	`, openAIPlanTokenSQL("a.credentials", "a.extra")), ownerUserID)
 	if err != nil {
 		return nil, err
 	}
@@ -1077,6 +1078,7 @@ func (r *accountRepository) listQuotaPoolAccountRows(ctx context.Context, ownerU
 		var codex5hUsedPercent, codex5hResetAfterSeconds, codex5hResetAt, codex5hLimitPercent sql.NullString
 		var codex7dUsedPercent, codex7dResetAfterSeconds, codex7dResetAt, codex7dLimitPercent sql.NullString
 		var codexUsageUpdatedAt, privacyMode sql.NullString
+		var effectivePlanToken sql.NullString
 		var credentialPlanType, credentialChatGPTPlanType, credentialSubscriptionPlan sql.NullString
 		var extraPlanType, extraChatGPTPlanType, extraSubscriptionPlan sql.NullString
 		var tempUnschedulableReason sql.NullString
@@ -1086,6 +1088,7 @@ func (r *accountRepository) listQuotaPoolAccountRows(ctx context.Context, ownerU
 			&account.Name,
 			&account.Platform,
 			&account.AccountLevel,
+			&effectivePlanToken,
 			&credentialPlanType,
 			&credentialChatGPTPlanType,
 			&credentialSubscriptionPlan,
@@ -1148,6 +1151,7 @@ func (r *accountRepository) listQuotaPoolAccountRows(ctx context.Context, ownerU
 		setNullStringExtra(account.Extra, "plan_type", extraPlanType)
 		setNullStringExtra(account.Extra, "chatgpt_plan_type", extraChatGPTPlanType)
 		setNullStringExtra(account.Extra, "subscription_plan", extraSubscriptionPlan)
+		setNullStringExtra(account.Credentials, "plan_type", effectivePlanToken)
 		account.AccountLevel = service.NormalizeOpenAIAccountLevel(account.Platform, account.AccountLevel, account.Credentials, account.Extra)
 		setNullStringExtra(account.Extra, "quota_limit", quotaLimit)
 		setNullStringExtra(account.Extra, "quota_used", quotaUsed)
@@ -1454,31 +1458,77 @@ func writeOpenAISharedPoolEffectiveAccountLevelEntSQL(b *entsql.Builder, account
 }
 
 func writeOpenAIPlanTokenEntSQL(b *entsql.Builder, credentialsCol, extraCol string) {
-	b.WriteString("regexp_replace(lower(COALESCE(")
-	writeJSONTextNullIfEmptyEntSQL(b, credentialsCol, "plan_type")
-	b.WriteString(", ")
-	writeJSONTextNullIfEmptyEntSQL(b, credentialsCol, "chatgpt_plan_type")
-	b.WriteString(", ")
-	writeJSONTextNullIfEmptyEntSQL(b, credentialsCol, "subscription_plan")
-	b.WriteString(", ")
-	writeJSONTextNullIfEmptyEntSQL(b, extraCol, "plan_type")
-	b.WriteString(", ")
-	writeJSONTextNullIfEmptyEntSQL(b, extraCol, "chatgpt_plan_type")
-	b.WriteString(", ")
-	writeJSONTextNullIfEmptyEntSQL(b, extraCol, "subscription_plan")
-	b.WriteString(", ").Arg("").WriteString(")), ").
-		Arg(`[[:space:]_-]+`).
-		WriteString(", ").
-		Arg("").
-		WriteString(", ").
-		Arg("g").
-		WriteString(")")
+	b.WriteString(openAIPlanTokenSQL(credentialsCol, extraCol))
 }
 
-func writeJSONTextNullIfEmptyEntSQL(b *entsql.Builder, jsonCol, key string) {
-	b.WriteString("NULLIF(")
-	b.Ident(jsonCol).WriteString(" ->> ").Arg(key)
-	b.WriteString(", ").Arg("").WriteString(")")
+func openAIPlanTokenSQL(credentialsExpr, extraExpr string) string {
+	rows := openAIPlanCandidateValueRowsSQL(credentialsExpr, 1)
+	rows = append(rows, openAIPlanCandidateValueRowsSQL(extraExpr, 101)...)
+	return fmt.Sprintf(`(
+	SELECT COALESCE((
+		SELECT token
+		FROM (
+			SELECT
+				token,
+				CASE
+					WHEN token IN ('team', 'chatgptteam') OR token LIKE 'team%%' THEN 4
+					WHEN token = 'pro' OR token = 'chatgptpro' OR token LIKE 'pro%%' OR token LIKE 'chatgptpro%%' THEN 3
+					WHEN token = 'plus' OR token = 'chatgptplus' OR token LIKE 'plus%%' THEN 2
+					WHEN token IN ('free', 'chatgptfree') THEN 1
+					ELSE 0
+				END AS rank,
+				ord
+			FROM (VALUES
+				%s
+			) AS raw_plan(ord, raw_token)
+			CROSS JOIN LATERAL (
+				SELECT regexp_replace(lower(btrim(COALESCE(raw_token, ''))), '[[:space:]_-]+', '', 'g') AS token
+			) normalized_plan
+			WHERE token <> ''
+		) ranked_plan
+		ORDER BY CASE WHEN rank > 0 THEN 0 ELSE 1 END, rank DESC, ord
+		LIMIT 1
+	), '')
+)`, strings.Join(rows, ",\n\t\t\t\t"))
+}
+
+func openAIPlanCandidateValueRowsSQL(jsonExpr string, startOrder int) []string {
+	jsonValue := fmt.Sprintf("COALESCE(%s, '{}'::jsonb)", jsonExpr)
+	selectedAccountID := fmt.Sprintf(
+		"COALESCE(NULLIF((%[1]s)->>'chatgpt_account_id', ''), NULLIF((%[1]s)->>'organization_id', ''), NULLIF((%[1]s)->>'account_id', ''), '')",
+		jsonValue,
+	)
+	exprs := []string{
+		fmt.Sprintf("(%s)->>'plan_type'", jsonValue),
+		fmt.Sprintf("(%s)->>'chatgpt_plan_type'", jsonValue),
+		fmt.Sprintf("(%s)->>'subscription_plan'", jsonValue),
+		fmt.Sprintf("(%s) #>> '{account,plan_type}'", jsonValue),
+		fmt.Sprintf("(%s) #>> '{account,chatgpt_plan_type}'", jsonValue),
+		fmt.Sprintf("(%s) #>> '{account,subscription_plan}'", jsonValue),
+		fmt.Sprintf("(%s) #>> '{entitlement,plan_type}'", jsonValue),
+		fmt.Sprintf("(%s) #>> '{entitlement,chatgpt_plan_type}'", jsonValue),
+		fmt.Sprintf("(%s) #>> '{entitlement,subscription_plan}'", jsonValue),
+		fmt.Sprintf("(%s) #>> '{account_info,plan_type}'", jsonValue),
+		fmt.Sprintf("(%s) #>> '{account_info,chatgpt_plan_type}'", jsonValue),
+		fmt.Sprintf("(%s) #>> '{account_info,subscription_plan}'", jsonValue),
+		fmt.Sprintf("(%s) #>> '{account_info,account,plan_type}'", jsonValue),
+		fmt.Sprintf("(%s) #>> '{account_info,account,chatgpt_plan_type}'", jsonValue),
+		fmt.Sprintf("(%s) #>> '{account_info,account,subscription_plan}'", jsonValue),
+		fmt.Sprintf("(%s) #>> '{account_info,entitlement,plan_type}'", jsonValue),
+		fmt.Sprintf("(%s) #>> '{account_info,entitlement,chatgpt_plan_type}'", jsonValue),
+		fmt.Sprintf("(%s) #>> '{account_info,entitlement,subscription_plan}'", jsonValue),
+		fmt.Sprintf("jsonb_extract_path_text((%s)->'accounts', %s, 'account', 'plan_type')", jsonValue, selectedAccountID),
+		fmt.Sprintf("jsonb_extract_path_text((%s)->'accounts', %s, 'account', 'chatgpt_plan_type')", jsonValue, selectedAccountID),
+		fmt.Sprintf("jsonb_extract_path_text((%s)->'accounts', %s, 'account', 'subscription_plan')", jsonValue, selectedAccountID),
+		fmt.Sprintf("jsonb_extract_path_text((%s)->'accounts', %s, 'entitlement', 'plan_type')", jsonValue, selectedAccountID),
+		fmt.Sprintf("jsonb_extract_path_text((%s)->'accounts', %s, 'entitlement', 'chatgpt_plan_type')", jsonValue, selectedAccountID),
+		fmt.Sprintf("jsonb_extract_path_text((%s)->'accounts', %s, 'entitlement', 'subscription_plan')", jsonValue, selectedAccountID),
+	}
+	rows := make([]string, 0, len(exprs))
+	for i, expr := range exprs {
+		rows = append(rows, fmt.Sprintf("(%d, %s)", startOrder+i, expr))
+	}
+	return rows
 }
 
 func accountCustomErrorPolicyActiveEntSQL(b *entsql.Builder, credentialsCol string) {
@@ -2949,7 +2999,7 @@ func repairOpenAISharedPoolBindingsForAccounts(ctx context.Context, exec sqlExec
 	}
 	var changedAccountIDs pq.Int64Array
 	var affectedGroupIDs pq.Int64Array
-	err = scanSingleRow(ctx, exec, `
+	query := strings.ReplaceAll(`
 		WITH candidate_accounts AS (
 			SELECT
 				a.id,
@@ -2972,15 +3022,7 @@ func repairOpenAISharedPoolBindingsForAccounts(ctx context.Context, exec sqlExec
 				END AS effective_level
 			FROM accounts a
 			CROSS JOIN LATERAL (
-				SELECT regexp_replace(lower(COALESCE(
-					NULLIF(a.credentials->>'plan_type', ''),
-					NULLIF(a.credentials->>'chatgpt_plan_type', ''),
-					NULLIF(a.credentials->>'subscription_plan', ''),
-					NULLIF(a.extra->>'plan_type', ''),
-					NULLIF(a.extra->>'chatgpt_plan_type', ''),
-					NULLIF(a.extra->>'subscription_plan', ''),
-					''
-				)), '[[:space:]_-]+', '', 'g') AS token
+				SELECT {{OPENAI_PLAN_TOKEN}} AS token
 			) plan
 			WHERE a.id = ANY($1)
 				AND a.deleted_at IS NULL
@@ -3068,7 +3110,8 @@ func repairOpenAISharedPoolBindingsForAccounts(ctx context.Context, exec sqlExec
 		SELECT
 			COALESCE((SELECT array_agg(account_id ORDER BY account_id) FROM changed_accounts), '{}'::bigint[]),
 			COALESCE((SELECT array_agg(group_id ORDER BY group_id) FROM affected_groups), '{}'::bigint[])
-	`, []any{pq.Array(accountIDs)}, &changedAccountIDs, &affectedGroupIDs)
+	`, "{{OPENAI_PLAN_TOKEN}}", openAIPlanTokenSQL("a.credentials", "a.extra"))
+	err = scanSingleRow(ctx, exec, query, []any{pq.Array(accountIDs)}, &changedAccountIDs, &affectedGroupIDs)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -3080,20 +3123,12 @@ func ensureOpenAIProSharedPoolForAccounts(ctx context.Context, exec sqlExecutor,
 		return nil, nil
 	}
 	var groupIDs pq.Int64Array
-	err := scanSingleRow(ctx, exec, `
+	query := strings.ReplaceAll(`
 		WITH effective_pro_accounts AS (
 			SELECT a.id
 			FROM accounts a
 			CROSS JOIN LATERAL (
-				SELECT regexp_replace(lower(COALESCE(
-					NULLIF(a.credentials->>'plan_type', ''),
-					NULLIF(a.credentials->>'chatgpt_plan_type', ''),
-					NULLIF(a.credentials->>'subscription_plan', ''),
-					NULLIF(a.extra->>'plan_type', ''),
-					NULLIF(a.extra->>'chatgpt_plan_type', ''),
-					NULLIF(a.extra->>'subscription_plan', ''),
-					''
-				)), '[[:space:]_-]+', '', 'g') AS token
+				SELECT {{OPENAI_PLAN_TOKEN}} AS token
 			) plan
 			WHERE a.id = ANY($1)
 				AND a.deleted_at IS NULL
@@ -3299,7 +3334,8 @@ func ensureOpenAIProSharedPoolForAccounts(ctx context.Context, exec sqlExecutor,
 			SELECT id FROM inserted_pro_pool
 		)
 		SELECT COALESCE((SELECT array_agg(id ORDER BY id) FROM changed_groups), '{}'::bigint[])
-	`, []any{pq.Array(accountIDs), includePending}, &groupIDs)
+	`, "{{OPENAI_PLAN_TOKEN}}", openAIPlanTokenSQL("a.credentials", "a.extra"))
+	err := scanSingleRow(ctx, exec, query, []any{pq.Array(accountIDs), includePending}, &groupIDs)
 	if err != nil {
 		return nil, fmt.Errorf("ensure openai pro shared pool: %w", err)
 	}
