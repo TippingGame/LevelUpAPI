@@ -879,6 +879,8 @@ func buildSchedulerMetadataAccount(account service.Account) service.Account {
 		AccountLevel:            account.AccountLevel,
 		Type:                    account.Type,
 		OwnerUserID:             account.OwnerUserID,
+		ShareMode:               account.ShareMode,
+		ShareStatus:             account.ShareStatus,
 		ProxyID:                 account.ProxyID,
 		Concurrency:             account.Concurrency,
 		LoadFactor:              account.LoadFactor,
