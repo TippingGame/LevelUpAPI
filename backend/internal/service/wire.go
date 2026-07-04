@@ -538,12 +538,16 @@ func ProvideAPIKeyService(
 	groupRepo GroupRepository,
 	userSubRepo UserSubscriptionRepository,
 	userGroupRateRepo UserGroupRateRepository,
+	accountRepo AccountRepository,
 	cache APIKeyCache,
 	cfg *config.Config,
 	settingService *SettingService,
 	billingCacheService *BillingCacheService,
 ) *APIKeyService {
 	svc := NewAPIKeyService(apiKeyRepo, userRepo, groupRepo, userSubRepo, userGroupRateRepo, cache, cfg)
+	if repairRepo, ok := accountRepo.(accountQuotaPoolVisibleRepairRepository); ok {
+		svc.SetQuotaPoolRepairRepository(repairRepo)
+	}
 	svc.SetSettingService(settingService)
 	svc.SetRateLimitCacheInvalidator(billingCacheService)
 	return svc

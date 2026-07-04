@@ -218,6 +218,15 @@ func (s *apiKeyAvailableGroupsSubRepoStub) BatchUpdateExpiredStatus(context.Cont
 	panic("unexpected BatchUpdateExpiredStatus call")
 }
 
+type apiKeyAvailableGroupsRepairRepoStub struct {
+	userIDs []int64
+}
+
+func (s *apiKeyAvailableGroupsRepairRepoStub) RepairQuotaPoolVisibleOpenAISharedPoolBindings(_ context.Context, userID int64) (bool, error) {
+	s.userIDs = append(s.userIDs, userID)
+	return true, nil
+}
+
 func TestAPIKeyService_GetAvailableGroups_PublicBalanceGroupIsSelectable(t *testing.T) {
 	userID := int64(7)
 	otherUserID := int64(8)
@@ -241,6 +250,29 @@ func TestAPIKeyService_GetAvailableGroups_PublicBalanceGroupIsSelectable(t *test
 	require.NoError(t, err)
 	require.Len(t, available, 1)
 	require.Equal(t, int64(10), available[0].ID)
+}
+
+func TestAPIKeyService_GetAvailableGroupsRepairsVisibleOpenAISharedPools(t *testing.T) {
+	userID := int64(7)
+	repairRepo := &apiKeyAvailableGroupsRepairRepoStub{}
+	svc := NewAPIKeyService(
+		nil,
+		&apiKeyAvailableGroupsUserRepoStub{user: &User{ID: userID}},
+		&apiKeyAvailableGroupsGroupRepoStub{groups: []Group{
+			{ID: 10, Name: "PRO共享号池", Status: StatusActive, Scope: GroupScopePublic, SubscriptionType: SubscriptionTypeStandard},
+		}},
+		&apiKeyAvailableGroupsSubRepoStub{},
+		nil,
+		nil,
+		nil,
+	)
+	svc.SetQuotaPoolRepairRepository(repairRepo)
+
+	available, err := svc.GetAvailableGroups(context.Background(), userID)
+
+	require.NoError(t, err)
+	require.Len(t, available, 1)
+	require.Equal(t, []int64{userID}, repairRepo.userIDs)
 }
 
 func TestAPIKeyService_GetAvailableGroups_OwnPrivateSubscriptionRequiresActiveSubscription(t *testing.T) {

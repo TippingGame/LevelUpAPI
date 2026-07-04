@@ -208,6 +208,7 @@ type APIKeyService struct {
 	groupRepo             GroupRepository
 	userSubRepo           UserSubscriptionRepository
 	userGroupRateRepo     UserGroupRateRepository
+	quotaPoolRepairRepo   accountQuotaPoolVisibleRepairRepository
 	cache                 APIKeyCache
 	rateLimitCacheInvalid RateLimitCacheInvalidator // optional: invalidate Redis rate limit cache
 	settingService        *SettingService
@@ -251,6 +252,12 @@ func (s *APIKeyService) SetRateLimitCacheInvalidator(inv RateLimitCacheInvalidat
 // SetSettingService injects system settings used by API key write validation.
 func (s *APIKeyService) SetSettingService(settingService *SettingService) {
 	s.settingService = settingService
+}
+
+// SetQuotaPoolRepairRepository injects the optional repair hook used before listing
+// user-visible groups, so stale OpenAI public share bindings do not hide Pro pools.
+func (s *APIKeyService) SetQuotaPoolRepairRepository(repo accountQuotaPoolVisibleRepairRepository) {
+	s.quotaPoolRepairRepo = repo
 }
 
 func (s *APIKeyService) compileAPIKeyIPRules(apiKey *APIKey) {
@@ -916,6 +923,12 @@ func (s *APIKeyService) IncrementUsage(ctx context.Context, keyID int64) error {
 // - 标准类型分组：公开的（非专属）或用户被明确允许的
 // - 订阅类型分组：用户有有效订阅的
 func (s *APIKeyService) GetAvailableGroups(ctx context.Context, userID int64) ([]Group, error) {
+	if s != nil && s.quotaPoolRepairRepo != nil {
+		if _, err := s.quotaPoolRepairRepo.RepairQuotaPoolVisibleOpenAISharedPoolBindings(ctx, userID); err != nil {
+			return nil, fmt.Errorf("repair visible openai shared pools: %w", err)
+		}
+	}
+
 	// 获取用户信息
 	user, err := s.userRepo.GetByID(ctx, userID)
 	if err != nil {
