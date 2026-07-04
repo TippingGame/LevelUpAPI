@@ -403,6 +403,88 @@ func TestGeminiMessagesCompatService_SelectAccountForModelFiltersInvisibleOwnedA
 	require.Equal(t, int64(1), acc.ID)
 }
 
+func TestGeminiMessagesCompatService_SelectAccountForModelUsesPublicPriorityForSharedConsumer(t *testing.T) {
+	ownerID := int64(101)
+	consumerID := int64(999)
+	privatePriority := 1
+	ctx := context.WithValue(context.Background(), ctxkey.AuthenticatedUserID, consumerID)
+	repo := &mockAccountRepoForGemini{
+		accounts: []Account{
+			{ID: 1, Platform: PlatformGemini, Priority: 5, PrivatePriority: &privatePriority, OwnerUserID: &ownerID, ShareMode: AccountShareModePublic, ShareStatus: AccountShareStatusApproved, Status: StatusActive, Schedulable: true},
+			{ID: 2, Platform: PlatformGemini, Priority: 1, Status: StatusActive, Schedulable: true},
+		},
+		accountsByID: map[int64]*Account{},
+	}
+	for i := range repo.accounts {
+		repo.accountsByID[repo.accounts[i].ID] = &repo.accounts[i]
+	}
+	svc := &GeminiMessagesCompatService{
+		accountRepo: repo,
+		groupRepo:   &mockGroupRepoForGemini{groups: map[int64]*Group{}},
+		cache:       &mockGatewayCacheForGemini{},
+	}
+
+	acc, err := svc.SelectAccountForModelWithExclusions(ctx, nil, "", "gemini-2.5-flash", nil)
+
+	require.NoError(t, err)
+	require.NotNil(t, acc)
+	require.Equal(t, int64(2), acc.ID)
+}
+
+func TestGeminiMessagesCompatService_SelectAccountForModelUsesPrivatePriorityForOwner(t *testing.T) {
+	ownerID := int64(101)
+	privatePriority := 1
+	ctx := context.WithValue(context.Background(), ctxkey.AuthenticatedUserID, ownerID)
+	repo := &mockAccountRepoForGemini{
+		accounts: []Account{
+			{ID: 1, Platform: PlatformGemini, Priority: 5, PrivatePriority: &privatePriority, OwnerUserID: &ownerID, ShareMode: AccountShareModePublic, ShareStatus: AccountShareStatusApproved, Status: StatusActive, Schedulable: true},
+			{ID: 2, Platform: PlatformGemini, Priority: 2, Status: StatusActive, Schedulable: true},
+		},
+		accountsByID: map[int64]*Account{},
+	}
+	for i := range repo.accounts {
+		repo.accountsByID[repo.accounts[i].ID] = &repo.accounts[i]
+	}
+	svc := &GeminiMessagesCompatService{
+		accountRepo: repo,
+		groupRepo:   &mockGroupRepoForGemini{groups: map[int64]*Group{}},
+		cache:       &mockGatewayCacheForGemini{},
+	}
+
+	acc, err := svc.SelectAccountForModelWithExclusions(ctx, nil, "", "gemini-2.5-flash", nil)
+
+	require.NoError(t, err)
+	require.NotNil(t, acc)
+	require.Equal(t, int64(1), acc.ID)
+}
+
+func TestGeminiMessagesCompatService_SelectAccountForAIStudioEndpointsUsesRequestPriority(t *testing.T) {
+	ownerID := int64(101)
+	privatePriority := 1
+	ctx := context.WithValue(context.Background(), ctxkey.AuthenticatedUserID, ownerID)
+	repo := &mockAccountRepoForGemini{
+		accounts: []Account{
+			{ID: 1, Platform: PlatformGemini, Type: AccountTypeAPIKey, Credentials: map[string]any{"api_key": "key-1"}, Priority: 5, PrivatePriority: &privatePriority, OwnerUserID: &ownerID, ShareMode: AccountShareModePublic, ShareStatus: AccountShareStatusApproved, Status: StatusActive, Schedulable: true},
+			{ID: 2, Platform: PlatformGemini, Type: AccountTypeAPIKey, Credentials: map[string]any{"api_key": "key-2"}, Priority: 2, Status: StatusActive, Schedulable: true},
+		},
+		accountsByID: map[int64]*Account{},
+	}
+	for i := range repo.accounts {
+		repo.accountsByID[repo.accounts[i].ID] = &repo.accounts[i]
+	}
+	svc := &GeminiMessagesCompatService{
+		accountRepo: repo,
+		groupRepo:   &mockGroupRepoForGemini{groups: map[int64]*Group{}},
+		cache:       &mockGatewayCacheForGemini{},
+	}
+
+	acc, err := svc.SelectAccountForAIStudioEndpoints(ctx, nil)
+
+	require.NoError(t, err)
+	require.NotNil(t, acc)
+	require.Equal(t, int64(1), acc.ID)
+}
+
 func TestGeminiMessagesCompatService_StickySessionClearsInvisibleOwnedAccount(t *testing.T) {
 	ownerID := int64(101)
 	ctx := context.WithValue(context.Background(), ctxkey.AuthenticatedUserID, int64(999))

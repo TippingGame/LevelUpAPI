@@ -359,7 +359,7 @@ func (s *GeminiMessagesCompatService) selectBestGeminiAccount(
 			continue
 		}
 
-		if s.isBetterGeminiAccount(acc, selected) {
+		if s.isBetterGeminiAccount(ctx, acc, selected) {
 			selected = acc
 		}
 	}
@@ -389,12 +389,14 @@ func (s *GeminiMessagesCompatService) buildPreCheckUsageResultMap(ctx context.Co
 //
 // isBetterGeminiAccount checks if candidate is better than current.
 // Rules: higher priority (lower value) wins; same priority: never used (OAuth > non-OAuth) > least recently used.
-func (s *GeminiMessagesCompatService) isBetterGeminiAccount(candidate, current *Account) bool {
+func (s *GeminiMessagesCompatService) isBetterGeminiAccount(ctx context.Context, candidate, current *Account) bool {
 	// 优先级更高（数值更小）
-	if candidate.Priority < current.Priority {
+	candidatePriority := accountPriorityForRequest(ctx, candidate)
+	currentPriority := accountPriorityForRequest(ctx, current)
+	if candidatePriority < currentPriority {
 		return true
 	}
-	if candidate.Priority > current.Priority {
+	if candidatePriority > currentPriority {
 		return false
 	}
 
@@ -624,9 +626,11 @@ func (s *GeminiMessagesCompatService) SelectAccountForAIStudioEndpoints(ctx cont
 			continue
 		}
 
-		if acc.Priority < selected.Priority {
+		accPriority := accountPriorityForRequest(ctx, acc)
+		selectedPriority := accountPriorityForRequest(ctx, selected)
+		if accPriority < selectedPriority {
 			selected = acc
-		} else if acc.Priority == selected.Priority {
+		} else if accPriority == selectedPriority {
 			switch {
 			case acc.LastUsedAt == nil && selected.LastUsedAt != nil:
 				selected = acc

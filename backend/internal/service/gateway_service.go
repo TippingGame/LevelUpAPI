@@ -2379,7 +2379,7 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 			}
 
 			if len(routingAvailable) > 0 {
-				if selection, ok, err := tryClientAffinity(routingAvailable, "routing"); err != nil || ok {
+				if selection, ok, err := tryClientAffinity(filterByMinPriorityForRequest(ctx, routingAvailable), "routing"); err != nil || ok {
 					return selection, err
 				}
 
@@ -2661,7 +2661,7 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 			}
 		}
 
-		if selection, ok, err := tryClientAffinity(available, "load_aware"); err != nil || ok {
+		if selection, ok, err := tryClientAffinity(filterByMinPriorityForRequest(ctx, available), "load_aware"); err != nil || ok {
 			return selection, err
 		}
 
