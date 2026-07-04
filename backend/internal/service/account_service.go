@@ -243,6 +243,10 @@ type accountQuotaPoolVisibleRepairRepository interface {
 	RepairQuotaPoolVisibleOpenAISharedPoolBindings(ctx context.Context, ownerUserID int64) (bool, error)
 }
 
+type accountQuotaPoolGlobalVisibleRepairRepository interface {
+	RepairAllVisibleOpenAISharedPoolBindings(ctx context.Context) (bool, error)
+}
+
 type accountQuotaPoolRepairRepository interface {
 	RepairQuotaPoolOwnerOpenAISharedPoolBindings(ctx context.Context, ownerUserID int64) (bool, error)
 }

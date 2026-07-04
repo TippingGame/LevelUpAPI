@@ -1769,8 +1769,23 @@ type groupScopeFilterRepository interface {
 	ListWithScopeFilters(ctx context.Context, params pagination.PaginationParams, platform, status, search string, isExclusive *bool, scope string) ([]Group, *pagination.PaginationResult, error)
 }
 
+func (s *adminServiceImpl) repairVisibleOpenAISharedPoolsForGroupView(ctx context.Context) error {
+	if s == nil || s.accountRepo == nil {
+		return nil
+	}
+	repo, ok := s.accountRepo.(accountQuotaPoolGlobalVisibleRepairRepository)
+	if !ok {
+		return nil
+	}
+	_, err := repo.RepairAllVisibleOpenAISharedPoolBindings(ctx)
+	return err
+}
+
 // Group management implementations
 func (s *adminServiceImpl) ListGroups(ctx context.Context, page, pageSize int, platform, status, search string, isExclusive *bool, scope, sortBy, sortOrder string) ([]Group, int64, error) {
+	if err := s.repairVisibleOpenAISharedPoolsForGroupView(ctx); err != nil {
+		return nil, 0, err
+	}
 	params := pagination.PaginationParams{Page: page, PageSize: pageSize, SortBy: sortBy, SortOrder: sortOrder}
 	if repo, ok := s.groupRepo.(groupScopeFilterRepository); ok {
 		groups, result, err := repo.ListWithScopeFilters(ctx, params, platform, status, search, isExclusive, scope)
@@ -1791,6 +1806,9 @@ func (s *adminServiceImpl) ListGroups(ctx context.Context, page, pageSize int, p
 }
 
 func (s *adminServiceImpl) GetAllGroups(ctx context.Context, scope string) ([]Group, error) {
+	if err := s.repairVisibleOpenAISharedPoolsForGroupView(ctx); err != nil {
+		return nil, err
+	}
 	groups, err := s.groupRepo.ListActive(ctx)
 	if err != nil {
 		return nil, err
@@ -1799,6 +1817,9 @@ func (s *adminServiceImpl) GetAllGroups(ctx context.Context, scope string) ([]Gr
 }
 
 func (s *adminServiceImpl) GetAllGroupsByPlatform(ctx context.Context, platform, scope string) ([]Group, error) {
+	if err := s.repairVisibleOpenAISharedPoolsForGroupView(ctx); err != nil {
+		return nil, err
+	}
 	groups, err := s.groupRepo.ListActiveByPlatform(ctx, platform)
 	if err != nil {
 		return nil, err
@@ -1822,6 +1843,9 @@ func filterGroupsByScope(groups []Group, scope string) []Group {
 }
 
 func (s *adminServiceImpl) GetGroup(ctx context.Context, id int64) (*Group, error) {
+	if err := s.repairVisibleOpenAISharedPoolsForGroupView(ctx); err != nil {
+		return nil, err
+	}
 	return s.groupRepo.GetByID(ctx, id)
 }
 

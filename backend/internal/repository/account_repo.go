@@ -880,6 +880,10 @@ func (r *accountRepository) RepairQuotaPoolVisibleOpenAISharedPoolBindings(ctx c
 	return r.repairQuotaPoolVisibleOpenAISharedPoolBindings(ctx, ownerUserID)
 }
 
+func (r *accountRepository) RepairAllVisibleOpenAISharedPoolBindings(ctx context.Context) (bool, error) {
+	return r.repairAllVisibleOpenAISharedPoolBindings(ctx)
+}
+
 func (r *accountRepository) EnsureOpenAIProSharedPoolForAccount(ctx context.Context, accountID int64) (bool, error) {
 	if r == nil || r.sql == nil || accountID <= 0 {
 		return false, nil
@@ -937,7 +941,14 @@ func (r *accountRepository) repairQuotaPoolOwnerOpenAISharedPoolBindings(ctx con
 }
 
 func (r *accountRepository) repairQuotaPoolVisibleOpenAISharedPoolBindings(ctx context.Context, ownerUserID int64) (bool, error) {
-	if r == nil || r.sql == nil || ownerUserID <= 0 {
+	if ownerUserID <= 0 {
+		return false, nil
+	}
+	return r.repairAllVisibleOpenAISharedPoolBindings(ctx)
+}
+
+func (r *accountRepository) repairAllVisibleOpenAISharedPoolBindings(ctx context.Context) (bool, error) {
+	if r == nil || r.sql == nil {
 		return false, nil
 	}
 	rows, err := r.sql.QueryContext(ctx, `

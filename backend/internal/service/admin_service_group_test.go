@@ -4,6 +4,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
@@ -21,6 +22,7 @@ type groupRepoStubForAdmin struct {
 	updated *Group // 记录 Update 调用的参数
 	getByID *Group // GetByID 返回值
 	getErr  error  // GetByID 返回的错误
+	events  *[]string
 
 	getByIDByID                  map[int64]*Group
 	accountIDsByGroupIDs         []int64
@@ -49,6 +51,9 @@ func (s *groupRepoStubForAdmin) Update(_ context.Context, g *Group) error {
 }
 
 func (s *groupRepoStubForAdmin) GetByID(_ context.Context, id int64) (*Group, error) {
+	if s.events != nil {
+		*s.events = append(*s.events, "get_group")
+	}
 	if s.getErr != nil {
 		return nil, s.getErr
 	}
@@ -81,6 +86,9 @@ func (s *groupRepoStubForAdmin) List(_ context.Context, _ pagination.PaginationP
 }
 
 func (s *groupRepoStubForAdmin) ListWithFilters(_ context.Context, params pagination.PaginationParams, platform, status, search string, isExclusive *bool) ([]Group, *pagination.PaginationResult, error) {
+	if s.events != nil {
+		*s.events = append(*s.events, "list_groups")
+	}
 	s.listWithFiltersCalls++
 	s.listWithFiltersParams = params
 	s.listWithFiltersPlatform = platform
@@ -102,6 +110,24 @@ func (s *groupRepoStubForAdmin) ListWithFilters(_ context.Context, params pagina
 	}
 
 	return s.listWithFiltersGroups, result, nil
+}
+
+type adminGroupVisibleRepairAccountRepoStub struct {
+	accountRepoStub
+	events *[]string
+	calls  int
+	err    error
+}
+
+func (s *adminGroupVisibleRepairAccountRepoStub) RepairAllVisibleOpenAISharedPoolBindings(context.Context) (bool, error) {
+	if s.events != nil {
+		*s.events = append(*s.events, "repair")
+	}
+	s.calls++
+	if s.err != nil {
+		return false, s.err
+	}
+	return true, nil
 }
 
 func (s *groupRepoStubForAdmin) ListActive(_ context.Context) ([]Group, error) {
@@ -162,6 +188,58 @@ func TestAdminService_ListGroups_PassesSortParams(t *testing.T) {
 		SortBy:    "account_count",
 		SortOrder: "ASC",
 	}, repo.listWithFiltersParams)
+}
+
+func TestAdminService_ListGroupsRepairsVisibleOpenAISharedPoolsBeforeListing(t *testing.T) {
+	events := []string{}
+	groupRepo := &groupRepoStubForAdmin{
+		events:                &events,
+		listWithFiltersGroups: []Group{{ID: 10, Name: "PRO共享号池", Platform: PlatformOpenAI}},
+	}
+	accountRepo := &adminGroupVisibleRepairAccountRepoStub{events: &events}
+	svc := &adminServiceImpl{groupRepo: groupRepo, accountRepo: accountRepo}
+
+	groups, total, err := svc.ListGroups(context.Background(), 1, 20, PlatformOpenAI, StatusActive, "", nil, GroupScopePublic, "account_count", "desc")
+
+	require.NoError(t, err)
+	require.Equal(t, int64(1), total)
+	require.Len(t, groups, 1)
+	require.Equal(t, 1, accountRepo.calls)
+	require.Equal(t, []string{"repair", "list_groups"}, events)
+}
+
+func TestAdminService_ListGroupsStopsWhenVisibleOpenAISharedPoolRepairFails(t *testing.T) {
+	repairErr := errors.New("repair failed")
+	groupRepo := &groupRepoStubForAdmin{
+		listWithFiltersGroups: []Group{{ID: 10, Name: "PRO共享号池", Platform: PlatformOpenAI}},
+	}
+	accountRepo := &adminGroupVisibleRepairAccountRepoStub{err: repairErr}
+	svc := &adminServiceImpl{groupRepo: groupRepo, accountRepo: accountRepo}
+
+	groups, total, err := svc.ListGroups(context.Background(), 1, 20, PlatformOpenAI, StatusActive, "", nil, GroupScopePublic, "account_count", "desc")
+
+	require.ErrorIs(t, err, repairErr)
+	require.Nil(t, groups)
+	require.Zero(t, total)
+	require.Equal(t, 1, accountRepo.calls)
+	require.Zero(t, groupRepo.listWithFiltersCalls)
+}
+
+func TestAdminService_GetGroupRepairsVisibleOpenAISharedPoolsBeforeLoadingCounts(t *testing.T) {
+	events := []string{}
+	groupRepo := &groupRepoStubForAdmin{
+		events:  &events,
+		getByID: &Group{ID: 10, Name: "PRO共享号池", Platform: PlatformOpenAI},
+	}
+	accountRepo := &adminGroupVisibleRepairAccountRepoStub{events: &events}
+	svc := &adminServiceImpl{groupRepo: groupRepo, accountRepo: accountRepo}
+
+	group, err := svc.GetGroup(context.Background(), 10)
+
+	require.NoError(t, err)
+	require.NotNil(t, group)
+	require.Equal(t, 1, accountRepo.calls)
+	require.Equal(t, []string{"repair", "get_group"}, events)
 }
 
 // TestAdminService_CreateGroup_WithImagePricing 测试创建分组时 ImagePrice 字段正确传递
