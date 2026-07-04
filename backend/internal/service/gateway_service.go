@@ -9941,9 +9941,6 @@ func (s *GatewayService) resolveCacheTTLUsageOverrideTarget(ctx context.Context,
 	if account.IsCacheTTLOverrideEnabled() {
 		return account.GetCacheTTLOverrideTarget(), true
 	}
-	if account.IsAnthropicOAuthOrSetupToken() && s != nil && s.settingService != nil && s.settingService.IsAnthropicCacheTTL1hInjectionEnabled(ctx) {
-		return cacheTTLTarget5m, true
-	}
 	return "", false
 }
 
@@ -10784,8 +10781,8 @@ func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsage
 		result.Usage.InputTokens = 0
 	}
 
-	// Cache TTL Override: 确保计费时 token 分类与账号设置一致。
-	// 账号级设置优先；全局 1h 请求注入开启时，默认把 usage 计费归回 5m。
+	// Cache TTL Override: 仅在账号显式设置时改写 token TTL 分类。
+	// 默认按上游返回的 5m/1h usage 明细计费，避免把真实 1h 成本误按 5m 计费。
 	cacheTTLOverridden := false
 	if overrideTarget, ok := s.resolveCacheTTLUsageOverrideTarget(ctx, account); ok {
 		applyCacheTTLOverride(&result.Usage, overrideTarget)
