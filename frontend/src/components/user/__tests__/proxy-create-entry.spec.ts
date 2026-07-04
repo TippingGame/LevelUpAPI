@@ -108,7 +108,8 @@ vi.mock('@/composables/useGeminiOAuth', async () => {
       loading: ref(false),
       error: ref(''),
       resetState: vi.fn(),
-      generateAuthUrl: vi.fn()
+      generateAuthUrl: vi.fn(),
+      getCapabilities: vi.fn().mockResolvedValue({ ai_studio_oauth_enabled: false })
     })
   }
 })
@@ -227,6 +228,31 @@ describe('user proxy create entry buttons', () => {
     resetOAuthStateMock.mockReset()
   })
 
+  it('shows the proxy selector by default for admin account creation', () => {
+    const wrapper = mount(CreateAccountModal, {
+      props: {
+        show: true,
+        proxies: [
+          {
+            id: 1,
+            name: 'proxy-1',
+            protocol: 'socks5',
+            host: '127.0.0.1',
+            port: 1080,
+            username: null,
+            status: 'active'
+          }
+        ],
+        groups: []
+      },
+      global: {
+        stubs: basicStubs
+      }
+    })
+
+    expect(wrapper.find('[data-testid="proxy-selector"]').exists()).toBe(true)
+  })
+
   it('opens the inline proxy create panel from OpenAI Pro import', async () => {
     const wrapper = mount(ImportAccountsModal, {
       props: {
@@ -278,6 +304,58 @@ describe('user proxy create entry buttons', () => {
     await wrapper.vm.$nextTick()
 
     expect(wrapper.find('[data-testid="user-proxy-create-panel"]').exists()).toBe(true)
+  })
+
+  it('shows optional proxy controls for user Gemini and Antigravity account creation', async () => {
+    const wrapper = mount(CreateAccountModal, {
+      props: {
+        show: true,
+        proxies: [],
+        groups: [],
+        accountScope: 'user',
+        allowProxy: true,
+        allowBillingRate: false
+      },
+      global: {
+        stubs: basicStubs
+      }
+    })
+
+    await findButtonByText(wrapper, 'Gemini').trigger('click')
+    await wrapper.vm.$nextTick()
+    expect(wrapper.find('[data-testid="proxy-selector"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="create-open-user-proxy-panel"]').exists()).toBe(true)
+
+    await findButtonByText(wrapper, 'Antigravity').trigger('click')
+    await wrapper.vm.$nextTick()
+    expect(wrapper.find('[data-testid="proxy-selector"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="create-open-user-proxy-panel"]').exists()).toBe(true)
+  })
+
+  it('does not require a proxy for user Gemini account creation', async () => {
+    const wrapper = mount(CreateAccountModal, {
+      props: {
+        show: true,
+        proxies: [],
+        groups: [],
+        accountScope: 'user',
+        allowProxy: true,
+        allowBillingRate: false
+      },
+      global: {
+        stubs: basicStubs
+      }
+    })
+
+    await wrapper.find('input[placeholder="admin.accounts.enterAccountName"]').setValue('Gemini Account')
+    await findButtonByText(wrapper, 'Gemini').trigger('click')
+    await wrapper.vm.$nextTick()
+
+    await wrapper.find('form#create-account-form').trigger('submit.prevent')
+    await wrapper.vm.$nextTick()
+
+    expect(showErrorMock).not.toHaveBeenCalledWith('userAccounts.importProxyRequired')
+    expect(wrapper.find('[data-testid="oauth-flow"]').exists()).toBe(true)
   })
 
   it('creates a custom proxy from the inline panel and emits the created proxy', async () => {

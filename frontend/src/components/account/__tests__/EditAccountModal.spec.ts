@@ -178,6 +178,12 @@ function mountModal(account = buildAccount()) {
 }
 
 describe('EditAccountModal', () => {
+  it('shows the proxy selector by default for admin account edits', () => {
+    const wrapper = mountModal()
+
+    expect(wrapper.find('proxy-selector-stub').exists()).toBe(true)
+  })
+
   it('reopening the same account rehydrates the OpenAI whitelist from props', async () => {
     const account = buildAccount()
     updateAccountMock.mockReset()

@@ -3343,7 +3343,10 @@ interface Props {
   allowBillingRate?: boolean
 }
 
-const props = defineProps<Props>()
+const props = withDefaults(defineProps<Props>(), {
+  allowProxy: true,
+  allowBillingRate: true
+})
 const emit = defineEmits<{
   close: []
   created: []
@@ -3719,8 +3722,17 @@ const userAccountProxyRequired = computed(() =>
   userOpenAIProxyLoginRequired.value || userAnthropicProxyRequired.value
 )
 
+const userOptionalProxyAvailable = computed(() =>
+  isUserScope.value &&
+  (form.platform === 'gemini' || form.platform === 'antigravity')
+)
+
+const userAccountProxyAvailable = computed(() =>
+  userAccountProxyRequired.value || userOptionalProxyAvailable.value
+)
+
 const canManageProxy = computed(() =>
-  props.allowProxy !== false && (!isUserScope.value || userAccountProxyRequired.value)
+  props.allowProxy !== false && (!isUserScope.value || userAccountProxyAvailable.value)
 )
 
 const PROXY_PURCHASE_URL = 'https://www.seekproxy.com/user/reg?invite_id=105978'
@@ -3996,9 +4008,9 @@ watch(
 )
 
 watch(
-  userAccountProxyRequired,
-  (required) => {
-    if (!required) {
+  canManageProxy,
+  (allowed) => {
+    if (!allowed) {
       form.proxy_id = null
       showUserProxyCreatePanel.value = false
       openaiOAuth.resetState()

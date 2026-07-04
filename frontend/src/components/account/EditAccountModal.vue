@@ -2292,7 +2292,10 @@ interface Props {
   hideProxyEndpoint?: boolean
 }
 
-const props = defineProps<Props>()
+const props = withDefaults(defineProps<Props>(), {
+  allowProxy: true,
+  allowBillingRate: true
+})
 const emit = defineEmits<{
   close: []
   updated: [account: Account]
