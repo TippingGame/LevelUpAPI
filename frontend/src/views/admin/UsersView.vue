@@ -239,7 +239,7 @@
           :columns="columns"
           :data="users"
           :loading="loading"
-          :actions-count="9"
+          :actions-count="10"
           :server-side-sort="true"
           default-sort-key="created_at"
           default-sort-order="desc"
@@ -593,6 +593,15 @@
                 {{ t('admin.users.groups') }}
               </button>
 
+              <!-- Usage Records -->
+              <button
+                @click="handleViewUsage(user); closeActionMenu()"
+                class="flex w-full items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-dark-700"
+              >
+                <Icon name="chart" size="sm" class="text-gray-400" :stroke-width="2" />
+                {{ t('admin.users.usageRecords') }}
+              </button>
+
               <div class="my-1 border-t border-gray-100 dark:border-dark-700"></div>
 
               <!-- Deposit -->
@@ -696,14 +705,13 @@
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRouter } from 'vue-router'
 import { useAppStore } from '@/stores/app'
+import { adminAPI } from '@/api/admin'
 import { getPersistedPageSize } from '@/composables/usePersistedPageSize'
 import { formatDateTime } from '@/utils/format'
 import { formatGameCoins } from '@/utils/gameCurrency'
 import Icon from '@/components/icons/Icon.vue'
-
-const { t } = useI18n()
-import { adminAPI } from '@/api/admin'
 import type { AdminUser, AdminGroup, UserAttributeDefinition } from '@/types'
 import type { BatchUserUsageStats } from '@/api/admin/dashboard'
 import type { Column } from '@/components/common/types'
@@ -727,6 +735,8 @@ import UserLoadFactorCreditsModal from '@/components/admin/user/UserLoadFactorCr
 import UserBalanceHistoryModal from '@/components/admin/user/UserBalanceHistoryModal.vue'
 import GroupReplaceModal from '@/components/admin/user/GroupReplaceModal.vue'
 
+const { t } = useI18n()
+const router = useRouter()
 const appStore = useAppStore()
 
 // Generate dynamic attribute columns from enabled definitions
@@ -1115,7 +1125,7 @@ const openActionMenu = (user: AdminUser, e: MouseEvent) => {
 
     const rect = target.getBoundingClientRect()
     const menuWidth = 200
-    const menuHeight = 320
+    const menuHeight = 360
     const padding = 8
     const viewportWidth = window.innerWidth
     const viewportHeight = window.innerHeight
@@ -1414,6 +1424,16 @@ const closeApiKeysModal = () => {
 const handleAllowedGroups = (user: AdminUser) => {
   allowedGroupsUser.value = user
   showAllowedGroupsModal.value = true
+}
+
+const handleViewUsage = (user: AdminUser) => {
+  router.push({
+    name: 'AdminUsage',
+    query: {
+      user_id: String(user.id),
+      user_email: user.email
+    }
+  })
 }
 
 const closeAllowedGroupsModal = () => {

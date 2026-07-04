@@ -182,10 +182,13 @@ interface Props {
   startDate: string
   endDate: string
   showActions?: boolean
+  initialUserId?: number
+  initialUserLabel?: string
 }
 
 const props = withDefaults(defineProps<Props>(), {
-  showActions: true
+  showActions: true,
+  initialUserLabel: ''
 })
 const emit = defineEmits([
   'update:modelValue',
@@ -396,6 +399,16 @@ watch(
       userResults.value = []
     }
   }
+)
+
+watch(
+  () => [props.initialUserId, props.initialUserLabel] as const,
+  ([initialUserId, initialUserLabel]) => {
+    if (initialUserId && filters.value.user_id === initialUserId) {
+      userKeyword.value = initialUserLabel || `#${initialUserId}`
+    }
+  },
+  { immediate: true }
 )
 
 watch(

@@ -90,7 +90,19 @@
           <TokenUsageTrend :trend-data="trendData" :loading="chartsLoading" />
         </div>
       </div>
-      <UsageFilters v-model="filters" :start-date="startDate" :end-date="endDate" :exporting="exporting" @change="applyFilters" @refresh="refreshData" @reset="resetFilters" @cleanup="openCleanupDialog" @export="exportToExcel">
+      <UsageFilters
+        v-model="filters"
+        :start-date="startDate"
+        :end-date="endDate"
+        :exporting="exporting"
+        :initial-user-id="initialUserId"
+        :initial-user-label="initialUserLabel"
+        @change="applyFilters"
+        @refresh="refreshData"
+        @reset="resetFilters"
+        @cleanup="openCleanupDialog"
+        @export="exportToExcel"
+      >
         <template #after-reset>
           <div class="relative" ref="columnDropdownRef">
             <button
@@ -504,6 +516,8 @@ const ledgerUserSearchRef = ref<HTMLElement | null>(null)
 const ledgerUserKeyword = ref('')
 const ledgerUserResults = ref<SimpleUser[]>([])
 const showLedgerUserDropdown = ref(false)
+const initialUserId = ref<number | undefined>(undefined)
+const initialUserLabel = ref('')
 let ledgerUserSearchTimeout: number | null = null
 
 const getSingleQueryValue = (value: string | null | Array<string | null> | undefined): string | undefined => {
@@ -522,6 +536,7 @@ const applyRouteQueryFilters = () => {
   const queryStartDate = getSingleQueryValue(route.query.start_date)
   const queryEndDate = getSingleQueryValue(route.query.end_date)
   const queryUserId = getNumericQueryValue(route.query.user_id)
+  const queryUserEmail = getSingleQueryValue(route.query.user_email)
 
   if (queryStartDate) {
     startDate.value = queryStartDate
@@ -539,7 +554,13 @@ const applyRouteQueryFilters = () => {
   ledgerFilters.user_id = queryUserId
   ledgerFilters.start_date = startDate.value
   ledgerFilters.end_date = endDate.value
-  ledgerUserKeyword.value = queryUserId ? `#${queryUserId}` : ''
+  initialUserId.value = queryUserId
+  initialUserLabel.value = queryUserId
+    ? queryUserEmail
+      ? `${queryUserEmail} #${queryUserId}`
+      : `#${queryUserId}`
+    : ''
+  ledgerUserKeyword.value = initialUserLabel.value
   granularity.value = getGranularityForRange(startDate.value, endDate.value)
 }
 

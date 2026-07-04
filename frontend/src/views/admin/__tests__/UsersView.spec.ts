@@ -9,13 +9,15 @@ const {
   getAllGroups,
   getBatchUsersUsage,
   listEnabledDefinitions,
-  getBatchUserAttributes
+  getBatchUserAttributes,
+  routerPush
 } = vi.hoisted(() => ({
   listUsers: vi.fn(),
   getAllGroups: vi.fn(),
   getBatchUsersUsage: vi.fn(),
   listEnabledDefinitions: vi.fn(),
-  getBatchUserAttributes: vi.fn()
+  getBatchUserAttributes: vi.fn(),
+  routerPush: vi.fn()
 }))
 
 vi.mock('@/api/admin', () => ({
@@ -42,6 +44,12 @@ vi.mock('@/stores/app', () => ({
   useAppStore: () => ({
     showError: vi.fn(),
     showSuccess: vi.fn()
+  })
+}))
+
+vi.mock('vue-router', () => ({
+  useRouter: () => ({
+    push: routerPush
   })
 }))
 
@@ -84,6 +92,7 @@ const DataTableStub = {
       <button data-test="sort-last-used" @click="$emit('sort', 'last_used_at', 'desc')">sort</button>
       <div v-for="row in data" :key="row.id">
         <slot name="cell-last_used_at" :value="row.last_used_at" :row="row" />
+        <slot name="cell-actions" :value="row" :row="row" />
       </div>
     </div>
   `
@@ -98,6 +107,7 @@ describe('admin UsersView', () => {
     getBatchUsersUsage.mockReset()
     listEnabledDefinitions.mockReset()
     getBatchUserAttributes.mockReset()
+    routerPush.mockReset()
 
     listUsers.mockResolvedValue({
       items: [createAdminUser()],
@@ -133,6 +143,8 @@ describe('admin UsersView', () => {
           UserApiKeysModal: true,
           UserAllowedGroupsModal: true,
           UserBalanceModal: true,
+          UserPointsModal: true,
+          UserLoadFactorCreditsModal: true,
           UserBalanceHistoryModal: true,
           GroupReplaceModal: true,
           Icon: true,
@@ -160,5 +172,57 @@ describe('admin UsersView', () => {
       }),
       expect.any(Object)
     )
+  })
+
+  it('opens the selected user usage records from the more menu', async () => {
+    const wrapper = mount(UsersView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' },
+          TablePageLayout: {
+            template: '<div><slot name="filters" /><slot name="table" /><slot name="pagination" /></div>'
+          },
+          DataTable: DataTableStub,
+          Pagination: true,
+          ConfirmDialog: true,
+          EmptyState: true,
+          GroupBadge: true,
+          Select: true,
+          UserAttributesConfigModal: true,
+          UserConcurrencyCell: true,
+          UserCreateModal: true,
+          UserEditModal: true,
+          UserApiKeysModal: true,
+          UserAllowedGroupsModal: true,
+          UserBalanceModal: true,
+          UserPointsModal: true,
+          UserLoadFactorCreditsModal: true,
+          UserBalanceHistoryModal: true,
+          GroupReplaceModal: true,
+          Icon: true,
+          Teleport: true
+        }
+      }
+    })
+
+    await flushPromises()
+
+    await wrapper.get('.action-menu-trigger').trigger('click', { clientX: 240, clientY: 120 })
+    await flushPromises()
+
+    const usageButton = wrapper
+      .findAll('.action-menu-content button')
+      .find((button) => button.text() === 'admin.users.usageRecords')
+
+    expect(usageButton).toBeTruthy()
+    await usageButton!.trigger('click')
+
+    expect(routerPush).toHaveBeenCalledWith({
+      name: 'AdminUsage',
+      query: {
+        user_id: '42',
+        user_email: 'scoped@example.com'
+      }
+    })
   })
 })

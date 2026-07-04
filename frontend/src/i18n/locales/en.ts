@@ -2743,6 +2743,7 @@ export default {
       balanceHistory: 'Recharge History',
       balanceHistoryTip: 'Click to open recharge history',
       balanceHistoryTitle: 'User Recharge & Concurrency History',
+      usageRecords: 'Usage Records',
       noBalanceHistory: 'No records found for this user',
       allTypes: 'All Types',
       typeBalance: 'Balance (Redeem)',

@@ -2800,6 +2800,7 @@ export default {
       balanceHistory: '充值记录',
       balanceHistoryTip: '点击查看充值记录',
       balanceHistoryTitle: '用户充值和并发变动记录',
+      usageRecords: '使用记录',
       noBalanceHistory: '暂无变动记录',
       allTypes: '全部类型',
       typeBalance: '余额（兑换码）',
