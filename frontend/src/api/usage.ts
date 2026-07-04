@@ -51,6 +51,13 @@ export interface TrendParams {
   start_date?: string
   end_date?: string
   granularity?: 'day' | 'hour' | 'week' | 'month'
+  api_key_id?: number
+  account_id?: number
+  group_id?: number
+  model?: string
+  request_type?: string
+  billing_type?: number | null
+  timezone?: string
 }
 
 export interface TrendResponse {
@@ -229,9 +236,11 @@ export async function getStats(
 export async function getStatsByDateRange(
   startDate: string,
   endDate: string,
-  apiKeyId?: number
+  apiKeyId?: number,
+  filters: Partial<UsageQueryParams> = {}
 ): Promise<UsageStatsResponse> {
   const params: Record<string, unknown> = {
+    ...filters,
     start_date: startDate,
     end_date: endDate
   }
@@ -322,6 +331,12 @@ export async function getDashboardTrend(params?: TrendParams): Promise<TrendResp
 export async function getDashboardModels(params?: {
   start_date?: string
   end_date?: string
+  api_key_id?: number
+  account_id?: number
+  group_id?: number
+  request_type?: string
+  billing_type?: number | null
+  timezone?: string
 }): Promise<ModelStatsResponse> {
   const { data } = await apiClient.get<ModelStatsResponse>('/usage/dashboard/models', { params })
   return data

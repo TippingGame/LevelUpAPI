@@ -1921,8 +1921,10 @@ export interface UsageQueryParams {
   request_type?: UsageRequestType
   stream?: boolean
   billing_type?: number | null
+  billing_mode?: string | null
   start_date?: string
   end_date?: string
+  timezone?: string
   sort_by?: string
   sort_order?: 'asc' | 'desc'
 }
@@ -1932,8 +1934,11 @@ export interface UserBalanceLedgerQueryParams {
   page_size?: number
   direction?: BalanceLedgerDirection | ''
   reason?: string
+  ref_type?: string
+  ref_id?: number
   start_date?: string
   end_date?: string
+  timezone?: string
   sort_order?: 'asc' | 'desc'
   exact_total?: boolean
 }

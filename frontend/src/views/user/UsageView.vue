@@ -2,7 +2,8 @@
   <AppLayout>
     <TablePageLayout>
       <template #actions>
-        <div v-if="activeTab === 'requests'" class="grid grid-cols-2 gap-4 lg:grid-cols-4">
+        <div v-if="activeTab === 'requests'" class="space-y-4">
+        <div class="grid grid-cols-2 gap-4 lg:grid-cols-4">
           <!-- Total Requests -->
           <div class="card p-4">
           <div class="flex items-center gap-3">
@@ -88,6 +89,26 @@
           </div>
         </div>
         </div>
+        <div class="card p-4">
+          <div class="flex flex-wrap items-center justify-end gap-3">
+            <span class="text-sm font-medium text-gray-700 dark:text-gray-300">{{ t('admin.dashboard.granularity') }}:</span>
+            <div class="w-28">
+              <Select v-model="granularity" :options="granularityOptions" @change="loadChartData" />
+            </div>
+          </div>
+        </div>
+        <div class="grid grid-cols-1 gap-6 lg:grid-cols-2">
+          <ModelDistributionChart
+            v-model:metric="modelDistributionMetric"
+            :model-stats="modelStats"
+            :loading="modelStatsLoading"
+            :show-metric-toggle="true"
+            :enable-breakdown="false"
+            :show-account-cost="false"
+          />
+          <TokenUsageTrend :trend-data="trendData" :loading="chartsLoading" />
+        </div>
+        </div>
       </template>
 
       <template #filters>
@@ -129,6 +150,63 @@
               />
             </div>
 
+            <!-- Model Filter -->
+            <div class="min-w-[200px]">
+              <label class="input-label">{{ t('usage.model') }}</label>
+              <Select
+                v-model="filters.model"
+                :options="modelFilterOptions"
+                searchable
+                @change="applyFilters"
+              />
+            </div>
+
+            <!-- Account ID Filter -->
+            <div class="min-w-[140px]">
+              <label class="input-label">{{ t('admin.usage.account') }}</label>
+              <input
+                v-model.number="filters.account_id"
+                type="number"
+                min="1"
+                step="1"
+                class="input"
+                placeholder="ID"
+                @keyup.enter="applyFilters"
+              />
+            </div>
+
+            <!-- Group ID Filter -->
+            <div class="min-w-[140px]">
+              <label class="input-label">{{ t('admin.usage.group') }}</label>
+              <input
+                v-model.number="filters.group_id"
+                type="number"
+                min="1"
+                step="1"
+                class="input"
+                placeholder="ID"
+                @keyup.enter="applyFilters"
+              />
+            </div>
+
+            <!-- Request Type Filter -->
+            <div class="min-w-[160px]">
+              <label class="input-label">{{ t('usage.type') }}</label>
+              <Select v-model="filters.request_type" :options="requestTypeOptions" @change="applyFilters" />
+            </div>
+
+            <!-- Billing Type Filter -->
+            <div class="min-w-[190px]">
+              <label class="input-label">{{ t('admin.usage.billingType') }}</label>
+              <Select v-model="filters.billing_type" :options="billingTypeOptions" @change="applyFilters" />
+            </div>
+
+            <!-- Billing Mode Filter -->
+            <div class="min-w-[190px]">
+              <label class="input-label">{{ t('admin.usage.billingMode') }}</label>
+              <Select v-model="filters.billing_mode" :options="billingModeOptions" @change="applyFilters" />
+            </div>
+
             <!-- Date Range Filter -->
             <div>
               <label class="input-label">{{ t('usage.timeRange') }}</label>
@@ -147,6 +225,36 @@
               <button @click="resetFilters" class="btn btn-secondary">
                 {{ t('common.reset') }}
               </button>
+              <div class="relative" ref="columnDropdownRef">
+                <button
+                  @click="showColumnDropdown = !showColumnDropdown"
+                  class="btn btn-secondary px-2 md:px-3"
+                  :title="t('admin.users.columnSettings')"
+                >
+                  <Icon name="grid" size="sm" class="md:mr-1.5" />
+                  <span class="hidden md:inline">{{ t('admin.users.columnSettings') }}</span>
+                </button>
+                <div
+                  v-if="showColumnDropdown"
+                  class="absolute right-0 top-full z-50 mt-1 max-h-80 w-48 overflow-y-auto rounded-lg border border-gray-200 bg-white py-1 shadow-lg dark:border-dark-600 dark:bg-dark-800"
+                >
+                  <button
+                    v-for="col in toggleableColumns"
+                    :key="col.key"
+                    @click="toggleColumn(col.key)"
+                    class="flex w-full items-center justify-between px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-dark-700"
+                  >
+                    <span>{{ col.label }}</span>
+                    <Icon
+                      v-if="isColumnVisible(col.key)"
+                      name="check"
+                      size="sm"
+                      class="text-primary-500"
+                      :stroke-width="2"
+                    />
+                  </button>
+                </div>
+              </div>
               <button @click="exportToCSV" :disabled="exporting" class="btn btn-primary">
                 <svg
                   v-if="exporting"
@@ -197,6 +305,28 @@
                 @change="applyFilters"
               />
             </div>
+            <div class="min-w-[180px]">
+              <label class="input-label">{{ t('usage.balanceLedger.labels.referenceType') }}</label>
+              <input
+                v-model.trim="ledgerFilters.ref_type"
+                type="text"
+                class="input"
+                placeholder="usage_log"
+                @keyup.enter="applyFilters"
+              />
+            </div>
+            <div class="min-w-[150px]">
+              <label class="input-label">{{ t('usage.balanceLedger.labels.reference') }}</label>
+              <input
+                v-model.number="ledgerFilters.ref_id"
+                type="number"
+                min="1"
+                step="1"
+                class="input"
+                placeholder="ID"
+                @keyup.enter="applyFilters"
+              />
+            </div>
             <div class="ml-auto flex items-center gap-3">
               <button @click="applyFilters" :disabled="ledgerLoading" class="btn btn-secondary">
                 {{ t('common.refresh') }}
@@ -213,7 +343,7 @@
       <template #table>
         <DataTable
           v-if="activeTab === 'requests'"
-          :columns="columns"
+          :columns="visibleColumns"
           :data="usageLogs"
           :loading="loading"
           :server-side-sort="true"
@@ -225,6 +355,16 @@
             <span class="text-sm text-gray-900 dark:text-white">{{
               row.api_key?.name || '-'
             }}</span>
+          </template>
+
+          <template #cell-account_id="{ row }">
+            <span v-if="row.account_id" class="text-sm font-mono text-gray-600 dark:text-gray-400">#{{ row.account_id }}</span>
+            <span v-else class="text-sm text-gray-400 dark:text-gray-500">-</span>
+          </template>
+
+          <template #cell-group_id="{ row }">
+            <span v-if="row.group_id" class="text-sm font-mono text-gray-600 dark:text-gray-400">#{{ row.group_id }}</span>
+            <span v-else class="text-sm text-gray-400 dark:text-gray-500">-</span>
           </template>
 
           <template #cell-model="{ value }">
@@ -474,6 +614,15 @@
     </TablePageLayout>
   </AppLayout>
 
+  <UsageExportProgress
+    :show="exportProgress.show"
+    :progress="exportProgress.progress"
+    :current="exportProgress.current"
+    :total="exportProgress.total"
+    :estimated-time="exportProgress.estimatedTime"
+    @cancel="cancelExport"
+  />
+
   <!-- Token Tooltip Portal -->
   <Teleport to="body">
     <div
@@ -647,11 +796,17 @@ import EmptyState from '@/components/common/EmptyState.vue'
 import Select from '@/components/common/Select.vue'
 import DateRangePicker from '@/components/common/DateRangePicker.vue'
 import Icon from '@/components/icons/Icon.vue'
+import UsageExportProgress from '@/components/admin/usage/UsageExportProgress.vue'
+import ModelDistributionChart from '@/components/charts/ModelDistributionChart.vue'
+import TokenUsageTrend from '@/components/charts/TokenUsageTrend.vue'
 import type {
   ApiKey,
   BalanceLedgerDirection,
+  ModelStat,
+  TrendDataPoint,
   UsageLog,
   UsageQueryParams,
+  UsageRequestType,
   UsageStatsResponse,
   UserBalanceLedgerEntry,
   UserBalanceLedgerQueryParams
@@ -671,9 +826,18 @@ const appStore = useAppStore()
 
 let abortController: AbortController | null = null
 let ledgerAbortController: AbortController | null = null
+let exportAbortController: AbortController | null = null
 let ledgerPrefetchTimer: number | null = null
+let chartReqSeq = 0
+let modelStatsReqSeq = 0
 
 type UsageTab = 'requests' | 'balanceLedger'
+type DistributionMetric = 'tokens' | 'actual_cost'
+type UserUsageFilters = Omit<UsageQueryParams, 'model' | 'request_type' | 'billing_mode'> & {
+  model?: string | null
+  request_type?: UsageRequestType | null
+  billing_mode?: string | null
+}
 type BalanceLedgerTableRow = UserBalanceLedgerEntry & {
   reasonLabel: string
   amountLabel: string
@@ -695,9 +859,22 @@ const tokenTooltipData = ref<UsageLog | null>(null)
 
 // Usage stats from API
 const usageStats = ref<UsageStatsResponse | null>(null)
+const trendData = ref<TrendDataPoint[]>([])
+const modelStats = ref<ModelStat[]>([])
+const chartsLoading = ref(false)
+const modelStatsLoading = ref(false)
+const granularity = ref<'day' | 'hour'>('day')
+const modelDistributionMetric = ref<DistributionMetric>('tokens')
+const exportProgress = reactive({ show: false, progress: 0, current: 0, total: 0, estimatedTime: '' })
 
-const columns = computed<Column[]>(() => [
+const ALWAYS_VISIBLE_COLUMNS = ['api_key', 'created_at']
+const DEFAULT_HIDDEN_COLUMNS = ['reasoning_effort', 'account_id', 'group_id', 'user_agent']
+const HIDDEN_COLUMNS_KEY = 'user-usage-hidden-columns'
+
+const allColumns = computed<Column[]>(() => [
   { key: 'api_key', label: t('usage.apiKeyFilter'), sortable: false },
+  { key: 'account_id', label: t('admin.usage.account'), sortable: false },
+  { key: 'group_id', label: t('admin.usage.group'), sortable: false },
   { key: 'model', label: t('usage.model'), sortable: true },
   { key: 'reasoning_effort', label: t('usage.reasoningEffort'), sortable: false },
   { key: 'endpoint', label: t('usage.endpoint'), sortable: false },
@@ -711,6 +888,40 @@ const columns = computed<Column[]>(() => [
   { key: 'created_at', label: t('usage.time'), sortable: true },
   { key: 'user_agent', label: t('usage.userAgent'), sortable: false }
 ])
+
+const hiddenColumns = reactive<Set<string>>(new Set())
+const toggleableColumns = computed(() => allColumns.value.filter((col) => !ALWAYS_VISIBLE_COLUMNS.includes(col.key)))
+const visibleColumns = computed(() =>
+  allColumns.value.filter((col) => ALWAYS_VISIBLE_COLUMNS.includes(col.key) || !hiddenColumns.has(col.key))
+)
+
+const isColumnVisible = (key: string) => !hiddenColumns.has(key)
+
+const toggleColumn = (key: string) => {
+  if (hiddenColumns.has(key)) {
+    hiddenColumns.delete(key)
+  } else {
+    hiddenColumns.add(key)
+  }
+  try {
+    localStorage.setItem(HIDDEN_COLUMNS_KEY, JSON.stringify([...hiddenColumns]))
+  } catch (error) {
+    console.error('Failed to save usage columns:', error)
+  }
+}
+
+const loadSavedColumns = () => {
+  try {
+    const saved = localStorage.getItem(HIDDEN_COLUMNS_KEY)
+    const values = saved ? JSON.parse(saved) as string[] : DEFAULT_HIDDEN_COLUMNS
+    values.forEach((key) => hiddenColumns.add(key))
+  } catch {
+    DEFAULT_HIDDEN_COLUMNS.forEach((key) => hiddenColumns.add(key))
+  }
+}
+
+const showColumnDropdown = ref(false)
+const columnDropdownRef = ref<HTMLElement | null>(null)
 
 const ledgerColumns = computed<Column[]>(() => [
   { key: 'reason', label: t('usage.balanceLedger.reason'), sortable: false },
@@ -737,6 +948,50 @@ const apiKeyOptions = computed(() => {
     }))
   ]
 })
+
+const modelFilterOptions = computed(() => {
+  const models = new Set<string>()
+  modelStats.value.forEach((item) => {
+    if (item.model) models.add(item.model)
+  })
+  usageLogs.value.forEach((item) => {
+    if (item.model) models.add(item.model)
+  })
+  if (filters.value.model) models.add(filters.value.model)
+
+  return [
+    { value: null, label: t('admin.usage.allModels') },
+    ...[...models].sort((a, b) => a.localeCompare(b)).map((model) => ({
+      value: model,
+      label: model
+    }))
+  ]
+})
+
+const requestTypeOptions = computed(() => [
+  { value: null, label: t('admin.usage.allTypes') },
+  { value: 'ws_v2', label: t('usage.ws') },
+  { value: 'stream', label: t('usage.stream') },
+  { value: 'sync', label: t('usage.sync') }
+])
+
+const billingTypeOptions = computed(() => [
+  { value: null, label: t('admin.usage.allBillingTypes') },
+  { value: 0, label: t('admin.usage.billingTypeBalance') },
+  { value: 1, label: t('admin.usage.billingTypeSubscription') }
+])
+
+const billingModeOptions = computed(() => [
+  { value: null, label: t('admin.usage.allBillingModes') },
+  { value: 'token', label: t('admin.usage.billingModeToken') },
+  { value: 'per_request', label: t('admin.usage.billingModePerRequest') },
+  { value: 'image', label: t('admin.usage.billingModeImage') }
+])
+
+const granularityOptions = computed(() => [
+  { value: 'day', label: t('admin.dashboard.day') },
+  { value: 'hour', label: t('admin.dashboard.hour') }
+])
 
 const ledgerDirectionOptions = computed(() => [
   { value: '', label: t('usage.balanceLedger.allDirections') },
@@ -849,6 +1104,13 @@ const formatLocalDate = (date: Date): string => {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
 }
 
+const getGranularityForRange = (start: string, end: string): 'day' | 'hour' => {
+  const startTime = new Date(`${start}T00:00:00`).getTime()
+  const endTime = new Date(`${end}T00:00:00`).getTime()
+  const daysDiff = Math.ceil((endTime - startTime) / (1000 * 60 * 60 * 24))
+  return daysDiff <= 1 ? 'hour' : 'day'
+}
+
 // Initialize date range immediately
 const now = new Date()
 const weekAgo = new Date(now)
@@ -858,8 +1120,14 @@ weekAgo.setDate(weekAgo.getDate() - 6)
 const startDate = ref(formatLocalDate(weekAgo))
 const endDate = ref(formatLocalDate(now))
 
-const filters = ref<UsageQueryParams>({
+const filters = ref<UserUsageFilters>({
   api_key_id: undefined,
+  account_id: undefined,
+  group_id: undefined,
+  model: null,
+  request_type: null,
+  billing_type: null,
+  billing_mode: null,
   start_date: undefined,
   end_date: undefined
 })
@@ -867,9 +1135,13 @@ const filters = ref<UsageQueryParams>({
 const ledgerFilters = ref<{
   direction: '' | BalanceLedgerDirection
   reason: string
+  ref_type: string
+  ref_id?: number
 }>({
   direction: '',
-  reason: ''
+  reason: '',
+  ref_type: '',
+  ref_id: undefined
 })
 
 // Initialize filters with date range
@@ -884,6 +1156,7 @@ const onDateRangeChange = (range: {
 }) => {
   filters.value.start_date = range.startDate
   filters.value.end_date = range.endDate
+  granularity.value = getGranularityForRange(range.startDate, range.endDate)
   applyFilters()
 }
 
@@ -962,10 +1235,48 @@ type UsageTableQueryParams = UsageQueryParams & {
   sort_order?: 'asc' | 'desc'
 }
 
+const getClientTimezone = (): string | undefined => {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone
+  } catch {
+    return undefined
+  }
+}
+
+const positiveNumberOrUndefined = (value: unknown): number | undefined => {
+  const parsed = Number(value)
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined
+}
+
+const buildCommonUsageParams = (): Partial<UsageQueryParams> => {
+  const params: Partial<UsageQueryParams> = {}
+  const apiKeyId = positiveNumberOrUndefined(filters.value.api_key_id)
+  const accountId = positiveNumberOrUndefined(filters.value.account_id)
+  const groupId = positiveNumberOrUndefined(filters.value.group_id)
+  const model = typeof filters.value.model === 'string' ? filters.value.model.trim() : ''
+  const billingType = filters.value.billing_type
+  const billingMode = typeof filters.value.billing_mode === 'string' ? filters.value.billing_mode.trim() : ''
+
+  if (apiKeyId) params.api_key_id = apiKeyId
+  if (accountId) params.account_id = accountId
+  if (groupId) params.group_id = groupId
+  if (model) params.model = model
+  if (filters.value.request_type) params.request_type = filters.value.request_type
+  if (billingType !== null && billingType !== undefined) params.billing_type = Number(billingType)
+  if (billingMode) params.billing_mode = billingMode
+
+  const timezone = getClientTimezone()
+  if (timezone) params.timezone = timezone
+
+  return params
+}
+
 const buildUsageQueryParams = (page: number, pageSize: number): UsageTableQueryParams => ({
   page,
   page_size: pageSize,
-  ...filters.value,
+  start_date: filters.value.start_date || startDate.value,
+  end_date: filters.value.end_date || endDate.value,
+  ...buildCommonUsageParams(),
   sort_by: sortState.sort_by,
   sort_order: sortState.sort_order
 })
@@ -975,9 +1286,12 @@ const buildBalanceLedgerQueryParams = (page: number, pageSize: number): UserBala
   page_size: pageSize,
   direction: ledgerFilters.value.direction,
   reason: ledgerFilters.value.reason || undefined,
+  ref_type: ledgerFilters.value.ref_type?.trim() || undefined,
+  ref_id: positiveNumberOrUndefined(ledgerFilters.value.ref_id),
   start_date: filters.value.start_date || startDate.value,
   end_date: filters.value.end_date || endDate.value,
-  sort_order: ledgerSortState.sort_order
+  sort_order: ledgerSortState.sort_order,
+  timezone: getClientTimezone()
 })
 
 const loadBalanceLedger = async () => {
@@ -1064,6 +1378,8 @@ const switchUsageTab = (tab: UsageTab) => {
   pagination.page = 1
   loadUsageLogs()
   loadUsageStats()
+  loadChartData()
+  loadModelStats()
 }
 
 const abortBalanceLedgerRequest = () => {
@@ -1106,15 +1422,62 @@ const loadApiKeys = async () => {
 
 const loadUsageStats = async () => {
   try {
-    const apiKeyId = filters.value.api_key_id ? Number(filters.value.api_key_id) : undefined
     const stats = await usageAPI.getStatsByDateRange(
       filters.value.start_date || startDate.value,
       filters.value.end_date || endDate.value,
-      apiKeyId
+      undefined,
+      buildCommonUsageParams()
     )
     usageStats.value = stats
   } catch (error) {
     console.error('Failed to load usage stats:', error)
+  }
+}
+
+const loadChartData = async () => {
+  const seq = ++chartReqSeq
+  chartsLoading.value = true
+  try {
+    const response = await usageAPI.getDashboardTrend({
+      start_date: filters.value.start_date || startDate.value,
+      end_date: filters.value.end_date || endDate.value,
+      granularity: granularity.value,
+      ...buildCommonUsageParams()
+    })
+    if (seq !== chartReqSeq) return
+    trendData.value = response.trend || []
+  } catch (error) {
+    if (seq !== chartReqSeq) return
+    console.error('Failed to load usage trend:', error)
+    trendData.value = []
+  } finally {
+    if (seq === chartReqSeq) chartsLoading.value = false
+  }
+}
+
+const loadModelStats = async () => {
+  const seq = ++modelStatsReqSeq
+  modelStatsLoading.value = true
+  try {
+    const commonParams = buildCommonUsageParams()
+    const response = await usageAPI.getDashboardModels({
+      start_date: filters.value.start_date || startDate.value,
+      end_date: filters.value.end_date || endDate.value,
+      api_key_id: commonParams.api_key_id,
+      account_id: commonParams.account_id,
+      group_id: commonParams.group_id,
+      request_type: commonParams.request_type || undefined,
+      billing_type: commonParams.billing_type ?? undefined,
+      timezone: commonParams.timezone
+    })
+    if (seq !== modelStatsReqSeq) return
+    modelStats.value = response.models || []
+  } catch (error) {
+    if (seq !== modelStatsReqSeq) return
+    console.error('Failed to load model stats:', error)
+    modelStats.value = []
+  } finally {
+    if (seq === modelStatsReqSeq) modelStatsLoading.value = false
   }
 }
 
@@ -1128,11 +1491,19 @@ const applyFilters = () => {
   pagination.page = 1
   loadUsageLogs()
   loadUsageStats()
+  loadChartData()
+  loadModelStats()
 }
 
 const resetFilters = () => {
   filters.value = {
     api_key_id: undefined,
+    account_id: undefined,
+    group_id: undefined,
+    model: null,
+    request_type: null,
+    billing_type: null,
+    billing_mode: null,
     start_date: undefined,
     end_date: undefined
   }
@@ -1144,9 +1515,12 @@ const resetFilters = () => {
   endDate.value = formatLocalDate(now)
   filters.value.start_date = startDate.value
   filters.value.end_date = endDate.value
+  granularity.value = getGranularityForRange(startDate.value, endDate.value)
   ledgerFilters.value = {
     direction: '',
-    reason: ''
+    reason: '',
+    ref_type: '',
+    ref_id: undefined
   }
   pagination.page = 1
   ledgerPagination.page = 1
@@ -1157,6 +1531,8 @@ const resetFilters = () => {
   }
   loadUsageLogs()
   loadUsageStats()
+  loadChartData()
+  loadModelStats()
 }
 
 const handlePageChange = (page: number) => {
@@ -1398,13 +1774,21 @@ const escapeCSVValue = (value: unknown): string => {
 }
 
 const exportToCSV = async () => {
+  if (exporting.value) return
   if (pagination.total === 0) {
     appStore.showWarning(t('usage.noDataToExport'))
     return
   }
 
   exporting.value = true
+  exportProgress.show = true
+  exportProgress.progress = 0
+  exportProgress.current = 0
+  exportProgress.total = pagination.total
+  exportProgress.estimatedTime = ''
   appStore.showInfo(t('usage.preparingExport'))
+  const currentAbortController = new AbortController()
+  exportAbortController = currentAbortController
 
   try {
     const allLogs: UsageLog[] = []
@@ -1412,10 +1796,19 @@ const exportToCSV = async () => {
     const totalRequests = Math.ceil(pagination.total / pageSize)
 
     for (let page = 1; page <= totalRequests; page++) {
-      const response = await usageAPI.query(buildUsageQueryParams(page, pageSize))
+      if (currentAbortController.signal.aborted) return
+      const response = await usageAPI.query(
+        buildUsageQueryParams(page, pageSize),
+        { signal: currentAbortController.signal }
+      )
       allLogs.push(...response.items)
+      exportProgress.current = allLogs.length
+      exportProgress.progress = pagination.total > 0
+        ? Math.min(100, Math.round((allLogs.length / pagination.total) * 100))
+        : 0
     }
 
+    if (currentAbortController.signal.aborted) return
     if (allLogs.length === 0) {
       appStore.showWarning(t('usage.noDataToExport'))
       return
@@ -1424,9 +1817,12 @@ const exportToCSV = async () => {
     const headers = [
       'Time',
       'API Key Name',
+      'Account ID',
+      'Group ID',
       'Model',
       'Reasoning Effort',
       'Inbound Endpoint',
+      'Upstream Endpoint',
       'Type',
       'Billing Mode',
       'Payment Source',
@@ -1441,15 +1837,20 @@ const exportToCSV = async () => {
       'Billed Cost',
       'Original Cost',
       'First Token (ms)',
-      'Duration (ms)'
+      'Duration (ms)',
+      'Request ID',
+      'User Agent'
     ]
     const rows = allLogs.map((log) =>
       [
         log.created_at,
         log.api_key?.name || '',
+        log.account_id ?? '',
+        log.group_id ?? '',
         log.model,
         formatReasoningEffort(log.reasoning_effort),
         log.inbound_endpoint || '',
+        log.upstream_endpoint || '',
         getRequestTypeExportText(log),
         getBillingModeLabel(log.billing_mode, t),
         paymentSourceLabel(log),
@@ -1464,7 +1865,9 @@ const exportToCSV = async () => {
         log.actual_cost.toFixed(8),
         log.total_cost.toFixed(8),
         log.first_token_ms ?? '',
-        log.duration_ms
+        log.duration_ms,
+        log.request_id || '',
+        log.user_agent || ''
       ].map(escapeCSVValue)
     )
 
@@ -1483,11 +1886,23 @@ const exportToCSV = async () => {
 
     appStore.showSuccess(t('usage.exportSuccess'))
   } catch (error) {
+    const abortError = error as { name?: string; code?: string }
+    if (abortError?.name === 'AbortError' || abortError?.code === 'ERR_CANCELED') {
+      return
+    }
     appStore.showError(t('usage.exportFailed'))
     console.error('CSV Export failed:', error)
   } finally {
-    exporting.value = false
+    if (exportAbortController === currentAbortController) {
+      exportAbortController = null
+      exporting.value = false
+      exportProgress.show = false
+    }
   }
+}
+
+const cancelExport = () => {
+  exportAbortController?.abort()
 }
 
 // Tooltip functions
@@ -1523,11 +1938,21 @@ const hideTokenTooltip = () => {
   tokenTooltipData.value = null
 }
 
+const handleColumnClickOutside = (event: MouseEvent) => {
+  if (columnDropdownRef.value && !columnDropdownRef.value.contains(event.target as HTMLElement)) {
+    showColumnDropdown.value = false
+  }
+}
+
 onMounted(() => {
+  loadSavedColumns()
   loadApiKeys()
   loadUsageLogs()
   loadUsageStats()
+  loadChartData()
+  loadModelStats()
   scheduleBalanceLedgerPrefetch()
+  document.addEventListener('click', handleColumnClickOutside)
 })
 
 onUnmounted(() => {
@@ -1536,5 +1961,7 @@ onUnmounted(() => {
     abortController.abort()
   }
   abortBalanceLedgerRequest()
+  exportAbortController?.abort()
+  document.removeEventListener('click', handleColumnClickOutside)
 })
 </script>

@@ -4,10 +4,12 @@ import { nextTick } from 'vue'
 
 import UsageView from '../UsageView.vue'
 
-const { query, queryBalanceLedger, getStatsByDateRange, list, showError, showWarning, showSuccess, showInfo } = vi.hoisted(() => ({
+const { query, queryBalanceLedger, getStatsByDateRange, getDashboardTrend, getDashboardModels, list, showError, showWarning, showSuccess, showInfo } = vi.hoisted(() => ({
   query: vi.fn(),
   queryBalanceLedger: vi.fn(),
   getStatsByDateRange: vi.fn(),
+  getDashboardTrend: vi.fn(),
+  getDashboardModels: vi.fn(),
   list: vi.fn(),
   showError: vi.fn(),
   showWarning: vi.fn(),
@@ -62,6 +64,8 @@ vi.mock('@/api', () => ({
     query,
     queryBalanceLedger,
     getStatsByDateRange,
+    getDashboardTrend,
+    getDashboardModels,
   },
   keysAPI: {
     list,
@@ -92,6 +96,8 @@ describe('user UsageView tooltip', () => {
     query.mockReset()
     queryBalanceLedger.mockReset()
     getStatsByDateRange.mockReset()
+    getDashboardTrend.mockReset()
+    getDashboardModels.mockReset()
     list.mockReset()
     showError.mockReset()
     showWarning.mockReset()
@@ -114,6 +120,9 @@ describe('user UsageView tooltip', () => {
       observe() {}
       disconnect() {}
     }
+
+    getDashboardTrend.mockResolvedValue({ trend: [], start_date: '2026-03-02', end_date: '2026-03-08', granularity: 'day' })
+    getDashboardModels.mockResolvedValue({ models: [], start_date: '2026-03-02', end_date: '2026-03-08' })
   })
 
   it('shows fast service tier and unit prices in user tooltip', async () => {
@@ -164,6 +173,9 @@ describe('user UsageView tooltip', () => {
           DateRangePicker: true,
           Icon: true,
           Teleport: true,
+          ModelDistributionChart: true,
+          TokenUsageTrend: true,
+          UsageExportProgress: true,
         },
       },
     })
@@ -262,6 +274,9 @@ describe('user UsageView tooltip', () => {
           DateRangePicker: true,
           Icon: true,
           Teleport: true,
+          ModelDistributionChart: true,
+          TokenUsageTrend: true,
+          UsageExportProgress: true,
         },
       },
     })
@@ -287,7 +302,7 @@ describe('user UsageView tooltip', () => {
         params?.page_size === 100 &&
         params?.sort_by === 'created_at' &&
         params?.sort_order === 'desc' &&
-        config === undefined
+        config?.signal instanceof AbortSignal
       )
     })
     expect(hasSortedExportQuery).toBe(true)
@@ -324,6 +339,9 @@ describe('user UsageView tooltip', () => {
           DateRangePicker: true,
           Icon: true,
           Teleport: true,
+          ModelDistributionChart: true,
+          TokenUsageTrend: true,
+          UsageExportProgress: true,
         },
       },
     })

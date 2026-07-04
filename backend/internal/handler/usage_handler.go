@@ -56,6 +56,93 @@ func (h *UsageHandler) PublicTodayStats(c *gin.Context) {
 	})
 }
 
+type userUsageFilterParams struct {
+	APIKeyID    int64
+	AccountID   int64
+	GroupID     int64
+	Model       string
+	BillingMode string
+	RequestType *int16
+	Stream      *bool
+	BillingType *int8
+}
+
+func (h *UsageHandler) parseUserUsageFilters(c *gin.Context, subject middleware2.AuthSubject, verifyAPIKey bool) (userUsageFilterParams, bool) {
+	var filters userUsageFilterParams
+
+	if apiKeyIDStr := strings.TrimSpace(c.Query("api_key_id")); apiKeyIDStr != "" {
+		id, err := strconv.ParseInt(apiKeyIDStr, 10, 64)
+		if err != nil || id <= 0 {
+			response.BadRequest(c, "Invalid api_key_id")
+			return filters, false
+		}
+
+		if verifyAPIKey {
+			apiKey, err := h.apiKeyService.GetByID(c.Request.Context(), id)
+			if err != nil {
+				response.ErrorFrom(c, err)
+				return filters, false
+			}
+			if apiKey.UserID != subject.UserID {
+				response.Forbidden(c, "Not authorized to access this API key's usage records")
+				return filters, false
+			}
+		}
+
+		filters.APIKeyID = id
+	}
+
+	if accountIDStr := strings.TrimSpace(c.Query("account_id")); accountIDStr != "" {
+		id, err := strconv.ParseInt(accountIDStr, 10, 64)
+		if err != nil || id <= 0 {
+			response.BadRequest(c, "Invalid account_id")
+			return filters, false
+		}
+		filters.AccountID = id
+	}
+
+	if groupIDStr := strings.TrimSpace(c.Query("group_id")); groupIDStr != "" {
+		id, err := strconv.ParseInt(groupIDStr, 10, 64)
+		if err != nil || id <= 0 {
+			response.BadRequest(c, "Invalid group_id")
+			return filters, false
+		}
+		filters.GroupID = id
+	}
+
+	filters.Model = strings.TrimSpace(c.Query("model"))
+	filters.BillingMode = strings.TrimSpace(c.Query("billing_mode"))
+
+	if requestTypeStr := strings.TrimSpace(c.Query("request_type")); requestTypeStr != "" {
+		parsed, err := service.ParseUsageRequestType(requestTypeStr)
+		if err != nil {
+			response.BadRequest(c, err.Error())
+			return filters, false
+		}
+		value := int16(parsed)
+		filters.RequestType = &value
+	} else if streamStr := strings.TrimSpace(c.Query("stream")); streamStr != "" {
+		val, err := strconv.ParseBool(streamStr)
+		if err != nil {
+			response.BadRequest(c, "Invalid stream value, use true or false")
+			return filters, false
+		}
+		filters.Stream = &val
+	}
+
+	if billingTypeStr := strings.TrimSpace(c.Query("billing_type")); billingTypeStr != "" {
+		val, err := strconv.ParseInt(billingTypeStr, 10, 8)
+		if err != nil {
+			response.BadRequest(c, "Invalid billing_type")
+			return filters, false
+		}
+		bt := int8(val)
+		filters.BillingType = &bt
+	}
+
+	return filters, true
+}
+
 // List handles listing usage records with pagination
 // GET /api/v1/usage
 func (h *UsageHandler) List(c *gin.Context) {
@@ -67,59 +154,9 @@ func (h *UsageHandler) List(c *gin.Context) {
 
 	page, pageSize := response.ParsePagination(c)
 
-	var apiKeyID int64
-	if apiKeyIDStr := c.Query("api_key_id"); apiKeyIDStr != "" {
-		id, err := strconv.ParseInt(apiKeyIDStr, 10, 64)
-		if err != nil {
-			response.BadRequest(c, "Invalid api_key_id")
-			return
-		}
-
-		// [Security Fix] Verify API Key ownership to prevent horizontal privilege escalation
-		apiKey, err := h.apiKeyService.GetByID(c.Request.Context(), id)
-		if err != nil {
-			response.ErrorFrom(c, err)
-			return
-		}
-		if apiKey.UserID != subject.UserID {
-			response.Forbidden(c, "Not authorized to access this API key's usage records")
-			return
-		}
-
-		apiKeyID = id
-	}
-
-	// Parse additional filters
-	model := c.Query("model")
-
-	var requestType *int16
-	var stream *bool
-	if requestTypeStr := strings.TrimSpace(c.Query("request_type")); requestTypeStr != "" {
-		parsed, err := service.ParseUsageRequestType(requestTypeStr)
-		if err != nil {
-			response.BadRequest(c, err.Error())
-			return
-		}
-		value := int16(parsed)
-		requestType = &value
-	} else if streamStr := c.Query("stream"); streamStr != "" {
-		val, err := strconv.ParseBool(streamStr)
-		if err != nil {
-			response.BadRequest(c, "Invalid stream value, use true or false")
-			return
-		}
-		stream = &val
-	}
-
-	var billingType *int8
-	if billingTypeStr := c.Query("billing_type"); billingTypeStr != "" {
-		val, err := strconv.ParseInt(billingTypeStr, 10, 8)
-		if err != nil {
-			response.BadRequest(c, "Invalid billing_type")
-			return
-		}
-		bt := int8(val)
-		billingType = &bt
+	parsedFilters, ok := h.parseUserUsageFilters(c, subject, true)
+	if !ok {
+		return
 	}
 
 	// Parse date range
@@ -153,11 +190,14 @@ func (h *UsageHandler) List(c *gin.Context) {
 	}
 	filters := usagestats.UsageLogFilters{
 		UserID:      subject.UserID, // Always filter by current user for security
-		APIKeyID:    apiKeyID,
-		Model:       model,
-		RequestType: requestType,
-		Stream:      stream,
-		BillingType: billingType,
+		APIKeyID:    parsedFilters.APIKeyID,
+		AccountID:   parsedFilters.AccountID,
+		GroupID:     parsedFilters.GroupID,
+		Model:       parsedFilters.Model,
+		RequestType: parsedFilters.RequestType,
+		Stream:      parsedFilters.Stream,
+		BillingType: parsedFilters.BillingType,
+		BillingMode: parsedFilters.BillingMode,
 		StartTime:   startTime,
 		EndTime:     endTime,
 	}
@@ -197,11 +237,23 @@ func (h *UsageHandler) ListBalanceLedger(c *gin.Context) {
 		return
 	}
 
+	var refID *int64
+	if refIDStr := strings.TrimSpace(c.Query("ref_id")); refIDStr != "" {
+		id, err := strconv.ParseInt(refIDStr, 10, 64)
+		if err != nil || id <= 0 {
+			response.BadRequest(c, "Invalid ref_id")
+			return
+		}
+		refID = &id
+	}
+
 	records, result, err := h.usageService.ListBalanceLedger(c.Request.Context(), params, service.UserBalanceLedgerFilters{
 		UserID:        subject.UserID,
 		RequireUserID: true,
 		Direction:     c.Query("direction"),
 		Reason:        c.Query("reason"),
+		RefType:       c.Query("ref_type"),
+		RefID:         refID,
 		StartTime:     startTime,
 		EndTime:       endTime,
 		ExactTotal:    true,
@@ -281,26 +333,9 @@ func (h *UsageHandler) Stats(c *gin.Context) {
 		return
 	}
 
-	var apiKeyID int64
-	if apiKeyIDStr := c.Query("api_key_id"); apiKeyIDStr != "" {
-		id, err := strconv.ParseInt(apiKeyIDStr, 10, 64)
-		if err != nil {
-			response.BadRequest(c, "Invalid api_key_id")
-			return
-		}
-
-		// [Security Fix] Verify API Key ownership to prevent horizontal privilege escalation
-		apiKey, err := h.apiKeyService.GetByID(c.Request.Context(), id)
-		if err != nil {
-			response.NotFound(c, "API key not found")
-			return
-		}
-		if apiKey.UserID != subject.UserID {
-			response.Forbidden(c, "Not authorized to access this API key's statistics")
-			return
-		}
-
-		apiKeyID = id
+	parsedFilters, ok := h.parseUserUsageFilters(c, subject, true)
+	if !ok {
+		return
 	}
 
 	// 获取时间范围参数
@@ -343,13 +378,19 @@ func (h *UsageHandler) Stats(c *gin.Context) {
 		endTime = now
 	}
 
-	var stats *service.UsageStats
-	var err error
-	if apiKeyID > 0 {
-		stats, err = h.usageService.GetStatsByAPIKey(c.Request.Context(), apiKeyID, startTime, endTime)
-	} else {
-		stats, err = h.usageService.GetStatsByUser(c.Request.Context(), subject.UserID, startTime, endTime)
-	}
+	stats, err := h.usageService.GetStatsWithFilters(c.Request.Context(), usagestats.UsageLogFilters{
+		UserID:      subject.UserID,
+		APIKeyID:    parsedFilters.APIKeyID,
+		AccountID:   parsedFilters.AccountID,
+		GroupID:     parsedFilters.GroupID,
+		Model:       parsedFilters.Model,
+		RequestType: parsedFilters.RequestType,
+		Stream:      parsedFilters.Stream,
+		BillingType: parsedFilters.BillingType,
+		BillingMode: parsedFilters.BillingMode,
+		StartTime:   &startTime,
+		EndTime:     &endTime,
+	})
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
@@ -467,10 +508,27 @@ func (h *UsageHandler) DashboardTrend(c *gin.Context) {
 		return
 	}
 
+	parsedFilters, ok := h.parseUserUsageFilters(c, subject, true)
+	if !ok {
+		return
+	}
 	startTime, endTime := parseUserTimeRange(c)
 	granularity := c.DefaultQuery("granularity", "day")
 
-	trend, err := h.usageService.GetUserUsageTrendByUserID(c.Request.Context(), subject.UserID, startTime, endTime, granularity)
+	trend, err := h.usageService.GetUsageTrendWithFilters(
+		c.Request.Context(),
+		startTime,
+		endTime,
+		granularity,
+		subject.UserID,
+		parsedFilters.APIKeyID,
+		parsedFilters.AccountID,
+		parsedFilters.GroupID,
+		parsedFilters.Model,
+		parsedFilters.RequestType,
+		parsedFilters.Stream,
+		parsedFilters.BillingType,
+	)
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
@@ -493,9 +551,24 @@ func (h *UsageHandler) DashboardModels(c *gin.Context) {
 		return
 	}
 
+	parsedFilters, ok := h.parseUserUsageFilters(c, subject, true)
+	if !ok {
+		return
+	}
 	startTime, endTime := parseUserTimeRange(c)
 
-	stats, err := h.usageService.GetUserModelStats(c.Request.Context(), subject.UserID, startTime, endTime)
+	stats, err := h.usageService.GetModelStatsWithFilters(
+		c.Request.Context(),
+		startTime,
+		endTime,
+		subject.UserID,
+		parsedFilters.APIKeyID,
+		parsedFilters.AccountID,
+		parsedFilters.GroupID,
+		parsedFilters.RequestType,
+		parsedFilters.Stream,
+		parsedFilters.BillingType,
+	)
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
