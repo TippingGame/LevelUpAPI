@@ -72,10 +72,8 @@ import type { UserAccountQuotaPoolDashboard } from '@/types'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import AccountQuotaDashboardPanel from '@/components/account/AccountQuotaDashboard.vue'
 import {
-  accountQuotaGroupHealthRank,
-  resolveAccountQuotaGroupHealth,
-  type AccountQuotaGroupHealth,
-} from '@/utils/accountQuotaHealth'
+  resolveChannelStatusOverallStatus,
+} from '@/utils/channelStatusOverall'
 import MonitorHero, {
   type MonitorWindow,
   type OverallStatus,
@@ -114,17 +112,10 @@ const countdown = autoRefresh.countdown
 
 // ── Computed ──
 const overallStatus = computed<OverallStatus>(() => {
-  let quotaStatus: AccountQuotaGroupHealth = 'normal'
-  for (const summary of quotaPoolDashboard.value?.platform?.group_summaries ?? []) {
-    const status = resolveAccountQuotaGroupHealth(summary)
-    if (accountQuotaGroupHealthRank(status) > accountQuotaGroupHealthRank(quotaStatus)) {
-      quotaStatus = status
-    }
-  }
-  for (const it of items.value) {
-    if (it.primary_status === 'failed' || it.primary_status === 'error') return 'unavailable'
-  }
-  return quotaStatus === 'normal' ? 'operational' : quotaStatus
+  return resolveChannelStatusOverallStatus(
+    quotaPoolDashboard.value?.platform?.group_summaries ?? [],
+    items.value
+  )
 })
 
 const detailTitle = computed(() => {
