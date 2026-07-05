@@ -35,6 +35,8 @@ var (
 	ErrOwnedOpenAIAccountLevelRequired           = infraerrors.BadRequest("OWNED_OPENAI_ACCOUNT_LEVEL_REQUIRED", "OpenAI user accounts must select an account level before import")
 	ErrOwnedOpenAIAccountProxyRequired           = infraerrors.BadRequest("OWNED_OPENAI_ACCOUNT_PROXY_REQUIRED", "Pro OpenAI user accounts must select a proxy IP")
 	ErrOwnedAnthropicAccountProxyRequired        = infraerrors.BadRequest("OWNED_ANTHROPIC_ACCOUNT_PROXY_REQUIRED", "Claude user accounts must select a proxy IP")
+	ErrOwnedGeminiAccountProxyRequired           = infraerrors.BadRequest("OWNED_GEMINI_ACCOUNT_PROXY_REQUIRED", "Gemini user accounts must select a proxy IP")
+	ErrOwnedAntigravityAccountProxyRequired      = infraerrors.BadRequest("OWNED_ANTIGRAVITY_ACCOUNT_PROXY_REQUIRED", "Antigravity user accounts must select a proxy IP")
 	ErrOwnedAccountGroupPlatformMismatch         = infraerrors.BadRequest("OWNED_ACCOUNT_GROUP_PLATFORM_MISMATCH", "account group platform does not match account platform")
 	ErrOwnedAccountGroupValidationUnavailable    = infraerrors.InternalServer("OWNED_ACCOUNT_GROUP_VALIDATION_UNAVAILABLE", "owned account group validation is unavailable")
 	ErrOwnedAccountPublicPoolUnavailable         = infraerrors.BadRequest("OWNED_ACCOUNT_PUBLIC_POOL_UNAVAILABLE", "public shared account pool group is not configured for this account platform")
@@ -627,10 +629,16 @@ func validateOwnedAccountSource(accountType string, credentials, extra map[strin
 }
 
 func ownedAccountProxyRequiredError(platform string) error {
-	if platform == PlatformAnthropic {
+	switch platform {
+	case PlatformAnthropic:
 		return ErrOwnedAnthropicAccountProxyRequired
+	case PlatformGemini:
+		return ErrOwnedGeminiAccountProxyRequired
+	case PlatformAntigravity:
+		return ErrOwnedAntigravityAccountProxyRequired
+	default:
+		return ErrOwnedOpenAIAccountProxyRequired
 	}
-	return ErrOwnedOpenAIAccountProxyRequired
 }
 
 func resolveOwnedOpenAIAccountLevel(platform, targetLevel string, credentials, extra map[string]any) (string, error) {

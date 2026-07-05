@@ -26,3 +26,31 @@ func TestApplyOwnedPersonalAccountTemplateIncludesOpenAISnapshotModel(t *testing
 	require.NotContains(t, credentials, "compact_model_mapping")
 	require.Equal(t, false, extra["openai_passthrough"])
 }
+
+func TestApplyDefaultModelMappingForCredentialImportIncludesOpenAISnapshotModel(t *testing.T) {
+	credentials := ApplyDefaultModelMappingForCredentialImport(
+		PlatformOpenAI,
+		map[string]any{
+			"access_token": "token",
+		},
+	)
+
+	mapping, ok := credentials["model_mapping"].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "gpt-5.4-2026-03-05", mapping["gpt-5.4-2026-03-05"])
+}
+
+func TestApplyDefaultModelMappingForCredentialImportPreservesExplicitMapping(t *testing.T) {
+	explicit := map[string]any{
+		"custom-model": "custom-target",
+	}
+	credentials := ApplyDefaultModelMappingForCredentialImport(
+		PlatformOpenAI,
+		map[string]any{
+			"access_token":  "token",
+			"model_mapping": explicit,
+		},
+	)
+
+	require.Equal(t, explicit, credentials["model_mapping"])
+}

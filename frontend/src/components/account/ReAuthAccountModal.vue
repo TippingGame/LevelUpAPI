@@ -245,10 +245,14 @@ const geminiOAuthType = ref<'code_assist' | 'google_one' | 'ai_studio'>('code_as
 // Computed - check platform
 const isOpenAI = computed(() => props.account?.platform === 'openai')
 const isOpenAILike = computed(() => isOpenAI.value)
+const isOpenAIPro = computed(() => props.account?.platform === 'openai' && props.account?.account_level === 'pro')
 const isGemini = computed(() => props.account?.platform === 'gemini')
 const isAnthropic = computed(() => props.account?.platform === 'anthropic')
 const isAntigravity = computed(() => props.account?.platform === 'antigravity')
-const userAnthropicProxyRequired = computed(() => isUserScope.value && isAnthropic.value)
+const userAccountProxyRequired = computed(() =>
+  isUserScope.value &&
+  (isOpenAIPro.value || isAnthropic.value || isGemini.value || isAntigravity.value)
+)
 
 // Computed - current OAuth state based on platform
 const currentAuthUrl = computed(() => {
@@ -341,7 +345,7 @@ const resetState = () => {
 }
 
 const ensureRequiredProxy = () => {
-  if (userAnthropicProxyRequired.value && !props.account?.proxy_id) {
+  if (userAccountProxyRequired.value && !props.account?.proxy_id) {
     appStore.showError(t('userAccounts.importProxyRequired'))
     return false
   }

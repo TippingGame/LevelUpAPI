@@ -268,6 +268,9 @@ describe('user proxy create entry buttons', () => {
     await findButtonByText(wrapper, 'admin.accounts.accountLevel.pro').trigger('click')
     await flushPromises()
 
+    expect(wrapper.text()).not.toContain('userAccounts.importMethod')
+    expect(wrapper.text()).not.toContain('userAccounts.importMethodOAuth')
+
     const openPanelButton = wrapper.find('[data-testid="import-open-user-proxy-panel"]')
     expect(openPanelButton.exists()).toBe(true)
 
@@ -275,6 +278,32 @@ describe('user proxy create entry buttons', () => {
     await wrapper.vm.$nextTick()
 
     expect(wrapper.find('[data-testid="user-proxy-create-panel"]').exists()).toBe(true)
+  })
+
+  it('shows required proxy controls for Claude, Gemini, and Antigravity import', async () => {
+    const wrapper = mount(ImportAccountsModal, {
+      props: {
+        show: true
+      },
+      global: {
+        stubs: basicStubs
+      }
+    })
+
+    await findButtonByText(wrapper, 'Claude').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-testid="proxy-selector"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="import-open-user-proxy-panel"]').exists()).toBe(true)
+
+    await findButtonByText(wrapper, 'Gemini').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-testid="proxy-selector"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="import-open-user-proxy-panel"]').exists()).toBe(true)
+
+    await findButtonByText(wrapper, 'Antigravity').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-testid="proxy-selector"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="import-open-user-proxy-panel"]').exists()).toBe(true)
   })
 
   it('opens the inline proxy create panel from user OpenAI Pro account creation', async () => {

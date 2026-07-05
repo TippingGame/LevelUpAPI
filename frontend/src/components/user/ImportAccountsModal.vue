@@ -1,6 +1,5 @@
 <template>
   <CredentialImportModal
-    v-if="!requiresOAuthLogin"
     :show="show"
     :title="t('userAccounts.importTitle')"
     :hint="t('userAccounts.importHint')"
@@ -22,12 +21,7 @@
         :selected-level="selectedAccountLevel"
         @select="selectAccountLevel"
       />
-      <ImportMethodSelector
-        v-if="selectedPlatform === 'openai' && selectedAccountLevel === 'pro'"
-        :selected-method="selectedImportMethod"
-        @select="selectImportMethod"
-      />
-      <div v-if="selectedPlatform === 'openai' && selectedAccountLevel === 'pro'">
+      <div v-if="credentialImportProxyRequired">
         <div class="mb-2 flex items-center justify-between gap-3">
           <label class="input-label mb-0">{{ t('userAccounts.importProxy') }}</label>
           <div class="flex flex-wrap items-center justify-end gap-2">
@@ -101,175 +95,29 @@
     </template>
   </CredentialImportModal>
 
-  <BaseDialog
-    v-else
-    :show="show"
-    :title="t('userAccounts.importTitle')"
-    width="wide"
-    close-on-click-outside
-    @close="handleClose"
-  >
-    <form id="user-import-openai-oauth-form" class="space-y-5" @submit.prevent="submitOAuthImport">
-      <PlatformSelector
-        :selected-platform="selectedPlatform"
-        @select="selectPlatform"
-      />
-      <AccountLevelSelector
-        v-if="selectedPlatform === 'openai'"
-        :selected-level="selectedAccountLevel"
-        @select="selectAccountLevel"
-      />
-      <ImportMethodSelector
-        v-if="selectedPlatform === 'openai' && selectedAccountLevel === 'pro'"
-        :selected-method="selectedImportMethod"
-        @select="selectImportMethod"
-      />
-      <ShareModeSelector
-        v-if="selectedPlatform"
-        :selected-mode="selectedShareMode"
-        @select="selectShareMode"
-      />
-      <div v-if="selectedPlatform" class="space-y-2">
-        <label class="input-label">{{ t('admin.accounts.privatePriority') }}</label>
-        <input
-          v-model.number="selectedPrivatePriority"
-          type="number"
-          min="1"
-          step="1"
-          class="input"
-        />
-        <p class="input-hint">{{ t('admin.accounts.privatePriorityHint') }}</p>
-      </div>
-
-      <div class="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-300">
-        {{ t('userAccounts.importOAuthOnlyHint') }}
-      </div>
-
-      <div>
-        <label class="input-label">{{ t('admin.accounts.accountName') }}</label>
-        <input
-          v-model.trim="oauthAccountName"
-          type="text"
-          class="input"
-          :placeholder="t('userAccounts.importOAuthNamePlaceholder')"
-        />
-      </div>
-
-      <div>
-        <div class="mb-2 flex items-center justify-between gap-3">
-          <label class="input-label mb-0">{{ t('userAccounts.importProxy') }}</label>
-          <div class="flex flex-wrap items-center justify-end gap-2">
-            <button
-              type="button"
-              class="text-xs font-medium text-primary-600 hover:text-primary-700 disabled:cursor-not-allowed disabled:opacity-60 dark:text-primary-400"
-              :disabled="proxyLoading"
-              @click="loadProxies(true)"
-            >
-              {{ proxyLoading ? t('common.loading') : t('common.refresh') }}
-            </button>
-            <button
-              type="button"
-              class="inline-flex items-center gap-1 rounded-md border border-gray-200 bg-white px-2.5 py-1.5 text-xs font-medium text-gray-700 hover:border-sky-300 hover:bg-sky-50 dark:border-dark-700 dark:bg-dark-800 dark:text-dark-200 dark:hover:border-sky-500/70 dark:hover:bg-sky-900/20"
-              @click="openProxyPurchase()"
-            >
-              <Icon name="externalLink" size="xs" />
-              {{ t('userAccounts.proxyActionBuyTitle') }}
-            </button>
-            <button
-              type="button"
-              class="inline-flex items-center gap-1 rounded-md border border-primary-200 bg-primary-50 px-2.5 py-1.5 text-xs font-medium text-primary-700 hover:border-primary-300 hover:bg-primary-100 dark:border-primary-500/30 dark:bg-primary-500/10 dark:text-primary-300 dark:hover:bg-primary-500/20"
-              :aria-expanded="showProxyDialog"
-              data-testid="import-open-user-proxy-panel"
-              @click="openAddProxyDialog()"
-            >
-              <Icon name="plus" size="xs" />
-              {{ t('userAccounts.proxyActionAddTitle') }}
-            </button>
-          </div>
-        </div>
-        <ProxySelector
-          v-model="selectedProxyId"
-          :proxies="proxies"
-          :allow-empty="false"
-          :can-test="false"
-          hide-endpoint
-        />
-        <p class="input-hint">
-          {{ proxyHelperText }}
-        </p>
-        <UserProxyQuickCreatePanel
-          v-if="showProxyDialog"
-          class="mt-4"
-          @created="handleProxyCreated"
-          @cancel="closeProxyDialog"
-        />
-      </div>
-
-      <OAuthAuthorizationFlow
-        ref="oauthFlowRef"
-        add-method="oauth"
-        :auth-url="openaiOAuth.authUrl.value"
-        :session-id="openaiOAuth.sessionId.value"
-        :loading="openaiOAuth.loading.value"
-        :error="openaiOAuth.error.value"
-        :show-help="false"
-        :show-proxy-warning="false"
-        :show-cookie-option="false"
-        :show-refresh-token-option="false"
-        :show-mobile-refresh-token-option="false"
-        :show-session-token-option="false"
-        :show-access-token-option="false"
-        platform="openai"
-        @generate-url="generateOAuthUrl"
-      />
-    </form>
-
-    <template #footer>
-      <div class="flex justify-end gap-3">
-        <button class="btn btn-secondary" type="button" :disabled="oauthSubmitting" @click="handleClose">
-          {{ t('common.cancel') }}
-        </button>
-        <button
-          class="btn btn-primary"
-          type="submit"
-          form="user-import-openai-oauth-form"
-          :disabled="oauthSubmitting || !canSubmitOAuthImport"
-        >
-          <Icon v-if="!oauthSubmitting" name="check" size="sm" class="mr-2" />
-          {{ oauthSubmitting ? t('admin.accounts.oauth.verifying') : t('admin.accounts.oauth.completeAuth') }}
-        </button>
-      </div>
-    </template>
-  </BaseDialog>
-
 </template>
 
 <script setup lang="ts">
 import { computed, defineComponent, h, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { accountsAPI, accountShareAPI } from '@/api'
-import BaseDialog from '@/components/common/BaseDialog.vue'
 import ProxySelector from '@/components/common/ProxySelector.vue'
 import CredentialImportModal from '@/components/account/CredentialImportModal.vue'
-import OAuthAuthorizationFlow from '@/components/account/OAuthAuthorizationFlow.vue'
 import UserProxyQuickCreatePanel from '@/components/user/UserProxyQuickCreatePanel.vue'
 import Icon from '@/components/icons/Icon.vue'
 import {
   PERSONAL_ACCOUNT_DEFAULT_AUTO_PAUSE_ON_EXPIRED,
   PERSONAL_ACCOUNT_DEFAULT_CONCURRENCY,
   PERSONAL_ACCOUNT_IMPORT_LIMIT,
-  PERSONAL_ACCOUNT_DEFAULT_PRIORITY,
-  applyPersonalAccountTemplate
+  PERSONAL_ACCOUNT_DEFAULT_PRIORITY
 } from '@/components/account/personalAccountTemplate'
 import { useAppStore } from '@/stores/app'
-import { useOpenAIOAuth } from '@/composables/useOpenAIOAuth'
 import { extractApiErrorMessage } from '@/utils/apiError'
 import type { ImportCredentialContentsRequest, ImportCredentialContentsResponse } from '@/api/accounts'
 import type { AccountLevel, AccountPlatform, AccountShareMode, Proxy } from '@/types'
 
 type SelectableOpenAILevel = Exclude<AccountLevel, 'unknown'>
 type ImportPlatform = AccountPlatform
-type ProImportMethod = 'credentials' | 'oauth'
 
 interface Props {
   show: boolean
@@ -281,26 +129,21 @@ interface Emits {
 }
 
 const props = defineProps<Props>()
-const emit = defineEmits<Emits>()
+defineEmits<Emits>()
 
 const { t } = useI18n()
 const appStore = useAppStore()
-const openaiOAuth = useOpenAIOAuth('user')
 
 const PROXY_PURCHASE_URL = 'https://www.seekproxy.com/user/reg?invite_id=106509'
 
 const selectedPlatform = ref<ImportPlatform | ''>('')
 const selectedAccountLevel = ref<SelectableOpenAILevel | ''>('')
 const selectedShareMode = ref<AccountShareMode>('private')
-const selectedImportMethod = ref<ProImportMethod>('credentials')
 const selectedPrivatePriority = ref(PERSONAL_ACCOUNT_DEFAULT_PRIORITY)
 const selectedProxyId = ref<number | null>(null)
 const proxies = ref<Proxy[]>([])
 const proxyLoading = ref(false)
 const proxyLoadMessage = ref('')
-const oauthAccountName = ref('')
-const oauthSubmitting = ref(false)
-const oauthFlowRef = ref<InstanceType<typeof OAuthAuthorizationFlow> | null>(null)
 const showProxyDialog = ref(false)
 
 const importLimit = computed(() => {
@@ -310,20 +153,20 @@ const importLimit = computed(() => {
     : PERSONAL_ACCOUNT_IMPORT_LIMIT
 })
 
-const requiresOAuthLogin = computed(() =>
-  selectedPlatform.value === 'openai' &&
-  selectedAccountLevel.value === 'pro' &&
-  selectedImportMethod.value === 'oauth'
+const credentialImportProxyRequired = computed(() =>
+  selectedPlatform.value === 'anthropic' ||
+  selectedPlatform.value === 'gemini' ||
+  selectedPlatform.value === 'antigravity' ||
+  (selectedPlatform.value === 'openai' && selectedAccountLevel.value === 'pro')
 )
 
 const canSubmitCredentialImport = computed(() => {
   if (!selectedPlatform.value) return false
   if (selectedPlatform.value === 'openai') {
     if (!selectedAccountLevel.value) return false
-    if (selectedAccountLevel.value === 'pro') {
-      return Boolean(selectedProxyId.value)
-    }
-    return true
+  }
+  if (credentialImportProxyRequired.value) {
+    return Boolean(selectedProxyId.value)
   }
   return true
 })
@@ -384,19 +227,6 @@ const normalizedPrivatePriority = computed(() => {
     return PERSONAL_ACCOUNT_DEFAULT_PRIORITY
   }
   return Math.trunc(value)
-})
-
-const canSubmitOAuthImport = computed(() => {
-  const authCode = oauthFlowRef.value?.authCode || ''
-  const oauthState = oauthFlowRef.value?.oauthState || openaiOAuth.oauthState.value || ''
-  return Boolean(
-    selectedPlatform.value === 'openai' &&
-    selectedAccountLevel.value &&
-    selectedProxyId.value &&
-    openaiOAuth.sessionId.value &&
-    String(authCode).trim() &&
-    String(oauthState).trim()
-  )
 })
 
 const PlatformSelector = defineComponent({
@@ -495,48 +325,6 @@ const AccountLevelSelector = defineComponent({
   }
 })
 
-const ImportMethodSelector = defineComponent({
-  name: 'UserImportMethodSelector',
-  props: {
-    selectedMethod: {
-      type: String,
-      default: 'credentials'
-    }
-  },
-  emits: ['select'],
-  setup(props, { emit }) {
-    const options: Array<{ value: ProImportMethod; label: string; desc: string; icon: 'document' | 'login' }> = [
-      { value: 'credentials', label: t('userAccounts.importMethodCredentials'), desc: t('userAccounts.importMethodCredentialsHint'), icon: 'document' },
-      { value: 'oauth', label: t('userAccounts.importMethodOAuth'), desc: t('userAccounts.importMethodOAuthHint'), icon: 'login' }
-    ]
-    return () => h('div', { class: 'space-y-2' }, [
-      h('label', { class: 'input-label' }, t('userAccounts.importMethod')),
-      h('div', { class: 'grid gap-2 sm:grid-cols-2' }, options.map(option =>
-        h(
-          'button',
-          {
-            type: 'button',
-            class: [
-              'flex min-h-[64px] items-center rounded-lg border px-3 py-2 text-left transition-colors',
-              props.selectedMethod === option.value
-                ? 'border-primary-400 bg-primary-50 text-primary-700 dark:border-primary-500 dark:bg-primary-900/30 dark:text-primary-300'
-                : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50 dark:border-dark-700 dark:bg-dark-800 dark:text-dark-200 dark:hover:bg-dark-700'
-            ],
-            onClick: () => emit('select', option.value)
-          },
-          [
-            h(Icon, { name: option.icon, size: 'sm', class: 'mr-3 shrink-0' }),
-            h('span', { class: 'min-w-0' }, [
-              h('span', { class: 'block text-sm font-semibold' }, option.label),
-              h('span', { class: 'mt-1 block text-xs text-gray-500 dark:text-dark-400' }, option.desc)
-            ])
-          ]
-        )
-      ))
-    ])
-  }
-})
-
 const ShareModeSelector = defineComponent({
   name: 'UserImportShareModeSelector',
   props: {
@@ -583,14 +371,12 @@ watch(
     if (platform !== 'openai') {
       selectedAccountLevel.value = ''
     }
-    selectedImportMethod.value = 'credentials'
     selectedProxyId.value = null
-    oauthAccountName.value = ''
     proxyLoadMessage.value = ''
     showProxyDialog.value = false
-    openaiOAuth.error.value = ''
-    openaiOAuth.resetState()
-    oauthFlowRef.value?.reset()
+    if (platform !== 'openai' && credentialImportProxyRequired.value) {
+      loadProxies()
+    }
   }
 )
 
@@ -598,51 +384,12 @@ watch(
   () => selectedAccountLevel.value,
   (level) => {
     proxyLoadMessage.value = ''
-    openaiOAuth.error.value = ''
-    openaiOAuth.resetState()
-    oauthFlowRef.value?.reset()
     if (selectedPlatform.value === 'openai' && level === 'pro') {
-      selectedImportMethod.value = 'credentials'
       loadProxies()
     } else {
       selectedProxyId.value = null
-      oauthAccountName.value = ''
       showProxyDialog.value = false
     }
-  }
-)
-
-watch(
-  () => selectedImportMethod.value,
-  () => {
-    openaiOAuth.error.value = ''
-    openaiOAuth.resetState()
-    oauthFlowRef.value?.reset()
-  }
-)
-
-watch(
-  () => selectedProxyId.value,
-  () => {
-    openaiOAuth.error.value = ''
-    openaiOAuth.resetState()
-    oauthFlowRef.value?.reset()
-  }
-)
-
-watch(
-  () => openaiOAuth.authUrl.value,
-  (authUrl) => {
-    if (authUrl) {
-      window.open(authUrl, '_blank', 'noopener,noreferrer')
-    }
-  }
-)
-
-watch(
-  () => openaiOAuth.sessionId.value,
-  () => {
-    oauthFlowRef.value?.reset()
   }
 )
 
@@ -654,10 +401,6 @@ function selectAccountLevel(level: SelectableOpenAILevel | ''): void {
   selectedAccountLevel.value = level
 }
 
-function selectImportMethod(method: ProImportMethod): void {
-  selectedImportMethod.value = method
-}
-
 function selectShareMode(mode: AccountShareMode): void {
   selectedShareMode.value = mode
 }
@@ -666,14 +409,10 @@ function resetOAuthImportState(): void {
   selectedPlatform.value = ''
   selectedAccountLevel.value = ''
   selectedShareMode.value = 'private'
-  selectedImportMethod.value = 'credentials'
   selectedPrivatePriority.value = PERSONAL_ACCOUNT_DEFAULT_PRIORITY
   selectedProxyId.value = null
-  oauthAccountName.value = ''
   proxyLoadMessage.value = ''
   showProxyDialog.value = false
-  openaiOAuth.resetState()
-  oauthFlowRef.value?.reset()
 }
 
 watch(
@@ -706,13 +445,13 @@ function importPersonalCredentials(contents: string[]): Promise<ImportCredential
       return Promise.reject(new Error(t('userAccounts.importAccountLevelRequired')))
     }
     request.account_level = accountLevel
-    if (accountLevel === 'pro') {
-      if (!selectedProxyId.value) {
-        appStore.showError(t('userAccounts.importProxyRequired'))
-        return Promise.reject(new Error(t('userAccounts.importProxyRequired')))
-      }
-      request.proxy_id = selectedProxyId.value
+  }
+  if (credentialImportProxyRequired.value) {
+    if (!selectedProxyId.value) {
+      appStore.showError(t('userAccounts.importProxyRequired'))
+      return Promise.reject(new Error(t('userAccounts.importProxyRequired')))
     }
+    request.proxy_id = selectedProxyId.value
   }
   return accountsAPI.importCredentialContents(request)
 }
@@ -758,84 +497,5 @@ function handleProxyCreated(proxy: Proxy): void {
   selectedProxyId.value = proxy.id
   proxyLoadMessage.value = ''
   showProxyDialog.value = false
-}
-
-async function generateOAuthUrl(): Promise<void> {
-  if (selectedPlatform.value !== 'openai') {
-    appStore.showError(t('userAccounts.importPlatformRequired'))
-    return
-  }
-  if (!selectedAccountLevel.value) {
-    appStore.showError(t('userAccounts.importAccountLevelRequired'))
-    return
-  }
-  if (!selectedProxyId.value) {
-    appStore.showError(t('userAccounts.importProxyRequired'))
-    return
-  }
-  await openaiOAuth.generateAuthUrl(selectedProxyId.value)
-}
-
-function handleClose(): void {
-  if (oauthSubmitting.value) return
-  emit('close')
-}
-
-async function submitOAuthImport(): Promise<void> {
-  if (selectedPlatform.value !== 'openai') {
-    appStore.showError(t('userAccounts.importPlatformRequired'))
-    return
-  }
-  if (!selectedAccountLevel.value) {
-    appStore.showError(t('userAccounts.importAccountLevelRequired'))
-    return
-  }
-  if (!selectedProxyId.value) {
-    appStore.showError(t('userAccounts.importProxyRequired'))
-    return
-  }
-  const authCode = String(oauthFlowRef.value?.authCode || '').trim()
-  const oauthState = String(oauthFlowRef.value?.oauthState || openaiOAuth.oauthState.value || '').trim()
-  if (!authCode || !oauthState || !openaiOAuth.sessionId.value) {
-    appStore.showError(t('userAccounts.importOAuthCallbackRequired'))
-    return
-  }
-
-  oauthSubmitting.value = true
-  try {
-    const tokenInfo = await openaiOAuth.exchangeAuthCode(
-      authCode,
-      openaiOAuth.sessionId.value,
-      oauthState,
-      selectedProxyId.value
-    )
-    if (!tokenInfo) return
-
-    const templated = applyPersonalAccountTemplate(
-      'openai',
-      openaiOAuth.buildCredentials(tokenInfo),
-      openaiOAuth.buildExtraInfo(tokenInfo)
-    )
-    await accountsAPI.create({
-      name: oauthAccountName.value || tokenInfo.email || `${t('admin.accounts.accountLevel.' + selectedAccountLevel.value)} OpenAI`,
-      platform: 'openai',
-      account_level: selectedAccountLevel.value,
-      type: 'oauth',
-      credentials: templated.credentials,
-      extra: templated.extra,
-      proxy_id: selectedProxyId.value,
-      share_mode: selectedShareMode.value,
-      concurrency: PERSONAL_ACCOUNT_DEFAULT_CONCURRENCY,
-      private_priority: normalizedPrivatePriority.value,
-      group_ids: [],
-      auto_pause_on_expired: PERSONAL_ACCOUNT_DEFAULT_AUTO_PAUSE_ON_EXPIRED
-    })
-    appStore.showSuccess(t('userAccounts.accountCreatedSuccess'))
-    emit('imported', { close: true })
-  } catch (error: unknown) {
-    appStore.showError(extractApiErrorMessage(error, t('userAccounts.importFailed')))
-  } finally {
-    oauthSubmitting.value = false
-  }
 }
 </script>

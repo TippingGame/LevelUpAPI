@@ -128,6 +128,22 @@ func BuildClaudeAccountCredentialImportExtra(tokenInfo *TokenInfo) map[string]an
 	return extra
 }
 
+func ApplyDefaultModelMappingForCredentialImport(platform string, credentials map[string]any) map[string]any {
+	if _, exists := credentials["model_mapping"]; exists {
+		return credentials
+	}
+	modelMapping := ownedPersonalDefaultModelMapping(platform)
+	if len(modelMapping) == 0 {
+		return credentials
+	}
+	nextCredentials := make(map[string]any, len(credentials)+1)
+	for key, value := range credentials {
+		nextCredentials[key] = value
+	}
+	nextCredentials["model_mapping"] = modelMapping
+	return nextCredentials
+}
+
 func DeriveAccountCredentialImportName(platform string, credentials, extra map[string]any, sequence int) string {
 	for _, source := range []map[string]any{credentials, extra} {
 		if name := importStringField(source, "name", "email", "email_address"); name != "" {

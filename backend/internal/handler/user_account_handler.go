@@ -402,7 +402,7 @@ func (h *UserAccountHandler) prepareUserAccountRequest(c *gin.Context, ownerUser
 	if req.Platform != service.PlatformOpenAI {
 		req.AccountLevel = service.AccountLevelUnknown
 		if service.RequiresUserAccountProxy(req.Platform, req.AccountLevel) {
-			return h.requireVisibleUserProxy(c, ownerUserID, req.ProxyID, service.ErrOwnedAnthropicAccountProxyRequired)
+			return h.requireVisibleUserProxy(c, ownerUserID, req.ProxyID, userAccountProxyRequiredError(req.Platform))
 		}
 		return rejectUserProxyID(c, req.ProxyID)
 	}
@@ -476,10 +476,16 @@ func validateOpenAIImportTargetLevel(defaults importUserAccountCredentialsReques
 }
 
 func userAccountProxyRequiredError(platform string) error {
-	if platform == service.PlatformAnthropic {
+	switch platform {
+	case service.PlatformAnthropic:
 		return service.ErrOwnedAnthropicAccountProxyRequired
+	case service.PlatformGemini:
+		return service.ErrOwnedGeminiAccountProxyRequired
+	case service.PlatformAntigravity:
+		return service.ErrOwnedAntigravityAccountProxyRequired
+	default:
+		return service.ErrOwnedOpenAIAccountProxyRequired
 	}
-	return service.ErrOwnedOpenAIAccountProxyRequired
 }
 
 func userUnixSecondsToTime(value *int64) *time.Time {
@@ -1455,11 +1461,8 @@ func (h *UserAccountHandler) createOwnedAccountFromCredentialImportSource(
 
 	if req.Platform == service.PlatformOpenAI {
 		req.AccountLevel = openAIAccountLevel
-		if service.RequiresUserOpenAIProxyLogin(openAIAccountLevel) {
-			req.ProxyID = defaults.ProxyID
-		}
 	}
-	if req.Platform == service.PlatformAnthropic {
+	if service.RequiresUserAccountProxy(req.Platform, req.AccountLevel) {
 		req.ProxyID = defaults.ProxyID
 	}
 	if strings.TrimSpace(req.Name) == "" {

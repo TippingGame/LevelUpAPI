@@ -162,7 +162,7 @@ func RequiresUserOpenAIProxyLogin(level string) bool {
 
 func RequiresUserAccountProxy(platform, level string) bool {
 	switch platform {
-	case PlatformAnthropic:
+	case PlatformAnthropic, PlatformGemini, PlatformAntigravity:
 		return true
 	case PlatformOpenAI:
 		return RequiresUserOpenAIProxyLogin(level)

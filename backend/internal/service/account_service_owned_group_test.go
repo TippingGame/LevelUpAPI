@@ -1029,6 +1029,38 @@ func TestAccountServiceCreateOwnedRejectsAnthropicWithoutProxy(t *testing.T) {
 	require.Empty(t, repo.createdAccounts)
 }
 
+func TestAccountServiceCreateOwnedRejectsGeminiAndAntigravityWithoutProxy(t *testing.T) {
+	cases := []struct {
+		name     string
+		platform string
+		wantErr  error
+	}{
+		{name: "gemini", platform: PlatformGemini, wantErr: ErrOwnedGeminiAccountProxyRequired},
+		{name: "antigravity", platform: PlatformAntigravity, wantErr: ErrOwnedAntigravityAccountProxyRequired},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ownerID := int64(101)
+			repo := &ownedAccountDuplicateRepoStub{}
+			svc := &AccountService{accountRepo: repo}
+
+			account, err := svc.CreateOwned(context.Background(), ownerID, CreateAccountRequest{
+				Name:        tc.name + "-without-proxy",
+				Platform:    tc.platform,
+				Type:        AccountTypeOAuth,
+				Credentials: map[string]any{"access_token": "token"},
+				Concurrency: ownedPersonalDefaultConcurrency,
+				Priority:    1,
+			})
+
+			require.Nil(t, account)
+			require.ErrorIs(t, err, tc.wantErr)
+			require.Empty(t, repo.createdAccounts)
+		})
+	}
+}
+
 func TestAccountServiceCreateOwnedRejectsProxyCapacityExceeded(t *testing.T) {
 	ownerID := int64(101)
 	proxyID := int64(7)
@@ -1161,6 +1193,53 @@ func TestAccountServiceCreateOwnedAllowsProxyCapacityAvailable(t *testing.T) {
 	require.Len(t, repo.createdAccounts, 1)
 	require.NotNil(t, repo.createdAccounts[0].ProxyID)
 	require.Equal(t, proxyID, *repo.createdAccounts[0].ProxyID)
+}
+
+func TestAccountServiceCreateOwnedKeepsGeminiAndAntigravityProxy(t *testing.T) {
+	cases := []struct {
+		name     string
+		platform string
+	}{
+		{name: "gemini", platform: PlatformGemini},
+		{name: "antigravity", platform: PlatformAntigravity},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ownerID := int64(101)
+			proxyID := int64(7)
+			repo := &ownedAccountDuplicateRepoStub{}
+			svc := &AccountService{
+				accountRepo: repo,
+				proxyRepo: &ownedAccountProxyRepoStub{
+					proxies: map[int64]*Proxy{
+						proxyID: {ID: proxyID, Status: StatusActive, MaxAccounts: 2},
+					},
+				},
+				privateGroupProvisioner: &ownedPrivateGroupProvisionerStub{
+					group: &Group{ID: 99, Platform: tc.platform, Status: StatusActive, Scope: GroupScopeUserPrivate},
+				},
+			}
+
+			account, err := svc.CreateOwned(context.Background(), ownerID, CreateAccountRequest{
+				Name:        tc.name + "-proxy",
+				Platform:    tc.platform,
+				Type:        AccountTypeOAuth,
+				Credentials: map[string]any{"access_token": "token"},
+				ProxyID:     &proxyID,
+				Concurrency: ownedPersonalDefaultConcurrency,
+				Priority:    1,
+			})
+
+			require.NoError(t, err)
+			require.NotNil(t, account)
+			require.NotNil(t, account.ProxyID)
+			require.Equal(t, proxyID, *account.ProxyID)
+			require.Len(t, repo.createdAccounts, 1)
+			require.NotNil(t, repo.createdAccounts[0].ProxyID)
+			require.Equal(t, proxyID, *repo.createdAccounts[0].ProxyID)
+		})
+	}
 }
 
 func TestAccountServiceCreateOwnedRejectsOpenAILevelMismatch(t *testing.T) {

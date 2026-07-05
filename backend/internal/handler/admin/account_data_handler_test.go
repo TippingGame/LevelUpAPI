@@ -70,6 +70,7 @@ func setupAccountDataRouter() (*gin.Engine, *stubAdminService) {
 
 	router.GET("/api/v1/admin/accounts/data", h.ExportData)
 	router.POST("/api/v1/admin/accounts/data", h.ImportData)
+	router.POST("/api/v1/admin/accounts/import-credentials", h.ImportCredentials)
 	return router, adminSvc
 }
 
@@ -371,4 +372,27 @@ func TestImportDataReusesProxyAndSkipsDefaultGroup(t *testing.T) {
 	require.Len(t, adminSvc.createdProxies, 0)
 	require.Len(t, adminSvc.createdAccounts, 1)
 	require.True(t, adminSvc.createdAccounts[0].SkipDefaultGroupBind)
+}
+
+func TestImportCredentialsAddsDefaultOpenAIModelMapping(t *testing.T) {
+	router, adminSvc := setupAccountDataRouter()
+
+	payload := map[string]any{
+		"contents": []string{
+			`{"name":"OpenAI OAuth","platform":"openai","credentials":{"access_token":"token"}}`,
+		},
+		"skip_default_group_bind": true,
+	}
+	body, _ := json.Marshal(payload)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/accounts/import-credentials", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Len(t, adminSvc.createdAccounts, 1)
+	mapping, ok := adminSvc.createdAccounts[0].Credentials["model_mapping"].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "gpt-5.4-2026-03-05", mapping["gpt-5.4-2026-03-05"])
 }

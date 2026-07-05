@@ -279,6 +279,7 @@ func (h *AccountHandler) createAccountFromCredentialImportSource(
 	if strings.TrimSpace(input.Name) == "" {
 		return nil, fmt.Errorf("account name is required")
 	}
+	input.Credentials = service.ApplyDefaultModelMappingForCredentialImport(input.Platform, input.Credentials)
 	sanitizeExtraBaseRPM(input.Extra)
 	account, err := h.adminService.CreateAccount(ctx, &input)
 	if err != nil {
