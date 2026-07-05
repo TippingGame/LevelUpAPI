@@ -103,7 +103,7 @@ func TestGatewayTryAcquireByLegacyOrderCapsAnthropicOAuthConcurrency(t *testing.
 		},
 	}
 
-	selection, ok, err := svc.tryAcquireByLegacyOrder(context.Background(), []*Account{account}, nil, "session", "session", false)
+	selection, ok, err := svc.tryAcquireByLegacyOrder(context.Background(), []*Account{account}, nil, "session", false)
 
 	require.NoError(t, err)
 	require.True(t, ok)

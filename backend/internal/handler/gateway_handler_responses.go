@@ -183,13 +183,6 @@ routeLoop:
 					if routeCursor.switchToNextWithoutCooldown(apiKey.ID, "account_select_failed", reqLog, zap.Error(err)) {
 						continue routeLoop
 					}
-					if status, code, message, retryAfter, ok := accountSelectionErrorDetails(err); ok {
-						if retryAfter > 0 {
-							c.Header("Retry-After", strconv.Itoa(retryAfter))
-						}
-						h.responsesErrorResponse(c, status, code, message)
-						return
-					}
 					h.responsesErrorResponse(c, http.StatusServiceUnavailable, "api_error", "No available accounts: "+err.Error())
 					return
 				}
