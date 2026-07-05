@@ -780,6 +780,11 @@ export default {
     title: 'Shared Owner',
     description: 'Manage shared-owner accounts and upstream resources',
     searchPlaceholder: 'Search account name...',
+    revenuePolicy: {
+      sharedOwnerShare: 'Shared owner share',
+      privateGroupCommission: 'Private group fee',
+      loadFailed: 'Failed to load share policy'
+    },
     createAccount: 'New Account',
     importAccounts: 'Import',
     editAccount: 'Edit Account',

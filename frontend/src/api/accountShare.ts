@@ -89,6 +89,11 @@ export interface AccountShareEndMembershipIntent {
   expires_at: string
 }
 
+export interface AccountShareRevenuePolicyResponse {
+  shared_owner_share_ratio?: number | null
+  private_group_commission_rate: number
+}
+
 export interface AccountShareAuthURLResponse {
   auth_url: string
   session_id: string
@@ -216,6 +221,11 @@ export async function listProxies(): Promise<Proxy[]> {
   return data
 }
 
+export async function getRevenuePolicy(): Promise<AccountShareRevenuePolicyResponse> {
+  const { data } = await apiClient.get<AccountShareRevenuePolicyResponse>('/account-share/revenue-policy')
+  return data
+}
+
 export async function createProxy(payload: CreateAccountShareProxyRequest): Promise<Proxy> {
   const { data } = await apiClient.post<Proxy>('/account-share/proxies', payload)
   return data
@@ -266,6 +276,7 @@ export async function endMembership(id: number, token: string): Promise<AccountS
 export const accountShareAPI = {
   generateOpenAIAuthURL,
   exchangeOpenAICode,
+  getRevenuePolicy,
   listProxies,
   createProxy,
   listListings,

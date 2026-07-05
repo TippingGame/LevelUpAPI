@@ -30,3 +30,11 @@ describe('AppSidebar header styles', () => {
     expect(sidebarBrandBlockMatch?.[0]).not.toContain('overflow: hidden;')
   })
 })
+
+describe('AppSidebar finance navigation', () => {
+  it('keeps revenue management visible independently from payment', () => {
+    expect(componentSource).not.toContain('flagAdminFinance')
+    expect(componentSource).toContain("{ path: '/admin/revenue', label: t('nav.revenue'), icon: ChartIcon }")
+    expect(componentSource).not.toMatch(/path: '\/admin\/revenue'[\s\S]*featureFlag: flagAdminPayment/)
+  })
+})

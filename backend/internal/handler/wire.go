@@ -98,6 +98,16 @@ func ProvideSettingHandler(settingService *service.SettingService, buildInfo Bui
 	return NewSettingHandler(settingService, buildInfo.Version)
 }
 
+func ProvideAccountShareModeHandler(
+	accountShareModeService *service.AccountShareModeService,
+	accountSharePolicyService *service.AccountSharePolicyService,
+	settingService *service.SettingService,
+) *AccountShareModeHandler {
+	h := NewAccountShareModeHandler(accountShareModeService)
+	h.SetRevenuePolicyDependencies(accountSharePolicyService, settingService)
+	return h
+}
+
 func ProvideAdminUserHandler(adminService service.AdminService, concurrencyService *service.ConcurrencyService, userAttributeService *service.UserAttributeService) *admin.UserHandler {
 	return admin.NewUserHandler(adminService, concurrencyService, userAttributeService)
 }
@@ -200,7 +210,7 @@ var ProviderSet = wire.NewSet(
 	NewAuthHandler,
 	NewUserHandler,
 	NewAPIKeyHandler,
-	NewAccountShareModeHandler,
+	ProvideAccountShareModeHandler,
 	ProvideUserAccountHandler,
 	NewUsageHandler,
 	NewRedeemHandler,

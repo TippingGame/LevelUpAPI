@@ -779,6 +779,11 @@ export default {
     title: '共享号主',
     description: '管理共享号主账号与上游资源',
     searchPlaceholder: '搜索账号名称...',
+    revenuePolicy: {
+      sharedOwnerShare: '共享号主分成',
+      privateGroupCommission: '私有分组抽成',
+      loadFailed: '分成策略加载失败'
+    },
     createAccount: '新增账号',
     importAccounts: '导入',
     editAccount: '编辑账号',

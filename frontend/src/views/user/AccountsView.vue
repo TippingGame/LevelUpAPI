@@ -65,42 +65,69 @@
 
     <TablePageLayout v-else>
       <template #actions>
-        <div class="flex flex-wrap items-center justify-end gap-3">
-          <button
-            type="button"
-            class="btn btn-secondary"
-            :disabled="loading"
-            :title="t('common.refresh')"
-            @click="refreshAccountsPage"
-          >
-            <Icon name="refresh" size="md" :class="loading ? 'animate-spin' : ''" />
-          </button>
-          <button
-            type="button"
-            class="btn btn-secondary"
-            :disabled="selectedCount === 0"
-            @click="openBulkEditModal"
-          >
-            <Icon name="edit" size="md" class="mr-2" />
-            {{ t('admin.accounts.bulkActions.edit') }}
-          </button>
-          <button
-            type="button"
-            class="btn btn-secondary"
-            :disabled="exportingData"
-            @click="openExportDataDialog"
-          >
-            <Icon name="download" size="md" class="mr-2" />
-            {{ selectedCount > 0 ? t('userAccounts.exportSelected') : t('userAccounts.exportAccounts') }}
-          </button>
-          <button type="button" class="btn btn-secondary" @click="showImportModal = true">
-            <Icon name="upload" size="md" class="mr-2" />
-            {{ t('userAccounts.importAccounts') }}
-          </button>
-          <button type="button" class="btn btn-primary" @click="openCreateModal">
-            <Icon name="plus" size="md" class="mr-2" />
-            {{ t('userAccounts.createAccount') }}
-          </button>
+        <div class="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+          <div class="flex flex-wrap items-center gap-2 text-xs">
+            <span
+              v-if="revenuePolicyLoading"
+              class="rounded-md border border-gray-200 bg-white px-3 py-2 text-gray-500 shadow-sm dark:border-dark-700 dark:bg-dark-900 dark:text-dark-400"
+            >
+              {{ t('common.loading') }}
+            </span>
+            <span
+              v-else-if="revenuePolicyError"
+              class="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-red-600 shadow-sm dark:border-red-900/50 dark:bg-red-900/20 dark:text-red-300"
+            >
+              {{ t('userAccounts.revenuePolicy.loadFailed') }}
+            </span>
+            <template v-else>
+              <span
+                v-for="item in revenuePolicyItems"
+                :key="item.key"
+                class="inline-flex items-center gap-1.5 rounded-md border border-gray-200 bg-white px-3 py-2 text-gray-600 shadow-sm dark:border-dark-700 dark:bg-dark-900 dark:text-dark-300"
+              >
+                <span>{{ item.label }}</span>
+                <span class="font-semibold text-gray-900 dark:text-white">{{ item.value }}</span>
+              </span>
+            </template>
+          </div>
+
+          <div class="flex flex-wrap items-center justify-end gap-3">
+            <button
+              type="button"
+              class="btn btn-secondary"
+              :disabled="loading"
+              :title="t('common.refresh')"
+              @click="refreshAccountsPage"
+            >
+              <Icon name="refresh" size="md" :class="loading ? 'animate-spin' : ''" />
+            </button>
+            <button
+              type="button"
+              class="btn btn-secondary"
+              :disabled="selectedCount === 0"
+              @click="openBulkEditModal"
+            >
+              <Icon name="edit" size="md" class="mr-2" />
+              {{ t('admin.accounts.bulkActions.edit') }}
+            </button>
+            <button
+              type="button"
+              class="btn btn-secondary"
+              :disabled="exportingData"
+              @click="openExportDataDialog"
+            >
+              <Icon name="download" size="md" class="mr-2" />
+              {{ selectedCount > 0 ? t('userAccounts.exportSelected') : t('userAccounts.exportAccounts') }}
+            </button>
+            <button type="button" class="btn btn-secondary" @click="showImportModal = true">
+              <Icon name="upload" size="md" class="mr-2" />
+              {{ t('userAccounts.importAccounts') }}
+            </button>
+            <button type="button" class="btn btn-primary" @click="openCreateModal">
+              <Icon name="plus" size="md" class="mr-2" />
+              {{ t('userAccounts.createAccount') }}
+            </button>
+          </div>
         </div>
       </template>
 
@@ -585,6 +612,7 @@
 import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { accountsAPI, accountShareAPI, userGroupsAPI } from '@/api'
+import type { AccountShareRevenuePolicyResponse } from '@/api/accountShare'
 import type { AccountBatchTask, UserAccountVerifyLevelTarget } from '@/api/accounts'
 import { useAppStore } from '@/stores/app'
 import { useAuthStore } from '@/stores/auth'
@@ -622,7 +650,7 @@ import { formatGameCoins } from '@/utils/gameCurrency'
 
 type UserAccountStatus = 'active' | 'disabled'
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
 const appStore = useAppStore()
 const authStore = useAuthStore()
 
@@ -655,6 +683,9 @@ const todayStatsByAccountId = ref<Record<string, WindowStats>>({})
 const todayStatsLoading = ref(false)
 const todayStatsError = ref<string | null>(null)
 const todayStatsReqSeq = ref(0)
+const revenuePolicy = ref<AccountShareRevenuePolicyResponse | null>(null)
+const revenuePolicyLoading = ref(true)
+const revenuePolicyError = ref(false)
 const exportingData = ref(false)
 let abortController: AbortController | null = null
 const actionMenu = reactive<{
@@ -791,6 +822,21 @@ const groupFilterOptions = computed(() => [
   }))
 ])
 
+const revenuePolicyItems = computed(() => {
+  return [
+    {
+      key: 'owner',
+      label: t('userAccounts.revenuePolicy.sharedOwnerShare'),
+      value: formatPolicyRatio(revenuePolicy.value?.shared_owner_share_ratio)
+    },
+    {
+      key: 'privateGroupCommission',
+      label: t('userAccounts.revenuePolicy.privateGroupCommission'),
+      value: formatPolicyRatio(revenuePolicy.value?.private_group_commission_rate)
+    }
+  ]
+})
+
 const deleteConfirmMessage = computed(() =>
   t('userAccounts.deleteConfirmMessage', { name: accountToDelete.value?.name ?? '' })
 )
@@ -826,6 +872,15 @@ function buildAccountQueryFilters(): {
   if (filterStatus.value) filters.status = filterStatus.value
   if (filterGroupId.value !== '') filters.group_id = filterGroupId.value
   return filters
+}
+
+function formatPolicyRatio(value?: number | null): string {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return '--'
+  const percent = Math.max(0, Math.min(100, value * 100))
+  return `${percent.toLocaleString(locale.value, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  })}%`
 }
 
 function formatExportTimestamp(): string {
@@ -1132,10 +1187,11 @@ async function refreshCurrentUserBalance(): Promise<void> {
 
 async function refreshAccountsPage(): Promise<void> {
   const balanceRefresh = refreshCurrentUserBalance()
+  const tasks: Array<Promise<void>> = []
   if (canManageSharedAccounts.value) {
-    await loadAccounts()
+    tasks.push(loadAccounts(), loadRevenuePolicy())
   }
-  await balanceRefresh
+  await Promise.all([...tasks, balanceRefresh])
 }
 
 async function loadGroups(): Promise<void> {
@@ -1161,6 +1217,26 @@ async function loadUserProxies(force = false): Promise<void> {
     appStore.showError(extractApiErrorMessage(error, t('userAccounts.importProxyLoadFailed')))
   } finally {
     userProxiesLoading.value = false
+  }
+}
+
+async function loadRevenuePolicy(): Promise<void> {
+  if (!canManageSharedAccounts.value) {
+    revenuePolicy.value = null
+    revenuePolicyError.value = false
+    revenuePolicyLoading.value = false
+    return
+  }
+  revenuePolicyLoading.value = true
+  revenuePolicyError.value = false
+  try {
+    revenuePolicy.value = await accountShareAPI.getRevenuePolicy()
+  } catch (error) {
+    revenuePolicy.value = null
+    revenuePolicyError.value = true
+    console.error('Failed to load account share revenue policy:', error)
+  } finally {
+    revenuePolicyLoading.value = false
   }
 }
 
@@ -1673,7 +1749,7 @@ onMounted(async () => {
   if (!canManageSharedAccounts.value) {
     return
   }
-  await Promise.all([loadGroups(), loadAccounts()])
+  await Promise.all([loadGroups(), loadAccounts(), loadRevenuePolicy()])
 })
 
 onUnmounted(() => {

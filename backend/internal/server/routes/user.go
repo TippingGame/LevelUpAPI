@@ -162,6 +162,7 @@ func RegisterUserRoutes(
 		accountShare := authenticated.Group("/account-share")
 		accountShare.Use(h.UserAccount.RequireSharedAccountOwner())
 		{
+			accountShare.GET("/revenue-policy", h.AccountShareMode.GetRevenuePolicy)
 			accountShare.POST("/openai/auth-url", h.AccountShareMode.GenerateOpenAIAuthURL)
 			accountShare.POST("/openai/exchange-code", h.AccountShareMode.ExchangeOpenAICode)
 			accountShare.GET("/proxies", h.AccountShareMode.ListAvailableProxies)

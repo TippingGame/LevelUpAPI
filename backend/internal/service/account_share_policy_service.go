@@ -87,6 +87,13 @@ func (s *AccountSharePolicyService) GetByID(ctx context.Context, id int64) (*Acc
 	return s.repo.GetAccountSharePolicyByID(ctx, id)
 }
 
+func (s *AccountSharePolicyService) GetCurrentGlobalPolicy(ctx context.Context) (*AccountSharePolicy, error) {
+	if s == nil || s.repo == nil {
+		return nil, fmt.Errorf("account share policy repository is not configured")
+	}
+	return s.repo.ResolveEnabledAccountSharePolicy(ctx, 0, nil, "", nil)
+}
+
 func (s *AccountSharePolicyService) Create(ctx context.Context, input CreateAccountSharePolicyInput) (*AccountSharePolicy, error) {
 	normalized, err := normalizeCreateAccountSharePolicyInput(input)
 	if err != nil {

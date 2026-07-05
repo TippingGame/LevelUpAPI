@@ -17,11 +17,21 @@ import (
 )
 
 type AccountShareModeHandler struct {
-	service *service.AccountShareModeService
+	service            *service.AccountShareModeService
+	sharePolicyService *service.AccountSharePolicyService
+	settingService     *service.SettingService
 }
 
 func NewAccountShareModeHandler(svc *service.AccountShareModeService) *AccountShareModeHandler {
 	return &AccountShareModeHandler{service: svc}
+}
+
+func (h *AccountShareModeHandler) SetRevenuePolicyDependencies(sharePolicyService *service.AccountSharePolicyService, settingService *service.SettingService) {
+	if h == nil {
+		return
+	}
+	h.sharePolicyService = sharePolicyService
+	h.settingService = settingService
 }
 
 type accountShareOpenAIAuthURLRequest struct {
@@ -95,6 +105,53 @@ type accountShareEndRequest struct {
 
 type accountShareIdleTimeoutUpdateRequest struct {
 	IdleTimeoutMinutes int `json:"idle_timeout_minutes"`
+}
+
+type accountShareRevenuePolicyResponse struct {
+	SharedOwnerShareRatio      *float64 `json:"shared_owner_share_ratio,omitempty"`
+	PrivateGroupCommissionRate float64  `json:"private_group_commission_rate"`
+}
+
+func (h *AccountShareModeHandler) GetRevenuePolicy(c *gin.Context) {
+	if _, ok := middleware2.GetAuthSubjectFromContext(c); !ok {
+		response.Unauthorized(c, "User not authenticated")
+		return
+	}
+	if h == nil || h.sharePolicyService == nil || h.settingService == nil {
+		response.InternalError(c, "Revenue policy service is not configured")
+		return
+	}
+
+	policy, err := h.sharePolicyService.GetCurrentGlobalPolicy(c.Request.Context())
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	settings, err := h.settingService.GetAllSettings(c.Request.Context())
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+
+	out := accountShareRevenuePolicyResponse{
+		PrivateGroupCommissionRate: clampRatio(settings.UserPrivateGroupCommissionRate),
+	}
+	if policy != nil {
+		ownerShare := clampRatio(policy.OwnerShareRatio)
+		out.SharedOwnerShareRatio = &ownerShare
+	}
+
+	response.Success(c, out)
+}
+
+func clampRatio(value float64) float64 {
+	if math.IsNaN(value) || math.IsInf(value, 0) || value < 0 {
+		return 0
+	}
+	if value > 1 {
+		return 1
+	}
+	return value
 }
 
 func (h *AccountShareModeHandler) GenerateOpenAIAuthURL(c *gin.Context) {

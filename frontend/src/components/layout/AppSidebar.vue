@@ -678,8 +678,6 @@ const flagInvoiceManagement = makeSidebarFlag(FeatureFlags.invoiceManagement)
 const flagWithdrawalManagement = makeSidebarFlag(FeatureFlags.withdrawalManagement)
 const flagOpsMonitoring = () => adminSettingsStore.opsMonitoringEnabled
 const flagAdminPayment = () => adminSettingsStore.paymentEnabled
-const flagAdminFinance = () =>
-  flagAdminPayment() || flagInvoiceManagement() || flagWithdrawalManagement()
 const externalPurchaseUrl = 'https://catfk.com/shop/M7KWPS96'
 // buildSelfNavItems 构造用户自己的导航项（用户端主菜单和管理员的"我的账户"子菜单共享这组声明）。
 // withDashboard=true 时包含仪表盘（用户端），false 时不含（管理员的个人区已经有独立仪表盘入口）。
@@ -790,14 +788,13 @@ const adminNavItems = computed((): NavItem[] => {
       icon: OrderIcon,
       hideInSimpleMode: true,
       expandOnly: true,
-      featureFlag: flagAdminFinance,
       children: [
         { path: '/admin/orders/dashboard', label: t('nav.paymentDashboard'), icon: ChartIcon, featureFlag: flagAdminPayment },
         { path: '/admin/orders', label: t('nav.orderManagement'), icon: OrderIcon, featureFlag: flagAdminPayment },
         { path: '/admin/withdrawals', label: t('nav.withdrawalManagement'), icon: CreditCardIcon, featureFlag: flagWithdrawalManagement },
         { path: '/admin/invoices', label: t('nav.invoiceManagement'), icon: OrderListIcon, featureFlag: flagInvoiceManagement },
         { path: '/admin/orders/plans', label: t('nav.paymentPlans'), icon: CreditCardIcon, featureFlag: flagAdminPayment },
-        { path: '/admin/revenue', label: t('nav.revenue'), icon: ChartIcon, featureFlag: flagAdminPayment },
+        { path: '/admin/revenue', label: t('nav.revenue'), icon: ChartIcon },
       ],
     },
     { path: '/admin/usage', label: t('nav.usage'), icon: ChartIcon }
