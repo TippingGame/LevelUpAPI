@@ -408,6 +408,9 @@ var (
 // ErrNoAvailableAccounts 表示没有可用的账号
 var ErrNoAvailableAccounts = errors.New("no available accounts")
 
+// ErrAccountRPMExceeded 表示账号级 RPM 调度限制已达到。
+var ErrAccountRPMExceeded = infraerrors.TooManyRequests("ACCOUNT_RPM_EXCEEDED", "account requests-per-minute limit exceeded")
+
 // ErrClaudeCodeOnly 表示分组仅允许 Claude Code 客户端访问
 var ErrClaudeCodeOnly = errors.New("this group only allows Claude Code clients")
 
@@ -1080,6 +1083,36 @@ func (s *GatewayService) buildClientAffinityKey(metadataUserID string, sub2apiUs
 
 	sum := sha256.Sum256([]byte(strings.Join(parts, "|")))
 	return clientAffinityKeyPrefix + fmt.Sprintf("%x", sum[:16])
+}
+
+func sessionLimitIDFromMetadataUserID(metadataUserID string) string {
+	if uid := ParseMetadataUserID(metadataUserID); uid != nil {
+		return strings.TrimSpace(uid.SessionID)
+	}
+	return ""
+}
+
+type accountSelectionFilterStats struct {
+	eligibleBeforeRPM int
+	rpmFiltered       int
+}
+
+func (s *GatewayService) accountRPMFiltered(ctx context.Context, account *Account, isSticky bool, stats *accountSelectionFilterStats) bool {
+	if s.isAccountSchedulableForRPM(ctx, account, isSticky) {
+		if !isSticky && stats != nil {
+			stats.eligibleBeforeRPM++
+		}
+		return false
+	}
+	if !isSticky && stats != nil {
+		stats.eligibleBeforeRPM++
+		stats.rpmFiltered++
+	}
+	return true
+}
+
+func (stats accountSelectionFilterStats) onlyRPMFiltered() bool {
+	return stats.eligibleBeforeRPM > 0 && stats.eligibleBeforeRPM == stats.rpmFiltered
 }
 
 func (s *GatewayService) getClientAffinityAccountID(ctx context.Context, groupID *int64, key string) int64 {
@@ -1998,6 +2031,7 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 
 	clientAffinityKey := s.buildClientAffinityKey(metadataUserID, sub2apiUserID)
 	clientAffinityAccountID := s.getClientAffinityAccountID(ctx, groupID, clientAffinityKey)
+	sessionLimitID := sessionLimitIDFromMetadataUserID(metadataUserID)
 	finalizeSelectionResult := func(account *Account, acquired bool, release func(), waitPlan *AccountWaitPlan) (*AccountSelectionResult, error) {
 		selection, err := s.newSelectionResult(ctx, account, acquired, release, waitPlan)
 		if err != nil {
@@ -2044,7 +2078,7 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 					"error", err)
 				return nil, false, nil
 			}
-			if !s.checkAndRegisterSession(ctx, item.account, sessionHash) {
+			if !s.checkAndRegisterSession(ctx, item.account, sessionLimitID) {
 				result.ReleaseFunc()
 				slog.Debug("client_affinity.session_limit",
 					"layer", layer,
@@ -2095,8 +2129,8 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 
 			result, err := s.tryAcquireAccountSlot(ctx, account.ID, account.EffectiveConcurrencyLimit())
 			if err == nil && result.Acquired {
-				// 获取槽位后检查会话限制（使用 sessionHash 作为会话标识符）
-				if !s.checkAndRegisterSession(ctx, account, sessionHash) {
+				// 获取槽位后检查会话限制（仅使用 metadata.user_id 中稳定的 session_id）
+				if !s.checkAndRegisterSession(ctx, account, sessionLimitID) {
 					result.ReleaseFunc()                   // 释放槽位
 					localExcluded[account.ID] = struct{}{} // 排除此账号
 					continue                               // 重新选择
@@ -2105,7 +2139,7 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 			}
 
 			// 对于等待计划的情况，也需要先检查会话限制
-			if !s.checkAndRegisterSession(ctx, account, sessionHash) {
+			if !s.checkAndRegisterSession(ctx, account, sessionLimitID) {
 				localExcluded[account.ID] = struct{}{}
 				continue
 			}
@@ -2235,7 +2269,7 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 				continue
 			}
 			// RPM 检查（非粘性会话路径）
-			if !s.isAccountSchedulableForRPM(ctx, account, false) {
+			if s.accountRPMFiltered(ctx, account, false, nil) {
 				continue
 			}
 			if !s.isAccountAllowedForUserAffinity(ctx, groupID, account, sub2apiUserID) {
@@ -2290,7 +2324,7 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 							result, err := s.tryAcquireAccountSlot(ctx, stickyAccountID, stickyAccount.EffectiveConcurrencyLimit())
 							if err == nil && result.Acquired {
 								// 会话数量限制检查
-								if !s.checkAndRegisterSession(ctx, stickyAccount, sessionHash) {
+								if !s.checkAndRegisterSession(ctx, stickyAccount, sessionLimitID) {
 									result.ReleaseFunc() // 释放槽位
 									stickyCacheMissReason = "session_limit"
 									// 继续到负载感知选择
@@ -2312,7 +2346,7 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 								maxWaiting := maxWaitingForStickyDecision(cfg.StickySessionMaxWaiting, stickyRuntime)
 								if waitingCount < maxWaiting {
 									// 会话数量限制检查（等待计划也需要占用会话配额）
-									if !s.checkAndRegisterSession(ctx, stickyAccount, sessionHash) {
+									if !s.checkAndRegisterSession(ctx, stickyAccount, sessionLimitID) {
 										stickyCacheMissReason = "session_limit"
 										// 会话限制已满，继续到负载感知选择
 									} else {
@@ -2412,7 +2446,7 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 					result, err := s.tryAcquireAccountSlot(ctx, item.account.ID, item.account.EffectiveConcurrencyLimit())
 					if err == nil && result.Acquired {
 						// 会话数量限制检查
-						if !s.checkAndRegisterSession(ctx, item.account, sessionHash) {
+						if !s.checkAndRegisterSession(ctx, item.account, sessionLimitID) {
 							result.ReleaseFunc() // 释放槽位，继续尝试下一个账号
 							continue
 						}
@@ -2429,7 +2463,7 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 				// 5. 所有路由账号槽位满，尝试返回等待计划（选择负载最低的）
 				// 遍历找到第一个满足会话限制的账号
 				for _, item := range routingAvailable {
-					if !s.checkAndRegisterSession(ctx, item.account, sessionHash) {
+					if !s.checkAndRegisterSession(ctx, item.account, sessionLimitID) {
 						continue // 会话限制已满，尝试下一个
 					}
 					if s.debugModelRoutingEnabled() {
@@ -2501,7 +2535,7 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 					result, err := s.tryAcquireAccountSlot(ctx, accountID, account.EffectiveConcurrencyLimit())
 					if err == nil && result.Acquired {
 						// 会话数量限制检查
-						if !s.checkAndRegisterSession(ctx, account, sessionHash) {
+						if !s.checkAndRegisterSession(ctx, account, sessionLimitID) {
 							result.ReleaseFunc() // 释放槽位，继续到 Layer 2
 							slog.Debug("sticky.layer1_5_no_routing_miss",
 								"account_id", accountID,
@@ -2530,7 +2564,7 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 					maxWaiting := maxWaitingForStickyDecision(cfg.StickySessionMaxWaiting, stickyRuntime)
 					if waitingCount < maxWaiting {
 						// 会话数量限制检查（等待计划也需要占用会话配额）
-						if !s.checkAndRegisterSession(ctx, account, sessionHash) {
+						if !s.checkAndRegisterSession(ctx, account, sessionLimitID) {
 							// 会话限制已满，继续到 Layer 2
 						} else {
 							slog.Debug("sticky.layer1_5_no_routing_hit",
@@ -2583,6 +2617,7 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 		"total_accounts", len(accounts),
 	)
 	candidates := make([]*Account, 0, len(accounts))
+	filterStats := accountSelectionFilterStats{}
 	for i := range accounts {
 		acc := &accounts[i]
 		if isExcluded(acc.ID) {
@@ -2612,7 +2647,7 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 			continue
 		}
 		// RPM 检查（非粘性会话路径）
-		if !s.isAccountSchedulableForRPM(ctx, acc, false) {
+		if s.accountRPMFiltered(ctx, acc, false, &filterStats) {
 			continue
 		}
 		if !s.isAccountAllowedForUserAffinity(ctx, groupID, acc, sub2apiUserID) {
@@ -2622,6 +2657,9 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 	}
 
 	if len(candidates) == 0 {
+		if filterStats.onlyRPMFiltered() {
+			return nil, ErrAccountRPMExceeded
+		}
 		return nil, ErrNoAvailableAccounts
 	}
 
@@ -2635,7 +2673,7 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 
 	loadMap, err := s.concurrencyService.GetAccountsLoadBatch(ctx, accountLoads)
 	if err != nil {
-		if result, ok, legacyErr := s.tryAcquireByLegacyOrder(ctx, candidates, groupID, sessionHash, preferOAuth); legacyErr != nil {
+		if result, ok, legacyErr := s.tryAcquireByLegacyOrder(ctx, candidates, groupID, sessionHash, sessionLimitID, preferOAuth); legacyErr != nil {
 			return nil, legacyErr
 		} else if ok {
 			if result.Acquired {
@@ -2680,7 +2718,7 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 			result, err := s.tryAcquireAccountSlot(ctx, selected.account.ID, selected.account.EffectiveConcurrencyLimit())
 			if err == nil && result.Acquired {
 				// 会话数量限制检查
-				if !s.checkAndRegisterSession(ctx, selected.account, sessionHash) {
+				if !s.checkAndRegisterSession(ctx, selected.account, sessionLimitID) {
 					result.ReleaseFunc() // 释放槽位，继续尝试下一个账号
 				} else {
 					if sessionHash != "" && s.cache != nil {
@@ -2706,7 +2744,7 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 	s.sortCandidatesForFallback(ctx, candidates, preferOAuth, cfg.FallbackSelectionMode)
 	for _, acc := range candidates {
 		// 会话数量限制检查（等待计划也需要占用会话配额）
-		if !s.checkAndRegisterSession(ctx, acc, sessionHash) {
+		if !s.checkAndRegisterSession(ctx, acc, sessionLimitID) {
 			continue // 会话限制已满，尝试下一个账号
 		}
 		return finalizeSelectionResult(acc, false, nil, &AccountWaitPlan{
@@ -2719,7 +2757,7 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 	return nil, ErrNoAvailableAccounts
 }
 
-func (s *GatewayService) tryAcquireByLegacyOrder(ctx context.Context, candidates []*Account, groupID *int64, sessionHash string, preferOAuth bool) (*AccountSelectionResult, bool, error) {
+func (s *GatewayService) tryAcquireByLegacyOrder(ctx context.Context, candidates []*Account, groupID *int64, sessionHash string, sessionLimitID string, preferOAuth bool) (*AccountSelectionResult, bool, error) {
 	ordered := append([]*Account(nil), candidates...)
 	s.sortAccountsByPriorityRuntimeAndLastUsed(ctx, ordered, preferOAuth)
 
@@ -2727,7 +2765,7 @@ func (s *GatewayService) tryAcquireByLegacyOrder(ctx context.Context, candidates
 		result, err := s.tryAcquireAccountSlot(ctx, acc.ID, acc.EffectiveConcurrencyLimit())
 		if err == nil && result.Acquired {
 			// 会话数量限制检查
-			if !s.checkAndRegisterSession(ctx, acc, sessionHash) {
+			if !s.checkAndRegisterSession(ctx, acc, sessionLimitID) {
 				result.ReleaseFunc() // 释放槽位，继续尝试下一个账号
 				continue
 			}
@@ -3443,7 +3481,7 @@ func (s *GatewayService) IncrementAccountRPM(ctx context.Context, accountID int6
 
 // checkAndRegisterSession 检查并注册会话，用于会话数量限制
 // 仅适用于 Anthropic OAuth/SetupToken 账号
-// sessionID: 会话标识符（使用粘性会话的 hash）
+// sessionID: 会话标识符（metadata.user_id 中稳定的 session_id）
 // 返回 true 表示允许（在限制内或会话已存在），false 表示拒绝（超出限制且是新会话）
 func (s *GatewayService) checkAndRegisterSession(ctx context.Context, account *Account, sessionID string) bool {
 	// 只检查 Anthropic OAuth/SetupToken 账号
@@ -4126,7 +4164,7 @@ func (s *GatewayService) selectAccountForModelWithPlatform(ctx context.Context, 
 			if !s.isAccountSchedulableForWindowCost(ctx, acc, false) {
 				continue
 			}
-			if !s.isAccountSchedulableForRPM(ctx, acc, false) {
+			if s.accountRPMFiltered(ctx, acc, false, nil) {
 				continue
 			}
 			if s.isBetterRuntimeAccountForRequest(ctx, acc, selected, preferOAuth) {
@@ -4195,6 +4233,7 @@ func (s *GatewayService) selectAccountForModelWithPlatform(ctx context.Context, 
 	// 因为粘性会话优先保持连接一致性，且 upstream 计费基准极少使用。
 	needsUpstreamCheck := s.needsUpstreamChannelRestrictionCheck(ctx, groupID)
 	var selected *Account
+	filterStats := accountSelectionFilterStats{}
 	for i := range accounts {
 		acc := &accounts[i]
 		if _, excluded := excludedIDs[acc.ID]; excluded {
@@ -4225,7 +4264,7 @@ func (s *GatewayService) selectAccountForModelWithPlatform(ctx context.Context, 
 		if !s.isAccountSchedulableForWindowCost(ctx, acc, false) {
 			continue
 		}
-		if !s.isAccountSchedulableForRPM(ctx, acc, false) {
+		if s.accountRPMFiltered(ctx, acc, false, &filterStats) {
 			continue
 		}
 		if s.isBetterRuntimeAccountForRequest(ctx, acc, selected, preferOAuth) {
@@ -4234,6 +4273,9 @@ func (s *GatewayService) selectAccountForModelWithPlatform(ctx context.Context, 
 	}
 
 	if selected == nil {
+		if filterStats.onlyRPMFiltered() {
+			return nil, ErrAccountRPMExceeded
+		}
 		stats := s.logDetailedSelectionFailure(ctx, groupID, sessionHash, requestedModel, platform, accounts, excludedIDs, false)
 		if requestedModel != "" {
 			return nil, fmt.Errorf("%w supporting model: %s (%s)", ErrNoAvailableAccounts, requestedModel, summarizeSelectionFailureStats(stats))
@@ -4356,7 +4398,7 @@ func (s *GatewayService) selectAccountWithMixedScheduling(ctx context.Context, g
 			if !s.isAccountSchedulableForWindowCost(ctx, acc, false) {
 				continue
 			}
-			if !s.isAccountSchedulableForRPM(ctx, acc, false) {
+			if s.accountRPMFiltered(ctx, acc, false, nil) {
 				continue
 			}
 			if s.isBetterRuntimeAccountForRequest(ctx, acc, selected, preferOAuth) {
@@ -4422,6 +4464,7 @@ func (s *GatewayService) selectAccountWithMixedScheduling(ctx context.Context, g
 	// needsUpstreamCheck 仅在主选择循环中使用；粘性会话命中时跳过此检查。
 	needsUpstreamCheck := s.needsUpstreamChannelRestrictionCheck(ctx, groupID)
 	var selected *Account
+	filterStats := accountSelectionFilterStats{}
 	for i := range accounts {
 		acc := &accounts[i]
 		if _, excluded := excludedIDs[acc.ID]; excluded {
@@ -4456,7 +4499,7 @@ func (s *GatewayService) selectAccountWithMixedScheduling(ctx context.Context, g
 		if !s.isAccountSchedulableForWindowCost(ctx, acc, false) {
 			continue
 		}
-		if !s.isAccountSchedulableForRPM(ctx, acc, false) {
+		if s.accountRPMFiltered(ctx, acc, false, &filterStats) {
 			continue
 		}
 		if s.isBetterRuntimeAccountForRequest(ctx, acc, selected, preferOAuth) {
@@ -4465,6 +4508,9 @@ func (s *GatewayService) selectAccountWithMixedScheduling(ctx context.Context, g
 	}
 
 	if selected == nil {
+		if filterStats.onlyRPMFiltered() {
+			return nil, ErrAccountRPMExceeded
+		}
 		stats := s.logDetailedSelectionFailure(ctx, groupID, sessionHash, requestedModel, nativePlatform, accounts, excludedIDs, true)
 		if requestedModel != "" {
 			return nil, fmt.Errorf("%w supporting model: %s (%s)", ErrNoAvailableAccounts, requestedModel, summarizeSelectionFailureStats(stats))
