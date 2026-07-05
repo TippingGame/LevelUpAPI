@@ -45,12 +45,6 @@ func TestAnthropicOAuthPoolProtectionRuntimeDefaultsForLegacyAccounts(t *testing
 	}{
 		{name: "nil extra", extra: nil},
 		{name: "empty extra", extra: map[string]any{}},
-		{name: "zero values", extra: map[string]any{
-			"max_sessions":                 0,
-			"session_idle_timeout_minutes": 0,
-			"base_rpm":                     0,
-			"rpm_strategy":                 "",
-		}},
 		{name: "invalid values", extra: map[string]any{
 			"max_sessions":                 -1,
 			"session_idle_timeout_minutes": -1,
@@ -75,6 +69,20 @@ func TestAnthropicOAuthPoolProtectionRuntimeDefaultsForLegacyAccounts(t *testing
 			require.Equal(t, anthropicOAuthDefaultRPMWarmupStartRPM, account.GetRPMWarmupStartRPM())
 		})
 	}
+}
+
+func TestAnthropicOAuthExplicitZeroDisablesPoolProtection(t *testing.T) {
+	account := &Account{
+		Platform: PlatformAnthropic,
+		Type:     AccountTypeOAuth,
+		Extra: map[string]any{
+			"max_sessions": 0,
+			"base_rpm":     0,
+		},
+	}
+
+	require.Equal(t, 0, account.GetMaxSessions())
+	require.Equal(t, 0, account.GetBaseRPM())
 }
 
 func TestAnthropicOAuthEffectiveConcurrencyLimitCappedByMaxSessions(t *testing.T) {

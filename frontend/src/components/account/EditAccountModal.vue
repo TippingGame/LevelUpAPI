@@ -3852,7 +3852,7 @@ const handleSubmit = async () => {
         newExtra.max_sessions = maxSessions.value
         newExtra.session_idle_timeout_minutes = sessionIdleTimeout.value ?? 5
       } else {
-        delete newExtra.max_sessions
+        newExtra.max_sessions = 0
         delete newExtra.session_idle_timeout_minutes
       }
 
@@ -3869,17 +3869,13 @@ const handleSubmit = async () => {
           delete newExtra.rpm_sticky_buffer
         }
       } else {
-        delete newExtra.base_rpm
+        newExtra.base_rpm = 0
         delete newExtra.rpm_strategy
         delete newExtra.rpm_sticky_buffer
       }
 
       // UMQ mode（独立于 RPM 保存）
-      if (userMsgQueueMode.value) {
-        newExtra.user_msg_queue_mode = userMsgQueueMode.value
-      } else {
-        delete newExtra.user_msg_queue_mode
-      }
+      newExtra.user_msg_queue_mode = userMsgQueueMode.value || 'off'
       delete newExtra.user_msg_queue_enabled  // 清理旧字段
 
       // TLS fingerprint setting

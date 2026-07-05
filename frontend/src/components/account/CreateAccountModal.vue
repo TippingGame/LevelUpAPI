@@ -5458,6 +5458,8 @@ const handleAnthropicExchange = async (authCode: string) => {
     if (sessionLimitEnabled.value && maxSessions.value != null && maxSessions.value > 0) {
       extra.max_sessions = maxSessions.value
       extra.session_idle_timeout_minutes = sessionIdleTimeout.value ?? 5
+    } else {
+      extra.max_sessions = 0
     }
 
     // Add RPM limit settings
@@ -5470,12 +5472,12 @@ const handleAnthropicExchange = async (authCode: string) => {
       if (rpmStickyBuffer.value != null && rpmStickyBuffer.value > 0) {
         extra.rpm_sticky_buffer = rpmStickyBuffer.value
       }
+    } else {
+      extra.base_rpm = 0
     }
 
     // UMQ mode（独立于 RPM）
-    if (userMsgQueueMode.value) {
-      extra.user_msg_queue_mode = userMsgQueueMode.value
-    }
+    extra.user_msg_queue_mode = userMsgQueueMode.value || 'off'
 
     // Add TLS fingerprint settings
     if (tlsFingerprintEnabled.value) {
@@ -5585,6 +5587,8 @@ const handleCookieAuth = async (sessionKey: string) => {
         if (sessionLimitEnabled.value && maxSessions.value != null && maxSessions.value > 0) {
           extra.max_sessions = maxSessions.value
           extra.session_idle_timeout_minutes = sessionIdleTimeout.value ?? 5
+        } else {
+          extra.max_sessions = 0
         }
 
         // Add RPM limit settings
@@ -5597,12 +5601,12 @@ const handleCookieAuth = async (sessionKey: string) => {
           if (rpmStickyBuffer.value != null && rpmStickyBuffer.value > 0) {
             extra.rpm_sticky_buffer = rpmStickyBuffer.value
           }
+        } else {
+          extra.base_rpm = 0
         }
 
         // UMQ mode（独立于 RPM）
-        if (userMsgQueueMode.value) {
-          extra.user_msg_queue_mode = userMsgQueueMode.value
-        }
+        extra.user_msg_queue_mode = userMsgQueueMode.value || 'off'
 
         // Add TLS fingerprint settings
         if (tlsFingerprintEnabled.value) {

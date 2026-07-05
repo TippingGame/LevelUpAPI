@@ -36,6 +36,8 @@ const DefaultCSPPolicy = "default-src 'self'; script-src 'self' __CSP_NONCE__ ht
 
 // UMQ（用户消息队列）模式常量
 const (
+	// UMQModeOff: account-level override that disables user-message throttling.
+	UMQModeOff = "off"
 	// UMQModeSerialize: 账号级串行锁 + RPM 自适应延迟
 	UMQModeSerialize = "serialize"
 	// UMQModeThrottle: 仅 RPM 自适应前置延迟，不阻塞并发

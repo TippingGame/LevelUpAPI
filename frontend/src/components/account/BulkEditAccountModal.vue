@@ -1799,7 +1799,7 @@ const buildUpdatePayload = (): Record<string, unknown> | null => {
     } else {
       // 关闭 RPM 限制 - 设置 base_rpm 为 0，并用空值覆盖关联字段
       // 后端使用 JSONB || merge 语义，不会删除已有 key，
-      // 所以必须显式发送空值来重置（后端读取时会 fallback 到默认值）
+      // 所以必须显式发送空值来重置（后端将 0 视为显式关闭）
       extra.base_rpm = 0
       extra.rpm_strategy = ''
       extra.rpm_sticky_buffer = 0
@@ -1810,7 +1810,7 @@ const buildUpdatePayload = (): Record<string, unknown> | null => {
   // UMQ mode（独立于 RPM 保存）
   if (userMsgQueueMode.value !== null) {
     const umqExtra = ensureExtra()
-    umqExtra.user_msg_queue_mode = userMsgQueueMode.value  // '' = 清除账号级覆盖
+    umqExtra.user_msg_queue_mode = userMsgQueueMode.value || 'off'
     umqExtra.user_msg_queue_enabled = false  // 清理旧字段（JSONB merge）
   }
 

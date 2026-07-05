@@ -14,7 +14,7 @@ func TestAccountGetUserMsgQueueModeDefaultsAnthropicOAuthToSerialize(t *testing.
 	}{
 		{name: "nil extra", extra: nil},
 		{name: "empty extra", extra: map[string]any{}},
-		{name: "invalid mode", extra: map[string]any{"user_msg_queue_mode": "off"}},
+		{name: "invalid mode", extra: map[string]any{"user_msg_queue_mode": "invalid"}},
 	}
 
 	for _, tt := range tests {
@@ -28,6 +28,16 @@ func TestAccountGetUserMsgQueueModeDefaultsAnthropicOAuthToSerialize(t *testing.
 			require.Equal(t, config.UMQModeSerialize, account.GetUserMsgQueueMode())
 		})
 	}
+}
+
+func TestAccountGetUserMsgQueueModeAllowsExplicitOff(t *testing.T) {
+	account := &Account{
+		Platform: PlatformAnthropic,
+		Type:     AccountTypeOAuth,
+		Extra:    map[string]any{"user_msg_queue_mode": config.UMQModeOff},
+	}
+
+	require.Empty(t, account.GetUserMsgQueueMode())
 }
 
 func TestAccountGetUserMsgQueueModePreservesExplicitAnthropicMode(t *testing.T) {

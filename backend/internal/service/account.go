@@ -2270,7 +2270,7 @@ func (a *Account) GetTLSFingerprintProfileID() int64 {
 }
 
 // GetUserMsgQueueMode 获取用户消息队列模式
-// "serialize" = 串行队列, "throttle" = 软性限速, "" = 未设置（使用全局配置）
+// "serialize" = 串行队列, "throttle" = 软性限速, "" = 显式关闭或非 Anthropic 未设置
 func (a *Account) GetUserMsgQueueMode() string {
 	if a.Extra == nil {
 		if a.IsAnthropicOAuthOrSetupToken() {
@@ -2280,6 +2280,9 @@ func (a *Account) GetUserMsgQueueMode() string {
 	}
 	// 优先读取新字段 user_msg_queue_mode（白名单校验，非法值视为未设置）
 	if mode, ok := a.Extra["user_msg_queue_mode"].(string); ok && mode != "" {
+		if mode == config.UMQModeOff {
+			return ""
+		}
 		if mode == config.UMQModeSerialize || mode == config.UMQModeThrottle {
 			return mode
 		}
@@ -2861,7 +2864,13 @@ func (a *Account) GetMaxSessions() int {
 	if a.IsAnthropicOAuthOrSetupToken() {
 		if a.Extra != nil {
 			if v, ok := a.Extra["max_sessions"]; ok {
-				if val := parseExtraInt(v); val > 0 {
+				if val, parsed := parseExtraIntOK(v); parsed {
+					if val == 0 {
+						return 0
+					}
+					if val < 0 {
+						return anthropicOAuthDefaultMaxSessions
+					}
 					return val
 				}
 			}
@@ -2909,7 +2918,13 @@ func (a *Account) GetBaseRPM() int {
 	if a.IsAnthropicOAuthOrSetupToken() {
 		if a.Extra != nil {
 			if v, ok := a.Extra["base_rpm"]; ok {
-				if val := parseExtraInt(v); val > 0 {
+				if val, parsed := parseExtraIntOK(v); parsed {
+					if val == 0 {
+						return 0
+					}
+					if val < 0 {
+						return anthropicOAuthDefaultBaseRPM
+					}
 					return val
 				}
 			}
