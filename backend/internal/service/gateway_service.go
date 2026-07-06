@@ -10216,6 +10216,9 @@ func finalizeLegacyUsageBillingWallet(p *postUsageBillingParams, deps *billingDe
 }
 
 func resolveUsageBillingRequestID(ctx context.Context, upstreamRequestID string) string {
+	if requestID := strings.TrimSpace(upstreamRequestID); requestID != "" {
+		return requestID
+	}
 	if ctx != nil {
 		if clientRequestID, _ := ctx.Value(ctxkey.ClientRequestID).(string); strings.TrimSpace(clientRequestID) != "" {
 			return "client:" + strings.TrimSpace(clientRequestID)
@@ -10223,9 +10226,6 @@ func resolveUsageBillingRequestID(ctx context.Context, upstreamRequestID string)
 		if requestID, _ := ctx.Value(ctxkey.RequestID).(string); strings.TrimSpace(requestID) != "" {
 			return "local:" + strings.TrimSpace(requestID)
 		}
-	}
-	if requestID := strings.TrimSpace(upstreamRequestID); requestID != "" {
-		return requestID
 	}
 	return "generated:" + generateRequestID()
 }
