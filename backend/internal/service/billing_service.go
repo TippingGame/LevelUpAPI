@@ -216,6 +216,17 @@ func (s *BillingService) initFallbackPricing() {
 	// Claude 4.7 Opus (暂与4.6同价，待官方定价更新)
 	s.fallbackPrices["claude-opus-4.7"] = s.fallbackPrices["claude-opus-4.6"]
 
+	for _, key := range []string{
+		"claude-opus-4.5",
+		"claude-sonnet-4",
+		"claude-3-5-sonnet",
+		"claude-3-5-haiku",
+		"claude-3-opus",
+		"claude-3-haiku",
+	} {
+		enableFallbackCacheBreakdown(s.fallbackPrices[key])
+	}
+
 	// Gemini 3.1 Pro
 	s.fallbackPrices["gemini-3.1-pro"] = &ModelPricing{
 		InputPricePerToken:         2e-6,   // $2 per MTok
@@ -392,7 +403,7 @@ func (s *BillingService) GetModelPricing(model string) (*ModelPricing, error) {
 		if _, seen := s.fallbackWarnSeen.LoadOrStore(model, struct{}{}); !seen {
 			log.Printf("[Billing] Using fallback pricing for model: %s", model)
 		}
-		return s.applyModelSpecificPricingPolicy(model, fallback), nil
+		return s.applyModelSpecificPricingPolicy(model, cloneModelPricing(fallback)), nil
 	}
 
 	return nil, fmt.Errorf("%w for model: %s", ErrModelPricingUnavailable, model)
@@ -417,9 +428,7 @@ func (s *BillingService) GetModelPricingWithChannel(model string, channelPricing
 		pricing.OutputPricePerTokenPriority = 0
 	}
 	if channelPricing.CacheWritePrice != nil {
-		pricing.CacheCreationPricePerToken = *channelPricing.CacheWritePrice
-		pricing.CacheCreation5mPrice = *channelPricing.CacheWritePrice
-		pricing.CacheCreation1hPrice = *channelPricing.CacheWritePrice
+		applyCacheWritePriceOverride(pricing, *channelPricing.CacheWritePrice, pricing)
 	}
 	if channelPricing.CacheReadPrice != nil {
 		pricing.CacheReadPricePerToken = *channelPricing.CacheReadPrice
@@ -435,6 +444,50 @@ func (s *BillingService) GetModelPricingWithChannel(model string, channelPricing
 		pricing.ImageOutputPricePerToken = *channelPricing.ImageOutputPrice
 	}
 	return pricing, nil
+}
+
+func cloneModelPricing(pricing *ModelPricing) *ModelPricing {
+	if pricing == nil {
+		return nil
+	}
+	cloned := *pricing
+	return &cloned
+}
+
+func enableFallbackCacheBreakdown(pricing *ModelPricing) {
+	if pricing == nil || pricing.CacheCreationPricePerToken <= 0 {
+		return
+	}
+	pricing.CacheCreation5mPrice = pricing.CacheCreationPricePerToken
+	pricing.CacheCreation1hPrice = deriveOneHourCacheWritePrice(pricing, pricing.CacheCreationPricePerToken)
+	pricing.SupportsCacheBreakdown = pricing.CacheCreation1hPrice > pricing.CacheCreation5mPrice
+}
+
+func deriveOneHourCacheWritePrice(base *ModelPricing, fiveMinutePrice float64) float64 {
+	if fiveMinutePrice <= 0 {
+		return 0
+	}
+	if base != nil && base.CacheCreation5mPrice > 0 && base.CacheCreation1hPrice > base.CacheCreation5mPrice {
+		return fiveMinutePrice * (base.CacheCreation1hPrice / base.CacheCreation5mPrice)
+	}
+	if base != nil && base.InputPricePerToken > 0 {
+		return base.InputPricePerToken * 2
+	}
+	// Anthropic's 1h cache write is 2x input, while 5m cache write is 1.25x input.
+	return fiveMinutePrice * 1.6
+}
+
+func applyCacheWritePriceOverride(pricing *ModelPricing, cacheWritePrice float64, base *ModelPricing) {
+	if pricing == nil {
+		return
+	}
+	oneHourPrice := deriveOneHourCacheWritePrice(base, cacheWritePrice)
+	pricing.CacheCreationPricePerToken = cacheWritePrice
+	pricing.CacheCreation5mPrice = cacheWritePrice
+	pricing.CacheCreation1hPrice = oneHourPrice
+	if pricing.CacheCreation1hPrice > pricing.CacheCreation5mPrice {
+		pricing.SupportsCacheBreakdown = true
+	}
 }
 
 // --- 统一计费入口 ---

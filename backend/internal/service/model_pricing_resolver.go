@@ -158,9 +158,7 @@ func (r *ModelPricingResolver) applyTokenOverrides(chPricing *ChannelModelPricin
 		resolved.BasePricing.OutputPricePerTokenPriority = 0
 	}
 	if chPricing.CacheWritePrice != nil {
-		resolved.BasePricing.CacheCreationPricePerToken = *chPricing.CacheWritePrice
-		resolved.BasePricing.CacheCreation5mPrice = *chPricing.CacheWritePrice
-		resolved.BasePricing.CacheCreation1hPrice = *chPricing.CacheWritePrice
+		applyCacheWritePriceOverride(resolved.BasePricing, *chPricing.CacheWritePrice, resolved.BasePricing)
 	}
 	if chPricing.CacheReadPrice != nil {
 		resolved.BasePricing.CacheReadPricePerToken = *chPricing.CacheReadPrice
@@ -211,11 +209,11 @@ func (r *ModelPricingResolver) GetIntervalPricing(resolved *ResolvedPricing, tot
 		return resolved.BasePricing
 	}
 
-	return intervalToModelPricing(iv, resolved.SupportsCacheBreakdown)
+	return intervalToModelPricing(iv, resolved.SupportsCacheBreakdown, resolved.BasePricing)
 }
 
 // intervalToModelPricing 将区间定价转换为 ModelPricing
-func intervalToModelPricing(iv *PricingInterval, supportsCacheBreakdown bool) *ModelPricing {
+func intervalToModelPricing(iv *PricingInterval, supportsCacheBreakdown bool, base *ModelPricing) *ModelPricing {
 	pricing := &ModelPricing{
 		SupportsCacheBreakdown: supportsCacheBreakdown,
 	}
@@ -226,9 +224,7 @@ func intervalToModelPricing(iv *PricingInterval, supportsCacheBreakdown bool) *M
 		pricing.OutputPricePerToken = *iv.OutputPrice
 	}
 	if iv.CacheWritePrice != nil {
-		pricing.CacheCreationPricePerToken = *iv.CacheWritePrice
-		pricing.CacheCreation5mPrice = *iv.CacheWritePrice
-		pricing.CacheCreation1hPrice = *iv.CacheWritePrice
+		applyCacheWritePriceOverride(pricing, *iv.CacheWritePrice, base)
 	}
 	if iv.CacheReadPrice != nil {
 		pricing.CacheReadPricePerToken = *iv.CacheReadPrice

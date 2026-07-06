@@ -227,6 +227,21 @@ func TestCalculateStatsCost_TokenBilling_WithCache(t *testing.T) {
 	require.InDelta(t, 0.95, *result, 1e-12)
 }
 
+func TestCalculateStatsCost_TokenBilling_WithCacheTTLBreakdown(t *testing.T) {
+	pricing := &ChannelModelPricing{
+		BillingMode:     BillingModeToken,
+		CacheWritePrice: testPtrFloat64(0.003),
+	}
+	tokens := UsageTokens{
+		CacheCreationTokens:   300,
+		CacheCreation5mTokens: 100,
+		CacheCreation1hTokens: 200,
+	}
+	result := calculateStatsCost(pricing, tokens, 1)
+	require.NotNil(t, result)
+	require.InDelta(t, 100*0.003+200*0.003*1.6, *result, 1e-12)
+}
+
 func TestCalculateStatsCost_TokenBilling_WithImageOutput(t *testing.T) {
 	pricing := &ChannelModelPricing{
 		BillingMode:      BillingModeToken,
@@ -528,6 +543,25 @@ func TestTryModelFilePricing_WithCacheTokens(t *testing.T) {
 	// 100*0.001 + 50*0.002 + 200*0.003 + 300*0.0005
 	// = 0.1 + 0.1 + 0.6 + 0.15 = 0.95
 	require.InDelta(t, 0.95, *result, 1e-12)
+}
+
+func TestTryModelFilePricing_WithCacheTTLBreakdown(t *testing.T) {
+	bs := newTestBillingServiceWithPrices(map[string]*ModelPricing{
+		"claude-sonnet-4": {
+			CacheCreationPricePerToken: 0.004,
+			CacheCreation5mPrice:       0.004,
+			CacheCreation1hPrice:       0.006,
+			SupportsCacheBreakdown:     true,
+		},
+	})
+	tokens := UsageTokens{
+		CacheCreationTokens:   300,
+		CacheCreation5mTokens: 100,
+		CacheCreation1hTokens: 200,
+	}
+	result := tryModelFilePricing(bs, "claude-sonnet-4", tokens)
+	require.NotNil(t, result)
+	require.InDelta(t, 100*0.004+200*0.006, *result, 1e-12)
 }
 
 // ---------------------------------------------------------------------------

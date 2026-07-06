@@ -81,7 +81,7 @@ func tryModelFilePricing(billingService *BillingService, model string, tokens Us
 	cost := float64(tokens.InputTokens+tokens.TextInputTokens)*pricing.InputPricePerToken +
 		float64(tokens.ImageInputTokens)*imageInputPrice +
 		float64(textOutputTokens)*pricing.OutputPricePerToken +
-		float64(tokens.CacheCreationTokens)*pricing.CacheCreationPricePerToken +
+		billingService.computeCacheCreationCost(pricing, tokens) +
 		float64(tokens.CacheReadTokens-imageCacheReadTokens)*pricing.CacheReadPricePerToken +
 		float64(imageCacheReadTokens)*imageCacheReadPrice +
 		float64(tokens.ImageOutputTokens)*pricing.ImageOutputPricePerToken
@@ -247,7 +247,7 @@ func calculateTokenStatsCost(pricing *ChannelModelPricing, tokens UsageTokens) *
 	cost := float64(tokens.InputTokens+tokens.TextInputTokens)*inputPrice +
 		float64(tokens.ImageInputTokens)*imageInputPrice +
 		float64(textOutputTokens)*deref(p.OutputPrice) +
-		float64(tokens.CacheCreationTokens)*deref(p.CacheWritePrice) +
+		calculateChannelCacheWriteCost(p.CacheWritePrice, tokens) +
 		float64(tokens.CacheReadTokens-imageCacheReadTokens)*cacheReadPrice +
 		float64(imageCacheReadTokens)*imageCacheReadPrice +
 		float64(tokens.ImageOutputTokens)*deref(p.ImageOutputPrice)
@@ -255,6 +255,17 @@ func calculateTokenStatsCost(pricing *ChannelModelPricing, tokens UsageTokens) *
 		return nil
 	}
 	return &cost
+}
+
+func calculateChannelCacheWriteCost(cacheWritePrice *float64, tokens UsageTokens) float64 {
+	if cacheWritePrice == nil || *cacheWritePrice <= 0 {
+		return 0
+	}
+	if tokens.CacheCreation5mTokens > 0 || tokens.CacheCreation1hTokens > 0 {
+		return float64(tokens.CacheCreation5mTokens)*(*cacheWritePrice) +
+			float64(tokens.CacheCreation1hTokens)*deriveOneHourCacheWritePrice(nil, *cacheWritePrice)
+	}
+	return float64(tokens.CacheCreationTokens) * (*cacheWritePrice)
 }
 
 // applyAccountStatsCost resolves the account stats cost for a usage log entry.

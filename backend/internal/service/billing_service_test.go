@@ -902,13 +902,13 @@ func TestGetModelPricingWithChannel_OverrideAllFields(t *testing.T) {
 	require.Zero(t, pricing.OutputPricePerTokenPriority)
 	require.InDelta(t, 5e-6, pricing.CacheCreationPricePerToken, 1e-12)
 	require.InDelta(t, 5e-6, pricing.CacheCreation5mPrice, 1e-12)
-	require.InDelta(t, 5e-6, pricing.CacheCreation1hPrice, 1e-12)
+	require.InDelta(t, 8e-6, pricing.CacheCreation1hPrice, 1e-12)
 	require.InDelta(t, 1e-6, pricing.CacheReadPricePerToken, 1e-12)
 	require.Zero(t, pricing.CacheReadPricePerTokenPriority)
 	require.InDelta(t, 50e-6, pricing.ImageOutputPricePerToken, 1e-12)
 }
 
-func TestGetModelPricingWithChannel_CacheWritePriceAffects5mAnd1h(t *testing.T) {
+func TestGetModelPricingWithChannel_CacheWritePricePreserves1hRatio(t *testing.T) {
 	svc := newTestBillingService()
 
 	chPricing := &ChannelModelPricing{
@@ -917,10 +917,10 @@ func TestGetModelPricingWithChannel_CacheWritePriceAffects5mAnd1h(t *testing.T) 
 	pricing, err := svc.GetModelPricingWithChannel("claude-sonnet-4", chPricing)
 	require.NoError(t, err)
 
-	// CacheWritePrice should set all three: CacheCreationPricePerToken, 5m, and 1h
+	// CacheWritePrice represents the 5m write price; 1h keeps the Anthropic 2x/1.25x ratio.
 	require.InDelta(t, 7e-6, pricing.CacheCreationPricePerToken, 1e-12)
 	require.InDelta(t, 7e-6, pricing.CacheCreation5mPrice, 1e-12)
-	require.InDelta(t, 7e-6, pricing.CacheCreation1hPrice, 1e-12)
+	require.InDelta(t, 11.2e-6, pricing.CacheCreation1hPrice, 1e-12)
 }
 
 func TestGetModelPricingWithChannel_CacheReadPriceAffectsPriority(t *testing.T) {

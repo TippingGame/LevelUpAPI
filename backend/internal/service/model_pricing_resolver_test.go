@@ -501,7 +501,7 @@ func TestGetIntervalPricing_WithChannelIntervals(t *testing.T) {
 		Models:      []string{"claude-sonnet-4"},
 		BillingMode: BillingModeToken,
 		Intervals: []PricingInterval{
-			{MinTokens: 0, MaxTokens: testPtrInt(100000), InputPrice: testPtrFloat64(1e-6), OutputPrice: testPtrFloat64(5e-6)},
+			{MinTokens: 0, MaxTokens: testPtrInt(100000), InputPrice: testPtrFloat64(1e-6), OutputPrice: testPtrFloat64(5e-6), CacheWritePrice: testPtrFloat64(3e-6)},
 			{MinTokens: 100000, MaxTokens: nil, InputPrice: testPtrFloat64(2e-6), OutputPrice: testPtrFloat64(10e-6)},
 		},
 	}})
@@ -516,6 +516,9 @@ func TestGetIntervalPricing_WithChannelIntervals(t *testing.T) {
 	require.NotNil(t, pricing)
 	require.InDelta(t, 1e-6, pricing.InputPricePerToken, 1e-12)
 	require.InDelta(t, 5e-6, pricing.OutputPricePerToken, 1e-12)
+	require.InDelta(t, 3e-6, pricing.CacheCreation5mPrice, 1e-12)
+	require.InDelta(t, 6e-6, pricing.CacheCreation1hPrice, 1e-12)
+	require.True(t, pricing.SupportsCacheBreakdown)
 
 	// Token count 150000 matches second interval
 	pricing2 := r.GetIntervalPricing(resolved, 150000)
