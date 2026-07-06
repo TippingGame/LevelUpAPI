@@ -15,8 +15,13 @@ type Model struct {
 
 // DefaultModels OpenAI models list
 var DefaultModels = []Model{
+	{ID: "gpt-5.6-sol", Object: "model", Created: 1780876800, OwnedBy: "openai", Type: "model", DisplayName: "GPT-5.6 Sol"},
+	{ID: "gpt-5.6-terra", Object: "model", Created: 1780876800, OwnedBy: "openai", Type: "model", DisplayName: "GPT-5.6 Terra"},
+	{ID: "gpt-5.6-luna", Object: "model", Created: 1780876800, OwnedBy: "openai", Type: "model", DisplayName: "GPT-5.6 Luna"},
 	{ID: "gpt-5.5", Object: "model", Created: 1776873600, OwnedBy: "openai", Type: "model", DisplayName: "GPT-5.5"},
+	{ID: "gpt-5.5-pro", Object: "model", Created: 1776902400, OwnedBy: "openai", Type: "model", DisplayName: "GPT-5.5 Pro"},
 	{ID: "gpt-5.4", Object: "model", Created: 1738368000, OwnedBy: "openai", Type: "model", DisplayName: "GPT-5.4"},
+	{ID: "gpt-5.4-pro", Object: "model", Created: 1772668800, OwnedBy: "openai", Type: "model", DisplayName: "GPT-5.4 Pro"},
 	{ID: "gpt-5.4-2026-03-05", Object: "model", Created: 1772668800, OwnedBy: "openai", Type: "model", DisplayName: "GPT-5.4 (2026-03-05)"},
 	{ID: "gpt-5.4-mini", Object: "model", Created: 1738368000, OwnedBy: "openai", Type: "model", DisplayName: "GPT-5.4 Mini"},
 	{ID: "gpt-5.3-codex", Object: "model", Created: 1735689600, OwnedBy: "openai", Type: "model", DisplayName: "GPT-5.3 Codex"},
@@ -26,6 +31,8 @@ var DefaultModels = []Model{
 	{ID: "gpt-image-1", Object: "model", Created: 1733875200, OwnedBy: "openai", Type: "model", DisplayName: "GPT Image 1"},
 	{ID: "gpt-image-1.5", Object: "model", Created: 1735689600, OwnedBy: "openai", Type: "model", DisplayName: "GPT Image 1.5"},
 	{ID: "gpt-image-2", Object: "model", Created: 1738368000, OwnedBy: "openai", Type: "model", DisplayName: "GPT Image 2"},
+	{ID: "gpt-realtime-1.5", Object: "model", Created: 1772668800, OwnedBy: "openai", Type: "model", DisplayName: "GPT Realtime 1.5"},
+	{ID: "gpt-realtime-2", Object: "model", Created: 1776873600, OwnedBy: "openai", Type: "model", DisplayName: "GPT Realtime 2"},
 }
 
 // DefaultModelIDs returns the default model ID list

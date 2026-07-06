@@ -376,6 +376,71 @@ func TestBuildGenerationConfig_ThinkingDynamicBudget(t *testing.T) {
 	}
 }
 
+func TestBuildGenerationConfig_GeminiReasoningOmitsUnsupportedParams(t *testing.T) {
+	temperature := 0.7
+	topP := 0.9
+	topK := 40
+
+	for _, model := range []string{"gemini-3.1-pro-high", "gemini-pro-agent"} {
+		t.Run(model, func(t *testing.T) {
+			cfg := buildGenerationConfig(&ClaudeRequest{
+				Model:       model,
+				MaxTokens:   4096,
+				Temperature: &temperature,
+				TopP:        &topP,
+				TopK:        &topK,
+			})
+
+			require.NotNil(t, cfg)
+			require.Equal(t, 4096, cfg.MaxOutputTokens)
+			require.Nil(t, cfg.StopSequences)
+			require.Nil(t, cfg.Temperature)
+			require.Nil(t, cfg.TopP)
+			require.Nil(t, cfg.TopK)
+		})
+	}
+}
+
+func TestTransformClaudeToGeminiWithOptions_GeminiReasoningToolConfig(t *testing.T) {
+	baseReq := &ClaudeRequest{
+		Model: "claude-3-5-sonnet-latest",
+		Messages: []ClaudeMessage{
+			{
+				Role:    "user",
+				Content: json.RawMessage(`[{"type":"text","text":"hello"}]`),
+			},
+		},
+	}
+
+	t.Run("omits empty tool config", func(t *testing.T) {
+		body, err := TransformClaudeToGeminiWithOptions(baseReq, "project-1", "gemini-pro-agent", DefaultTransformOptions())
+		require.NoError(t, err)
+
+		var req V1InternalRequest
+		require.NoError(t, json.Unmarshal(body, &req))
+		require.Nil(t, req.Request.ToolConfig)
+	})
+
+	t.Run("keeps tool config when tools exist", func(t *testing.T) {
+		claudeReq := *baseReq
+		claudeReq.Tools = []ClaudeTool{
+			{
+				Name:        "get_weather",
+				Description: "Get weather information",
+				InputSchema: map[string]any{"type": "object"},
+			},
+		}
+
+		body, err := TransformClaudeToGeminiWithOptions(&claudeReq, "project-1", "gemini-pro-agent", DefaultTransformOptions())
+		require.NoError(t, err)
+
+		var req V1InternalRequest
+		require.NoError(t, json.Unmarshal(body, &req))
+		require.NotNil(t, req.Request.ToolConfig)
+		require.Len(t, req.Request.Tools, 1)
+	})
+}
+
 func TestTransformClaudeToGeminiWithOptions_PreservesBillingHeaderSystemBlock(t *testing.T) {
 	tests := []struct {
 		name   string

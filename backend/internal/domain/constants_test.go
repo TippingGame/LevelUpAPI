@@ -49,6 +49,27 @@ func TestDefaultAntigravityModelMapping_IncludesFable5(t *testing.T) {
 	}
 }
 
+func TestDefaultAntigravityModelMapping_Gemini31ProHighUsesAgent(t *testing.T) {
+	t.Parallel()
+
+	expected := map[string]string{
+		"gemini-3.1-pro":                 AntigravityGemini31ProAgentModel,
+		"gemini-3.1-pro-high":            AntigravityGemini31ProAgentModel,
+		"gemini-3.1-pro-preview":         AntigravityGemini31ProAgentModel,
+		AntigravityGemini31ProAgentModel: AntigravityGemini31ProAgentModel,
+	}
+
+	for model, want := range expected {
+		got, ok := DefaultAntigravityModelMapping[model]
+		if !ok {
+			t.Fatalf("expected %q in DefaultAntigravityModelMapping", model)
+		}
+		if got != want {
+			t.Fatalf("DefaultAntigravityModelMapping[%q] = %q, want %q", model, got, want)
+		}
+	}
+}
+
 func TestDefaultBedrockModelMapping_IncludesSonnet5(t *testing.T) {
 	t.Parallel()
 

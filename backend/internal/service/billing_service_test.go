@@ -168,6 +168,22 @@ func TestGetModelPricing_OpenAIGPT55ProFallback(t *testing.T) {
 	require.InDelta(t, 1875e-6, pricing.OutputPricePerTokenPriority, 1e-12)
 }
 
+func TestGetModelPricing_OpenAIGPT56Fallback(t *testing.T) {
+	svc := newTestBillingService()
+
+	for _, model := range []string{"gpt-5.6-sol", "openai/gpt-5.6-terra", "models/gpt-5.6-luna"} {
+		pricing, err := svc.GetModelPricing(model)
+		require.NoError(t, err, model)
+		require.NotNil(t, pricing)
+		require.InDelta(t, 5e-6, pricing.InputPricePerToken, 1e-12, model)
+		require.InDelta(t, 10e-6, pricing.InputPricePerTokenPriority, 1e-12, model)
+		require.InDelta(t, 30e-6, pricing.OutputPricePerToken, 1e-12, model)
+		require.InDelta(t, 60e-6, pricing.OutputPricePerTokenPriority, 1e-12, model)
+		require.InDelta(t, 0.5e-6, pricing.CacheReadPricePerToken, 1e-12, model)
+		require.Equal(t, 272000, pricing.LongContextInputThreshold, model)
+	}
+}
+
 func TestGetModelPricing_OpenAIGPT54MiniFallback(t *testing.T) {
 	svc := newTestBillingService()
 
@@ -250,6 +266,7 @@ func TestGetFallbackPricing_FamilyMatching(t *testing.T) {
 		{name: "gemini unknown no fallback", model: "gemini-2.0-pro", expectNilPricing: true},
 		{name: "openai gpt5.5", model: "gpt-5.5", expectedInput: 125e-6},
 		{name: "openai gpt5.5 pro", model: "openai/gpt-5.5-pro", expectedInput: 125e-6},
+		{name: "openai gpt5.6 sol", model: "openai/gpt-5.6-sol", expectedInput: 5e-6},
 		{name: "openai gpt5.4", model: "gpt-5.4", expectedInput: 62.5e-6},
 		{name: "openai gpt5.4 mini", model: "gpt-5.4-mini", expectedInput: 7.5e-7},
 		{name: "openai gpt5.3 codex", model: "gpt-5.3-codex", expectedInput: 1.5e-6},
@@ -258,6 +275,12 @@ func TestGetFallbackPricing_FamilyMatching(t *testing.T) {
 		{name: "openai legacy gpt5.1 codex falls back to gpt5.3 codex", model: "gpt-5.1-codex", expectedInput: 1.5e-6},
 		{name: "openai legacy codex mini latest falls back to gpt5.3 codex", model: "codex-mini-latest", expectedInput: 1.5e-6},
 		{name: "openai unknown no fallback", model: "gpt-unknown-model", expectNilPricing: true},
+		{name: "deepseek chat", model: "deepseek-chat", expectedInput: 1.4e-7},
+		{name: "glm newest", model: "glm-5.1", expectedInput: 1.4e-6},
+		{name: "kimi coding", model: "kimi-for-coding", expectedInput: 0.95e-6},
+		{name: "minimax highspeed", model: "minimax-m2.7-highspeed", expectedInput: 0.60e-6},
+		{name: "doubao vision embedding", model: "doubao-embedding-vision-251215", expectedInput: 0.098e-6},
+		{name: "grok latest", model: "grok-latest", expectedInput: 1.25e-6},
 		{name: "non supported family", model: "qwen-max", expectNilPricing: true},
 	}
 

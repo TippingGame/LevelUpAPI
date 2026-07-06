@@ -1107,7 +1107,11 @@ func ensureAntigravityDefaultPassthrough(mapping map[string]string, model string
 			return
 		}
 	}
-	mapping[model] = model
+	target := model
+	if defaultTarget, ok := domain.DefaultAntigravityModelMapping[model]; ok && defaultTarget != "" {
+		target = defaultTarget
+	}
+	mapping[model] = target
 }
 
 func ensureAntigravityDefaultPassthroughs(mapping map[string]string, models []string) {

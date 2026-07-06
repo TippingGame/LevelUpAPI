@@ -23,7 +23,22 @@ var (
 	openAIModelDatePattern        = regexp.MustCompile(`-\d{8}$`)
 	openAIModelBasePattern        = regexp.MustCompile(`^(gpt-\d+(?:\.\d+)?)(?:-|$)`)
 	defaultOpenAITextPricingModel = "gpt-5.1-codex"
-	openAIGPT55FallbackPricing    = &LiteLLMModelPricing{
+	openAIGPT56FallbackPricing    = &LiteLLMModelPricing{
+		InputCostPerToken:               5e-06,
+		InputCostPerTokenPriority:       10e-06,
+		OutputCostPerToken:              30e-06,
+		OutputCostPerTokenPriority:      60e-06,
+		CacheReadInputTokenCost:         0.5e-06,
+		CacheReadInputTokenCostPriority: 1e-06,
+		LongContextInputTokenThreshold:  272000,
+		LongContextInputCostMultiplier:  2.0,
+		LongContextOutputCostMultiplier: 1.5,
+		LiteLLMProvider:                 "openai",
+		Mode:                            "chat",
+		SupportsPromptCaching:           true,
+		SupportsServiceTier:             true,
+	}
+	openAIGPT55FallbackPricing = &LiteLLMModelPricing{
 		InputCostPerToken:               125e-06,
 		InputCostPerTokenPriority:       312.5e-06,
 		OutputCostPerToken:              750e-06,
@@ -805,7 +820,7 @@ func (s *PricingService) matchByModelFamily(model string) *LiteLLMModelPricing {
 // 2. gpt-5.2-codex -> gpt-5.2（去掉后缀如 -codex, -mini, -max 等）
 // 3. gpt-5.2-20251222 -> gpt-5.2（去掉日期版本号）
 // 4. gpt-5.3-codex -> gpt-5.2-codex
-// 5. gpt-5.5* / gpt-5.4* -> Codex rate card 静态兜底价
+// 5. gpt-5.6* / gpt-5.5* / gpt-5.4* -> 静态兜底价
 // 6. 最终回退到 defaultOpenAITextPricingModel
 func (s *PricingService) matchOpenAIModel(model string) *LiteLLMModelPricing {
 	if strings.HasPrefix(model, "gpt-5.3-codex-spark") {
@@ -834,6 +849,12 @@ func (s *PricingService) matchOpenAIModel(model string) *LiteLLMModelPricing {
 				Info(fmt.Sprintf("[Pricing] OpenAI fallback matched %s -> %s", model, "gpt-5.2-codex"))
 			return pricing
 		}
+	}
+
+	if strings.HasPrefix(model, "gpt-5.6") {
+		logger.With(zap.String("component", "service.pricing")).
+			Info(fmt.Sprintf("[Pricing] OpenAI fallback matched %s -> %s", model, "gpt-5.6(static)"))
+		return openAIGPT56FallbackPricing
 	}
 
 	if strings.HasPrefix(model, "gpt-5.5") {

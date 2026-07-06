@@ -4,18 +4,20 @@
 
 // OpenAI
 const openaiModels = [
+  // GPT-5.6 系列
+  'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna',
   // GPT-5.2 系列
   'gpt-5.2', 'gpt-5.2-2025-12-11', 'gpt-5.2-chat-latest',
   'gpt-5.2-pro', 'gpt-5.2-pro-2025-12-11',
   // GPT-5.5 系列
-  'gpt-5.5',
+  'gpt-5.5', 'gpt-5.5-pro',
   // GPT-5.4 系列
-  'gpt-5.4', 'gpt-5.4-mini', 'gpt-5.4-2026-03-05',
+  'gpt-5.4', 'gpt-5.4-pro', 'gpt-5.4-mini', 'gpt-5.4-2026-03-05',
   // GPT-5.3 系列
   'gpt-5.3-codex', 'gpt-5.3-codex-spark', 'codex-auto-review',
-  'gpt-4o-audio-preview', 'gpt-4o-realtime-preview',
+  'gpt-4o-audio-preview', 'gpt-4o-realtime-preview', 'gpt-realtime-1.5', 'gpt-realtime-2',
   // GPT Image 系列
-  'gpt-image-1', 'gpt-image-1.5', 'gpt-image-2'
+  'gpt-image-1', 'gpt-image-1.5', 'gpt-image-2', 'gpt-image-2-2026-04-21'
 ]
 
 // Anthropic Claude
@@ -45,8 +47,12 @@ const geminiModels = [
   'gemini-2.5-flash',
   'gemini-2.5-pro',
   'gemini-3.5-flash',
+  'gemini-3-flash',
   'gemini-3-flash-preview',
-  'gemini-3-pro-preview'
+  'gemini-3-pro-preview',
+  'gemini-3.1-flash-image-preview',
+  'gemini-embedding-2',
+  'gemini-embedding-2-preview'
 ]
 
 // Antigravity 官方支持的模型（精确匹配）
@@ -74,6 +80,7 @@ const antigravityModels = [
   'gemini-3-pro-high',
   'gemini-3-pro-low',
   // Gemini 3.1 系列
+  'gemini-pro-agent',
   'gemini-3.1-pro-high',
   'gemini-3.1-pro-low',
   'gemini-3-pro-image',
@@ -86,7 +93,8 @@ const antigravityModels = [
 const zhipuModels = [
   'glm-4', 'glm-4v', 'glm-4-plus', 'glm-4-0520',
   'glm-4-air', 'glm-4-airx', 'glm-4-long', 'glm-4-flash',
-  'glm-4v-plus', 'glm-4.5', 'glm-4.6',
+  'glm-4v-plus', 'glm-4.5', 'glm-4.5-x', 'glm-4.5-air', 'glm-4.5-airx', 'glm-4.6', 'glm-4.7',
+  'glm-4.7-flash', 'glm-4.7-flashx', 'glm-5', 'glm-5.1', 'glm-5-turbo',
   'glm-3-turbo', 'glm-4-alltools',
   'chatglm_turbo', 'chatglm_pro', 'chatglm_std', 'chatglm_lite',
   'cogview-3', 'cogvideo'
@@ -106,7 +114,7 @@ const qwenModels = [
 // DeepSeek
 const deepseekModels = [
   'deepseek-chat', 'deepseek-coder', 'deepseek-reasoner',
-  'deepseek-v3', 'deepseek-v3-0324',
+  'deepseek-v3', 'deepseek-v3-0324', 'deepseek-v4-pro', 'deepseek-v4-flash',
   'deepseek-r1', 'deepseek-r1-0528',
   'deepseek-r1-distill-qwen-32b', 'deepseek-r1-distill-qwen-14b', 'deepseek-r1-distill-qwen-7b',
   'deepseek-r1-distill-llama-70b', 'deepseek-r1-distill-llama-8b'
@@ -132,6 +140,7 @@ const metaModels = [
 
 // xAI Grok
 const xaiModels = [
+  'grok-4.3', 'grok-build-0.1',
   'grok-4', 'grok-4-0709',
   'grok-3-beta', 'grok-3-mini-beta', 'grok-3-fast-beta',
   'grok-2', 'grok-2-vision', 'grok-2-image',
@@ -158,11 +167,12 @@ const yiModels = [
 // Moonshot/Kimi
 const moonshotModels = [
   'moonshot-v1-8k', 'moonshot-v1-32k', 'moonshot-v1-128k',
-  'kimi-latest'
+  'kimi-latest', 'kimi-k2', 'kimi-k2-thinking', 'kimi-k2.5', 'kimi-k2.6', 'kimi-for-coding'
 ]
 
 // 字节跳动 豆包
 const doubaoModels = [
+  'doubao-embedding-vision',
   'doubao-pro-256k', 'doubao-pro-128k', 'doubao-pro-32k', 'doubao-pro-4k',
   'doubao-lite-128k', 'doubao-lite-32k', 'doubao-lite-4k',
   'doubao-vision-pro-32k', 'doubao-vision-lite-32k',
@@ -172,6 +182,7 @@ const doubaoModels = [
 
 // MiniMax
 const minimaxModels = [
+  'minimax-m3', 'minimax-m2.7', 'minimax-m2.7-highspeed', 'minimax-m2.5', 'minimax-m2.1', 'minimax-m2',
   'abab6.5-chat', 'abab6.5s-chat', 'abab6.5s-chat-pro',
   'abab6-chat',
   'abab5.5-chat', 'abab5.5s-chat'
@@ -288,10 +299,11 @@ const antigravityPresetMappings = [
   { label: 'Sonnet3.5→4.6', from: 'claude-3-5-sonnet-20241022', to: 'claude-sonnet-4-6', color: 'bg-teal-100 text-teal-700 hover:bg-teal-200 dark:bg-teal-900/30 dark:text-teal-400' },
   { label: 'Opus4.5→4.6', from: 'claude-opus-4-5-20251101', to: 'claude-opus-4-6-thinking', color: 'bg-violet-100 text-violet-700 hover:bg-violet-200 dark:bg-violet-900/30 dark:text-violet-400' },
   // Gemini 3→3.1 映射
-  { label: '3-Pro-Preview→3.1-Pro-High', from: 'gemini-3-pro-preview', to: 'gemini-3.1-pro-high', color: 'bg-amber-100 text-amber-700 hover:bg-amber-200 dark:bg-amber-900/30 dark:text-amber-400' },
-  { label: '3-Pro-High→3.1-Pro-High', from: 'gemini-3-pro-high', to: 'gemini-3.1-pro-high', color: 'bg-orange-100 text-orange-700 hover:bg-orange-200 dark:bg-orange-900/30 dark:text-orange-400' },
+  { label: '3-Pro-Preview→Agent', from: 'gemini-3-pro-preview', to: 'gemini-pro-agent', color: 'bg-amber-100 text-amber-700 hover:bg-amber-200 dark:bg-amber-900/30 dark:text-amber-400' },
+  { label: '3-Pro-High→Agent', from: 'gemini-3-pro-high', to: 'gemini-pro-agent', color: 'bg-orange-100 text-orange-700 hover:bg-orange-200 dark:bg-orange-900/30 dark:text-orange-400' },
   { label: '3-Pro-Low→3.1-Pro-Low', from: 'gemini-3-pro-low', to: 'gemini-3.1-pro-low', color: 'bg-yellow-100 text-yellow-700 hover:bg-yellow-200 dark:bg-yellow-900/30 dark:text-yellow-400' },
-  { label: '3.1-Pro-High透传', from: 'gemini-3.1-pro-high', to: 'gemini-3.1-pro-high', color: 'bg-orange-100 text-orange-700 hover:bg-orange-200 dark:bg-orange-900/30 dark:text-orange-400' },
+  { label: '3.1-Pro-High→Agent', from: 'gemini-3.1-pro-high', to: 'gemini-pro-agent', color: 'bg-orange-100 text-orange-700 hover:bg-orange-200 dark:bg-orange-900/30 dark:text-orange-400' },
+  { label: 'Agent透传', from: 'gemini-pro-agent', to: 'gemini-pro-agent', color: 'bg-orange-100 text-orange-700 hover:bg-orange-200 dark:bg-orange-900/30 dark:text-orange-400' },
   { label: '3.1-Pro-Low透传', from: 'gemini-3.1-pro-low', to: 'gemini-3.1-pro-low', color: 'bg-yellow-100 text-yellow-700 hover:bg-yellow-200 dark:bg-yellow-900/30 dark:text-yellow-400' },
   // Gemini 通配符映射
   { label: 'Gemini 3→Flash', from: 'gemini-3*', to: 'gemini-3-flash', color: 'bg-yellow-100 text-yellow-700 hover:bg-yellow-200 dark:bg-yellow-900/30 dark:text-yellow-400' },

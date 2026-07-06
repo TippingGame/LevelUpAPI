@@ -2,7 +2,7 @@ package antigravity
 
 import "testing"
 
-func TestDefaultModels_ExcludesImageModels(t *testing.T) {
+func TestDefaultModels_ContainsNewAndLegacyImageModels(t *testing.T) {
 	t.Parallel()
 
 	models := DefaultModels()
@@ -11,25 +11,10 @@ func TestDefaultModels_ExcludesImageModels(t *testing.T) {
 		byID[m.ID] = m
 	}
 
-	if _, ok := byID["claude-opus-4-6-thinking"]; !ok {
-		t.Fatalf("expected non-image model %q to be exposed in DefaultModels", "claude-opus-4-6-thinking")
-	}
-
-	if _, ok := byID["claude-opus-4-8"]; !ok {
-		t.Fatalf("expected Opus model %q to be exposed in DefaultModels", "claude-opus-4-8")
-	}
-
 	requiredIDs := []string{
 		"claude-fable-5",
-	}
-
-	for _, id := range requiredIDs {
-		if _, ok := byID[id]; !ok {
-			t.Fatalf("expected model %q to be exposed in DefaultModels", id)
-		}
-	}
-
-	blockedIDs := []string{
+		"claude-opus-4-8",
+		"claude-opus-4-6-thinking",
 		"gemini-2.5-flash-image",
 		"gemini-2.5-flash-image-preview",
 		"gemini-3.1-flash-image",
@@ -37,9 +22,9 @@ func TestDefaultModels_ExcludesImageModels(t *testing.T) {
 		"gemini-3-pro-image",
 	}
 
-	for _, id := range blockedIDs {
-		if _, ok := byID[id]; ok {
-			t.Fatalf("did not expect image generation model %q to be exposed in DefaultModels", id)
+	for _, id := range requiredIDs {
+		if _, ok := byID[id]; !ok {
+			t.Fatalf("expected model %q to be exposed in DefaultModels", id)
 		}
 	}
 }
