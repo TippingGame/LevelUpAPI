@@ -124,15 +124,14 @@
 
           <!-- 支持模型 -->
           <td class="align-top px-4 py-3">
-            <div class="grid gap-2">
-              <AvailableModelDisclosure
+            <div class="flex flex-wrap gap-1">
+              <SupportedModelChip
                 v-for="m in section.supported_models"
                 :key="`${section.platform}-${m.name}`"
                 :model="m"
-                :groups="section.groups"
-                :user-group-rates="userGroupRates"
                 :pricing-key-prefix="pricingKeyPrefix"
                 :no-pricing-label="noPricingLabel"
+                :show-platform="false"
                 :platform-hint="section.platform"
               />
               <span v-if="section.supported_models.length === 0" class="text-xs text-gray-400">
@@ -151,7 +150,7 @@ import { useI18n } from 'vue-i18n'
 import Icon from '@/components/icons/Icon.vue'
 import PlatformIcon from '@/components/common/PlatformIcon.vue'
 import GroupBadge from '@/components/common/GroupBadge.vue'
-import AvailableModelDisclosure from './AvailableModelDisclosure.vue'
+import SupportedModelChip from './SupportedModelChip.vue'
 import type { UserAvailableChannel, UserAvailableGroup, UserChannelPlatformSection } from '@/api/channels'
 import type { GroupPlatform, SubscriptionType } from '@/types'
 import { platformBadgeClass } from '@/utils/platformColors'
