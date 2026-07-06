@@ -367,6 +367,13 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 						if routeCursor.switchToNextWithoutCooldown(apiKey.ID, "account_select_failed", reqLog, zap.Error(err), zap.Int64p("group_id", currentAPIKey.GroupID)) {
 							continue geminiRouteLoop
 						}
+						if status, code, message, retryAfter, ok := accountSelectionErrorDetails(err); ok {
+							if retryAfter > 0 {
+								c.Header("Retry-After", strconv.Itoa(retryAfter))
+							}
+							h.handleStreamingAwareError(c, status, code, message, streamStarted)
+							return
+						}
 						h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "api_error", "No available accounts: "+err.Error(), streamStarted)
 						return
 					}
@@ -741,6 +748,13 @@ routeLoop:
 					)
 					if routeBackedRequest && routeCursor.switchToNextWithoutCooldown(apiKey.ID, "account_select_failed", reqLog, zap.Error(err)) {
 						continue routeLoop
+					}
+					if status, code, message, retryAfter, ok := accountSelectionErrorDetails(err); ok {
+						if retryAfter > 0 {
+							c.Header("Retry-After", strconv.Itoa(retryAfter))
+						}
+						h.handleStreamingAwareError(c, status, code, message, streamStarted)
+						return
 					}
 					h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "api_error", "No available accounts: "+err.Error(), streamStarted)
 					return
@@ -2369,6 +2383,13 @@ func (h *GatewayHandler) CountTokens(c *gin.Context) {
 			if routeCursor.switchToNextWithoutCooldown(apiKey.ID, "count_tokens_account_select_failed", reqLog, zap.Error(err), zap.Int64p("group_id", currentAPIKey.GroupID)) {
 				continue
 			}
+			if status, code, message, retryAfter, ok := accountSelectionErrorDetails(err); ok {
+				if retryAfter > 0 {
+					c.Header("Retry-After", strconv.Itoa(retryAfter))
+				}
+				h.errorResponse(c, status, code, message)
+				return
+			}
 			h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "Service temporarily unavailable")
 			return
 		}
@@ -2656,6 +2677,18 @@ func billingErrorDetails(err error) (status int, code, message string, retryAfte
 		msg = "Billing error"
 	}
 	return http.StatusForbidden, "billing_error", msg, 0
+}
+
+func accountSelectionErrorDetails(err error) (status int, code, message string, retryAfter int, ok bool) {
+	if errors.Is(err, service.ErrAccountRPMExceeded) {
+		msg := pkgerrors.Message(err)
+		if msg == "" {
+			msg = "account requests-per-minute limit exceeded"
+		}
+		retrySeconds := 60 - int(time.Now().Unix()%60)
+		return http.StatusTooManyRequests, "rate_limit_error", msg, retrySeconds, true
+	}
+	return 0, "", "", 0, false
 }
 
 func (h *GatewayHandler) metadataBridgeEnabled() bool {

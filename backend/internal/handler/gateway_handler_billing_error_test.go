@@ -26,6 +26,21 @@ func TestBillingErrorDetails_MapsUserRPMExceededToTooManyRequests(t *testing.T) 
 	require.LessOrEqual(t, retryAfter, 60)
 }
 
+func TestAccountSelectionErrorDetails_MapsAccountRPMExceededToTooManyRequests(t *testing.T) {
+	status, code, msg, retryAfter, ok := accountSelectionErrorDetails(service.ErrAccountRPMExceeded)
+	require.True(t, ok)
+	require.Equal(t, http.StatusTooManyRequests, status)
+	require.Equal(t, "rate_limit_error", code)
+	require.NotEmpty(t, msg)
+	require.Greater(t, retryAfter, 0, "account RPM exceeded should return positive Retry-After")
+	require.LessOrEqual(t, retryAfter, 60)
+}
+
+func TestAccountSelectionErrorDetails_IgnoresNoAvailableAccounts(t *testing.T) {
+	_, _, _, _, ok := accountSelectionErrorDetails(service.ErrNoAvailableAccounts)
+	require.False(t, ok)
+}
+
 func TestBillingErrorDetails_APIKeyRateLimitStillMaps(t *testing.T) {
 	// 回归保护：加 RPM 分支后不应影响已有 APIKey rate limit 的映射。
 	for _, err := range []error{
