@@ -598,6 +598,10 @@ func IsBillableStreamUsageError(err error) bool {
 	return errors.As(err, &target)
 }
 
+func ForwardResultHasBillableUsage(result *ForwardResult) bool {
+	return result != nil && claudeUsageHasBillableTokens(&result.Usage)
+}
+
 func claudeUsageHasBillableTokens(usage *ClaudeUsage) bool {
 	if usage == nil {
 		return false

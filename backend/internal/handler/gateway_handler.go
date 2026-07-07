@@ -1030,13 +1030,19 @@ routeLoop:
 				})
 			}
 			if err != nil {
-				if service.IsBillableStreamUsageError(err) && result != nil {
+				billableStreamUsageError := service.IsBillableStreamUsageError(err)
+				if result != nil && (billableStreamUsageError || service.ForwardResultHasBillableUsage(result)) {
 					recordUsageResult(result)
-					reqLog.Warn("gateway.billable_stream_usage_recorded_after_error",
+					usageRecordedEvent := "gateway.forward_usage_recorded_after_error"
+					if billableStreamUsageError {
+						usageRecordedEvent = "gateway.billable_stream_usage_recorded_after_error"
+					}
+					reqLog.Warn(usageRecordedEvent,
 						zap.Int64("account_id", account.ID),
 						zap.String("account_name", account.Name),
 						zap.String("account_platform", account.Platform),
 						zap.String("model", reqModel),
+						zap.Bool("billable_stream_usage_error", billableStreamUsageError),
 						zap.Int("input_tokens", result.Usage.InputTokens),
 						zap.Int("output_tokens", result.Usage.OutputTokens),
 						zap.Int("cache_creation_tokens", result.Usage.CacheCreationInputTokens),
