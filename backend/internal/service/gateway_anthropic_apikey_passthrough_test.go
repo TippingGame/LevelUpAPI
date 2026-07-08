@@ -1794,6 +1794,23 @@ func TestGatewayService_ParseSSEUsagePassthrough_MessageStartFallbacks(t *testin
 	require.Equal(t, 4, usage.CacheCreation1hTokens)
 }
 
+func TestGatewayService_ParseSSEUsagePassthrough_OpenAIStyleCachedTokens(t *testing.T) {
+	svc := &GatewayService{}
+	usage := &ClaudeUsage{}
+	data := `{"type":"message_start","message":{"usage":{"input_tokens":594,"cache_read_input_tokens":0,"input_tokens_details":{"cached_tokens":594}}}}`
+
+	svc.parseSSEUsagePassthrough(data, usage)
+
+	require.Equal(t, 594, usage.InputTokens)
+	require.Equal(t, 594, usage.CacheReadInputTokens)
+	require.True(t, usage.InputTokensIncludeCacheRead)
+
+	normalizeClaudeCompatibleUsageForBilling(usage)
+	require.Equal(t, 0, usage.InputTokens)
+	require.Equal(t, 594, usage.CacheReadInputTokens)
+	require.False(t, usage.InputTokensIncludeCacheRead)
+}
+
 func TestGatewayService_ParseSSEUsagePassthrough_MessageDeltaSelectiveOverwrite(t *testing.T) {
 	svc := &GatewayService{}
 	usage := &ClaudeUsage{

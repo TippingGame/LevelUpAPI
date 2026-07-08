@@ -706,7 +706,7 @@ func TestOpenAIGatewayServiceRecordUsage_UsesFallbackRequestIDForBillingAndUsage
 	require.Equal(t, "local:req-local-fallback", usageRepo.lastLog.RequestID)
 }
 
-func TestOpenAIGatewayServiceRecordUsage_PrefersUpstreamRequestIDOverClientRequestID(t *testing.T) {
+func TestOpenAIGatewayServiceRecordUsage_ComposesUpstreamRequestIDWithBillingRequestID(t *testing.T) {
 	usageRepo := &openAIRecordUsageLogRepoStub{}
 	billingRepo := &openAIRecordUsageBillingRepoStub{result: &UsageBillingApplyResult{Applied: true}}
 	userRepo := &openAIRecordUsageUserRepoStub{}
@@ -714,6 +714,7 @@ func TestOpenAIGatewayServiceRecordUsage_PrefersUpstreamRequestIDOverClientReque
 	svc := newOpenAIRecordUsageServiceWithBillingRepoForTest(usageRepo, billingRepo, userRepo, subRepo, nil)
 
 	ctx := context.WithValue(context.Background(), ctxkey.ClientRequestID, "openai-client-stable-123")
+	ctx = context.WithValue(ctx, ctxkey.BillingRequestID, "openai-billing-unique-789")
 	err := svc.RecordUsage(ctx, &OpenAIRecordUsageInput{
 		Result: &OpenAIForwardResult{
 			RequestID: "upstream-openai-volatile-456",
@@ -731,9 +732,48 @@ func TestOpenAIGatewayServiceRecordUsage_PrefersUpstreamRequestIDOverClientReque
 
 	require.NoError(t, err)
 	require.NotNil(t, billingRepo.lastCmd)
-	require.Equal(t, "upstream-openai-volatile-456", billingRepo.lastCmd.RequestID)
+	require.Equal(t, "upstream-openai-volatile-456|billing:openai-billing-unique-789", billingRepo.lastCmd.RequestID)
 	require.NotNil(t, usageRepo.lastLog)
-	require.Equal(t, "upstream-openai-volatile-456", usageRepo.lastLog.RequestID)
+	require.Equal(t, "upstream-openai-volatile-456|billing:openai-billing-unique-789", usageRepo.lastLog.RequestID)
+}
+
+func TestOpenAIGatewayServiceRecordUsage_ReusedClientRequestIDDoesNotCollapseHTTPBilling(t *testing.T) {
+	usageRepo := &openAIRecordUsageLogRepoStub{}
+	billingRepo := &openAIRecordUsageBillingRepoStub{result: &UsageBillingApplyResult{Applied: true}}
+	userRepo := &openAIRecordUsageUserRepoStub{}
+	subRepo := &openAIRecordUsageSubRepoStub{}
+	svc := newOpenAIRecordUsageServiceWithBillingRepoForTest(usageRepo, billingRepo, userRepo, subRepo, nil)
+
+	baseCtx := context.WithValue(context.Background(), ctxkey.ClientRequestID, "codex-reused-client-request")
+	firstCtx := context.WithValue(baseCtx, ctxkey.BillingRequestID, "billing-http-1")
+	secondCtx := context.WithValue(baseCtx, ctxkey.BillingRequestID, "billing-http-2")
+
+	input := func(outputTokens int) *OpenAIRecordUsageInput {
+		return &OpenAIRecordUsageInput{
+			Result: &OpenAIForwardResult{
+				RequestID: "upstream-openai-reused",
+				Usage: OpenAIUsage{
+					InputTokens:  8,
+					OutputTokens: outputTokens,
+				},
+				Model:    "gpt-5.1",
+				Duration: time.Second,
+			},
+			APIKey:  &APIKey{ID: 10051},
+			User:    &User{ID: 20051},
+			Account: &Account{ID: 30051},
+		}
+	}
+
+	require.NoError(t, svc.RecordUsage(firstCtx, input(4)))
+	require.NotNil(t, billingRepo.lastCmd)
+	firstRequestID := billingRepo.lastCmd.RequestID
+	require.Equal(t, "upstream-openai-reused|billing:billing-http-1", firstRequestID)
+
+	require.NoError(t, svc.RecordUsage(secondCtx, input(9)))
+	require.NotNil(t, billingRepo.lastCmd)
+	require.Equal(t, "upstream-openai-reused|billing:billing-http-2", billingRepo.lastCmd.RequestID)
+	require.NotEqual(t, firstRequestID, billingRepo.lastCmd.RequestID)
 }
 
 func TestOpenAIGatewayServiceRecordUsage_WSModePrefersUpstreamRequestIDOverClientRequestID(t *testing.T) {

@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -7415,11 +7416,11 @@ func (s *GatewayService) parseSSEUsagePassthrough(data string, usage *ClaudeUsag
 	}
 
 	if usage.CacheReadInputTokens == 0 {
-		if cached := parsed.Get("message.usage.cached_tokens").Int(); cached > 0 {
+		if cached, ok := compatCachedTokensFromUsageNode(parsed.Get("message.usage")); ok {
 			usage.CacheReadInputTokens = int(cached)
 			usage.InputTokensIncludeCacheRead = true
 		}
-		if cached := parsed.Get("usage.cached_tokens").Int(); usage.CacheReadInputTokens == 0 && cached > 0 {
+		if cached, ok := compatCachedTokensFromUsageNode(parsed.Get("usage")); usage.CacheReadInputTokens == 0 && ok {
 			usage.CacheReadInputTokens = int(cached)
 			usage.InputTokensIncludeCacheRead = true
 		}
@@ -7465,7 +7466,7 @@ func parseClaudeUsageFromResponseBody(body []byte) *ClaudeUsage {
 		usage.CacheCreationInputTokens = int(cc5m + cc1h)
 	}
 	if usage.CacheReadInputTokens == 0 {
-		if cached := usageNode.Get("cached_tokens").Int(); cached > 0 {
+		if cached, ok := compatCachedTokensFromUsageNode(usageNode); ok {
 			usage.CacheReadInputTokens = int(cached)
 			usage.InputTokensIncludeCacheRead = true
 		}
@@ -10024,8 +10025,7 @@ func (s *GatewayService) handleNonStreamingResponse(ctx context.Context, resp *h
 
 	// 兼容 Kimi cached_tokens → cache_read_input_tokens
 	if response.Usage.CacheReadInputTokens == 0 {
-		cachedTokens := gjson.GetBytes(body, "usage.cached_tokens").Int()
-		if cachedTokens > 0 {
+		if cachedTokens, ok := compatCachedTokensFromUsageNode(gjson.GetBytes(body, "usage")); ok {
 			response.Usage.CacheReadInputTokens = int(cachedTokens)
 			response.Usage.InputTokensIncludeCacheRead = true
 			if newBody, err := sjson.SetBytes(body, "usage.cache_read_input_tokens", cachedTokens); err == nil {
@@ -10266,18 +10266,69 @@ func finalizeLegacyUsageBillingWallet(p *postUsageBillingParams, deps *billingDe
 }
 
 func resolveUsageBillingRequestID(ctx context.Context, upstreamRequestID string) string {
-	if requestID := strings.TrimSpace(upstreamRequestID); requestID != "" {
-		return requestID
-	}
+	upstreamRequestID = strings.TrimSpace(upstreamRequestID)
+	billingRequestID := ""
+	clientRequestID := ""
+	localRequestID := ""
 	if ctx != nil {
-		if clientRequestID, _ := ctx.Value(ctxkey.ClientRequestID).(string); strings.TrimSpace(clientRequestID) != "" {
-			return "client:" + strings.TrimSpace(clientRequestID)
+		billingRequestID, _ = ctx.Value(ctxkey.BillingRequestID).(string)
+		billingRequestID = strings.TrimSpace(billingRequestID)
+		clientRequestID, _ = ctx.Value(ctxkey.ClientRequestID).(string)
+		clientRequestID = strings.TrimSpace(clientRequestID)
+		localRequestID, _ = ctx.Value(ctxkey.RequestID).(string)
+		localRequestID = strings.TrimSpace(localRequestID)
+	}
+
+	if upstreamRequestID != "" {
+		if billingRequestID != "" {
+			return compactUsageRequestID(upstreamRequestID, "billing", billingRequestID)
 		}
-		if requestID, _ := ctx.Value(ctxkey.RequestID).(string); strings.TrimSpace(requestID) != "" {
-			return "local:" + strings.TrimSpace(requestID)
+		if localRequestID != "" {
+			return compactUsageRequestID(upstreamRequestID, "local", localRequestID)
 		}
+		if clientRequestID != "" {
+			return compactUsageRequestID(upstreamRequestID, "client", clientRequestID)
+		}
+		return compactUsageRequestID(upstreamRequestID, "", "")
+	}
+	if billingRequestID != "" {
+		return compactUsageRequestID("billing:"+billingRequestID, "", "")
+	}
+	if localRequestID != "" {
+		return compactUsageRequestID("local:"+localRequestID, "", "")
+	}
+	if clientRequestID != "" {
+		return compactUsageRequestID("client:"+clientRequestID, "", "")
 	}
 	return "generated:" + generateRequestID()
+}
+
+func compactUsageRequestID(primary, secondaryKind, secondary string) string {
+	primary = strings.TrimSpace(primary)
+	secondaryKind = strings.TrimSpace(secondaryKind)
+	secondary = strings.TrimSpace(secondary)
+	raw := primary
+	if secondaryKind != "" && secondary != "" {
+		raw = primary + "|" + secondaryKind + ":" + secondary
+	}
+	if len(raw) <= 64 {
+		return raw
+	}
+
+	sum := sha256.Sum256([]byte(raw))
+	suffix := hex.EncodeToString(sum[:])[:16]
+	const sep = "|h:"
+	maxPrimaryLen := 64 - len(sep) - len(suffix)
+	if maxPrimaryLen <= 0 {
+		return suffix
+	}
+	if len(primary) > maxPrimaryLen {
+		primary = primary[:maxPrimaryLen]
+	}
+	if primary == "" {
+		return suffix
+	}
+	return primary + sep + suffix
 }
 
 func resolveUsageBillingPayloadFingerprint(ctx context.Context, requestPayloadHash string) string {
@@ -10285,11 +10336,14 @@ func resolveUsageBillingPayloadFingerprint(ctx context.Context, requestPayloadHa
 		return payloadHash
 	}
 	if ctx != nil {
-		if clientRequestID, _ := ctx.Value(ctxkey.ClientRequestID).(string); strings.TrimSpace(clientRequestID) != "" {
-			return "client:" + strings.TrimSpace(clientRequestID)
+		if billingRequestID, _ := ctx.Value(ctxkey.BillingRequestID).(string); strings.TrimSpace(billingRequestID) != "" {
+			return "billing:" + strings.TrimSpace(billingRequestID)
 		}
 		if requestID, _ := ctx.Value(ctxkey.RequestID).(string); strings.TrimSpace(requestID) != "" {
 			return "local:" + strings.TrimSpace(requestID)
+		}
+		if clientRequestID, _ := ctx.Value(ctxkey.ClientRequestID).(string); strings.TrimSpace(clientRequestID) != "" {
+			return "client:" + strings.TrimSpace(clientRequestID)
 		}
 	}
 	return ""
@@ -11948,16 +12002,47 @@ func reconcileCachedTokens(usage map[string]any) bool {
 	if usage == nil {
 		return false
 	}
-	cacheRead, _ := usage["cache_read_input_tokens"].(float64)
-	if cacheRead > 0 {
+	if cacheRead, ok := parseSSEUsageInt(usage["cache_read_input_tokens"]); ok && cacheRead > 0 {
 		return false // 已有标准字段，无需处理
 	}
-	cached, _ := usage["cached_tokens"].(float64)
-	if cached <= 0 {
+	cached, ok := compatCachedTokensFromUsageMap(usage)
+	if !ok {
 		return false
 	}
-	usage["cache_read_input_tokens"] = cached
+	usage["cache_read_input_tokens"] = float64(cached)
 	return true
+}
+
+func compatCachedTokensFromUsageNode(usage gjson.Result) (int, bool) {
+	if !usage.Exists() {
+		return 0, false
+	}
+	for _, path := range []string{
+		"cached_tokens",
+		"input_tokens_details.cached_tokens",
+		"prompt_tokens_details.cached_tokens",
+	} {
+		if v := usage.Get(path); v.Exists() && v.Int() > 0 {
+			return int(v.Int()), true
+		}
+	}
+	return 0, false
+}
+
+func compatCachedTokensFromUsageMap(usage map[string]any) (int, bool) {
+	if usage == nil {
+		return 0, false
+	}
+	if v, ok := parseSSEUsageInt(usage["cached_tokens"]); ok && v > 0 {
+		return v, true
+	}
+	for _, key := range []string{"input_tokens_details", "prompt_tokens_details"} {
+		details, _ := usage[key].(map[string]any)
+		if v, ok := parseSSEUsageInt(details["cached_tokens"]); ok && v > 0 {
+			return v, true
+		}
+	}
+	return 0, false
 }
 
 const debugGatewayBodyDefaultFilename = "gateway_debug.log"

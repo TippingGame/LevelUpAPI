@@ -28,11 +28,18 @@ func RequestLogger() gin.HandlerFunc {
 		c.Header(requestIDHeader, requestID)
 
 		ctx := context.WithValue(c.Request.Context(), ctxkey.RequestID, requestID)
+		billingRequestID, _ := ctx.Value(ctxkey.BillingRequestID).(string)
+		billingRequestID = strings.TrimSpace(billingRequestID)
+		if billingRequestID == "" {
+			billingRequestID = uuid.NewString()
+		}
+		ctx = context.WithValue(ctx, ctxkey.BillingRequestID, billingRequestID)
 		clientRequestID, _ := ctx.Value(ctxkey.ClientRequestID).(string)
 
 		requestLogger := logger.With(
 			zap.String("component", "http"),
 			zap.String("request_id", requestID),
+			zap.String("billing_request_id", billingRequestID),
 			zap.String("client_request_id", strings.TrimSpace(clientRequestID)),
 			zap.String("path", c.Request.URL.Path),
 			zap.String("method", c.Request.Method),

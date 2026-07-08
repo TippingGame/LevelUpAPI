@@ -14,6 +14,10 @@ const (
 	// ClientRequestID 客户端请求的唯一标识，用于追踪请求全生命周期（用于 Ops 监控与排障）。
 	ClientRequestID Key = "ctx_client_request_id"
 
+	// BillingRequestID 是服务端为每个入口 HTTP 请求生成的记账幂等种子。
+	// 它不透传客户端请求头，避免客户端复用 request/client id 时吞掉独立的上游成功请求。
+	BillingRequestID Key = "ctx_billing_request_id"
+
 	// Model 请求模型标识（用于统一请求链路日志字段）。
 	Model Key = "ctx_model"
 

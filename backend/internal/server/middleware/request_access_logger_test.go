@@ -74,6 +74,10 @@ func TestRequestLogger_GenerateAndPropagateRequestID(t *testing.T) {
 		if got := c.Writer.Header().Get(requestIDHeader); got != reqID {
 			t.Fatalf("response header request_id mismatch, header=%q ctx=%q", got, reqID)
 		}
+		billingID, ok := c.Request.Context().Value(ctxkey.BillingRequestID).(string)
+		if !ok || billingID == "" {
+			t.Fatalf("billing_request_id missing in context")
+		}
 		c.Status(http.StatusOK)
 	})
 
@@ -96,6 +100,10 @@ func TestRequestLogger_KeepIncomingRequestID(t *testing.T) {
 		reqID, _ := c.Request.Context().Value(ctxkey.RequestID).(string)
 		if reqID != "rid-fixed" {
 			t.Fatalf("request_id=%q, want rid-fixed", reqID)
+		}
+		billingID, _ := c.Request.Context().Value(ctxkey.BillingRequestID).(string)
+		if billingID == "" || billingID == "rid-fixed" {
+			t.Fatalf("billing_request_id=%q, want generated id distinct from request_id", billingID)
 		}
 		c.Status(http.StatusOK)
 	})

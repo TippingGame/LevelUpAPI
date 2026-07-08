@@ -38,6 +38,19 @@ func TestReconcileCachedTokens_KimiStyle(t *testing.T) {
 	assert.Equal(t, float64(23), usage["cache_read_input_tokens"])
 }
 
+func TestReconcileCachedTokens_OpenAIStyleInputTokenDetails(t *testing.T) {
+	usage := map[string]any{
+		"input_tokens":            float64(594),
+		"cache_read_input_tokens": float64(0),
+		"input_tokens_details": map[string]any{
+			"cached_tokens": float64(594),
+		},
+	}
+
+	assert.True(t, reconcileCachedTokens(usage))
+	assert.Equal(t, float64(594), usage["cache_read_input_tokens"])
+}
+
 func TestReconcileCachedTokens_NoCachedTokens(t *testing.T) {
 	// 无 cached_tokens 字段（原生 Claude）
 	usage := map[string]any{
@@ -306,6 +319,30 @@ func TestParseClaudeUsageFromResponseBody_MarksCompatCachedTokensIncluded(t *tes
 	normalizeClaudeCompatibleUsageForBilling(usage)
 	require.Equal(t, 400, usage.InputTokens)
 	require.Equal(t, 600, usage.CacheReadInputTokens)
+	require.False(t, usage.InputTokensIncludeCacheRead)
+}
+
+func TestParseClaudeUsageFromResponseBody_MarksOpenAIStyleCachedTokensIncluded(t *testing.T) {
+	body := []byte(`{
+		"usage": {
+			"input_tokens": 594,
+			"output_tokens": 1,
+			"cache_read_input_tokens": 0,
+			"input_tokens_details": {
+				"cached_tokens": 594
+			}
+		}
+	}`)
+
+	usage := parseClaudeUsageFromResponseBody(body)
+
+	require.Equal(t, 594, usage.InputTokens)
+	require.Equal(t, 594, usage.CacheReadInputTokens)
+	require.True(t, usage.InputTokensIncludeCacheRead)
+
+	normalizeClaudeCompatibleUsageForBilling(usage)
+	require.Equal(t, 0, usage.InputTokens)
+	require.Equal(t, 594, usage.CacheReadInputTokens)
 	require.False(t, usage.InputTokensIncludeCacheRead)
 }
 

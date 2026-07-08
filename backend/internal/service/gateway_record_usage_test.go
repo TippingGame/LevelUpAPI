@@ -364,13 +364,14 @@ func TestGatewayServiceRecordUsage_UsesFallbackRequestIDForUsageLog(t *testing.T
 	require.Equal(t, "local:gateway-local-fallback", usageRepo.lastLog.RequestID)
 }
 
-func TestGatewayServiceRecordUsage_PrefersUpstreamRequestIDOverClientRequestID(t *testing.T) {
+func TestGatewayServiceRecordUsage_ComposesUpstreamRequestIDWithBillingRequestID(t *testing.T) {
 	usageRepo := &openAIRecordUsageLogRepoStub{}
 	billingRepo := &openAIRecordUsageBillingRepoStub{result: &UsageBillingApplyResult{Applied: true}}
 	svc := newGatewayRecordUsageServiceWithBillingRepoForTest(usageRepo, billingRepo, &openAIRecordUsageUserRepoStub{}, &openAIRecordUsageSubRepoStub{})
 
 	ctx := context.WithValue(context.Background(), ctxkey.ClientRequestID, "client-stable-123")
 	ctx = context.WithValue(ctx, ctxkey.RequestID, "req-local-ignored")
+	ctx = context.WithValue(ctx, ctxkey.BillingRequestID, "billing-unique-789")
 	err := svc.RecordUsage(ctx, &RecordUsageInput{
 		Result: &ForwardResult{
 			RequestID: "upstream-volatile-456",
@@ -388,9 +389,23 @@ func TestGatewayServiceRecordUsage_PrefersUpstreamRequestIDOverClientRequestID(t
 
 	require.NoError(t, err)
 	require.NotNil(t, billingRepo.lastCmd)
-	require.Equal(t, "upstream-volatile-456", billingRepo.lastCmd.RequestID)
+	require.Equal(t, "upstream-volatile-456|billing:billing-unique-789", billingRepo.lastCmd.RequestID)
 	require.NotNil(t, usageRepo.lastLog)
-	require.Equal(t, "upstream-volatile-456", usageRepo.lastLog.RequestID)
+	require.Equal(t, "upstream-volatile-456|billing:billing-unique-789", usageRepo.lastLog.RequestID)
+}
+
+func TestResolveUsageBillingRequestID_LongUpstreamAndBillingIDsStayWithinLimit(t *testing.T) {
+	ctx1 := context.WithValue(context.Background(), ctxkey.BillingRequestID, strings.Repeat("billing-a", 10))
+	ctx2 := context.WithValue(context.Background(), ctxkey.BillingRequestID, strings.Repeat("billing-b", 10))
+	upstream := strings.Repeat("upstream-", 10)
+
+	id1 := resolveUsageBillingRequestID(ctx1, upstream)
+	id2 := resolveUsageBillingRequestID(ctx2, upstream)
+
+	require.LessOrEqual(t, len(id1), 64)
+	require.LessOrEqual(t, len(id2), 64)
+	require.NotEqual(t, id1, id2)
+	require.Contains(t, id1, "|h:")
 }
 
 func TestGatewayServiceRecordUsage_GeneratesRequestIDWhenAllSourcesMissing(t *testing.T) {
