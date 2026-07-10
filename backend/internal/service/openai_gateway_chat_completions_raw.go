@@ -366,9 +366,10 @@ func openAIUsageFromChatCompletionsUsage(payload string) *OpenAIUsage {
 		return nil
 	}
 	u := OpenAIUsage{
-		InputTokens:          int(gjson.Get(payload, "usage.prompt_tokens").Int()),
-		OutputTokens:         int(gjson.Get(payload, "usage.completion_tokens").Int()),
-		CacheReadInputTokens: int(gjson.Get(payload, "usage.prompt_tokens_details.cached_tokens").Int()),
+		InputTokens:              int(gjson.Get(payload, "usage.prompt_tokens").Int()),
+		OutputTokens:             int(gjson.Get(payload, "usage.completion_tokens").Int()),
+		CacheCreationInputTokens: openAICacheCreationTokensFromGJSON(usageResult),
+		CacheReadInputTokens:     int(gjson.Get(payload, "usage.prompt_tokens_details.cached_tokens").Int()),
 	}
 	return &u
 }

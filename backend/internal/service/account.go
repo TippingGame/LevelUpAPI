@@ -1159,11 +1159,15 @@ func resolveRequestedModelInMapping(mapping map[string]string, requestedModel st
 	return matchWildcardMappingResult(mapping, requestedModel)
 }
 
-// IsModelSupported 检查模型是否在 model_mapping 中（支持通配符）
-// 如果未配置 mapping，返回 true（允许所有模型）
+// IsModelSupported 检查模型是否在 model_mapping 中（支持通配符）。
+// OpenAI OAuth 空映射账号会排除明显属于其他厂商的模型，避免 Codex 上游
+// 返回不可重试的 400，阻断真正支持该模型的 API Key 账号接手。
 func (a *Account) IsModelSupported(requestedModel string) bool {
 	mapping := a.GetModelMapping()
 	if len(mapping) == 0 {
+		if a.IsOpenAIOAuth() && !a.IsOpenAIPassthroughEnabled() {
+			return isOpenAIOAuthServableModel(requestedModel)
+		}
 		return true // 无映射 = 允许所有
 	}
 	if mappingSupportsRequestedModel(mapping, requestedModel) {

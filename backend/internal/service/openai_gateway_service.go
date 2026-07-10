@@ -5583,12 +5583,38 @@ func openAIUsageFromGJSON(value gjson.Result) (OpenAIUsage, bool) {
 		ImageInputTokens:          int(value.Get("input_tokens_details.image_tokens").Int()),
 		OutputTokens:              int(outputTokens),
 		TextOutputTokens:          int(value.Get("output_tokens_details.text_tokens").Int()),
-		CacheCreationInputTokens:  int(value.Get("cache_creation_input_tokens").Int()),
+		CacheCreationInputTokens:  openAICacheCreationTokensFromGJSON(value),
 		CacheReadInputTokens:      int(cacheReadTokens),
 		TextCacheReadInputTokens:  int(value.Get("input_tokens_details.cached_text_tokens").Int()),
 		ImageCacheReadInputTokens: int(value.Get("input_tokens_details.cached_image_tokens").Int()),
 		ImageOutputTokens:         int(imageOutputTokens),
 	}, true
+}
+
+func openAICacheCreationTokensFromGJSON(value gjson.Result) int {
+	// OpenAI-compatible providers expose cache-write usage under several names.
+	// Prefer nested detail fields because they are the canonical Responses/Chat shape.
+	for _, path := range []string{
+		"input_tokens_details.cache_write_tokens",
+		"prompt_tokens_details.cache_write_tokens",
+		"input_tokens_details.cache_creation_tokens",
+		"prompt_tokens_details.cache_creation_tokens",
+		"cache_creation_input_tokens",
+		"cache_write_input_tokens",
+		"cache_creation_tokens",
+		"cache_write_tokens",
+	} {
+		result := value.Get(path)
+		if !result.Exists() {
+			continue
+		}
+		tokens := int(result.Int())
+		if tokens < 0 {
+			return 0
+		}
+		return tokens
+	}
+	return 0
 }
 
 func openAIUsageTokens(usage OpenAIUsage) (UsageTokens, int) {
@@ -5600,7 +5626,8 @@ func openAIUsageTokens(usage OpenAIUsage) (UsageTokens, int) {
 		cacheReadTokens = 0
 	}
 
-	actualInputTokens := usage.InputTokens - cacheReadTokens
+	cacheCreationTokens := nonNegativeOpenAITokenCount(usage.CacheCreationInputTokens)
+	actualInputTokens := usage.InputTokens - cacheReadTokens - cacheCreationTokens
 	if actualInputTokens < 0 {
 		actualInputTokens = 0
 	}
@@ -5637,6 +5664,27 @@ func openAIUsageTokens(usage OpenAIUsage) (UsageTokens, int) {
 		}
 	}
 
+	// Responses input_tokens includes cache-write tokens. Remove them from the
+	// normal input buckets as well, otherwise they are billed once as input and
+	// again as cache creation.
+	remainingCacheCreation := cacheCreationTokens
+	if remainingCacheCreation > 0 {
+		if textInputTokens >= remainingCacheCreation {
+			textInputTokens -= remainingCacheCreation
+			remainingCacheCreation = 0
+		} else {
+			remainingCacheCreation -= textInputTokens
+			textInputTokens = 0
+		}
+		if remainingCacheCreation > 0 {
+			if imageInputTokens >= remainingCacheCreation {
+				imageInputTokens -= remainingCacheCreation
+			} else {
+				imageInputTokens = 0
+			}
+		}
+	}
+
 	classifiedInputTokens := textInputTokens + imageInputTokens
 	unclassifiedInputTokens := actualInputTokens
 	if classifiedInputTokens > 0 {
@@ -5655,7 +5703,7 @@ func openAIUsageTokens(usage OpenAIUsage) (UsageTokens, int) {
 		TextInputTokens:      textInputTokens,
 		ImageInputTokens:     imageInputTokens,
 		OutputTokens:         usage.OutputTokens,
-		CacheCreationTokens:  usage.CacheCreationInputTokens,
+		CacheCreationTokens:  cacheCreationTokens,
 		CacheReadTokens:      cacheReadTokens,
 		ImageCacheReadTokens: imageCacheReadTokens,
 		ImageOutputTokens:    usage.ImageOutputTokens,

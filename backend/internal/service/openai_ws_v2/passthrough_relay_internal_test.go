@@ -303,15 +303,17 @@ func TestParseUsageAndEnrichCoverage(t *testing.T) {
 	require.Equal(t, 0, state.usage.OutputTokens)
 	require.Equal(t, 0, state.usage.CacheReadInputTokens)
 
-	parseUsageAndAccumulate(state, []byte(`{"type":"response.completed","response":{"usage":{"input_tokens":2,"output_tokens":1,"input_tokens_details":{"cached_tokens":1}}}}`), "response.completed", nil)
+	parseUsageAndAccumulate(state, []byte(`{"type":"response.completed","response":{"usage":{"input_tokens":2,"output_tokens":1,"input_tokens_details":{"cached_tokens":1,"cache_write_tokens":3}}}}`), "response.completed", nil)
 	require.Equal(t, 2, state.usage.InputTokens)
 	require.Equal(t, 1, state.usage.OutputTokens)
 	require.Equal(t, 1, state.usage.CacheReadInputTokens)
+	require.Equal(t, 3, state.usage.CacheCreationInputTokens)
 
 	parseUsageAndAccumulate(state, []byte(`{"type":"response.done","response":{"usage":{"prompt_tokens":12,"completion_tokens":6,"prompt_tokens_details":{"cached_tokens":4},"completion_tokens_details":{"image_tokens":2}}}}`), "response.done", nil)
 	require.Equal(t, 14, state.usage.InputTokens)
 	require.Equal(t, 7, state.usage.OutputTokens)
 	require.Equal(t, 5, state.usage.CacheReadInputTokens)
+	require.Equal(t, 3, state.usage.CacheCreationInputTokens)
 	require.Equal(t, 2, state.usage.ImageOutputTokens)
 
 	state.imageCounter = newImageOutputCounter()

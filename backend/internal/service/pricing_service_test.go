@@ -16,6 +16,7 @@ func TestParsePricingData_ParsesPriorityAndServiceTierFields(t *testing.T) {
 			"output_cost_per_token": 0.000375,
 			"output_cost_per_token_priority": 0.00075,
 			"cache_creation_input_token_cost": 0.0000625,
+			"cache_creation_input_token_cost_priority": 0.000125,
 			"cache_read_input_token_cost": 0.00000625,
 			"cache_read_input_token_cost_priority": 0.0000125,
 			"supports_service_tier": true,
@@ -31,6 +32,7 @@ func TestParsePricingData_ParsesPriorityAndServiceTierFields(t *testing.T) {
 	require.NotNil(t, pricing)
 	require.InDelta(t, 125e-6, pricing.InputCostPerTokenPriority, 1e-12)
 	require.InDelta(t, 750e-6, pricing.OutputCostPerTokenPriority, 1e-12)
+	require.InDelta(t, 125e-6, pricing.CacheCreationInputTokenCostPriority, 1e-12)
 	require.InDelta(t, 12.5e-6, pricing.CacheReadInputTokenCostPriority, 1e-12)
 	require.True(t, pricing.SupportsServiceTier)
 }
@@ -164,7 +166,19 @@ func TestGetModelPricing_Gpt56UsesStaticFallbackWhenRemoteMissing(t *testing.T) 
 	require.InDelta(t, 60e-6, got.OutputCostPerTokenPriority, 1e-12)
 	require.InDelta(t, 0.5e-6, got.CacheReadInputTokenCost, 1e-12)
 	require.InDelta(t, 1e-6, got.CacheReadInputTokenCostPriority, 1e-12)
+	require.InDelta(t, 6.25e-6, got.CacheCreationInputTokenCost, 1e-12)
+	require.InDelta(t, 12.5e-6, got.CacheCreationInputTokenCostPriority, 1e-12)
 	require.Equal(t, 272000, got.LongContextInputTokenThreshold)
+
+	terra := svc.GetModelPricing("gpt-5.6-terra")
+	require.InDelta(t, 2.5e-6, terra.InputCostPerToken, 1e-12)
+	require.InDelta(t, 15e-6, terra.OutputCostPerToken, 1e-12)
+	require.InDelta(t, 3.125e-6, terra.CacheCreationInputTokenCost, 1e-12)
+
+	luna := svc.GetModelPricing("gpt-5.6-luna")
+	require.InDelta(t, 1e-6, luna.InputCostPerToken, 1e-12)
+	require.InDelta(t, 6e-6, luna.OutputCostPerToken, 1e-12)
+	require.InDelta(t, 1.25e-6, luna.CacheCreationInputTokenCost, 1e-12)
 }
 
 func TestGetModelPricing_Gpt54MiniUsesDedicatedStaticFallbackWhenRemoteMissing(t *testing.T) {

@@ -920,6 +920,7 @@ func parseUsageAndAccumulate(
 		ImageInputTokens:          imageInputTokens,
 		OutputTokens:              outputTokens,
 		TextOutputTokens:          textOutputTokens,
+		CacheCreationInputTokens:  openAICacheCreationTokensFromUsage(usageResult),
 		CacheReadInputTokens:      cachedTokens,
 		TextCacheReadInputTokens:  textCachedTokens,
 		ImageCacheReadInputTokens: imageCachedTokens,
@@ -934,6 +935,7 @@ func parseUsageAndAccumulate(
 	state.usage.ImageInputTokens += parsedUsage.ImageInputTokens
 	state.usage.OutputTokens += parsedUsage.OutputTokens
 	state.usage.TextOutputTokens += parsedUsage.TextOutputTokens
+	state.usage.CacheCreationInputTokens += parsedUsage.CacheCreationInputTokens
 	state.usage.CacheReadInputTokens += parsedUsage.CacheReadInputTokens
 	state.usage.TextCacheReadInputTokens += parsedUsage.TextCacheReadInputTokens
 	state.usage.ImageCacheReadInputTokens += parsedUsage.ImageCacheReadInputTokens
@@ -950,6 +952,35 @@ func parseUsageIntField(value gjson.Result, required bool) (int, bool) {
 		return 0, false
 	}
 	return int(value.Int()), true
+}
+
+func openAICacheCreationTokensFromUsage(value gjson.Result) int {
+	for _, field := range []string{
+		"input_tokens_details.cache_write_tokens",
+		"prompt_tokens_details.cache_write_tokens",
+		"input_tokens_details.cache_creation_tokens",
+		"prompt_tokens_details.cache_creation_tokens",
+	} {
+		result := value.Get(field)
+		if result.Exists() {
+			tokens := int(result.Int())
+			if tokens < 0 {
+				return 0
+			}
+			return tokens
+		}
+	}
+	for _, field := range []string{
+		"cache_write_tokens",
+		"cache_creation_input_tokens",
+		"cache_write_input_tokens",
+		"cache_creation_tokens",
+	} {
+		if tokens := int(value.Get(field).Int()); tokens > 0 {
+			return tokens
+		}
+	}
+	return 0
 }
 
 func enrichResult(result *RelayResult, state *relayState, duration time.Duration) {

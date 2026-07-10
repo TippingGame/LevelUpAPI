@@ -23,20 +23,56 @@ var (
 	openAIModelDatePattern        = regexp.MustCompile(`-\d{8}$`)
 	openAIModelBasePattern        = regexp.MustCompile(`^(gpt-\d+(?:\.\d+)?)(?:-|$)`)
 	defaultOpenAITextPricingModel = "gpt-5.1-codex"
-	openAIGPT56FallbackPricing    = &LiteLLMModelPricing{
-		InputCostPerToken:               5e-06,
-		InputCostPerTokenPriority:       10e-06,
-		OutputCostPerToken:              30e-06,
-		OutputCostPerTokenPriority:      60e-06,
-		CacheReadInputTokenCost:         0.5e-06,
-		CacheReadInputTokenCostPriority: 1e-06,
-		LongContextInputTokenThreshold:  272000,
-		LongContextInputCostMultiplier:  2.0,
-		LongContextOutputCostMultiplier: 1.5,
-		LiteLLMProvider:                 "openai",
-		Mode:                            "chat",
-		SupportsPromptCaching:           true,
-		SupportsServiceTier:             true,
+	openAIGPT56SolFallbackPricing = &LiteLLMModelPricing{
+		InputCostPerToken:                   5e-06,
+		InputCostPerTokenPriority:           10e-06,
+		OutputCostPerToken:                  30e-06,
+		OutputCostPerTokenPriority:          60e-06,
+		CacheCreationInputTokenCost:         6.25e-06,
+		CacheCreationInputTokenCostPriority: 12.5e-06,
+		CacheReadInputTokenCost:             0.5e-06,
+		CacheReadInputTokenCostPriority:     1e-06,
+		LongContextInputTokenThreshold:      openAIGPT54LongContextInputThreshold,
+		LongContextInputCostMultiplier:      openAIGPT54LongContextInputMultiplier,
+		LongContextOutputCostMultiplier:     openAIGPT54LongContextOutputMultiplier,
+		LiteLLMProvider:                     "openai",
+		Mode:                                "chat",
+		SupportsPromptCaching:               true,
+		SupportsServiceTier:                 true,
+	}
+	openAIGPT56TerraFallbackPricing = &LiteLLMModelPricing{
+		InputCostPerToken:                   2.5e-06,
+		InputCostPerTokenPriority:           5e-06,
+		OutputCostPerToken:                  15e-06,
+		OutputCostPerTokenPriority:          30e-06,
+		CacheCreationInputTokenCost:         3.125e-06,
+		CacheCreationInputTokenCostPriority: 6.25e-06,
+		CacheReadInputTokenCost:             0.25e-06,
+		CacheReadInputTokenCostPriority:     0.5e-06,
+		LongContextInputTokenThreshold:      openAIGPT54LongContextInputThreshold,
+		LongContextInputCostMultiplier:      openAIGPT54LongContextInputMultiplier,
+		LongContextOutputCostMultiplier:     openAIGPT54LongContextOutputMultiplier,
+		LiteLLMProvider:                     "openai",
+		Mode:                                "chat",
+		SupportsPromptCaching:               true,
+		SupportsServiceTier:                 true,
+	}
+	openAIGPT56LunaFallbackPricing = &LiteLLMModelPricing{
+		InputCostPerToken:                   1e-06,
+		InputCostPerTokenPriority:           2e-06,
+		OutputCostPerToken:                  6e-06,
+		OutputCostPerTokenPriority:          12e-06,
+		CacheCreationInputTokenCost:         1.25e-06,
+		CacheCreationInputTokenCostPriority: 2.5e-06,
+		CacheReadInputTokenCost:             0.1e-06,
+		CacheReadInputTokenCostPriority:     0.2e-06,
+		LongContextInputTokenThreshold:      openAIGPT54LongContextInputThreshold,
+		LongContextInputCostMultiplier:      openAIGPT54LongContextInputMultiplier,
+		LongContextOutputCostMultiplier:     openAIGPT54LongContextOutputMultiplier,
+		LiteLLMProvider:                     "openai",
+		Mode:                                "chat",
+		SupportsPromptCaching:               true,
+		SupportsServiceTier:                 true,
 	}
 	openAIGPT55FallbackPricing = &LiteLLMModelPricing{
 		InputCostPerToken:               125e-06,
@@ -96,6 +132,7 @@ type LiteLLMModelPricing struct {
 	OutputCostPerToken                  float64 `json:"output_cost_per_token"`
 	OutputCostPerTokenPriority          float64 `json:"output_cost_per_token_priority"`
 	CacheCreationInputTokenCost         float64 `json:"cache_creation_input_token_cost"`
+	CacheCreationInputTokenCostPriority float64 `json:"cache_creation_input_token_cost_priority"`
 	CacheCreationInputTokenCostAbove1hr float64 `json:"cache_creation_input_token_cost_above_1hr"`
 	CacheReadInputTokenCost             float64 `json:"cache_read_input_token_cost"`
 	CacheReadInputTokenCostPriority     float64 `json:"cache_read_input_token_cost_priority"`
@@ -123,9 +160,13 @@ type LiteLLMRawEntry struct {
 	OutputCostPerToken                  *float64 `json:"output_cost_per_token"`
 	OutputCostPerTokenPriority          *float64 `json:"output_cost_per_token_priority"`
 	CacheCreationInputTokenCost         *float64 `json:"cache_creation_input_token_cost"`
+	CacheCreationInputTokenCostPriority *float64 `json:"cache_creation_input_token_cost_priority"`
 	CacheCreationInputTokenCostAbove1hr *float64 `json:"cache_creation_input_token_cost_above_1hr"`
 	CacheReadInputTokenCost             *float64 `json:"cache_read_input_token_cost"`
 	CacheReadInputTokenCostPriority     *float64 `json:"cache_read_input_token_cost_priority"`
+	LongContextInputTokenThreshold      *int     `json:"long_context_input_token_threshold"`
+	LongContextInputCostMultiplier      *float64 `json:"long_context_input_cost_multiplier"`
+	LongContextOutputCostMultiplier     *float64 `json:"long_context_output_cost_multiplier"`
 	SupportsServiceTier                 bool     `json:"supports_service_tier"`
 	LiteLLMProvider                     string   `json:"litellm_provider"`
 	Mode                                string   `json:"mode"`
@@ -434,6 +475,9 @@ func (s *PricingService) parsePricingData(body []byte) (map[string]*LiteLLMModel
 		if entry.CacheCreationInputTokenCost != nil {
 			pricing.CacheCreationInputTokenCost = *entry.CacheCreationInputTokenCost
 		}
+		if entry.CacheCreationInputTokenCostPriority != nil {
+			pricing.CacheCreationInputTokenCostPriority = *entry.CacheCreationInputTokenCostPriority
+		}
 		if entry.CacheCreationInputTokenCostAbove1hr != nil {
 			pricing.CacheCreationInputTokenCostAbove1hr = *entry.CacheCreationInputTokenCostAbove1hr
 		}
@@ -442,6 +486,15 @@ func (s *PricingService) parsePricingData(body []byte) (map[string]*LiteLLMModel
 		}
 		if entry.CacheReadInputTokenCostPriority != nil {
 			pricing.CacheReadInputTokenCostPriority = *entry.CacheReadInputTokenCostPriority
+		}
+		if entry.LongContextInputTokenThreshold != nil {
+			pricing.LongContextInputTokenThreshold = *entry.LongContextInputTokenThreshold
+		}
+		if entry.LongContextInputCostMultiplier != nil {
+			pricing.LongContextInputCostMultiplier = *entry.LongContextInputCostMultiplier
+		}
+		if entry.LongContextOutputCostMultiplier != nil {
+			pricing.LongContextOutputCostMultiplier = *entry.LongContextOutputCostMultiplier
 		}
 		if entry.OutputCostPerImage != nil {
 			pricing.OutputCostPerImage = *entry.OutputCostPerImage
@@ -674,6 +727,12 @@ func normalizeModelNameForPricing(model string) string {
 
 	model = strings.TrimLeft(model, "/")
 	if canonical := canonicalizeOpenAIModelAliasSpelling(model); canonical != "" {
+		if canonical == "gpt-5.6" {
+			return "gpt-5.6-sol"
+		}
+		if suffix, ok := strings.CutPrefix(canonical, "gpt-5.6-"); ok && (suffix == "max" || isKnownCodexModelSuffix(suffix)) {
+			return "gpt-5.6-sol"
+		}
 		return canonical
 	}
 	return model
@@ -851,10 +910,20 @@ func (s *PricingService) matchOpenAIModel(model string) *LiteLLMModelPricing {
 		}
 	}
 
-	if strings.HasPrefix(model, "gpt-5.6") {
+	if strings.HasPrefix(model, "gpt-5.6-sol") || model == "gpt-5.6" || strings.HasPrefix(model, "gpt-5.6-max") {
 		logger.With(zap.String("component", "service.pricing")).
-			Info(fmt.Sprintf("[Pricing] OpenAI fallback matched %s -> %s", model, "gpt-5.6(static)"))
-		return openAIGPT56FallbackPricing
+			Info(fmt.Sprintf("[Pricing] OpenAI fallback matched %s -> %s", model, "gpt-5.6-sol(static)"))
+		return openAIGPT56SolFallbackPricing
+	}
+	if strings.HasPrefix(model, "gpt-5.6-terra") {
+		logger.With(zap.String("component", "service.pricing")).
+			Info(fmt.Sprintf("[Pricing] OpenAI fallback matched %s -> %s", model, "gpt-5.6-terra(static)"))
+		return openAIGPT56TerraFallbackPricing
+	}
+	if strings.HasPrefix(model, "gpt-5.6-luna") {
+		logger.With(zap.String("component", "service.pricing")).
+			Info(fmt.Sprintf("[Pricing] OpenAI fallback matched %s -> %s", model, "gpt-5.6-luna(static)"))
+		return openAIGPT56LunaFallbackPricing
 	}
 
 	if strings.HasPrefix(model, "gpt-5.5") {

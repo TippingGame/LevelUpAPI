@@ -129,14 +129,18 @@ func TestHandle429_AnthropicOAuthNoResetUsesFallbackCooldown(t *testing.T) {
 	require.False(t, accountRepo.lastRateLimitReset.After(after.Add(5*time.Second)))
 }
 
-func TestHandle429_AnthropicAPIKeyNoResetStillSkipsFallback(t *testing.T) {
+func TestHandle429_AnthropicAPIKeyNoResetUsesFallback(t *testing.T) {
 	accountRepo := &rateLimit429AccountRepoStub{}
 	svc := NewRateLimitService(accountRepo, nil, &config.Config{}, nil, nil)
 
 	account := &Account{ID: 46, Platform: PlatformAnthropic, Type: AccountTypeAPIKey}
+	before := time.Now()
 	svc.handle429(context.Background(), account, http.Header{}, []byte(`{"error":{"message":"Extra usage required"}}`))
+	after := time.Now()
 
-	require.Zero(t, accountRepo.rateLimitCalls)
+	require.Equal(t, 1, accountRepo.rateLimitCalls)
+	require.False(t, accountRepo.lastRateLimitReset.Before(before.Add(5*time.Second)))
+	require.False(t, accountRepo.lastRateLimitReset.After(after.Add(5*time.Second)))
 }
 
 func TestHandle429_AnthropicOAuthPerWindowHeadersNotExceededUseFallback(t *testing.T) {
@@ -160,7 +164,7 @@ func TestHandle429_AnthropicOAuthPerWindowHeadersNotExceededUseFallback(t *testi
 	require.False(t, accountRepo.lastRateLimitReset.After(after.Add(5*time.Second)))
 }
 
-func TestHandle429_AnthropicAPIKeyPerWindowHeadersNotExceededSkipsFallback(t *testing.T) {
+func TestHandle429_AnthropicAPIKeyPerWindowHeadersNotExceededUsesFallback(t *testing.T) {
 	accountRepo := &rateLimit429AccountRepoStub{}
 	svc := NewRateLimitService(accountRepo, nil, &config.Config{}, nil, nil)
 
@@ -171,9 +175,13 @@ func TestHandle429_AnthropicAPIKeyPerWindowHeadersNotExceededSkipsFallback(t *te
 	headers.Set("anthropic-ratelimit-unified-7d-utilization", "0.80")
 	headers.Set("anthropic-ratelimit-unified-7d-reset", strconv.FormatInt(time.Now().Add(72*time.Hour).Unix(), 10))
 
+	before := time.Now()
 	svc.handle429(context.Background(), account, headers, []byte(`{"error":{"type":"rate_limit_error","message":"slow down"}}`))
+	after := time.Now()
 
-	require.Zero(t, accountRepo.rateLimitCalls)
+	require.Equal(t, 1, accountRepo.rateLimitCalls)
+	require.False(t, accountRepo.lastRateLimitReset.Before(before.Add(5*time.Second)))
+	require.False(t, accountRepo.lastRateLimitReset.After(after.Add(5*time.Second)))
 }
 
 func TestHandle429_AnthropicOAuthInvalidUnifiedResetUsesFallback(t *testing.T) {
@@ -194,7 +202,7 @@ func TestHandle429_AnthropicOAuthInvalidUnifiedResetUsesFallback(t *testing.T) {
 	require.False(t, accountRepo.lastRateLimitReset.After(after.Add(5*time.Second)))
 }
 
-func TestHandle429_AnthropicAPIKeyInvalidUnifiedResetSkipsFallback(t *testing.T) {
+func TestHandle429_AnthropicAPIKeyInvalidUnifiedResetUsesFallback(t *testing.T) {
 	accountRepo := &rateLimit429AccountRepoStub{}
 	svc := NewRateLimitService(accountRepo, nil, &config.Config{}, nil, nil)
 
@@ -202,9 +210,13 @@ func TestHandle429_AnthropicAPIKeyInvalidUnifiedResetSkipsFallback(t *testing.T)
 	headers := http.Header{}
 	headers.Set("anthropic-ratelimit-unified-reset", strconv.FormatInt(time.Now().Add(9*24*time.Hour).Unix(), 10))
 
+	before := time.Now()
 	svc.handle429(context.Background(), account, headers, []byte(`{"error":{"type":"rate_limit_error","message":"slow down"}}`))
+	after := time.Now()
 
-	require.Zero(t, accountRepo.rateLimitCalls)
+	require.Equal(t, 1, accountRepo.rateLimitCalls)
+	require.False(t, accountRepo.lastRateLimitReset.Before(before.Add(5*time.Second)))
+	require.False(t, accountRepo.lastRateLimitReset.After(after.Add(5*time.Second)))
 }
 
 func TestHandle429_AnthropicUnifiedResetMillisAccepted(t *testing.T) {

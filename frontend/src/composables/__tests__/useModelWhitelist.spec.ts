@@ -15,6 +15,31 @@ describe('useModelWhitelist', () => {
     expect(models).toContain('gpt-5.4-2026-03-05')
   })
 
+  it('openai 模型列表和预设包含 GPT-5.6 三个计费变体', () => {
+    const models = getModelsByPlatform('openai')
+    expect(models).toEqual(expect.arrayContaining([
+      'gpt-5.6',
+      'gpt-5.6-sol',
+      'gpt-5.6-terra',
+      'gpt-5.6-luna'
+    ]))
+
+    const presets = getPresetMappingsByPlatform('openai')
+    expect(presets).toEqual(expect.arrayContaining([
+      expect.objectContaining({ from: 'gpt-5.6-sol', to: 'gpt-5.6-sol' }),
+      expect.objectContaining({ from: 'gpt-5.6-terra', to: 'gpt-5.6-terra' }),
+      expect.objectContaining({ from: 'gpt-5.6-luna', to: 'gpt-5.6-luna' })
+    ]))
+  })
+
+  it('xAI 模型列表包含 Grok 4.5 及 latest 别名', () => {
+    expect(getModelsByPlatform('xai')).toEqual(expect.arrayContaining([
+      'grok-4.5',
+      'grok-latest',
+      'grok-4.5-latest'
+    ]))
+  })
+
   it('openai 模型列表不再暴露已下线的 ChatGPT 登录 Codex 模型', () => {
     const models = getModelsByPlatform('openai')
 
