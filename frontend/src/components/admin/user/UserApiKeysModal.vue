@@ -52,10 +52,29 @@
     <div
       v-if="groupSelectorKeyId !== null && dropdownPosition"
       ref="dropdownRef"
-      class="animate-in fade-in slide-in-from-top-2 fixed z-[100000020] w-[380px] overflow-hidden rounded-xl bg-white shadow-lg ring-1 ring-black/5 duration-200 dark:bg-dark-800 dark:ring-white/10"
+      class="animate-in fade-in slide-in-from-top-2 fixed z-[100000020] w-[min(640px,calc(100vw-1rem))] overflow-hidden rounded-xl bg-white shadow-lg ring-1 ring-black/5 duration-200 dark:bg-dark-800 dark:ring-white/10"
       :style="{ top: dropdownPosition.top + 'px', left: dropdownPosition.left + 'px' }"
     >
       <div class="border-b border-gray-100 p-2 dark:border-dark-700">
+        <div class="grid grid-cols-2 gap-1.5 sm:grid-cols-5">
+          <button
+            v-for="platform in availableGroupPlatforms"
+            :key="platform"
+            type="button"
+            :class="[
+              'flex items-center justify-center gap-1.5 rounded-lg border px-2 py-2 text-xs font-medium transition-colors',
+              dropdownSelectedPlatform === platform
+                ? 'border-primary-400 bg-primary-50 text-primary-700 dark:border-primary-500 dark:bg-primary-900/30 dark:text-primary-300'
+                : 'border-gray-200 text-gray-600 hover:bg-gray-50 dark:border-dark-600 dark:text-gray-300 dark:hover:bg-dark-700'
+            ]"
+            @click.stop="selectDropdownPlatform(platform)"
+          >
+            <PlatformIcon :platform="platform" size="sm" />
+            {{ platformLabel(platform) }}
+          </button>
+        </div>
+      </div>
+      <div v-if="dropdownSelectedPlatform" class="border-b border-gray-100 p-2 dark:border-dark-700">
         <input
           v-model="groupSearchQuery"
           type="text"
@@ -64,7 +83,7 @@
           @click.stop
         />
       </div>
-      <div class="max-h-72 overflow-y-auto p-1.5">
+      <div v-if="dropdownSelectedPlatform" class="max-h-72 overflow-y-auto p-1.5">
         <label
           v-for="group in filteredGroups"
           :key="group.id"
@@ -94,17 +113,20 @@
             :scope="group.scope"
             :subscription-type="group.subscription_type"
             :rate-multiplier="group.rate_multiplier"
-            :description="group.description"
+            :description="localizedKeyGroupDescription(group, t)"
             :selected="selectedDropdownGroupIds.includes(group.id)"
           />
         </label>
         <div v-if="filteredGroups.length === 0" class="py-4 text-center text-sm text-gray-400 dark:text-gray-500">
-          没有匹配的分组
+          {{ t('keys.noGroupFound') }}
         </div>
+      </div>
+      <div v-else class="px-3 py-6 text-center text-sm text-gray-500 dark:text-gray-400">
+        {{ t('keys.choosePlatformFirst') }}
       </div>
       <div class="flex items-center justify-between gap-2 border-t border-gray-100 p-2 dark:border-dark-700">
         <button type="button" class="btn btn-secondary text-sm" @click="clearDropdownGroups">
-          清空
+          {{ t('keys.clearSelection') }}
         </button>
         <button
           type="button"
@@ -112,7 +134,7 @@
           :disabled="!selectedKeyForGroup || updatingKeyIds.has(selectedKeyForGroup.id)"
           @click="applyDropdownGroups"
         >
-          保存
+          {{ t('keys.saveSelection') }}
         </button>
       </div>
     </div>
@@ -125,10 +147,12 @@ import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { adminAPI } from '@/api/admin'
 import { formatDateTime } from '@/utils/format'
-import type { AdminUser, AdminGroup, ApiKey, ApiKeyGroupRoute } from '@/types'
+import type { AdminUser, AdminGroup, ApiKey, ApiKeyGroupRoute, GroupPlatform } from '@/types'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import GroupBadge from '@/components/common/GroupBadge.vue'
 import GroupOptionItem from '@/components/common/GroupOptionItem.vue'
+import PlatformIcon from '@/components/common/PlatformIcon.vue'
+import { availableKeyGroupPlatforms, localizedKeyGroupDescription } from '@/utils/keyGroupSelection'
 
 const props = defineProps<{ show: boolean; user: AdminUser | null }>()
 const emit = defineEmits(['close'])
@@ -145,6 +169,7 @@ const dropdownRef = ref<HTMLElement | null>(null)
 const scrollContainerRef = ref<HTMLElement | null>(null)
 const groupButtonRefs = ref<Map<number, HTMLElement>>(new Map())
 const dropdownGroupIds = ref<number[]>([])
+const dropdownSelectedPlatform = ref<GroupPlatform | null>(null)
 const groupSearchQuery = ref('')
 
 const selectedKeyForGroup = computed(() => {
@@ -195,20 +220,19 @@ const keyRouteGroups = (key: ApiKey): AdminGroup[] => {
 }
 
 const selectedDropdownGroupIds = computed(() => dropdownGroupIds.value)
-const selectedDropdownPlatform = computed(() => {
-  const firstGroup = selectedDropdownGroupIds.value
-    .map((id) => groupById.value.get(id))
-    .find((group): group is AdminGroup => !!group)
-  return firstGroup?.platform ?? null
-})
+const availableGroupPlatforms = computed(() => availableKeyGroupPlatforms(allGroups.value))
+
+const platformLabel = (platform: GroupPlatform): string =>
+  t(`admin.groups.platforms.${platform}`)
 
 const filteredGroups = computed(() => {
+  if (!dropdownSelectedPlatform.value) return []
   const query = groupSearchQuery.value.trim().toLowerCase()
   return allGroups.value.filter((group) => {
-    if (selectedDropdownPlatform.value && group.platform !== selectedDropdownPlatform.value) return false
+    if (group.platform !== dropdownSelectedPlatform.value) return false
     if (!query) return true
     return group.name.toLowerCase().includes(query) ||
-      (group.description || '').toLowerCase().includes(query)
+      (localizedKeyGroupDescription(group, t) || '').toLowerCase().includes(query)
   })
 })
 
@@ -223,7 +247,7 @@ const normalizeGroupRoutes = (groupIds: number[]): ApiKeyGroupRoute[] | null => 
   }
   const platform = selectedGroups[0]?.platform
   if (platform && selectedGroups.some((group) => group.platform !== platform)) {
-    appStore.showError('只能选择同一开发商的分组')
+    appStore.showError(t('keys.samePlatformOnly'))
     return null
   }
   return orderedGroupIds.map((groupId, index) => ({
@@ -277,7 +301,7 @@ const loadGroups = async () => {
   }
 }
 
-const DROPDOWN_HEIGHT = 272 // max-h-64 = 16rem = 256px + padding
+const DROPDOWN_HEIGHT = 420
 const DROPDOWN_GAP = 4
 
 const openGroupSelector = (key: ApiKey) => {
@@ -289,13 +313,18 @@ const openGroupSelector = (key: ApiKey) => {
       const rect = buttonEl.getBoundingClientRect()
       const spaceBelow = window.innerHeight - rect.bottom
       const openUpward = spaceBelow < DROPDOWN_HEIGHT && rect.top > spaceBelow
+      const dropdownWidth = Math.min(640, window.innerWidth - 16)
+      const dropdownLeft = Math.max(8, Math.min(rect.left, window.innerWidth - dropdownWidth - 8))
       dropdownPosition.value = {
-        top: openUpward ? rect.top - DROPDOWN_HEIGHT - DROPDOWN_GAP : rect.bottom + DROPDOWN_GAP,
-        left: rect.left
+        top: openUpward ? Math.max(8, rect.top - DROPDOWN_HEIGHT - DROPDOWN_GAP) : rect.bottom + DROPDOWN_GAP,
+        left: dropdownLeft
       }
     }
     groupSelectorKeyId.value = key.id
     dropdownGroupIds.value = routeGroupIdsFromKey(key)
+    dropdownSelectedPlatform.value = dropdownGroupIds.value
+      .map((id) => groupById.value.get(id))
+      .find((group): group is AdminGroup => !!group)?.platform ?? key.group?.platform ?? null
     groupSearchQuery.value = ''
   }
 }
@@ -304,18 +333,26 @@ const closeGroupSelector = () => {
   groupSelectorKeyId.value = null
   dropdownPosition.value = null
   dropdownGroupIds.value = []
+  dropdownSelectedPlatform.value = null
   groupSearchQuery.value = ''
 }
 
 const handleDropdownGroupToggle = (groupId: number, checked: boolean) => {
   const group = groupById.value.get(groupId)
-  if (checked && selectedDropdownPlatform.value && group && group.platform !== selectedDropdownPlatform.value) {
-    appStore.showError('只能选择同一开发商的分组')
+  if (checked && dropdownSelectedPlatform.value && group && group.platform !== dropdownSelectedPlatform.value) {
+    appStore.showError(t('keys.samePlatformOnly'))
     return
   }
   dropdownGroupIds.value = checked
     ? uniqueGroupIds([...dropdownGroupIds.value, groupId])
     : dropdownGroupIds.value.filter((id) => id !== groupId)
+}
+
+const selectDropdownPlatform = (platform: GroupPlatform) => {
+  if (dropdownSelectedPlatform.value === platform) return
+  dropdownSelectedPlatform.value = platform
+  dropdownGroupIds.value = []
+  groupSearchQuery.value = ''
 }
 
 const clearDropdownGroups = () => {
