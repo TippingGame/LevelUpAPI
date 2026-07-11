@@ -4017,9 +4017,9 @@ func (r *usageLogRepository) getAccountHourlyCostsByDate(ctx context.Context, st
 		ctx,
 		query,
 		pq.Array(accountUsageStatsAccountIDStrings(accountIDs)),
-		accountShareSeatPrepayReason,
-		accountShareSeatRefundReason,
-		accountShareSeatWaiverRefundReason,
+		"account_share_mode_seat_prepay",
+		"account_share_mode_seat_refund",
+		"account_share_mode_seat_waiver_refund",
 		startTime,
 		endTime,
 	)

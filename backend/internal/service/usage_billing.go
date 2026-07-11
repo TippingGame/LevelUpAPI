@@ -55,8 +55,6 @@ type UsageBillingCommand struct {
 	InviteShareRatio      float64
 	UsageOccurredAt       time.Time
 
-	AccountShareModeSettlement *AccountShareModeBillingSnapshot
-
 	UsageLog *UsageLog
 }
 
@@ -99,23 +97,6 @@ func buildUsageBillingFingerprint(c *UsageBillingCommand) string {
 		c.APIKeyRateLimitCost,
 		c.AccountQuotaCost,
 	)
-	if snapshot := c.AccountShareModeSettlement; snapshot != nil {
-		raw += fmt.Sprintf(
-			"|account_share_mode|%d|%d|%d|%d|%d|%0.10f|%0.10f|%0.10f|%0.10f|%0.10f|%0.10f|%d",
-			snapshot.MembershipID,
-			snapshot.ListingID,
-			snapshot.AccountID,
-			snapshot.OwnerUserID,
-			snapshot.ConsumerUserID,
-			snapshot.BaseCharge,
-			snapshot.HourlyCharge,
-			snapshot.TotalCharge,
-			snapshot.RateMultiplier,
-			snapshot.OwnerShareRatio,
-			snapshot.PlatformShareRatio,
-			snapshot.DurationMs,
-		)
-	}
 	if payloadHash := strings.TrimSpace(c.RequestPayloadHash); payloadHash != "" {
 		raw += "|" + payloadHash
 	}

@@ -280,7 +280,6 @@ func ProvideOpenAIGatewayService(
 	settingService *SettingService,
 	accountService *AccountService,
 	proxyLatencyCache ProxyLatencyCache,
-	accountShareModeService *AccountShareModeService,
 ) *OpenAIGatewayService {
 	svc := NewOpenAIGatewayService(
 		accountRepo,
@@ -305,7 +304,6 @@ func ProvideOpenAIGatewayService(
 		balanceNotifyService,
 		settingService,
 		accountService,
-		accountShareModeService,
 	)
 	svc.SetProxyLatencyCache(proxyLatencyCache)
 	return svc
@@ -660,30 +658,6 @@ func ProvideAccountService(
 	return svc
 }
 
-func ProvideAccountShareModeService(
-	cfg *config.Config,
-	repo AccountShareModeRepository,
-	accountRepo AccountRepository,
-	apiKeyRepo APIKeyRepository,
-	userRepo UserRepository,
-	proxyRepo ProxyRepository,
-	openaiOAuthService *OpenAIOAuthService,
-	concurrencyService *ConcurrencyService,
-	authCacheInvalidator APIKeyAuthCacheInvalidator,
-	accountTestService *AccountTestService,
-	rateLimitService *RateLimitService,
-	billingCacheService *BillingCacheService,
-) *AccountShareModeService {
-	svc := NewAccountShareModeService(repo, accountRepo, apiKeyRepo, userRepo, proxyRepo, openaiOAuthService)
-	if cfg != nil {
-		svc.SetActionTokenSecret(cfg.JWT.Secret)
-	}
-	svc.SetRuntimeDependencies(concurrencyService, authCacheInvalidator, accountTestService, rateLimitService)
-	svc.SetBillingCacheService(billingCacheService)
-	svc.StartSeatBillingWorker()
-	return svc
-}
-
 func ProvideSubscriptionService(
 	groupRepo GroupRepository,
 	userSubRepo UserSubscriptionRepository,
@@ -764,7 +738,6 @@ var ProviderSet = wire.NewSet(
 	ProvideGroupRateScheduleService,
 	ProvideAccountService,
 	NewAccountSharePolicyService,
-	ProvideAccountShareModeService,
 	NewProxyService,
 	NewRedeemService,
 	NewPromoService,
@@ -889,14 +862,12 @@ func ProvideContentModerationService(
 	repo ContentModerationRepository,
 	hashCache ContentModerationHashCache,
 	groupRepo GroupRepository,
-	accountShareModeService *AccountShareModeService,
 	userRepo UserRepository,
 	authCacheInvalidator APIKeyAuthCacheInvalidator,
 	emailService *EmailService,
 	systemNoticeService *SystemNoticeService,
 ) *ContentModerationService {
 	svc := NewContentModerationService(settingRepo, repo, hashCache, groupRepo, userRepo, authCacheInvalidator, emailService)
-	svc.SetAccountShareModeResolver(accountShareModeService)
 	svc.SetSystemNoticeService(systemNoticeService)
 	return svc
 }

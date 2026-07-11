@@ -29,7 +29,6 @@ func RegisterAdminRoutes(
 		// 账号管理
 		registerAccountRoutes(admin, h)
 		registerAccountSharePolicyRoutes(admin, h)
-		registerAccountShareModePolicyRoutes(admin, h)
 
 		// 公告管理
 		registerAnnouncementRoutes(admin, h)
@@ -116,7 +115,6 @@ func registerContentModerationRoutes(admin *gin.RouterGroup, h *handler.Handlers
 		risk.PUT("/config", h.Admin.ContentModeration.UpdateConfig)
 		risk.POST("/api-keys/test", h.Admin.ContentModeration.TestAPIKeys)
 		risk.GET("/status", h.Admin.ContentModeration.GetStatus)
-		risk.GET("/account-share/listings", h.Admin.ContentModeration.ListAccountShareModeListings)
 		risk.GET("/logs", h.Admin.ContentModeration.ListLogs)
 		risk.POST("/users/:user_id/unban", h.Admin.ContentModeration.UnbanUser)
 		risk.DELETE("/hashes", h.Admin.ContentModeration.DeleteFlaggedHash)
@@ -416,14 +414,6 @@ func registerAccountSharePolicyRoutes(admin *gin.RouterGroup, h *handler.Handler
 		policies.POST("", h.Admin.AccountSharePolicy.Create)
 		policies.PUT("/:id", h.Admin.AccountSharePolicy.Update)
 		policies.DELETE("/:id", h.Admin.AccountSharePolicy.Delete)
-	}
-}
-
-func registerAccountShareModePolicyRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
-	policy := admin.Group("/account-share-mode-policy")
-	{
-		policy.GET("", h.Admin.AccountShareModePolicy.Get)
-		policy.PUT("", h.Admin.AccountShareModePolicy.Update)
 	}
 }
 

@@ -10148,7 +10148,6 @@ type postUsageBillingParams struct {
 	IsSubscriptionBill         bool
 	PrivateGroupCommissionRate float64
 	AccountRateMultiplier      float64
-	AccountShareModeSettlement *AccountShareModeBillingSnapshot
 	APIKeyService              APIKeyQuotaUpdater
 }
 
@@ -10364,7 +10363,6 @@ func buildUsageBillingCommand(requestID string, usageLog *UsageLog, p *postUsage
 		UsageOccurredAt:            time.Now(),
 		UsageLog:                   usageLog,
 		PrivateGroupCommissionCost: calculatePrivateGroupCommissionCost(p),
-		AccountShareModeSettlement: p.AccountShareModeSettlement,
 	}
 	if usageLog != nil {
 		if !usageLog.CreatedAt.IsZero() {

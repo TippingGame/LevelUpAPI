@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"sort"
 	"strconv"
 	"strings"
@@ -41,8 +42,117 @@ type UserAccountHandler struct {
 	sessionLimitCache       service.SessionLimitCache
 	rpmCache                service.RPMCache
 	accountBatchTaskService *service.AccountBatchTaskService
+	proxyService            *service.ProxyService
+	sharePolicyService      *service.AccountSharePolicyService
 	levelVerifyMu           sync.Mutex
 	levelVerifyWindows      map[int64]levelVerifyWindow
+}
+
+func (h *UserAccountHandler) SetSharedOwnerSupport(proxyService *service.ProxyService, sharePolicyService *service.AccountSharePolicyService) {
+	if h == nil {
+		return
+	}
+	h.proxyService = proxyService
+	h.sharePolicyService = sharePolicyService
+}
+
+type ownedProxyCreateRequest struct {
+	Name     string `json:"name"`
+	Protocol string `json:"protocol" binding:"required,oneof=http https socks5 socks5h"`
+	Host     string `json:"host" binding:"required"`
+	Port     int    `json:"port" binding:"required,min=1,max=65535"`
+	Username string `json:"username"`
+	Password string `json:"password"`
+}
+
+type ownedRevenuePolicyResponse struct {
+	SharedOwnerShareRatio      *float64 `json:"shared_owner_share_ratio,omitempty"`
+	PrivateGroupCommissionRate float64  `json:"private_group_commission_rate"`
+}
+
+func clampOwnedRatio(value float64) float64 {
+	if math.IsNaN(value) || math.IsInf(value, 0) || value < 0 {
+		return 0
+	}
+	if value > 1 {
+		return 1
+	}
+	return value
+}
+
+func (h *UserAccountHandler) GetRevenuePolicy(c *gin.Context) {
+	if _, ok := middleware2.GetAuthSubjectFromContext(c); !ok {
+		response.Unauthorized(c, "User not authenticated")
+		return
+	}
+	if h == nil || h.sharePolicyService == nil || h.settingService == nil {
+		response.InternalError(c, "Revenue policy service is not configured")
+		return
+	}
+	policy, err := h.sharePolicyService.GetCurrentGlobalPolicy(c.Request.Context())
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	settings, err := h.settingService.GetAllSettings(c.Request.Context())
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	out := ownedRevenuePolicyResponse{PrivateGroupCommissionRate: clampOwnedRatio(settings.UserPrivateGroupCommissionRate)}
+	if policy != nil {
+		ownerShare := clampOwnedRatio(policy.OwnerShareRatio)
+		out.SharedOwnerShareRatio = &ownerShare
+	}
+	response.Success(c, out)
+}
+
+func (h *UserAccountHandler) ListProxies(c *gin.Context) {
+	subject, ok := middleware2.GetAuthSubjectFromContext(c)
+	if !ok {
+		response.Unauthorized(c, "User not authenticated")
+		return
+	}
+	if h == nil || h.proxyService == nil {
+		response.ErrorFrom(c, service.ErrServiceUnavailable)
+		return
+	}
+	proxies, err := h.proxyService.ListOwnedVisible(c.Request.Context(), subject.UserID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	out := make([]dto.ProxyWithAccountCount, 0, len(proxies))
+	for i := range proxies {
+		out = append(out, *dto.ProxyWithAccountCountFromService(&proxies[i]))
+	}
+	response.Success(c, out)
+}
+
+func (h *UserAccountHandler) CreateProxy(c *gin.Context) {
+	subject, ok := middleware2.GetAuthSubjectFromContext(c)
+	if !ok {
+		response.Unauthorized(c, "User not authenticated")
+		return
+	}
+	if h == nil || h.proxyService == nil {
+		response.ErrorFrom(c, service.ErrServiceUnavailable)
+		return
+	}
+	var req ownedProxyCreateRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+	proxy, err := h.proxyService.CreateOwned(c.Request.Context(), subject.UserID, service.CreateProxyRequest{
+		Name: strings.TrimSpace(req.Name), Protocol: strings.TrimSpace(req.Protocol), Host: strings.TrimSpace(req.Host), Port: req.Port,
+		Username: strings.TrimSpace(req.Username), Password: strings.TrimSpace(req.Password),
+	})
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Created(c, dto.ProxyFromService(proxy))
 }
 
 func NewUserAccountHandler(

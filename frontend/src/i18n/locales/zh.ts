@@ -410,7 +410,6 @@ export default {
     subscriptions: '订阅管理',
     accounts: '账号管理',
     myAccounts: '共享号主',
-    accountShare: '账号广场',
     proxies: 'IP管理',
     redeemCodes: '兑换码',
     ops: '运维监控',
@@ -769,11 +768,6 @@ export default {
     private: '私有'
   },
 
-  accountShare: {
-    title: '账号广场',
-    description: '选择共享账号后，账号模式分组下的 API Key 将只调度当前绑定账号。'
-  },
-
   // User-owned Accounts
   userAccounts: {
     title: '共享号主',
@@ -816,9 +810,6 @@ export default {
     shareModeHint: '切换为公共模式后，系统会进行公共共享校验，未通过时可能会进入待审核状态。',
     privateMode: '私有',
     publicMode: '公共',
-    accountShareModeOnly: '账号模式专属',
-    accountShareModeOnlyHint: '该账号来自账号广场，只能用于账号模式，不能转入公共共享号池。',
-    accountShareModeOnlyBulkHint: '已选账号包含账号模式专属账号，不能批量修改共享模式。',
     pendingReview: '待校验',
     approved: '已通过',
     suspended: '已暂停',
@@ -920,7 +911,7 @@ export default {
     importOAuthNamePlaceholder: '可选；留空则使用 OpenAI 邮箱',
     importProxy: '代理 IP',
     importProxyHint: '请选择一个可见且启用的代理 IP，用于需要代理的登录或导入，并绑定到导入账号。OpenAI Pro / Claude / Gemini / Antigravity 必选。',
-    importProxyEmpty: '暂无可选代理 IP，请先在账号模式中添加或购买代理 IP。',
+	importProxyEmpty: '暂无可选代理 IP，请先添加或购买代理 IP。',
     importProxyLoading: '正在加载代理 IP...',
     importProxyLoadFailed: '代理 IP 加载失败',
     importProxyRequired: '请先选择代理 IP',
@@ -1250,10 +1241,10 @@ export default {
       reasons: {
         usage_charge: '接口使用扣费',
         private_group_commission: '专属分组佣金',
-        account_share_mode_seat_prepay: '账号模式小时费预扣',
-        account_share_mode_seat_refund: '账号模式小时费退回',
-        account_share_mode_seat_waiver_refund: '账号模式小时费达标退回',
-        account_share_mode_income: '账号模式收益',
+		account_share_mode_seat_prepay: '已停用账号模式历史预扣',
+		account_share_mode_seat_refund: '已停用账号模式历史退回',
+		account_share_mode_seat_waiver_refund: '已停用账号模式历史达标退回',
+		account_share_mode_income: '已停用账号模式历史收益',
         account_share_income: '共享账号收益',
         invite_share_income: '邀请分成收益',
         redeem_code: '充值',
@@ -2170,16 +2161,6 @@ export default {
         privateGroupCommissionHint: '可设置 0% - 100%，默认 0.5%。',
         privateGroupCommissionExample: '当前配置：{rate}',
         saveCommission: '保存抽成',
-        modePolicyTitle: '账号模式分成策略',
-        modePolicyDescription: '配置账号共享模式的独立分成比例。该策略只用于账号广场绑定后的账号模式请求，不影响共享号池抽成。',
-        modeCurrentPolicy: '当前账号模式策略',
-        modeGlobalConfig: '账号模式全局配置',
-        modePolicyHint: '默认平台留存 10%，账号主获得 90%。每次 usage 会写入当时的倍率、耗时费和分成快照。',
-        modePlatformSharePercent: '平台留存比例',
-        modeOwnerSharePercent: '账号主收益比例',
-        modePlatformShareHint: '账号模式平台抽成，默认 10%，独立于共享号池。',
-        modeOwnerShareHint: '系统自动按 100% 减去平台留存计算。',
-        modeSaveHint: '保存后只影响后续账号模式结算，历史快照不会被改写。',
         enabled: '启用策略',
         ownerShare: '账号主分成',
         inviteShare: '邀请分成',
@@ -2203,7 +2184,6 @@ export default {
         loadFailed: '加载分成策略失败',
         saveFailed: '保存分成策略失败',
         invalidRatio: '账号主分成和邀请分成必须在 0 到 100 之间，且合计不能超过 100',
-        invalidModeRatio: '账号模式平台留存比例必须在 0 到 100 之间',
         errors: {
           INVALID_REQUEST: '请求参数无效'
         }
@@ -3476,19 +3456,6 @@ export default {
       selectedGroups: '指定分组',
       searchGroups: '搜索分组名称或平台',
       noGroups: '暂无可用分组',
-      accountShareScope: '账号模式',
-      accountShareScopeHint: '单独配置 AI 账号模式 / OpenAI账号模式请求的审核范围，不把账号模式分组当普通分组处理。',
-      accountShareAllGroupsNotice: '当前选择“全部分组”，账号模式请求在解析到有效绑定后也会审核。',
-      accountShareAll: '全部账号模式',
-      accountShareSelected: '指定上架账号',
-      accountShareSelectedCount: '已选 {count} 个上架账号',
-      accountShareOwner: '号主：{owner}',
-      accountShareRate: '倍率 {rate}',
-      accountShareListingsFailed: '加载账号模式上架账号失败',
-      searchAccountShareListings: '搜索账号名称、号主、模型或 ID',
-      refreshListings: '刷新上架账号',
-      noAccountShareListings: '暂无账号模式上架账号',
-      accountShareMode: '账号模式',
       modelFilter: '模型范围',
       modelFilterHint: '按客户端请求的模型名决定是否执行内容审计，模型映射后仍以请求模型判断。',
       modelFilterAll: '所有模型',

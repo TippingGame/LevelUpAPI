@@ -155,7 +155,7 @@ routeLoop:
 
 		for {
 			reqLog.Debug("openai.images.account_selecting", zap.Int("excluded_account_count", len(failedAccountIDs)))
-			selectionCtx := openAIAccountShareModeRequestContext(c, currentAPIKey)
+			selectionCtx := c.Request.Context()
 			if decision := h.checkCyberPreflightWithContext(selectionCtx, c, reqLog, currentAPIKey, subject, service.ContentModerationProtocolOpenAIImages, parsed.Model, body); decision != nil && decision.Blocked {
 				h.handleStreamingAwareError(c, contentModerationStatus(decision), cyberPreflightErrorCode(decision), decision.Message, streamStarted)
 				return
@@ -177,9 +177,6 @@ routeLoop:
 					zap.Error(err),
 					zap.Int("excluded_account_count", len(failedAccountIDs)),
 				)
-				if h.handleAccountShareModeSelectionError(c, err, streamStarted) {
-					return
-				}
 				if len(failedAccountIDs) == 0 {
 					if routeCursor.switchToNextWithoutCooldown(apiKey.ID, "account_select_failed", reqLog, zap.Error(err)) {
 						continue routeLoop
@@ -336,8 +333,7 @@ routeLoop:
 			}
 
 			h.submitUsageRecordTask(c.Request.Context(), func(ctx context.Context) {
-				usageCtx := service.WithAccountShareModeRequestFromContext(ctx, selectionCtx)
-				if err := h.gatewayService.RecordUsage(usageCtx, &service.OpenAIRecordUsageInput{
+				if err := h.gatewayService.RecordUsage(ctx, &service.OpenAIRecordUsageInput{
 					Result:             result,
 					APIKey:             currentAPIKey,
 					User:               currentAPIKey.User,

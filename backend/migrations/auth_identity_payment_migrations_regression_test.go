@@ -156,3 +156,25 @@ func TestMigration186AllowsAllAccountShareMembershipEndReasons(t *testing.T) {
 	require.Contains(t, sql, "'prepay_insufficient'")
 	require.Contains(t, sql, "'account_unavailable'")
 }
+
+func TestMigration209RetiresAccountShareModeWithSafetyChecks(t *testing.T) {
+	content, err := FS.ReadFile("209_remove_account_share_mode.sql")
+	require.NoError(t, err)
+
+	sql := string(content)
+	activeGuard := strings.Index(sql, "active memberships still exist")
+	firstMutation := strings.Index(sql, "UPDATE accounts a")
+	require.GreaterOrEqual(t, activeGuard, 0)
+	require.Greater(t, firstMutation, activeGuard, "active membership guard must run before any account mutation")
+	require.Contains(t, sql, "listing owner private OpenAI group is missing")
+	require.Contains(t, sql, "SET share_mode = 'private'")
+	require.Contains(t, sql, "share_status = 'approved'")
+	require.Contains(t, sql, "RENAME TO account_share_mode_settlement_archive")
+	require.Contains(t, sql, "DROP TABLE IF EXISTS account_share_memberships")
+	require.Contains(t, sql, "DROP TABLE IF EXISTS account_share_listings")
+	require.Contains(t, sql, "DROP TABLE IF EXISTS account_share_mode_policies")
+	require.Contains(t, sql, "DROP TABLE IF EXISTS account_share_mode_groups")
+	require.NotContains(t, sql, "DROP TABLE account_share_policies")
+	require.NotContains(t, sql, "DROP TABLE account_share_settlement_entries")
+	require.NotContains(t, sql, "DROP TABLE user_balance_ledger")
+}

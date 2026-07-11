@@ -176,7 +176,7 @@
 <script setup lang="ts">
 import { reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { accountShareAPI } from '@/api'
+import { accountsAPI } from '@/api'
 import Icon from '@/components/icons/Icon.vue'
 import { useAppStore } from '@/stores/app'
 import { extractApiErrorMessage } from '@/utils/apiError'
@@ -312,7 +312,7 @@ async function saveUserProxy(): Promise<void> {
 
   savingProxy.value = true
   try {
-    const created = await accountShareAPI.createProxy({
+    const created = await accountsAPI.createProxy({
       name: proxyForm.name.trim() || undefined,
       protocol: proxyForm.protocol,
       host: proxyForm.host.trim(),

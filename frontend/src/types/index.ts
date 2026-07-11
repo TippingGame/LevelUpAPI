@@ -1104,7 +1104,6 @@ export interface Account {
   share_mode?: AccountShareMode | string
   share_status?: AccountShareStatus | string
   share_policy_id?: number | null
-  account_share_mode_listing_id?: number | null
   concurrency: number
   load_factor?: number | null
   load_factor_paid_ceiling?: number

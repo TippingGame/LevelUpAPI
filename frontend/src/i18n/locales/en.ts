@@ -410,7 +410,6 @@ export default {
     subscriptions: 'Subscriptions',
     accounts: 'Accounts',
     myAccounts: 'Shared Owner',
-    accountShare: 'Account Plaza',
     proxies: 'Proxies',
     redeemCodes: 'Redeem Codes',
     ops: 'Ops',
@@ -770,11 +769,6 @@ export default {
     private: 'Private'
   },
 
-  accountShare: {
-    title: 'Account Plaza',
-    description: 'After choosing a shared account, API keys in account mode groups will only schedule the bound account.'
-  },
-
   // User-owned Accounts
   userAccounts: {
     title: 'Shared Owner',
@@ -817,9 +811,6 @@ export default {
     shareModeHint: 'When switching to public mode, the system will run public-share validation and may leave the account pending review if it does not pass.',
     privateMode: 'Private',
     publicMode: 'Public',
-    accountShareModeOnly: 'Account mode only',
-    accountShareModeOnlyHint: 'This account comes from Account Plaza and can only be used in account mode. It cannot be moved to the public shared pool.',
-    accountShareModeOnlyBulkHint: 'The selected accounts include account-mode-only accounts, so share mode cannot be changed in bulk.',
     pendingReview: 'Validation Pending',
     approved: 'Approved',
     suspended: 'Suspended',
@@ -1246,10 +1237,10 @@ export default {
       reasons: {
         usage_charge: 'API usage charge',
         private_group_commission: 'Private group commission',
-        account_share_mode_seat_prepay: 'Account mode hourly prepay',
-        account_share_mode_seat_refund: 'Account mode hourly refund',
-        account_share_mode_seat_waiver_refund: 'Account mode hourly waiver refund',
-        account_share_mode_income: 'Account mode income',
+		account_share_mode_seat_prepay: 'Retired account-mode historical prepay',
+		account_share_mode_seat_refund: 'Retired account-mode historical refund',
+		account_share_mode_seat_waiver_refund: 'Retired account-mode historical waiver refund',
+		account_share_mode_income: 'Retired account-mode historical income',
         account_share_income: 'Shared account income',
         invite_share_income: 'Invite share income',
         redeem_code: 'Recharge',
@@ -2149,16 +2140,6 @@ export default {
         privateGroupCommissionHint: 'Allowed range: 0% - 100%. Default is 0.5%.',
         privateGroupCommissionExample: 'Current setting: {rate}',
         saveCommission: 'Save Commission',
-        modePolicyTitle: 'Account Mode Share Policy',
-        modePolicyDescription: 'Configure the independent split for account-share mode. This applies only to account-plaza bindings and does not affect the shared-pool policy.',
-        modeCurrentPolicy: 'Current Account Mode Policy',
-        modeGlobalConfig: 'Account Mode Global Config',
-        modePolicyHint: 'Default platform retention is 10%, with 90% credited to the owner. Each usage stores the multiplier, duration fee, and split snapshot.',
-        modePlatformSharePercent: 'Platform retention ratio',
-        modeOwnerSharePercent: 'Owner income ratio',
-        modePlatformShareHint: 'Platform retention for account mode. Default is 10%, independent from the shared account pool.',
-        modeOwnerShareHint: 'Calculated automatically as 100% minus platform retention.',
-        modeSaveHint: 'Saving affects later account-mode settlements only. Historical snapshots are not rewritten.',
         enabled: 'Enable policy',
         ownerShare: 'Owner Share',
         inviteShare: 'Invite Share',
@@ -2182,7 +2163,6 @@ export default {
         loadFailed: 'Failed to load share policies',
         saveFailed: 'Failed to save share policy',
         invalidRatio: 'Owner share and invite share must be between 0 and 100, and their sum cannot exceed 100',
-        invalidModeRatio: 'Account mode platform retention must be between 0 and 100',
         errors: {
           INVALID_REQUEST: 'Invalid request'
         }
@@ -3400,19 +3380,6 @@ export default {
       selectedGroups: 'Selected Groups',
       searchGroups: 'Search group name or platform',
       noGroups: 'No groups available',
-      accountShareScope: 'Account Mode',
-      accountShareScopeHint: 'Configure AI / OpenAI account mode moderation separately. Account mode groups are not treated as normal groups.',
-      accountShareAllGroupsNotice: 'All groups is selected, so account mode requests are moderated after a valid binding is resolved.',
-      accountShareAll: 'All account mode',
-      accountShareSelected: 'Selected listings',
-      accountShareSelectedCount: '{count} listing(s) selected',
-      accountShareOwner: 'Owner: {owner}',
-      accountShareRate: 'Rate {rate}',
-      accountShareListingsFailed: 'Failed to load account mode listings',
-      searchAccountShareListings: 'Search account, owner, model, or ID',
-      refreshListings: 'Refresh listings',
-      noAccountShareListings: 'No account mode listings',
-      accountShareMode: 'Account mode',
       modelFilter: 'Model scope',
       modelFilterHint: 'Moderate by the client-requested model name; channel model mappings do not change this match.',
       modelFilterAll: 'All models',

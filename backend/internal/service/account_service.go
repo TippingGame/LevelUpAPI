@@ -42,8 +42,6 @@ var (
 	ErrOwnedAccountPublicPoolUnavailable         = infraerrors.BadRequest("OWNED_ACCOUNT_PUBLIC_POOL_UNAVAILABLE", "public shared account pool group is not configured for this account platform")
 	ErrOwnedAccountPublicPolicyUnavailable       = infraerrors.BadRequest("OWNED_ACCOUNT_PUBLIC_POLICY_UNAVAILABLE", "account share policy is not configured for this public account pool")
 	ErrOwnedAccountPublicValidationFailed        = infraerrors.BadRequest("OWNED_ACCOUNT_PUBLIC_VALIDATION_FAILED", "public account validation failed")
-	ErrOwnedAccountShareModeOnly                 = infraerrors.BadRequest("OWNED_ACCOUNT_SHARE_MODE_ONLY", "account share mode accounts cannot be moved to the public shared account pool")
-	ErrOwnedAccountShareModeBoundaryUnavailable  = infraerrors.InternalServer("OWNED_ACCOUNT_SHARE_MODE_BOUNDARY_UNAVAILABLE", "account share mode boundary check is unavailable")
 )
 
 const AccountListGroupUngrouped int64 = -1
@@ -255,10 +253,6 @@ type accountQuotaPoolRepairRepository interface {
 
 type openAIProSharedPoolEnsureRepository interface {
 	EnsureOpenAIProSharedPoolForAccount(ctx context.Context, accountID int64) (bool, error)
-}
-
-type accountShareModeListingAccountRepository interface {
-	IsAccountShareModeListingAccount(ctx context.Context, accountID int64) (bool, error)
 }
 
 type ownedAccountDuplicateKey struct {
@@ -1964,20 +1958,6 @@ func (s *AccountService) managedOwnedAccountGroupIDsForShareMode(ctx context.Con
 func (s *AccountService) ensureAccountCanEnterPublicShare(ctx context.Context, account *Account) error {
 	if account == nil {
 		return ErrAccountNotFound
-	}
-	if account.AccountShareModeListingID != nil && *account.AccountShareModeListingID > 0 {
-		return ErrOwnedAccountShareModeOnly
-	}
-	repo, ok := s.accountRepo.(accountShareModeListingAccountRepository)
-	if !ok {
-		return ErrOwnedAccountShareModeBoundaryUnavailable
-	}
-	isModeListingAccount, err := repo.IsAccountShareModeListingAccount(ctx, account.ID)
-	if err != nil {
-		return fmt.Errorf("check account share mode boundary: %w", err)
-	}
-	if isModeListingAccount {
-		return ErrOwnedAccountShareModeOnly
 	}
 	return nil
 }

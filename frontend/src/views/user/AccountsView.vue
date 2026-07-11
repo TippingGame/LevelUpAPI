@@ -284,17 +284,10 @@
 
           <template #cell-share="{ row }">
             <div class="flex flex-col gap-1">
-              <span
-                v-if="isAccountShareModeOnly(row)"
-                :class="accountShareModeOnlyBadgeClass()"
-                :title="t('userAccounts.accountShareModeOnlyHint')"
-              >
-                {{ t('userAccounts.accountShareModeOnly') }}
-              </span>
-              <span v-else :class="shareModeBadgeClass(row.share_mode)">
+              <span :class="shareModeBadgeClass(row.share_mode)">
                 {{ shareModeLabel(row.share_mode) }}
               </span>
-              <div v-if="!isAccountShareModeOnly(row) && row.share_mode === 'public'" class="flex items-center gap-1">
+			  <div v-if="row.share_mode === 'public'" class="flex items-center gap-1">
                 <span :class="shareStatusBadgeClass(row.share_status)" :title="shareStatusTitle(row)">
                   {{ shareStatusLabel(row.share_status) }}
                 </span>
@@ -519,7 +512,6 @@
       :allow-proxy="false"
       :allow-billing-rate="false"
       :allow-base-url="false"
-      :has-account-share-mode-only="selectedHasAccountShareModeOnly"
       @close="showBulkEditModal = false"
       @updated="handleBulkAccountsUpdated"
     />
@@ -611,8 +603,8 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { accountsAPI, accountShareAPI, userGroupsAPI } from '@/api'
-import type { AccountShareRevenuePolicyResponse } from '@/api/accountShare'
+import { accountsAPI, userGroupsAPI } from '@/api'
+import type { SharedOwnerRevenuePolicy } from '@/api/accounts'
 import type { AccountBatchTask, UserAccountVerifyLevelTarget } from '@/api/accounts'
 import { useAppStore } from '@/stores/app'
 import { useAuthStore } from '@/stores/auth'
@@ -683,7 +675,7 @@ const todayStatsByAccountId = ref<Record<string, WindowStats>>({})
 const todayStatsLoading = ref(false)
 const todayStatsError = ref<string | null>(null)
 const todayStatsReqSeq = ref(0)
-const revenuePolicy = ref<AccountShareRevenuePolicyResponse | null>(null)
+const revenuePolicy = ref<SharedOwnerRevenuePolicy | null>(null)
 const revenuePolicyLoading = ref(true)
 const revenuePolicyError = ref(false)
 const exportingData = ref(false)
@@ -764,7 +756,6 @@ const selectedPlatforms = computed<AccountPlatform[]>(() => [
 const selectedTypes = computed<AccountType[]>(() => [
   ...new Set(selectedAccounts.value.map((account) => account.type))
 ])
-const selectedHasAccountShareModeOnly = computed(() => selectedAccounts.value.some(isAccountShareModeOnly))
 
 const columns = computed<Column[]>(() => [
   { key: 'select', label: '', sortable: false, class: 'w-10' },
@@ -1064,12 +1055,6 @@ function shareModeLabel(mode?: string): string {
   return mode === 'public' ? t('userAccounts.publicMode') : t('userAccounts.privateMode')
 }
 
-function isAccountShareModeOnly(account: Account): boolean {
-  return Number(account.account_share_mode_listing_id || 0) > 0 ||
-    account.extra?.account_share_mode === true ||
-    account.extra?.account_share_mode === 'true'
-}
-
 function shareStatusLabel(status?: string): string {
   switch (status) {
     case 'pending':
@@ -1105,7 +1090,7 @@ function shareStatusTitle(row: Account): string {
 }
 
 function canRevalidatePublicShare(row: Account): boolean {
-  return !isAccountShareModeOnly(row) && row.share_mode === 'public' && row.share_status !== 'approved'
+  return row.share_mode === 'public' && row.share_status !== 'approved'
 }
 
 function shareModeBadgeClass(mode?: string): string {
@@ -1113,10 +1098,6 @@ function shareModeBadgeClass(mode?: string): string {
   return mode === 'public'
     ? `${base} bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300`
     : `${base} bg-gray-100 text-gray-700 dark:bg-dark-700 dark:text-dark-200`
-}
-
-function accountShareModeOnlyBadgeClass(): string {
-  return 'inline-flex w-fit rounded-md bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300'
 }
 
 function shareStatusBadgeClass(status?: string): string {
@@ -1211,7 +1192,7 @@ async function loadUserProxies(force = false): Promise<void> {
   if (userProxiesLoading.value || (!force && userProxies.value.length > 0)) return
   userProxiesLoading.value = true
   try {
-    userProxies.value = await accountShareAPI.listProxies()
+    userProxies.value = await accountsAPI.listProxies()
   } catch (error) {
     console.error('Failed to load user proxies:', error)
     appStore.showError(extractApiErrorMessage(error, t('userAccounts.importProxyLoadFailed')))
@@ -1230,7 +1211,7 @@ async function loadRevenuePolicy(): Promise<void> {
   revenuePolicyLoading.value = true
   revenuePolicyError.value = false
   try {
-    revenuePolicy.value = await accountShareAPI.getRevenuePolicy()
+    revenuePolicy.value = await accountsAPI.getRevenuePolicy()
   } catch (error) {
     revenuePolicy.value = null
     revenuePolicyError.value = true

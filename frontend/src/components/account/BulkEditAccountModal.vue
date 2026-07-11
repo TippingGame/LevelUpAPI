@@ -682,28 +682,23 @@
             v-model="enableShareMode"
             id="bulk-edit-share-mode-enabled"
             type="checkbox"
-            :disabled="!canBulkEditShareMode"
             aria-controls="bulk-edit-share-mode"
             :class="[
               'rounded border-gray-300 text-primary-600 focus:ring-primary-500',
-              !canBulkEditShareMode && 'cursor-not-allowed opacity-50'
             ]"
           />
         </div>
         <div
           id="bulk-edit-share-mode"
-          :class="(!enableShareMode || !canBulkEditShareMode) && 'pointer-events-none opacity-50'"
+		  :class="!enableShareMode && 'pointer-events-none opacity-50'"
         >
           <Select
             v-model="shareMode"
             :options="shareModeOptions"
-            :disabled="!enableShareMode || !canBulkEditShareMode"
+			:disabled="!enableShareMode"
             aria-labelledby="bulk-edit-share-mode-label"
           />
-          <p v-if="hasAccountShareModeOnly" class="input-hint text-emerald-700 dark:text-emerald-300">
-            {{ t('userAccounts.accountShareModeOnlyBulkHint') }}
-          </p>
-          <p v-else class="input-hint">{{ t('userAccounts.shareModeHint') }}</p>
+		  <p class="input-hint">{{ t('userAccounts.shareModeHint') }}</p>
         </div>
       </div>
 
@@ -1276,15 +1271,13 @@ interface Props {
   allowProxy?: boolean
   allowBillingRate?: boolean
   allowBaseUrl?: boolean
-  hasAccountShareModeOnly?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
   accountScope: 'admin',
   allowProxy: true,
   allowBillingRate: true,
-  allowBaseUrl: true,
-  hasAccountShareModeOnly: false
+	allowBaseUrl: true
 })
 const emit = defineEmits<{
   close: []
@@ -1296,8 +1289,6 @@ const appStore = useAppStore()
 const authStore = useAuthStore()
 const accountScope = computed(() => props.accountScope ?? 'admin')
 const isUserScope = computed(() => accountScope.value === 'user')
-const hasAccountShareModeOnly = computed(() => props.hasAccountShareModeOnly === true)
-const canBulkEditShareMode = computed(() => isUserScope.value && !hasAccountShareModeOnly.value)
 const canManageProxy = computed(() => !isUserScope.value && props.allowProxy !== false)
 const canManageBillingRate = computed(() => !isUserScope.value && props.allowBillingRate !== false)
 const canManageBaseUrl = computed(() => !isUserScope.value && props.allowBaseUrl !== false)
@@ -1686,7 +1677,7 @@ const buildUpdatePayload = (): Record<string, unknown> | null => {
     updates.rate_multiplier = rateMultiplier.value
   }
 
-  if (canBulkEditShareMode.value && enableShareMode.value) {
+	if (isUserScope.value && enableShareMode.value) {
     updates.share_mode = shareMode.value
   }
 
@@ -1922,12 +1913,6 @@ const handleSubmit = async () => {
     appStore.showError(t('admin.accounts.bulkEdit.noSelection'))
     return
   }
-  if (isUserScope.value && enableShareMode.value && !canBulkEditShareMode.value) {
-    appStore.showError(t('userAccounts.accountShareModeOnlyBulkHint'))
-    enableShareMode.value = false
-    return
-  }
-
   const hasAnyFieldEnabled =
     (canManageBaseUrl.value && enableBaseUrl.value) ||
     enableOpenAIPassthrough.value ||
@@ -1940,7 +1925,7 @@ const handleSubmit = async () => {
     enablePriority.value ||
     (canManageAccountLevel.value && enableAccountLevel.value) ||
     (canManageBillingRate.value && enableRateMultiplier.value) ||
-    (canBulkEditShareMode.value && enableShareMode.value) ||
+	(isUserScope.value && enableShareMode.value) ||
     enableStatus.value ||
     (canManageGroups.value && enableGroups.value) ||
     enableOpenAIWSMode.value ||
@@ -2109,12 +2094,6 @@ watch(
     }
   }
 )
-
-watch(hasAccountShareModeOnly, (blocked) => {
-  if (blocked) {
-    enableShareMode.value = false
-  }
-})
 
 watch(
   [bulkEditableGroups, canManageGroups],

@@ -183,9 +183,6 @@
                     <td class="whitespace-nowrap px-5 py-4 text-sm text-gray-700 dark:text-gray-300">{{ formatDateTime(row.created_at) }}</td>
                     <td class="whitespace-nowrap px-5 py-4 text-sm text-gray-700 dark:text-gray-300">
                       <div>{{ row.group_name || '-' }}</div>
-                      <div v-if="row.scope_type === 'account_share_mode'" class="text-xs text-gray-400">
-                        {{ accountShareLogMeta(row) }}
-                      </div>
                     </td>
                     <td class="whitespace-nowrap px-5 py-4 text-sm text-gray-700 dark:text-gray-300">
                       <div>{{ row.user_email || '-' }}</div>
@@ -649,88 +646,6 @@
               </div>
             </div>
 
-            <div class="rounded-xl border border-gray-100 bg-white p-4 dark:border-dark-700 dark:bg-dark-800">
-              <div class="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-                <div>
-                  <h3 class="text-base font-semibold text-gray-900 dark:text-white">{{ t('admin.riskControl.accountShareScope') }}</h3>
-                  <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">{{ t('admin.riskControl.accountShareScopeHint') }}</p>
-                </div>
-                <Toggle v-model="configForm.account_share_mode_scope.enabled" :disabled="configForm.all_groups" />
-              </div>
-              <p v-if="configForm.all_groups" class="mt-3 rounded-lg bg-emerald-50 px-3 py-2 text-xs leading-5 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-300">
-                {{ t('admin.riskControl.accountShareAllGroupsNotice') }}
-              </p>
-              <div v-else class="mt-4 space-y-4" :class="!configForm.account_share_mode_scope.enabled ? 'opacity-60' : ''">
-                <div class="inline-flex rounded-lg bg-gray-100 p-1 dark:bg-dark-700">
-                  <button
-                    type="button"
-                    class="rounded-md px-3 py-1.5 text-sm font-medium transition-colors"
-                    :class="configForm.account_share_mode_scope.all ? 'bg-white text-gray-900 shadow-sm dark:bg-dark-800 dark:text-white' : 'text-gray-500 dark:text-gray-400'"
-                    :disabled="!configForm.account_share_mode_scope.enabled"
-                    @click="configForm.account_share_mode_scope.all = true"
-                  >
-                    {{ t('admin.riskControl.accountShareAll') }}
-                  </button>
-                  <button
-                    type="button"
-                    class="rounded-md px-3 py-1.5 text-sm font-medium transition-colors"
-                    :class="!configForm.account_share_mode_scope.all ? 'bg-white text-gray-900 shadow-sm dark:bg-dark-800 dark:text-white' : 'text-gray-500 dark:text-gray-400'"
-                    :disabled="!configForm.account_share_mode_scope.enabled"
-                    @click="configForm.account_share_mode_scope.all = false"
-                  >
-                    {{ t('admin.riskControl.accountShareSelected') }}
-                  </button>
-                </div>
-
-                <div v-if="configForm.account_share_mode_scope.enabled && !configForm.account_share_mode_scope.all" class="space-y-3">
-                  <div class="flex flex-col gap-2 sm:flex-row">
-                    <div class="relative flex-1">
-                      <Icon name="search" size="sm" class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-                      <input v-model.trim="accountShareListingSearch" type="search" class="input pl-9" :placeholder="t('admin.riskControl.searchAccountShareListings')" />
-                    </div>
-                    <button type="button" class="btn btn-secondary inline-flex items-center justify-center gap-2" :disabled="accountShareListingsLoading" @click="loadAccountShareListings">
-                      <Icon name="refresh" size="sm" :class="accountShareListingsLoading ? 'animate-spin' : ''" />
-                      {{ t('admin.riskControl.refreshListings') }}
-                    </button>
-                  </div>
-                  <div class="flex flex-wrap items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
-                    <span class="inline-flex rounded-md bg-gray-100 px-2 py-1 dark:bg-dark-700">
-                      {{ t('admin.riskControl.accountShareSelectedCount', { count: selectedAccountShareListingCount }) }}
-                    </span>
-                  </div>
-                  <div class="grid max-h-[420px] grid-cols-1 gap-3 overflow-y-auto pr-1 xl:grid-cols-2">
-                    <button
-                      v-for="listing in filteredAccountShareListings"
-                      :key="listing.id"
-                      type="button"
-                      class="flex min-h-28 items-start justify-between gap-3 rounded-lg border p-4 text-left transition-colors"
-                      :class="isAccountShareListingSelected(listing.id) ? 'border-primary-300 bg-primary-50 dark:border-primary-700 dark:bg-primary-900/20' : 'border-gray-100 hover:bg-gray-50 dark:border-dark-700 dark:hover:bg-dark-700/60'"
-                      @click="toggleAccountShareListing(listing.id)"
-                    >
-                      <span class="min-w-0 flex-1">
-                        <span class="block truncate text-sm font-semibold text-gray-900 dark:text-white">{{ listing.account_name || `#${listing.id}` }}</span>
-                        <span class="mt-1 block truncate text-xs text-gray-500 dark:text-gray-400">
-                          {{ t('admin.riskControl.accountShareOwner', { owner: listing.owner_username || listing.owner_user_id }) }}
-                        </span>
-                        <span class="mt-2 flex flex-wrap gap-1.5">
-                          <span class="inline-flex rounded-md bg-gray-100 px-2 py-0.5 text-xs text-gray-600 dark:bg-dark-700 dark:text-gray-300">{{ listing.status }}</span>
-                          <span class="inline-flex rounded-md bg-sky-50 px-2 py-0.5 text-xs text-sky-700 dark:bg-sky-900/20 dark:text-sky-300">{{ t('admin.riskControl.accountShareRate', { rate: listing.rate_multiplier }) }}</span>
-                          <span class="inline-flex rounded-md bg-emerald-50 px-2 py-0.5 text-xs text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-300">{{ listing.active_seats }}/{{ listing.seat_limit }}</span>
-                        </span>
-                        <span class="mt-2 block truncate text-xs text-gray-400">{{ (listing.allowed_models || []).join(', ') || '-' }}</span>
-                      </span>
-                      <span
-                        class="mt-1 flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full border"
-                        :class="isAccountShareListingSelected(listing.id) ? 'border-primary-500 bg-primary-500 text-white' : 'border-gray-300 text-transparent dark:border-dark-500'"
-                      >
-                        <Icon name="check" size="xs" :stroke-width="2" />
-                      </span>
-                    </button>
-                    <p v-if="filteredAccountShareListings.length === 0" class="text-sm text-gray-500 dark:text-gray-400">{{ t('admin.riskControl.noAccountShareListings') }}</p>
-                  </div>
-                </div>
-              </div>
-            </div>
           </div>
 
           <div v-else-if="activeSettingsTab === 'cyberRules'" class="space-y-5">
@@ -936,9 +851,6 @@
               <span v-if="inputDetailRow.group_name" class="inline-flex rounded-md bg-sky-50 px-2.5 py-1 text-xs font-medium text-sky-700 dark:bg-sky-900/20 dark:text-sky-300">
                 {{ inputDetailRow.group_name }}
               </span>
-              <span v-if="inputDetailRow.scope_type === 'account_share_mode'" class="inline-flex rounded-md bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-700 dark:bg-amber-900/20 dark:text-amber-300">
-                {{ accountShareLogMeta(inputDetailRow) }}
-              </span>
             </div>
             <pre class="mt-4 max-h-[420px] overflow-auto whitespace-pre-wrap break-words rounded-lg bg-gray-950 p-4 text-sm leading-6 text-gray-100 shadow-inner dark:bg-black/50">{{ inputDetailText }}</pre>
           </div>
@@ -965,7 +877,6 @@ import Toggle from '@/components/common/Toggle.vue'
 import Pagination from '@/components/common/Pagination.vue'
 import { adminAPI } from '@/api/admin'
 import type {
-  ContentModerationAccountShareModeScope,
   ContentModerationAPIKeyStatus,
   ContentModerationConfig,
   ContentModerationCyberPreflightRules,
@@ -974,7 +885,6 @@ import type {
   ContentModerationRuntimeStatus,
   ContentModerationTestAuditResult,
   ModerationMode,
-  RiskControlAccountShareListing,
   UpdateContentModerationConfig,
 } from '@/api/admin/riskControl'
 import type { AdminGroup, SelectOption } from '@/types'
@@ -1018,14 +928,11 @@ const statusLoading = ref(false)
 const apiKeyTesting = ref(false)
 const hashActionLoading = ref(false)
 const unbanningUserID = ref<number | null>(null)
-const accountShareListingsLoading = ref(false)
 const settingsOpen = ref(false)
 const activeSettingsTab = ref<SettingsTab>('basic')
 const groupSearch = ref('')
-const accountShareListingSearch = ref('')
 const flaggedHashInput = ref('')
 const groups = ref<AdminGroup[]>([])
-const accountShareListings = ref<RiskControlAccountShareListing[]>([])
 const defaultCyberPreflightRules = ref<ContentModerationCyberPreflightRules>(createEmptyCyberPreflightRules())
 const logs = ref<ContentModerationLog[]>([])
 const status = ref<ContentModerationRuntimeStatus | null>(null)
@@ -1071,12 +978,6 @@ const configForm = reactive({
   hit_retention_days: 180,
   non_hit_retention_days: 3,
   pre_hash_check_enabled: false,
-  account_share_mode_scope: {
-    enabled: false,
-    all: false,
-    platforms: ['openai'],
-    listing_ids: [] as number[],
-  } as ContentModerationAccountShareModeScope,
 })
 
 const pagination = reactive({
@@ -1161,28 +1062,6 @@ const filteredGroups = computed(() => {
     return group.name.toLowerCase().includes(keyword) || String(group.platform).toLowerCase().includes(keyword)
   })
 })
-
-const filteredAccountShareListings = computed(() => {
-  const keyword = accountShareListingSearch.value.trim().toLowerCase()
-  if (!keyword) return accountShareListings.value
-  return accountShareListings.value.filter((listing) => {
-    const haystack = [
-      listing.account_name,
-      listing.owner_username,
-      listing.status,
-      listing.account_level,
-      listing.allowed_models?.join(' '),
-      String(listing.id),
-      String(listing.account_id),
-      String(listing.owner_user_id),
-    ].join(' ').toLowerCase()
-    return haystack.includes(keyword)
-  })
-})
-
-const selectedAccountShareListingCount = computed(() => configForm.account_share_mode_scope.listing_ids.length)
-
-const selectedAccountShareListingIDs = computed(() => new Set(configForm.account_share_mode_scope.listing_ids))
 
 const isZhipuProvider = computed(() => configForm.provider === 'zhipu')
 
@@ -1425,17 +1304,6 @@ function resetCyberPreflightRules() {
   configForm.cyber_preflight_rules = normalizeCyberPreflightRules(defaultCyberPreflightRules.value)
 }
 
-function normalizeAccountShareModeScope(scope?: ContentModerationAccountShareModeScope): ContentModerationAccountShareModeScope {
-  return {
-    enabled: Boolean(scope?.enabled),
-    all: Boolean(scope?.all),
-    platforms: Array.isArray(scope?.platforms) && scope.platforms.length > 0 ? [...scope.platforms] : ['openai'],
-    listing_ids: Array.isArray(scope?.listing_ids)
-      ? Array.from(new Set(scope.listing_ids.filter((id) => Number.isFinite(id) && id > 0)))
-      : [],
-  }
-}
-
 function applyConfig(config: ContentModerationConfig) {
   configForm.enabled = config.enabled
   configForm.cyber_preflight_enabled = config.cyber_preflight_enabled ?? false
@@ -1473,21 +1341,18 @@ function applyConfig(config: ContentModerationConfig) {
   configForm.hit_retention_days = config.hit_retention_days || 180
   configForm.non_hit_retention_days = Math.min(Math.max(config.non_hit_retention_days || 3, 1), 3)
   configForm.pre_hash_check_enabled = config.pre_hash_check_enabled ?? false
-  configForm.account_share_mode_scope = normalizeAccountShareModeScope(config.account_share_mode_scope)
 }
 
 async function loadAll() {
   loading.value = true
   try {
-    const [config, groupItems, runtimeStatus, listingResult] = await Promise.all([
+	const [config, groupItems, runtimeStatus] = await Promise.all([
       adminAPI.riskControl.getConfig(),
       adminAPI.groups.getAll(),
-      adminAPI.riskControl.getStatus(),
-      adminAPI.riskControl.listAccountShareListings({ page: 1, page_size: 100 }),
+	  adminAPI.riskControl.getStatus(),
     ])
     applyConfig(config)
     groups.value = groupItems
-    accountShareListings.value = listingResult.items
     status.value = runtimeStatus
     if (Array.isArray(runtimeStatus.api_key_statuses)) {
       configForm.api_key_statuses = [...runtimeStatus.api_key_statuses]
@@ -1516,18 +1381,6 @@ async function loadStatus(silent = true) {
     }
   } finally {
     statusLoading.value = false
-  }
-}
-
-async function loadAccountShareListings() {
-  accountShareListingsLoading.value = true
-  try {
-    const result = await adminAPI.riskControl.listAccountShareListings({ page: 1, page_size: 100 })
-    accountShareListings.value = result.items
-  } catch (err: unknown) {
-    appStore.showError(extractApiErrorMessage(err, t('admin.riskControl.accountShareListingsFailed')))
-  } finally {
-    accountShareListingsLoading.value = false
   }
 }
 
@@ -1560,7 +1413,6 @@ async function saveConfig() {
       hit_retention_days: Number(configForm.hit_retention_days) || 180,
       non_hit_retention_days: Math.min(Math.max(Number(configForm.non_hit_retention_days) || 3, 1), 3),
       pre_hash_check_enabled: configForm.pre_hash_check_enabled,
-      account_share_mode_scope: normalizeAccountShareModeScope(configForm.account_share_mode_scope),
     }
     const keys = parseApiKeys(configForm.api_keys_text)
     if (!payload.clear_api_key && configForm.api_keys_mode === 'replace' && keys.length === 0) {
@@ -1872,20 +1724,6 @@ function onProviderChange(provider: string | number | boolean | null) {
   moderationTestResult.value = null
 }
 
-function toggleAccountShareListing(listingID: number) {
-  const ids = configForm.account_share_mode_scope.listing_ids
-  const index = ids.indexOf(listingID)
-  if (index >= 0) {
-    ids.splice(index, 1)
-  } else {
-    ids.push(listingID)
-  }
-}
-
-function isAccountShareListingSelected(listingID: number): boolean {
-  return selectedAccountShareListingIDs.value.has(listingID)
-}
-
 function isGroupSelected(groupID: number): boolean {
   return configForm.group_ids.includes(groupID)
 }
@@ -2014,14 +1852,6 @@ function parseApiKeys(value: string): string[] {
 function violationCountText(row: ContentModerationLog): string {
   if (!row.flagged) return '-'
   return t('admin.riskControl.violationCount', { count: row.violation_count || 1 })
-}
-
-function accountShareLogMeta(row: ContentModerationLog): string {
-  const parts: string[] = []
-  if (row.account_share_listing_id) parts.push(`Listing ${row.account_share_listing_id}`)
-  if (row.account_id) parts.push(`Account ${row.account_id}`)
-  if (row.consumer_user_id) parts.push(`Consumer ${row.consumer_user_id}`)
-  return parts.join(' / ') || t('admin.riskControl.accountShareMode')
 }
 
 function normalizeDateTimeLocal(value: string): string | undefined {

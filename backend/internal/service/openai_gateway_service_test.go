@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
-	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/cespare/xxhash/v2"
 	"github.com/gin-gonic/gin"
@@ -545,52 +544,6 @@ func TestOpenAISelectAccountWithLoadAwareness_FiltersUnschedulable(t *testing.T)
 	}
 	if selection.Account.ID != available.ID {
 		t.Fatalf("expected account %d, got %d", available.ID, selection.Account.ID)
-	}
-	if selection.ReleaseFunc != nil {
-		selection.ReleaseFunc()
-	}
-}
-
-func TestOpenAISelectAccountWithLoadAwareness_AccountShareModeUsesMembershipAccount(t *testing.T) {
-	modeGroupID := int64(61711)
-	privateGroupID := int64(61761)
-	ownerUserID := int64(1)
-	boundAccount := Account{
-		ID:          416100,
-		Platform:    PlatformOpenAI,
-		Type:        AccountTypeOAuth,
-		Status:      StatusActive,
-		Schedulable: true,
-		Concurrency: 20,
-		OwnerUserID: &ownerUserID,
-		GroupIDs:    []int64{privateGroupID},
-		AccountGroups: []AccountGroup{
-			{AccountID: 416100, GroupID: privateGroupID},
-		},
-	}
-	shareRepo := &accountShareModeRepoStub{
-		membership: &AccountShareMembership{ID: 1, AccountID: boundAccount.ID, ConsumerUserID: 5580, APIKeyID: 20103},
-		listing:    &AccountShareListing{ID: 1, OwnerUserID: 1, Status: AccountShareListingStatusActive},
-	}
-	svc := &OpenAIGatewayService{
-		accountRepo:             stubOpenAIAccountRepo{accounts: []Account{boundAccount}},
-		accountShareModeService: &AccountShareModeService{repo: shareRepo},
-	}
-	baseCtx := context.WithValue(context.Background(), ctxkey.AuthenticatedUserID, int64(5580))
-	ctx := WithAccountShareModeRequest(baseCtx, 5580, 20103)
-
-	selection, err := svc.SelectAccountWithLoadAwareness(ctx, &modeGroupID, "", "gpt-4", nil)
-	if err != nil {
-		t.Fatalf("SelectAccountWithLoadAwareness error: %v", err)
-	}
-	if selection == nil || selection.Account == nil {
-		t.Fatalf("expected selection with account")
-	}
-	if selection.Account.ID != boundAccount.ID {
-		t.Fatalf("expected bound account %d, got %d", boundAccount.ID, selection.Account.ID)
-	}
-	if shareRepo.bindingCalls != 1 {
-		t.Fatalf("expected one account-share binding lookup, got %d", shareRepo.bindingCalls)
 	}
 	if selection.ReleaseFunc != nil {
 		selection.ReleaseFunc()

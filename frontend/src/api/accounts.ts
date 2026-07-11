@@ -4,7 +4,7 @@
  */
 
 import { apiClient } from './client'
-import type { Account, AccountUsageInfo, AccountUsageStatsResponse, AdminDataPayload, CreateAccountRequest, PaginatedResponse, UpdateAccountRequest, UserAccountQuotaPoolDashboard, WindowStats } from '@/types'
+import type { Account, AccountUsageInfo, AccountUsageStatsResponse, AdminDataPayload, CreateAccountRequest, PaginatedResponse, Proxy, UpdateAccountRequest, UserAccountQuotaPoolDashboard, WindowStats } from '@/types'
 import type { OpenAIQuotaResetResult, OpenAIQuotaUsage } from './admin/accounts'
 
 const USER_ACCOUNT_BULK_OPERATION_TIMEOUT_MS = 120000
@@ -29,6 +29,35 @@ export interface UserAccountListFilters {
   search?: string
   sort_by?: string
   sort_order?: 'asc' | 'desc'
+}
+
+export interface SharedOwnerRevenuePolicy {
+  shared_owner_share_ratio?: number | null
+  private_group_commission_rate: number
+}
+
+export interface CreateOwnedProxyRequest {
+  name?: string
+  protocol: Proxy['protocol']
+  host: string
+  port: number
+  username?: string
+  password?: string
+}
+
+export async function listProxies(): Promise<Proxy[]> {
+  const { data } = await apiClient.get<Proxy[]>('/accounts/proxies')
+  return data
+}
+
+export async function createProxy(payload: CreateOwnedProxyRequest): Promise<Proxy> {
+  const { data } = await apiClient.post<Proxy>('/accounts/proxies', payload)
+  return data
+}
+
+export async function getRevenuePolicy(): Promise<SharedOwnerRevenuePolicy> {
+  const { data } = await apiClient.get<SharedOwnerRevenuePolicy>('/accounts/revenue-policy')
+  return data
 }
 
 export async function list(
@@ -548,6 +577,9 @@ export const accountsAPI = {
   list,
   getById,
   getQuotaDashboard,
+  listProxies,
+  createProxy,
+  getRevenuePolicy,
   create,
   importAccount,
   importCredentialContents,

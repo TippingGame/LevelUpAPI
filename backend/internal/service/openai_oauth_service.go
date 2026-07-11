@@ -63,7 +63,7 @@ func (s *OpenAIOAuthService) visibleProxyForUser(ctx context.Context, userID int
 		return nil, ErrUserNotFound
 	}
 	if proxyID == nil || *proxyID <= 0 {
-		return nil, ErrAccountShareModeProxyRequired
+		return nil, ErrOwnedOpenAIAccountProxyRequired
 	}
 	if s == nil || s.proxyRepo == nil {
 		return nil, ErrServiceUnavailable

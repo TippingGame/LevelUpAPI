@@ -275,7 +275,6 @@ func AccountFromServiceShallow(a *service.Account) *Account {
 		ShareMode:                 service.NormalizeAccountShareMode(a.ShareMode),
 		ShareStatus:               service.NormalizeAccountShareStatus(a.ShareStatus),
 		SharePolicyID:             a.SharePolicyID,
-		AccountShareModeListingID: a.AccountShareModeListingID,
 		ProxyID:                   a.ProxyID,
 		Concurrency:               a.Concurrency,
 		LoadFactor:                a.LoadFactor,

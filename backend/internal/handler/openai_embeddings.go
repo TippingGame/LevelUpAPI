@@ -142,7 +142,7 @@ routeLoop:
 				zap.Int64p("group_id", currentAPIKey.GroupID),
 			)
 			selectionModel := resolveOpenAIAccountSelectionModel(reqModel, channelMapping)
-			selectionCtx := openAIAccountShareModeRequestContext(c, currentAPIKey)
+			selectionCtx := c.Request.Context()
 			selection, scheduleDecision, err := h.gatewayService.SelectAccountWithSchedulerForCapability(
 				selectionCtx,
 				currentAPIKey.GroupID,
@@ -161,9 +161,6 @@ routeLoop:
 					zap.Int64p("group_id", currentAPIKey.GroupID),
 				)
 				if len(failedAccountIDs) == 0 {
-					if h.handleAccountShareModeSelectionError(c, err, streamStarted) {
-						return
-					}
 					if routeCursor.switchToNextWithoutCooldown(apiKey.ID, "account_select_failed", reqLog, zap.Error(err)) {
 						continue routeLoop
 					}
@@ -294,8 +291,7 @@ routeLoop:
 			upstreamEndpoint := GetUpstreamEndpoint(c, account.Platform)
 
 			h.submitUsageRecordTask(c.Request.Context(), func(ctx context.Context) {
-				usageCtx := service.WithAccountShareModeRequestFromContext(ctx, selectionCtx)
-				if err := h.gatewayService.RecordUsage(usageCtx, &service.OpenAIRecordUsageInput{
+				if err := h.gatewayService.RecordUsage(ctx, &service.OpenAIRecordUsageInput{
 					Result:             result,
 					APIKey:             currentAPIKey,
 					User:               currentAPIKey.User,

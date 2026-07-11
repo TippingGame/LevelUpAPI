@@ -139,7 +139,6 @@ type ownedAccountDuplicateRepoStub struct {
 	ensureOpenAIProPoolFn      func(accountID int64) error
 	getByIDAccounts            map[int64]*Account
 	getByIDsAccounts           map[int64]*Account
-	accountShareModeListingIDs map[int64]int64
 	listOwnedByPlatform        map[string][]Account
 	loadFactorCreditsBalance   int
 	loadFactorCreditsUsedTotal int
@@ -310,11 +309,6 @@ func (s *ownedAccountDuplicateRepoStub) GetByIDs(_ context.Context, ids []int64)
 		out = append(out, &cp)
 	}
 	return out, nil
-}
-
-func (s *ownedAccountDuplicateRepoStub) IsAccountShareModeListingAccount(_ context.Context, accountID int64) (bool, error) {
-	listingID := s.accountShareModeListingIDs[accountID]
-	return listingID > 0, nil
 }
 
 func (s *ownedAccountDuplicateRepoStub) ListOwnedWithFilters(_ context.Context, ownerUserID int64, params pagination.PaginationParams, platform, accountType, status, search string, groupID, proxyID int64, privacyMode string) ([]Account, *pagination.PaginationResult, error) {
@@ -1938,42 +1932,6 @@ func TestAccountServiceBulkUpdateOwnedShareModeUsesPerAccountUpdateOnly(t *testi
 	require.Len(t, repo.updatedAccounts, 1)
 	require.Equal(t, StatusDisabled, repo.updatedAccounts[0].Status)
 	require.Equal(t, AccountShareModePrivate, repo.updatedAccounts[0].ShareMode)
-}
-
-func TestAccountServiceUpdateOwnedRejectsAccountShareModeListingPublicShare(t *testing.T) {
-	ownerID := int64(101)
-	listingID := int64(301)
-	publicMode := AccountShareModePublic
-	repo := &ownedAccountDuplicateRepoStub{
-		getByIDAccounts: map[int64]*Account{
-			1: {
-				ID:                        1,
-				Platform:                  PlatformOpenAI,
-				AccountLevel:              AccountLevelPlus,
-				Type:                      AccountTypeOAuth,
-				OwnerUserID:               &ownerID,
-				Credentials:               map[string]any{"access_token": "token", "chatgpt_account_id": "acct-1"},
-				ShareMode:                 AccountShareModePrivate,
-				ShareStatus:               AccountShareStatusApproved,
-				AccountShareModeListingID: &listingID,
-				Status:                    StatusActive,
-				Schedulable:               true,
-				Concurrency:               OpenAIPlusDefaultConcurrency,
-				Priority:                  1,
-			},
-		},
-		accountShareModeListingIDs: map[int64]int64{1: listingID},
-	}
-	svc := &AccountService{accountRepo: repo}
-
-	account, err := svc.UpdateOwned(context.Background(), ownerID, 1, UpdateAccountRequest{
-		ShareMode: &publicMode,
-	})
-
-	require.Nil(t, account)
-	require.ErrorIs(t, err, ErrOwnedAccountShareModeOnly)
-	require.Empty(t, repo.updatedAccounts)
-	require.Empty(t, repo.boundAccountIDs)
 }
 
 func TestAccountServiceUpdateOwnedAllowsPrivateAccountPublicSharePending(t *testing.T) {

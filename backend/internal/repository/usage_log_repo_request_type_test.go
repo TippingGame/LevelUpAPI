@@ -325,7 +325,7 @@ func TestUsageLogRepositoryGetAccountUsageStatsUsesIdentityScope(t *testing.T) {
 			AddRow("2025-01-15", int64(1), int64(150), 1.25, 1.25, 1.25).
 			AddRow("2025-01-16", int64(1), int64(15), 0.25, 0.25, 0.25))
 	mock.ExpectQuery(`FROM user_balance_ledger`).
-		WithArgs(sqlmock.AnyArg(), accountShareSeatPrepayReason, accountShareSeatRefundReason, accountShareSeatWaiverRefundReason, start, end).
+		WithArgs(sqlmock.AnyArg(), "account_share_mode_seat_prepay", "account_share_mode_seat_refund", "account_share_mode_seat_waiver_refund", start, end).
 		WillReturnRows(sqlmock.NewRows([]string{"date", "hourly_cost"}).
 			AddRow("2025-01-16", 0.75).
 			AddRow("2025-01-17", -0.25))

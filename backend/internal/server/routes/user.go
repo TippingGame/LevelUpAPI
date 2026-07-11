@@ -117,6 +117,9 @@ func RegisterUserRoutes(
 			accounts.GET("/:id/usage", h.UserAccount.GetUsage)
 			accounts.GET("/:id/openai-quota", h.UserAccount.QueryOpenAIQuota)
 			accounts.POST("/:id/openai-quota/reset", h.UserAccount.ResetOpenAIQuota)
+			accounts.GET("/revenue-policy", h.UserAccount.GetRevenuePolicy)
+			accounts.GET("/proxies", h.UserAccount.ListProxies)
+			accounts.POST("/proxies", h.UserAccount.CreateProxy)
 			accounts.GET("/:id/stats", h.UserAccount.GetStats)
 			accounts.GET("/:id/today-stats", h.UserAccount.GetTodayStats)
 			accounts.GET("/:id", h.UserAccount.GetByID)
@@ -157,25 +160,6 @@ func RegisterUserRoutes(
 			accountOAuth.POST("/antigravity/auth-url", h.UserAccount.GenerateAntigravityOAuthURL)
 			accountOAuth.POST("/antigravity/exchange-code", h.UserAccount.ExchangeAntigravityOAuthCode)
 			accountOAuth.POST("/antigravity/refresh-token", h.UserAccount.RefreshAntigravityToken)
-		}
-
-		accountShare := authenticated.Group("/account-share")
-		accountShare.Use(h.UserAccount.RequireSharedAccountOwner())
-		{
-			accountShare.GET("/revenue-policy", h.AccountShareMode.GetRevenuePolicy)
-			accountShare.POST("/openai/auth-url", h.AccountShareMode.GenerateOpenAIAuthURL)
-			accountShare.POST("/openai/exchange-code", h.AccountShareMode.ExchangeOpenAICode)
-			accountShare.GET("/proxies", h.AccountShareMode.ListAvailableProxies)
-			accountShare.POST("/proxies", h.AccountShareMode.CreateProxy)
-			accountShare.GET("/listings", h.AccountShareMode.ListListings)
-			accountShare.GET("/listings/:id", h.AccountShareMode.GetListing)
-			accountShare.POST("/listings/:id/edit-session", h.AccountShareMode.BeginListingEdit)
-			accountShare.POST("/listings/:id/edit-session/release", h.AccountShareMode.ReleaseListingEdit)
-			accountShare.PATCH("/listings/:id", h.AccountShareMode.UpdateListing)
-			accountShare.POST("/listings/:id/join", h.AccountShareMode.JoinListing)
-			accountShare.PATCH("/memberships/:id/idle-timeout", h.AccountShareMode.UpdateMembershipIdleTimeout)
-			accountShare.POST("/memberships/:id/end-intent", h.AccountShareMode.CreateEndMembershipIntent)
-			accountShare.POST("/memberships/:id/end", h.AccountShareMode.EndMembership)
 		}
 
 		// 用户可用分组（非管理员接口）

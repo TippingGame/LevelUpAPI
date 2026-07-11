@@ -360,7 +360,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 			zap.Int64p("group_id", currentAPIKey.GroupID),
 		)
 		selectionModel := resolveOpenAIAccountSelectionModel(reqModel, channelMapping)
-		selectionCtx := openAIAccountShareModeRequestContext(c, currentAPIKey)
+		selectionCtx := c.Request.Context()
 		if decision := h.checkCyberPreflightWithContext(selectionCtx, c, reqLog, currentAPIKey, subject, service.ContentModerationProtocolOpenAIResponses, reqModel, body); decision != nil && decision.Blocked {
 			h.handleStreamingAwareError(c, contentModerationStatus(decision), cyberPreflightErrorCode(decision), decision.Message, streamStarted)
 			return
@@ -388,9 +388,6 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 				zap.Int("excluded_account_count", len(failedAccountIDs)),
 				zap.Int64p("group_id", currentAPIKey.GroupID),
 			)
-			if h.handleAccountShareModeSelectionError(c, err, streamStarted) {
-				return
-			}
 			if len(failedAccountIDs) == 0 {
 				if !errors.Is(err, service.ErrNoAvailableCompactAccounts) && routeCursor.switchToNextWithoutCooldown(apiKey.ID, "account_select_failed", reqLog, zap.Error(err)) {
 					failedAccountIDs = make(map[int64]struct{})
@@ -563,8 +560,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 
 		// 使用量记录通过有界 worker 池提交，避免请求热路径创建无界 goroutine。
 		h.submitUsageRecordTask(c.Request.Context(), func(ctx context.Context) {
-			usageCtx := service.WithAccountShareModeRequestFromContext(ctx, selectionCtx)
-			if err := h.gatewayService.RecordUsage(usageCtx, &service.OpenAIRecordUsageInput{
+			if err := h.gatewayService.RecordUsage(ctx, &service.OpenAIRecordUsageInput{
 				Result:             result,
 				APIKey:             currentAPIKey,
 				User:               currentAPIKey.User,
@@ -835,7 +831,7 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 			zap.Int("excluded_account_count", len(failedAccountIDs)),
 			zap.Int64p("group_id", currentAPIKey.GroupID),
 		)
-		selectionCtx := openAIAccountShareModeRequestContext(c, currentAPIKey)
+		selectionCtx := c.Request.Context()
 		if decision := h.checkCyberPreflightWithContext(selectionCtx, c, reqLog, currentAPIKey, subject, service.ContentModerationProtocolAnthropicMessages, reqModel, body); decision != nil && decision.Blocked {
 			h.anthropicStreamingAwareError(c, contentModerationStatus(decision), "permission_error", decision.Message, streamStarted)
 			return
@@ -863,9 +859,6 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 				zap.Int("excluded_account_count", len(failedAccountIDs)),
 				zap.Int64p("group_id", currentAPIKey.GroupID),
 			)
-			if h.handleAccountShareModeAnthropicError(c, err, streamStarted) {
-				return
-			}
 			if len(failedAccountIDs) == 0 {
 				if err != nil {
 					if routeCursor.switchToNextWithoutCooldown(apiKey.ID, "account_select_failed", reqLog, zap.Error(err)) {
@@ -1013,8 +1006,7 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 		requestPayloadHash := service.HashUsageRequestPayload(body)
 
 		h.submitUsageRecordTask(c.Request.Context(), func(ctx context.Context) {
-			usageCtx := service.WithAccountShareModeRequestFromContext(ctx, selectionCtx)
-			if err := h.gatewayService.RecordUsage(usageCtx, &service.OpenAIRecordUsageInput{
+			if err := h.gatewayService.RecordUsage(ctx, &service.OpenAIRecordUsageInput{
 				Result:             result,
 				APIKey:             currentAPIKey,
 				User:               currentAPIKey.User,
@@ -1387,7 +1379,6 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 	var channelMappingWS service.ChannelMappingResult
 	var selection *service.AccountSelectionResult
 	var scheduleDecision service.OpenAIAccountScheduleDecision
-	var selectedAccountShareCtx context.Context
 	var cyberBlockKeyWS string
 	for {
 		routeCandidate, ok := routeCursor.current()
@@ -1441,7 +1432,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		}
 		var selectErr error
 		selectionModel := resolveOpenAIAccountSelectionModel(reqModel, channelMappingWS)
-		selectionCtx := openAIAccountShareModeRequestContext(c, currentAPIKey)
+		selectionCtx := c.Request.Context()
 		if decision := h.checkCyberPreflightWithContext(selectionCtx, c, reqLog, currentAPIKey, subject, service.ContentModerationProtocolOpenAIResponses, reqModel, routeFirstMessage); decision != nil && decision.Blocked {
 			closeOpenAIClientWS(wsConn, coderws.StatusPolicyViolation, decision.Message)
 			return
@@ -1464,7 +1455,6 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 			routeFirstMessage,
 		)
 		if selectErr == nil && selection != nil && selection.Account != nil {
-			selectedAccountShareCtx = selectionCtx
 			firstMessage = routeFirstMessage
 			previousResponseID = routePreviousResponseID
 			previousResponseIDKind = routePreviousResponseIDKind
@@ -1481,18 +1471,6 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 			zap.Error(selectErr),
 			zap.Int64p("group_id", currentAPIKey.GroupID),
 		)
-		if errors.Is(selectErr, service.ErrAccountShareModeGroupUnbound) {
-			closeOpenAIClientWS(wsConn, coderws.StatusPolicyViolation, "该分组未绑定账号")
-			return
-		}
-		if errors.Is(selectErr, service.ErrAccountShareBalanceBelowMinimum) {
-			closeOpenAIClientWS(wsConn, coderws.StatusPolicyViolation, "账户余额低于共享账号最低准入余额")
-			return
-		}
-		if errors.Is(selectErr, service.ErrAccountSharePerUserConcurrencyExceeded) {
-			closeOpenAIClientWS(wsConn, coderws.StatusTryAgainLater, "共享账号单用户并发已达上限")
-			return
-		}
 		if !routeCursor.switchToNextWithoutCooldown(apiKey.ID, "account_select_failed", reqLog, zap.Error(selectErr), zap.Int64p("group_id", currentAPIKey.GroupID)) {
 			closeOpenAIClientWS(wsConn, coderws.StatusTryAgainLater, openAIAccountSelectionUnavailableMessage(selectErr))
 			return
@@ -1597,8 +1575,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 			}
 			h.gatewayService.ReportOpenAIAccountScheduleResult(account.ID, true, result.FirstTokenMs)
 			h.submitUsageRecordTask(ctx, func(taskCtx context.Context) {
-				usageCtx := service.WithAccountShareModeRequestFromContext(taskCtx, selectedAccountShareCtx)
-				if err := h.gatewayService.RecordUsage(usageCtx, &service.OpenAIRecordUsageInput{
+				if err := h.gatewayService.RecordUsage(taskCtx, &service.OpenAIRecordUsageInput{
 					Result:             result,
 					APIKey:             currentAPIKey,
 					User:               currentAPIKey.User,

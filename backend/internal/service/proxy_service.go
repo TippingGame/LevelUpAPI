@@ -2,7 +2,10 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"strings"
+	"unicode"
 
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
@@ -68,6 +71,62 @@ func NewProxyService(proxyRepo ProxyRepository) *ProxyService {
 	return &ProxyService{
 		proxyRepo: proxyRepo,
 	}
+}
+
+// ListOwnedVisible returns active proxies the user is allowed to attach to
+// personal/shared-owner accounts.
+func (s *ProxyService) ListOwnedVisible(ctx context.Context, userID int64) ([]ProxyWithAccountCount, error) {
+	if userID <= 0 {
+		return nil, ErrUserNotFound
+	}
+	if s == nil || s.proxyRepo == nil {
+		return []ProxyWithAccountCount{}, nil
+	}
+	return s.proxyRepo.ListActiveVisibleWithAccountCount(ctx, userID)
+}
+
+// CreateOwned creates (or reuses) a proxy owned by the requesting user.
+func (s *ProxyService) CreateOwned(ctx context.Context, userID int64, req CreateProxyRequest) (*Proxy, error) {
+	if userID <= 0 {
+		return nil, ErrUserNotFound
+	}
+	if s == nil || s.proxyRepo == nil {
+		return nil, ErrServiceUnavailable
+	}
+	protocol := strings.ToLower(strings.TrimSpace(req.Protocol))
+	switch protocol {
+	case "http", "https", "socks5", "socks5h":
+	default:
+		return nil, infraerrors.BadRequest("OWNED_PROXY_INVALID", "invalid proxy protocol")
+	}
+	host := strings.TrimSpace(req.Host)
+	if host == "" || strings.IndexFunc(host, unicode.IsSpace) >= 0 || req.Port < 1 || req.Port > 65535 {
+		return nil, infraerrors.BadRequest("OWNED_PROXY_INVALID", "invalid proxy endpoint")
+	}
+	username := strings.TrimSpace(req.Username)
+	password := strings.TrimSpace(req.Password)
+	if existing, err := s.proxyRepo.FindVisibleActiveByEndpoint(ctx, userID, protocol, host, req.Port, username, password); err == nil && existing != nil {
+		return existing, nil
+	} else if err != nil && !errors.Is(err, ErrProxyNotFound) {
+		return nil, err
+	}
+	name := strings.TrimSpace(req.Name)
+	if name == "" {
+		name = fmt.Sprintf("我的代理 %s:%d", host, req.Port)
+	}
+	if runes := []rune(name); len(runes) > 100 {
+		name = string(runes[:100])
+	}
+	ownerID := userID
+	proxy := &Proxy{
+		Name: name, Protocol: protocol, Host: host, Port: req.Port,
+		Username: username, Password: password, OwnerUserID: &ownerID,
+		Status: StatusActive, MaxAccounts: userOwnedProxyDefaultMaxAccounts,
+	}
+	if err := s.proxyRepo.Create(ctx, proxy); err != nil {
+		return nil, err
+	}
+	return proxy, nil
 }
 
 // Create 创建代理

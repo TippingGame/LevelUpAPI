@@ -11,7 +11,6 @@ type AdminHandlers struct {
 	Group                  *admin.GroupHandler
 	Account                *admin.AccountHandler
 	AccountSharePolicy     *admin.AccountSharePolicyHandler
-	AccountShareModePolicy *admin.AccountShareModePolicyHandler
 	Announcement           *admin.AnnouncementHandler
 	Conversation           *admin.ConversationHandler
 	DataManagement         *admin.DataManagementHandler
@@ -50,7 +49,6 @@ type Handlers struct {
 	Auth             *AuthHandler
 	User             *UserHandler
 	APIKey           *APIKeyHandler
-	AccountShareMode *AccountShareModeHandler
 	UserAccount      *UserAccountHandler
 	Usage            *UsageHandler
 	Redeem           *RedeemHandler

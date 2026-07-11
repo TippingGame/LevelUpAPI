@@ -414,7 +414,6 @@ type OpenAIGatewayService struct {
 	balanceNotifyService    *BalanceNotifyService
 	settingService          *SettingService
 	accountService          *AccountService
-	accountShareModeService *AccountShareModeService
 	proxyLatencyCache       ProxyLatencyCache
 
 	openaiWSPoolOnce              sync.Once
@@ -459,12 +458,7 @@ func NewOpenAIGatewayService(
 	balanceNotifyService *BalanceNotifyService,
 	settingService *SettingService,
 	accountService *AccountService,
-	accountShareModeServices ...*AccountShareModeService,
 ) *OpenAIGatewayService {
-	var accountShareModeService *AccountShareModeService
-	if len(accountShareModeServices) > 0 {
-		accountShareModeService = accountShareModeServices[0]
-	}
 	svc := &OpenAIGatewayService{
 		accountRepo:            accountRepo,
 		accountSharePolicyRepo: accountSharePolicyRepo,
@@ -497,7 +491,6 @@ func NewOpenAIGatewayService(
 		balanceNotifyService:    balanceNotifyService,
 		settingService:          settingService,
 		accountService:          accountService,
-		accountShareModeService: accountShareModeService,
 		responseHeaderFilter:    compileResponseHeaderFilter(cfg),
 		codexSnapshotThrottle:   newAccountWriteThrottle(openAICodexSnapshotPersistMinInterval),
 	}
@@ -1716,13 +1709,6 @@ func (s *OpenAIGatewayService) selectAccountForModelWithExclusions(ctx context.C
 		return nil, fmt.Errorf("%w supporting model: %s (channel pricing restriction)", ErrNoAvailableAccounts, requestedModel)
 	}
 
-	if account, handled, err := s.resolveAccountShareModeBoundAccount(ctx, groupID, requestedModel, excludedIDs, requireCompact, requiredCapability); handled {
-		if err != nil {
-			return nil, err
-		}
-		return account, nil
-	}
-
 	// 1. 灏濊瘯绮樻€т細璇濆懡涓?	// Try sticky session hit
 	if account := s.tryStickySessionHit(ctx, groupID, sessionHash, requestedModel, excludedIDs, requireCompact, stickyAccountID, requiredCapability); account != nil {
 		return account, nil
@@ -1929,35 +1915,6 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 		if accountID, err := s.getStickySessionAccountID(ctx, groupID, sessionHash); err == nil {
 			stickyAccountID = accountID
 		}
-	}
-	if account, handled, err := s.resolveAccountShareModeBoundAccount(ctx, groupID, requestedModel, excludedIDs, requireCompact, requiredCapability); handled {
-		if err != nil {
-			return nil, err
-		}
-		result, err := s.tryAcquireAccountSlot(ctx, account.ID, account.Concurrency)
-		if err == nil && result.Acquired {
-			s.bindOpenAIAccountProxyExitIP(ctx, account)
-			return newAccountShareModeSelectionResult(account, true, result.ReleaseFunc, nil), nil
-		}
-		if stickyAccountID > 0 && stickyAccountID == account.ID && s.concurrencyService != nil {
-			waitingCount, _ := s.concurrencyService.GetAccountWaitingCount(ctx, account.ID)
-			if waitingCount < cfg.StickySessionMaxWaiting {
-				s.bindOpenAIAccountProxyExitIP(ctx, account)
-				return newAccountShareModeSelectionResult(account, false, nil, &AccountWaitPlan{
-					AccountID:      account.ID,
-					MaxConcurrency: account.Concurrency,
-					Timeout:        cfg.StickySessionWaitTimeout,
-					MaxWaiting:     cfg.StickySessionMaxWaiting,
-				}), nil
-			}
-		}
-		s.bindOpenAIAccountProxyExitIP(ctx, account)
-		return newAccountShareModeSelectionResult(account, false, nil, &AccountWaitPlan{
-			AccountID:      account.ID,
-			MaxConcurrency: account.Concurrency,
-			Timeout:        cfg.FallbackWaitTimeout,
-			MaxWaiting:     cfg.FallbackMaxWaiting,
-		}), nil
 	}
 	if s.concurrencyService == nil || !cfg.LoadBatchEnabled {
 		account, err := s.selectAccountForModelWithExclusions(ctx, groupID, sessionHash, requestedModel, excludedIDs, requireCompact, stickyAccountID, requiredCapability)
@@ -2236,55 +2193,6 @@ func (s *OpenAIGatewayService) listSchedulableAccounts(ctx context.Context, grou
 	return FilterAccountsVisibleToRequestUser(ctx, accounts), nil
 }
 
-func (s *OpenAIGatewayService) resolveAccountShareModeBoundAccount(ctx context.Context, groupID *int64, requestedModel string, excludedIDs map[int64]struct{}, requireCompact bool, requiredCapability OpenAIEndpointCapability) (*Account, bool, error) {
-	if s == nil || s.accountShareModeService == nil || s.accountRepo == nil || groupID == nil {
-		return nil, false, nil
-	}
-	requestCtx, ok := AccountShareModeRequestFromContext(ctx)
-	if !ok || requestCtx.UserID <= 0 || requestCtx.APIKeyID <= 0 {
-		return nil, false, nil
-	}
-	membership, listing, err := s.accountShareModeService.ResolveActiveBindingForRequest(ctx, requestCtx.UserID, requestCtx.APIKeyID, *groupID)
-	if err != nil {
-		return nil, true, err
-	}
-	if membership == nil || listing == nil {
-		return nil, false, nil
-	}
-	accountID := membership.AccountID
-	if accountID <= 0 {
-		return nil, true, ErrNoAvailableAccounts
-	}
-	account, err := s.accountRepo.GetByID(ctx, accountID)
-	if err != nil {
-		return nil, true, fmt.Errorf("get account share mode account: %w", err)
-	}
-	if account == nil || account.ID != accountID {
-		return nil, true, ErrNoAvailableAccounts
-	}
-	if s.isAccountTempUnschedulableCached(ctx, account) {
-		return nil, true, noAvailableOpenAISelectionError(requestedModel, false)
-	}
-	if excludedIDs != nil {
-		if _, excluded := excludedIDs[account.ID]; excluded {
-			return nil, true, noAvailableOpenAISelectionError(requestedModel, false)
-		}
-	}
-	if !isOpenAIAccountEligibleForRequest(account, requestedModel, requireCompact, requiredCapability) {
-		return nil, true, noAvailableOpenAISelectionError(requestedModel, requireCompact && openAICompactSupportTier(account) == 0)
-	}
-	if !s.isOpenAIAccountProxyHealthSchedulable(ctx, account) {
-		return nil, true, noAvailableOpenAISelectionError(requestedModel, false)
-	}
-	if !s.isOpenAIAccountProxyExitIPStable(ctx, account) {
-		return nil, true, noAvailableOpenAISelectionError(requestedModel, false)
-	}
-	if s.needsUpstreamChannelRestrictionCheck(ctx, groupID) && s.isUpstreamModelRestrictedByChannel(ctx, *groupID, account, requestedModel, requireCompact) {
-		return nil, true, noAvailableOpenAISelectionError(requestedModel, false)
-	}
-	return account, true, nil
-}
-
 func (s *OpenAIGatewayService) tryAcquireAccountSlot(ctx context.Context, accountID int64, maxConcurrency int) (*AcquireResult, error) {
 	if s.concurrencyService == nil {
 		return &AcquireResult{Acquired: true, ReleaseFunc: func() {}}, nil
@@ -2474,15 +2382,6 @@ func (s *OpenAIGatewayService) newSelectionResult(ctx context.Context, account *
 		ReleaseFunc: release,
 		WaitPlan:    waitPlan,
 	}, nil
-}
-
-func newAccountShareModeSelectionResult(account *Account, acquired bool, release func(), waitPlan *AccountWaitPlan) *AccountSelectionResult {
-	return &AccountSelectionResult{
-		Account:     account,
-		Acquired:    acquired,
-		ReleaseFunc: release,
-		WaitPlan:    waitPlan,
-	}
 }
 
 func (s *OpenAIGatewayService) schedulingConfig() config.GatewaySchedulingConfig {
@@ -6385,22 +6284,6 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		}
 		multiplier = resolver.Resolve(ctx, user.ID, *apiKey.GroupID, apiKey.Group.RateMultiplier)
 	}
-	var accountShareMembership *AccountShareMembership
-	var accountShareListing *AccountShareListing
-	if s.accountShareModeService != nil && apiKey.GroupID != nil {
-		var err error
-		accountShareMembership, accountShareListing, err = s.accountShareModeService.ResolveActiveBindingForRequest(ctx, user.ID, apiKey.ID, *apiKey.GroupID)
-		if err != nil {
-			return err
-		}
-		if accountShareListing != nil && accountShareListing.AccountID != account.ID {
-			return ErrNoAvailableAccounts
-		}
-		if accountShareListing != nil {
-			multiplier = accountShareListing.RateMultiplier
-		}
-	}
-
 	var cost *CostBreakdown
 	var err error
 	billingModel := forwardResultBillingModel(result.Model, result.UpstreamModel)
@@ -6437,17 +6320,6 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		).Warn("openai_usage.pricing_missing_record_zero_cost", zap.Error(err))
 		cost = &CostBreakdown{BillingMode: string(BillingModeToken)}
 	}
-	var accountShareModeSettlement *AccountShareModeBillingSnapshot
-	if accountShareMembership != nil && accountShareListing != nil && cost != nil {
-		baseCharge := cost.ActualCost
-		hourlyCharge := 0.0
-		policy, err := s.accountShareModeService.ResolvePolicy(ctx, account.Platform)
-		if err != nil {
-			return err
-		}
-		accountShareModeSettlement = BuildAccountShareModeBillingSnapshot(accountShareMembership, accountShareListing, policy, baseCharge, hourlyCharge, int(result.Duration.Milliseconds()))
-	}
-
 	// Determine billing type. Subscription groups never fall back to balance billing.
 	isSubscriptionBilling := apiKey.Group != nil && apiKey.Group.IsSubscriptionType()
 	if isSubscriptionBilling && subscription == nil {
@@ -6574,7 +6446,6 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 			IsSubscriptionBill:         isSubscriptionBilling,
 			PrivateGroupCommissionRate: privateGroupCommissionRate,
 			AccountRateMultiplier:      accountRateMultiplier,
-			AccountShareModeSettlement: accountShareModeSettlement,
 			APIKeyService:              input.APIKeyService,
 		}, s.billingDeps(), s.usageBillingRepo)
 		return err

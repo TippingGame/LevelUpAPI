@@ -100,7 +100,7 @@
 <script setup lang="ts">
 import { computed, defineComponent, h, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { accountsAPI, accountShareAPI } from '@/api'
+import { accountsAPI } from '@/api'
 import ProxySelector from '@/components/common/ProxySelector.vue'
 import CredentialImportModal from '@/components/account/CredentialImportModal.vue'
 import UserProxyQuickCreatePanel from '@/components/user/UserProxyQuickCreatePanel.vue'
@@ -461,7 +461,7 @@ async function loadProxies(force = false): Promise<void> {
   proxyLoading.value = true
   proxyLoadMessage.value = ''
   try {
-    proxies.value = await accountShareAPI.listProxies()
+    proxies.value = await accountsAPI.listProxies()
   } catch (error: unknown) {
     proxyLoadMessage.value = extractApiErrorMessage(error, t('userAccounts.importProxyLoadFailed'))
   } finally {

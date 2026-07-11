@@ -14,7 +14,6 @@ func ProvideAdminHandlers(
 	groupHandler *admin.GroupHandler,
 	accountHandler *admin.AccountHandler,
 	accountSharePolicyHandler *admin.AccountSharePolicyHandler,
-	accountShareModePolicyHandler *admin.AccountShareModePolicyHandler,
 	announcementHandler *admin.AnnouncementHandler,
 	adminConversationHandler *admin.ConversationHandler,
 	dataManagementHandler *admin.DataManagementHandler,
@@ -53,7 +52,6 @@ func ProvideAdminHandlers(
 		Group:                  groupHandler,
 		Account:                accountHandler,
 		AccountSharePolicy:     accountSharePolicyHandler,
-		AccountShareModePolicy: accountShareModePolicyHandler,
 		Announcement:           announcementHandler,
 		Conversation:           adminConversationHandler,
 		DataManagement:         dataManagementHandler,
@@ -98,16 +96,6 @@ func ProvideSettingHandler(settingService *service.SettingService, buildInfo Bui
 	return NewSettingHandler(settingService, buildInfo.Version)
 }
 
-func ProvideAccountShareModeHandler(
-	accountShareModeService *service.AccountShareModeService,
-	accountSharePolicyService *service.AccountSharePolicyService,
-	settingService *service.SettingService,
-) *AccountShareModeHandler {
-	h := NewAccountShareModeHandler(accountShareModeService)
-	h.SetRevenuePolicyDependencies(accountSharePolicyService, settingService)
-	return h
-}
-
 func ProvideAdminUserHandler(adminService service.AdminService, concurrencyService *service.ConcurrencyService, userAttributeService *service.UserAttributeService) *admin.UserHandler {
 	return admin.NewUserHandler(adminService, concurrencyService, userAttributeService)
 }
@@ -129,6 +117,8 @@ func ProvideUserAccountHandler(
 	sessionLimitCache service.SessionLimitCache,
 	rpmCache service.RPMCache,
 	accountBatchTaskService *service.AccountBatchTaskService,
+	proxyService *service.ProxyService,
+	accountSharePolicyService *service.AccountSharePolicyService,
 ) *UserAccountHandler {
 	h := NewUserAccountHandler(
 		accountService,
@@ -145,6 +135,7 @@ func ProvideUserAccountHandler(
 	h.SetUserAttributeService(userAttributeService)
 	h.SetUserService(userService)
 	h.SetOpenAIQuotaService(openaiQuotaService)
+	h.SetSharedOwnerSupport(proxyService, accountSharePolicyService)
 	h.SetRuntimeCapacityProviders(concurrencyService, sessionLimitCache, rpmCache)
 	return h
 }
@@ -154,7 +145,6 @@ func ProvideHandlers(
 	authHandler *AuthHandler,
 	userHandler *UserHandler,
 	apiKeyHandler *APIKeyHandler,
-	accountShareModeHandler *AccountShareModeHandler,
 	userAccountHandler *UserAccountHandler,
 	usageHandler *UsageHandler,
 	redeemHandler *RedeemHandler,
@@ -181,7 +171,6 @@ func ProvideHandlers(
 		Auth:             authHandler,
 		User:             userHandler,
 		APIKey:           apiKeyHandler,
-		AccountShareMode: accountShareModeHandler,
 		UserAccount:      userAccountHandler,
 		Usage:            usageHandler,
 		Redeem:           redeemHandler,
@@ -210,7 +199,6 @@ var ProviderSet = wire.NewSet(
 	NewAuthHandler,
 	NewUserHandler,
 	NewAPIKeyHandler,
-	ProvideAccountShareModeHandler,
 	ProvideUserAccountHandler,
 	NewUsageHandler,
 	NewRedeemHandler,
@@ -236,7 +224,6 @@ var ProviderSet = wire.NewSet(
 	admin.NewGroupHandler,
 	admin.NewAccountHandler,
 	admin.NewAccountSharePolicyHandler,
-	admin.NewAccountShareModePolicyHandler,
 	admin.NewAnnouncementHandler,
 	admin.NewConversationHandler,
 	admin.NewDataManagementHandler,

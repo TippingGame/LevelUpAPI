@@ -28,19 +28,7 @@
 
       <div v-if="isUserScope">
         <label class="input-label">{{ t('userAccounts.shareMode') }}</label>
-        <div
-          v-if="isAccountShareModeOnly"
-          class="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800 dark:border-emerald-800/70 dark:bg-emerald-900/20 dark:text-emerald-200"
-        >
-          <div class="flex items-center gap-2 font-medium">
-            <Icon name="lock" size="sm" />
-            <span>{{ t('userAccounts.accountShareModeOnly') }}</span>
-          </div>
-          <p class="mt-1 text-xs text-emerald-700 dark:text-emerald-300">
-            {{ t('userAccounts.accountShareModeOnlyHint') }}
-          </p>
-        </div>
-        <div v-else class="grid grid-cols-2 gap-2">
+		<div class="grid grid-cols-2 gap-2">
           <button
             type="button"
             :class="[
@@ -2306,13 +2294,6 @@ const appStore = useAppStore()
 const authStore = useAuthStore()
 const accountScope = computed(() => props.accountScope ?? 'admin')
 const isUserScope = computed(() => accountScope.value === 'user')
-const isAccountShareModeOnly = computed(() => {
-  const account = props.account
-  if (!isUserScope.value || !account) return false
-  return Number(account.account_share_mode_listing_id || 0) > 0 ||
-    account.extra?.account_share_mode === true ||
-    account.extra?.account_share_mode === 'true'
-})
 const canManageProxy = computed(() => !isUserScope.value && props.allowProxy !== false)
 const canManageBillingRate = computed(() => !isUserScope.value && props.allowBillingRate !== false)
 const hideProxyEndpoint = computed(() => props.hideProxyEndpoint === true)
@@ -3487,9 +3468,6 @@ const sanitizeUpdatePayload = (payload: Record<string, unknown>) => {
     delete next.proxy_id
     next.concurrency = normalizePersonalAccountConcurrency(next.concurrency)
     next.load_factor = normalizePersonalAccountLoadFactor(next.load_factor)
-    if (isAccountShareModeOnly.value) {
-      delete next.share_mode
-    }
     next.private_priority = typeof next.priority === 'number' && Number(next.priority) > 0
       ? next.priority
       : PERSONAL_ACCOUNT_DEFAULT_PRIORITY

@@ -31,9 +31,7 @@ vi.mock('vue-i18n', async () => {
 vi.mock('@/api', () => ({
   accountsAPI: {
     create: vi.fn(),
-    importCredentialContents: vi.fn()
-  },
-  accountShareAPI: {
+    importCredentialContents: vi.fn(),
     listProxies: listProxiesMock,
     createProxy: createProxyMock
   }
@@ -41,7 +39,9 @@ vi.mock('@/api', () => ({
 
 vi.mock('@/api/accounts', () => ({
   accountsAPI: {
-    create: vi.fn()
+    create: vi.fn(),
+    listProxies: listProxiesMock,
+    createProxy: createProxyMock
   }
 }))
 

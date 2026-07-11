@@ -30,9 +30,6 @@ type Account struct {
 	ShareMode     string
 	ShareStatus   string
 	SharePolicyID *int64
-	// AccountShareModeListingID is a runtime marker for accounts that back an
-	// account-share-mode listing. It is not stored on accounts.
-	AccountShareModeListingID *int64
 	ProxyID                   *int64
 	Concurrency               int
 	Priority                  int

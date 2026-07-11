@@ -239,10 +239,6 @@ func (r *accountRepository) GetByIDs(ctx context.Context, ids []int64) ([]*servi
 	if err != nil {
 		return nil, err
 	}
-	listingIDsByAccount, err := r.loadAccountShareModeListingIDs(ctx, accountIDs)
-	if err != nil {
-		return nil, err
-	}
 
 	outByID := make(map[int64]*service.Account, len(entAccounts))
 	for _, entAcc := range entAccounts {
@@ -264,10 +260,6 @@ func (r *accountRepository) GetByIDs(ctx context.Context, ids []int64) ([]*servi
 		}
 		if ags, ok := accountGroupsByAccount[entAcc.ID]; ok {
 			out.AccountGroups = ags
-		}
-		if listingID, ok := listingIDsByAccount[entAcc.ID]; ok {
-			id := listingID
-			out.AccountShareModeListingID = &id
 		}
 		outByID[entAcc.ID] = out
 	}
@@ -297,31 +289,6 @@ func (r *accountRepository) ExistsByID(ctx context.Context, id int64) (bool, err
 		return false, err
 	}
 	return exists, nil
-}
-
-func (r *accountRepository) IsAccountShareModeListingAccount(ctx context.Context, id int64) (bool, error) {
-	if id <= 0 {
-		return false, nil
-	}
-	rows, err := r.sql.QueryContext(ctx, `
-		SELECT id
-		FROM account_share_listings
-		WHERE account_id = $1
-			AND deleted_at IS NULL
-		LIMIT 1
-	`, id)
-	if err != nil {
-		return false, err
-	}
-	defer func() { _ = rows.Close() }()
-	if !rows.Next() {
-		return false, rows.Err()
-	}
-	var listingID int64
-	if err := rows.Scan(&listingID); err != nil {
-		return false, err
-	}
-	return true, rows.Err()
 }
 
 func (r *accountRepository) GetByCRSAccountID(ctx context.Context, crsAccountID string) (*service.Account, error) {
@@ -3703,10 +3670,6 @@ func (r *accountRepository) accountsToService(ctx context.Context, accounts []*d
 	if err != nil {
 		return nil, err
 	}
-	listingIDsByAccount, err := r.loadAccountShareModeListingIDs(ctx, accountIDs)
-	if err != nil {
-		return nil, err
-	}
 
 	outAccounts := make([]service.Account, 0, len(accounts))
 	for _, acc := range accounts {
@@ -3731,45 +3694,10 @@ func (r *accountRepository) accountsToService(ctx context.Context, accounts []*d
 		if ags, ok := accountGroupsByAccount[acc.ID]; ok {
 			out.AccountGroups = ags
 		}
-		if listingID, ok := listingIDsByAccount[acc.ID]; ok {
-			id := listingID
-			out.AccountShareModeListingID = &id
-		}
 		outAccounts = append(outAccounts, *out)
 	}
 
 	return outAccounts, nil
-}
-
-func (r *accountRepository) loadAccountShareModeListingIDs(ctx context.Context, accountIDs []int64) (map[int64]int64, error) {
-	out := make(map[int64]int64)
-	if len(accountIDs) == 0 {
-		return out, nil
-	}
-
-	rows, err := r.sql.QueryContext(ctx, `
-		SELECT account_id, id
-		FROM account_share_listings
-		WHERE account_id = ANY($1)
-			AND deleted_at IS NULL
-	`, pq.Array(accountIDs))
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = rows.Close() }()
-
-	for rows.Next() {
-		var accountID int64
-		var listingID int64
-		if err := rows.Scan(&accountID, &listingID); err != nil {
-			return nil, err
-		}
-		out[accountID] = listingID
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return out, nil
 }
 
 func (r *accountRepository) loadAccountErrorSince(ctx context.Context, accountIDs []int64) (map[int64]*time.Time, error) {

@@ -86,8 +86,7 @@ const (
 	contentModerationCleanupTimeout  = 30 * time.Minute
 	contentModerationCleanupDelay    = 5 * time.Minute
 
-	contentModerationScopeTypeGroup            = "group"
-	contentModerationScopeTypeAccountShareMode = "account_share_mode"
+	contentModerationScopeTypeGroup = "group"
 )
 
 var contentModerationCategoryOrder = []string{
@@ -161,7 +160,6 @@ type ContentModerationConfig struct {
 	HitRetentionDays           int                                          `json:"hit_retention_days"`
 	NonHitRetentionDays        int                                          `json:"non_hit_retention_days"`
 	PreHashCheckEnabled        bool                                         `json:"pre_hash_check_enabled"`
-	AccountShareModeScope      ContentModerationAccountShareModeScopeConfig `json:"account_share_mode_scope"`
 }
 
 type ContentModerationConfigView struct {
@@ -195,14 +193,6 @@ type ContentModerationConfigView struct {
 	HitRetentionDays           int                                          `json:"hit_retention_days"`
 	NonHitRetentionDays        int                                          `json:"non_hit_retention_days"`
 	PreHashCheckEnabled        bool                                         `json:"pre_hash_check_enabled"`
-	AccountShareModeScope      ContentModerationAccountShareModeScopeConfig `json:"account_share_mode_scope"`
-}
-
-type ContentModerationAccountShareModeScopeConfig struct {
-	Enabled    bool     `json:"enabled"`
-	All        bool     `json:"all"`
-	Platforms  []string `json:"platforms"`
-	ListingIDs []int64  `json:"listing_ids"`
 }
 
 type ContentModerationCyberPreflightRulesConfig struct {
@@ -288,7 +278,6 @@ type UpdateContentModerationConfigInput struct {
 	HitRetentionDays      *int                                          `json:"hit_retention_days"`
 	NonHitRetentionDays   *int                                          `json:"non_hit_retention_days"`
 	PreHashCheckEnabled   *bool                                         `json:"pre_hash_check_enabled"`
-	AccountShareModeScope *ContentModerationAccountShareModeScopeConfig `json:"account_share_mode_scope"`
 }
 
 type ContentModerationCheckInput struct {
@@ -380,11 +369,9 @@ type ContentModerationLog struct {
 	GroupID               *int64             `json:"group_id,omitempty"`
 	GroupName             string             `json:"group_name"`
 	ScopeType             string             `json:"scope_type"`
-	AccountShareListingID *int64             `json:"account_share_listing_id,omitempty"`
 	AccountID             *int64             `json:"account_id,omitempty"`
 	OwnerUserID           *int64             `json:"owner_user_id,omitempty"`
 	ConsumerUserID        *int64             `json:"consumer_user_id,omitempty"`
-	MembershipID          *int64             `json:"membership_id,omitempty"`
 	Endpoint              string             `json:"endpoint"`
 	Provider              string             `json:"provider"`
 	Model                 string             `json:"model"`
@@ -466,18 +453,11 @@ type ContentModerationRepository interface {
 	CleanupExpiredLogs(ctx context.Context, hitBefore time.Time, nonHitBefore time.Time) (*ContentModerationCleanupResult, error)
 }
 
-type ContentModerationAccountShareModeResolver interface {
-	IsModeGroup(ctx context.Context, groupID int64) bool
-	ResolveActiveBindingForRequest(ctx context.Context, userID, apiKeyID, groupID int64) (*AccountShareMembership, *AccountShareListing, error)
-}
-
 type ContentModerationScopeContext struct {
-	ScopeType             string
-	AccountShareListingID *int64
-	AccountID             *int64
-	OwnerUserID           *int64
-	ConsumerUserID        *int64
-	MembershipID          *int64
+	ScopeType      string
+	AccountID      *int64
+	OwnerUserID    *int64
+	ConsumerUserID *int64
 }
 
 type ContentModerationHashCache interface {
@@ -493,7 +473,6 @@ type ContentModerationService struct {
 	repo                     ContentModerationRepository
 	hashCache                ContentModerationHashCache
 	groupRepo                GroupRepository
-	accountShareModeResolver ContentModerationAccountShareModeResolver
 	userRepo                 UserRepository
 	authCacheInvalidator     APIKeyAuthCacheInvalidator
 	emailService             *EmailService
@@ -573,13 +552,6 @@ func (s *ContentModerationService) SetSystemNoticeService(noticeService *SystemN
 	s.systemNoticeService = noticeService
 }
 
-func (s *ContentModerationService) SetAccountShareModeResolver(resolver ContentModerationAccountShareModeResolver) {
-	if s == nil {
-		return
-	}
-	s.accountShareModeResolver = resolver
-}
-
 func (s *ContentModerationService) GetConfig(ctx context.Context) (*ContentModerationConfigView, error) {
 	cfg, err := s.loadConfig(ctx)
 	if err != nil {
@@ -655,9 +627,6 @@ func (s *ContentModerationService) UpdateConfig(ctx context.Context, input Updat
 	}
 	if input.PreHashCheckEnabled != nil {
 		cfg.PreHashCheckEnabled = *input.PreHashCheckEnabled
-	}
-	if input.AccountShareModeScope != nil {
-		cfg.AccountShareModeScope = *input.AccountShareModeScope
 	}
 	if input.AllGroups != nil {
 		cfg.AllGroups = *input.AllGroups
@@ -815,7 +784,6 @@ func (s *ContentModerationService) Check(ctx context.Context, input ContentModer
 		"audit_provider", cfg.Provider,
 		"all_groups", cfg.AllGroups,
 		"configured_group_ids", cfg.GroupIDs,
-		"account_share_scope_enabled", cfg.AccountShareModeScope.Enabled,
 		"scope_type", scopeCtx.ScopeType,
 		"in_scope", inScope,
 		"sample_rate", cfg.SampleRate,
@@ -850,7 +818,6 @@ func (s *ContentModerationService) Check(ctx context.Context, input ContentModer
 			"protocol", input.Protocol,
 			"all_groups", cfg.AllGroups,
 			"configured_group_ids", cfg.GroupIDs,
-			"account_share_scope_enabled", cfg.AccountShareModeScope.Enabled,
 			"scope_type", scopeCtx.ScopeType)
 		return allow, nil
 	}
@@ -1550,11 +1517,9 @@ func (s *ContentModerationService) buildLog(input ContentModerationCheckInput, c
 		GroupID:               cloneContentModerationInt64Ptr(input.GroupID),
 		GroupName:             input.GroupName,
 		ScopeType:             scopeCtx.ScopeType,
-		AccountShareListingID: cloneContentModerationInt64Ptr(scopeCtx.AccountShareListingID),
 		AccountID:             cloneContentModerationInt64Ptr(scopeCtx.AccountID),
 		OwnerUserID:           cloneContentModerationInt64Ptr(scopeCtx.OwnerUserID),
 		ConsumerUserID:        cloneContentModerationInt64Ptr(scopeCtx.ConsumerUserID),
-		MembershipID:          cloneContentModerationInt64Ptr(scopeCtx.MembershipID),
 		Endpoint:              input.Endpoint,
 		Provider:              input.Provider,
 		Model:                 input.Model,
@@ -1700,12 +1665,6 @@ func defaultContentModerationConfig() *ContentModerationConfig {
 		HitRetentionDays:      defaultContentModerationHitRetentionDays,
 		NonHitRetentionDays:   defaultContentModerationNonHitRetentionDays,
 		PreHashCheckEnabled:   false,
-		AccountShareModeScope: ContentModerationAccountShareModeScopeConfig{
-			Enabled:    false,
-			All:        false,
-			Platforms:  []string{AccountShareModeGroupPlatformOpenAI},
-			ListingIDs: []int64{},
-		},
 	}
 }
 
@@ -1785,7 +1744,6 @@ func (cfg *ContentModerationConfig) normalize() {
 	}
 	cfg.GroupIDs = normalizeInt64IDs(cfg.GroupIDs)
 	cfg.Thresholds = mergeContentModerationThresholds(ContentModerationDefaultThresholds(), cfg.Thresholds)
-	cfg.AccountShareModeScope.normalize()
 	cfg.CyberPreflightRules.normalize()
 }
 
@@ -1804,109 +1762,12 @@ func (cfg *ContentModerationConfig) includesGroup(groupID *int64) bool {
 	return false
 }
 
-func (cfg *ContentModerationAccountShareModeScopeConfig) normalize() {
-	if cfg == nil {
-		return
-	}
-	cfg.Platforms = normalizeContentModerationPlatforms(cfg.Platforms)
-	if len(cfg.Platforms) == 0 {
-		cfg.Platforms = []string{AccountShareModeGroupPlatformOpenAI}
-	}
-	cfg.ListingIDs = normalizeInt64IDs(cfg.ListingIDs)
-}
-
-func (cfg ContentModerationAccountShareModeScopeConfig) includesPlatform(platform string) bool {
-	platform = strings.ToLower(strings.TrimSpace(platform))
-	if platform == "" {
-		return false
-	}
-	for _, item := range cfg.Platforms {
-		if strings.EqualFold(strings.TrimSpace(item), platform) {
-			return true
-		}
-	}
-	return false
-}
-
-func (cfg ContentModerationAccountShareModeScopeConfig) includesListing(listingID int64) bool {
-	if listingID <= 0 {
-		return false
-	}
-	for _, id := range cfg.ListingIDs {
-		if id == listingID {
-			return true
-		}
-	}
-	return false
-}
-
-func (s *ContentModerationService) resolveScope(ctx context.Context, cfg *ContentModerationConfig, input ContentModerationCheckInput) (bool, ContentModerationScopeContext) {
+func (s *ContentModerationService) resolveScope(_ context.Context, cfg *ContentModerationConfig, input ContentModerationCheckInput) (bool, ContentModerationScopeContext) {
 	scopeCtx := ContentModerationScopeContext{ScopeType: contentModerationScopeTypeGroup}
 	if cfg == nil {
 		return false, scopeCtx
 	}
-	if input.GroupID == nil || *input.GroupID <= 0 {
-		return cfg.AllGroups, scopeCtx
-	}
-	groupID := *input.GroupID
-	resolver := s.accountShareModeResolver
-	isModeGroup := false
-	if resolver != nil {
-		isModeGroup = resolver.IsModeGroup(ctx, groupID)
-	}
-	if !isModeGroup {
-		return cfg.includesGroup(input.GroupID), scopeCtx
-	}
-
-	scopeCtx.ScopeType = contentModerationScopeTypeAccountShareMode
-	if resolver == nil {
-		return false, scopeCtx
-	}
-	membership, listing, err := resolver.ResolveActiveBindingForRequest(ctx, input.UserID, input.APIKeyID, groupID)
-	if err != nil {
-		if errors.Is(err, ErrAccountShareModeGroupUnbound) {
-			slog.Info("content_moderation.skip_account_share_mode_unbound",
-				"user_id", input.UserID,
-				"api_key_id", input.APIKeyID,
-				"group_id", groupID,
-				"endpoint", input.Endpoint,
-				"protocol", input.Protocol)
-			return false, scopeCtx
-		}
-		slog.Warn("content_moderation.account_share_scope_resolve_failed",
-			"user_id", input.UserID,
-			"api_key_id", input.APIKeyID,
-			"group_id", groupID,
-			"endpoint", input.Endpoint,
-			"protocol", input.Protocol,
-			"error", err)
-		return false, scopeCtx
-	}
-	if membership == nil || listing == nil {
-		return false, scopeCtx
-	}
-	scopeCtx.AccountShareListingID = contentModerationInt64Ptr(listing.ID)
-	scopeCtx.AccountID = contentModerationInt64Ptr(listing.AccountID)
-	scopeCtx.OwnerUserID = contentModerationInt64Ptr(listing.OwnerUserID)
-	scopeCtx.ConsumerUserID = contentModerationInt64Ptr(membership.ConsumerUserID)
-	scopeCtx.MembershipID = contentModerationInt64Ptr(membership.ID)
-
-	if cfg.AllGroups {
-		return true, scopeCtx
-	}
-	accountScope := cfg.AccountShareModeScope
-	accountScope.normalize()
-	if !accountScope.Enabled {
-		return false, scopeCtx
-	}
-	platform := AccountShareModeGroupPlatformOpenAI
-	if !accountScope.includesPlatform(platform) {
-		return false, scopeCtx
-	}
-	if accountScope.All {
-		return true, scopeCtx
-	}
-	return accountScope.includesListing(listing.ID), scopeCtx
+	return cfg.includesGroup(input.GroupID), scopeCtx
 }
 
 func contentModerationLogGroupID(groupID *int64) int64 {
@@ -2072,7 +1933,6 @@ func (s *ContentModerationService) configView(cfg *ContentModerationConfig) *Con
 		HitRetentionDays:           cfg.HitRetentionDays,
 		NonHitRetentionDays:        cfg.NonHitRetentionDays,
 		PreHashCheckEnabled:        cfg.PreHashCheckEnabled,
-		AccountShareModeScope:      cfg.AccountShareModeScope,
 	}
 }
 
@@ -2519,26 +2379,6 @@ func defaultContentModerationModelForProvider(provider string) string {
 	default:
 		return defaultContentModerationModel
 	}
-}
-
-func normalizeContentModerationPlatforms(platforms []string) []string {
-	seen := make(map[string]struct{}, len(platforms))
-	out := make([]string, 0, len(platforms))
-	for _, platform := range platforms {
-		platform = strings.ToLower(strings.TrimSpace(platform))
-		if platform == "" {
-			continue
-		}
-		if platform != AccountShareModeGroupPlatformOpenAI {
-			continue
-		}
-		if _, ok := seen[platform]; ok {
-			continue
-		}
-		seen[platform] = struct{}{}
-		out = append(out, platform)
-	}
-	return out
 }
 
 func normalizeContentModerationAPIKeysMode(mode string) string {

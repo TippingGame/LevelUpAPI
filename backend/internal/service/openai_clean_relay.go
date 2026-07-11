@@ -112,19 +112,6 @@ func (s *OpenAIGatewayService) SelectAccountWithCleanRelayScheduler(
 	if effectiveModel == "" {
 		effectiveModel = strings.TrimSpace(requestedModel)
 	}
-	if s.accountShareModeService != nil && groupID != nil && *groupID > 0 && s.accountShareModeService.IsModeGroup(ctx, *groupID) {
-		return s.SelectAccountWithSchedulerForCapability(
-			ctx,
-			groupID,
-			previousResponseID,
-			sessionHash,
-			effectiveModel,
-			excludedIDs,
-			requiredTransport,
-			OpenAIEndpointCapabilityChatCompletions,
-			requireCompact,
-		)
-	}
 	selection, decision, hit, err := s.selectOpenAICleanRelayMappedAccount(
 		ctx,
 		c,

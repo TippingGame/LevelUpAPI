@@ -156,7 +156,7 @@ routeLoop:
 			zap.Int64p("group_id", currentAPIKey.GroupID),
 		)
 		selectionModel := resolveOpenAIAccountSelectionModel(reqModel, channelMapping)
-		selectionCtx := openAIAccountShareModeRequestContext(c, currentAPIKey)
+		selectionCtx := c.Request.Context()
 		if decision := h.checkCyberPreflightWithContext(selectionCtx, c, reqLog, currentAPIKey, subject, service.ContentModerationProtocolOpenAIChat, reqModel, body); decision != nil && decision.Blocked {
 			h.handleStreamingAwareError(c, contentModerationStatus(decision), cyberPreflightErrorCode(decision), decision.Message, streamStarted)
 			return
@@ -185,9 +185,6 @@ routeLoop:
 				zap.Int64p("group_id", currentAPIKey.GroupID),
 			)
 			if len(failedAccountIDs) == 0 {
-				if h.handleAccountShareModeSelectionError(c, err, streamStarted) {
-					return
-				}
 				if routeCursor.switchToNextWithoutCooldown(apiKey.ID, "account_select_failed", reqLog, zap.Error(err)) {
 					failedAccountIDs = make(map[int64]struct{})
 					sameAccountRetryCount = make(map[int64]int)
@@ -332,8 +329,7 @@ routeLoop:
 		clientIP := ip.GetClientIP(c)
 
 		h.submitUsageRecordTask(c.Request.Context(), func(ctx context.Context) {
-			usageCtx := service.WithAccountShareModeRequestFromContext(ctx, selectionCtx)
-			if err := h.gatewayService.RecordUsage(usageCtx, &service.OpenAIRecordUsageInput{
+			if err := h.gatewayService.RecordUsage(ctx, &service.OpenAIRecordUsageInput{
 				Result:             result,
 				APIKey:             currentAPIKey,
 				User:               currentAPIKey.User,

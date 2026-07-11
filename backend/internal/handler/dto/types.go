@@ -204,7 +204,6 @@ type Account struct {
 	ShareMode                 string          `json:"share_mode"`
 	ShareStatus               string          `json:"share_status"`
 	SharePolicyID             *int64          `json:"share_policy_id,omitempty"`
-	AccountShareModeListingID *int64          `json:"account_share_mode_listing_id,omitempty"`
 	ProxyID                   *int64          `json:"proxy_id"`
 	Concurrency               int             `json:"concurrency"`
 	LoadFactor                *int            `json:"load_factor,omitempty"`

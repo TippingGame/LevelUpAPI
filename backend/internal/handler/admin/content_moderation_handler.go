@@ -7,22 +7,16 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
-	middleware2 "github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
 )
 
 type ContentModerationHandler struct {
-	service                 *service.ContentModerationService
-	accountShareModeService *service.AccountShareModeService
+	service *service.ContentModerationService
 }
 
-func NewContentModerationHandler(svc *service.ContentModerationService, accountShareModeSvc ...*service.AccountShareModeService) *ContentModerationHandler {
-	h := &ContentModerationHandler{service: svc}
-	if len(accountShareModeSvc) > 0 {
-		h.accountShareModeService = accountShareModeSvc[0]
-	}
-	return h
+func NewContentModerationHandler(svc *service.ContentModerationService) *ContentModerationHandler {
+	return &ContentModerationHandler{service: svc}
 }
 
 type contentModerationConfigRequest struct {
@@ -55,7 +49,6 @@ type contentModerationConfigRequest struct {
 	HitRetentionDays      *int                                                  `json:"hit_retention_days"`
 	NonHitRetentionDays   *int                                                  `json:"non_hit_retention_days"`
 	PreHashCheckEnabled   *bool                                                 `json:"pre_hash_check_enabled"`
-	AccountShareModeScope *service.ContentModerationAccountShareModeScopeConfig `json:"account_share_mode_scope"`
 }
 
 type contentModerationAPIKeyTestRequest struct {
@@ -117,7 +110,6 @@ func (h *ContentModerationHandler) UpdateConfig(c *gin.Context) {
 		HitRetentionDays:      req.HitRetentionDays,
 		NonHitRetentionDays:   req.NonHitRetentionDays,
 		PreHashCheckEnabled:   req.PreHashCheckEnabled,
-		AccountShareModeScope: req.AccountShareModeScope,
 	})
 	if err != nil {
 		response.ErrorFrom(c, err)
@@ -146,34 +138,6 @@ func (h *ContentModerationHandler) TestAPIKeys(c *gin.Context) {
 		return
 	}
 	response.Success(c, result)
-}
-
-func (h *ContentModerationHandler) ListAccountShareModeListings(c *gin.Context) {
-	if h == nil || h.accountShareModeService == nil {
-		response.InternalError(c, "Account share mode service unavailable")
-		return
-	}
-	subject, ok := middleware2.GetAuthSubjectFromContext(c)
-	if !ok {
-		response.Unauthorized(c, "User not authenticated")
-		return
-	}
-	page, pageSize := response.ParsePagination(c)
-	if pageSize <= 0 || pageSize > 100 {
-		pageSize = 100
-	}
-	listings, result, err := h.accountShareModeService.ListListings(
-		c.Request.Context(),
-		subject.UserID,
-		true,
-		service.AccountShareListingFilters{Tab: service.AccountShareModeListingTabMine},
-		pagination.PaginationParams{Page: page, PageSize: pageSize},
-	)
-	if err != nil {
-		response.ErrorFrom(c, err)
-		return
-	}
-	response.Paginated(c, listings, result.Total, result.Page, result.PageSize)
 }
 
 func (h *ContentModerationHandler) GetStatus(c *gin.Context) {
