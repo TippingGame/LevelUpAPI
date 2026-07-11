@@ -4,6 +4,8 @@ import {
   localizedKeyGroupDescription
 } from '@/utils/keyGroupSelection'
 import type { Group } from '@/types'
+import zh from '@/i18n/locales/zh'
+import en from '@/i18n/locales/en'
 
 const makeGroup = (overrides: Partial<Group>): Group => ({
   id: 1,
@@ -31,6 +33,13 @@ const makeGroup = (overrides: Partial<Group>): Group => ({
 })
 
 describe('keyGroupSelection', () => {
+  it('defines the Grok platform label in both supported languages', () => {
+    expect(zh.admin.groups.platforms.grok).toBe('Grok')
+    expect(en.admin.groups.platforms.grok).toBe('Grok')
+    expect(zh.admin.accounts.platforms.grok).toBe('Grok')
+    expect(en.admin.accounts.platforms.grok).toBe('Grok')
+  })
+
   it('returns only available platforms in a stable product order', () => {
     const groups = [
       makeGroup({ id: 1, platform: 'grok' }),

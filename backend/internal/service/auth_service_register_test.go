@@ -71,6 +71,20 @@ type defaultSubscriptionAssignerStub struct {
 	err   error
 }
 
+type authPrivateGroupProvisionerStub struct {
+	userIDs []int64
+	err     error
+}
+
+func (s *authPrivateGroupProvisionerStub) ProvisionUserPrivateGroups(_ context.Context, userID int64) error {
+	s.userIDs = append(s.userIDs, userID)
+	return s.err
+}
+
+func (s *authPrivateGroupProvisionerStub) GetActiveUserPrivateGroup(context.Context, int64, string) (*Group, error) {
+	panic("unexpected GetActiveUserPrivateGroup call")
+}
+
 type refreshTokenCacheStub struct{}
 
 func (s *defaultSubscriptionAssignerStub) AssignOrExtendSubscription(_ context.Context, input *AssignSubscriptionInput) (*UserSubscription, bool, error) {
@@ -224,6 +238,30 @@ func TestAuthService_Register_Disabled(t *testing.T) {
 
 	_, _, err := service.Register(context.Background(), "user@test.com", "password")
 	require.ErrorIs(t, err, ErrRegDisabled)
+}
+
+func TestAuthService_Login_BackfillsPrivateGroupsWithoutBlockingLoginOnFailure(t *testing.T) {
+	repo := &userRepoStub{}
+	service := newAuthService(repo, nil, nil)
+	passwordHash, err := service.HashPassword("password")
+	require.NoError(t, err)
+	repo.user = &User{
+		ID:           42,
+		Email:        "existing@test.com",
+		PasswordHash: passwordHash,
+		Role:         RoleUser,
+		Status:       StatusActive,
+		Concurrency:  1,
+	}
+	provisioner := &authPrivateGroupProvisionerStub{err: errors.New("temporary provision failure")}
+	service.SetUserPrivateGroupProvisioner(provisioner)
+
+	token, user, err := service.Login(context.Background(), repo.user.Email, "password")
+
+	require.NoError(t, err)
+	require.NotEmpty(t, token)
+	require.Equal(t, repo.user.ID, user.ID)
+	require.Equal(t, []int64{repo.user.ID}, provisioner.userIDs)
 }
 
 func TestAuthService_Register_DisabledByDefault(t *testing.T) {
@@ -657,6 +695,8 @@ func TestAuthService_LoginOrRegisterOAuthWithTokenPair_ExistingUserDoesNotGrantA
 	}, nil)
 	service.defaultSubAssigner = assigner
 	service.refreshTokenCache = &refreshTokenCacheStub{}
+	provisioner := &authPrivateGroupProvisionerStub{}
+	service.SetUserPrivateGroupProvisioner(provisioner)
 
 	tokenPair, user, err := service.LoginOrRegisterOAuthWithTokenPair(context.Background(), existing.Email, "linuxdo_user", "", "")
 	require.NoError(t, err)
@@ -666,4 +706,5 @@ func TestAuthService_LoginOrRegisterOAuthWithTokenPair_ExistingUserDoesNotGrantA
 	require.Equal(t, 1, user.Concurrency)
 	require.Empty(t, repo.created)
 	require.Empty(t, assigner.calls)
+	require.Equal(t, []int64{existing.ID}, provisioner.userIDs)
 }

@@ -529,6 +529,7 @@ func (s *AuthService) Login(ctx context.Context, email, password string) (string
 	if !user.IsActive() {
 		return "", nil, ErrUserNotActive
 	}
+	s.provisionUserPrivateGroupsBestEffort(ctx, user.ID)
 
 	// 生成JWT token
 	token, err := s.GenerateToken(user)
@@ -560,6 +561,7 @@ func (s *AuthService) LoginOrRegisterOAuth(ctx context.Context, email, username 
 	}
 
 	user, err := s.userRepo.GetByEmail(ctx, email)
+	created := false
 	if err != nil {
 		if errors.Is(err, ErrUserNotFound) {
 			// OAuth 首次登录视为注册（fail-close：settingService 未配置时不允许注册）
@@ -610,6 +612,7 @@ func (s *AuthService) LoginOrRegisterOAuth(ctx context.Context, email, username 
 				}
 			} else {
 				user = newUser
+				created = true
 				s.postAuthUserBootstrap(ctx, user, signupSource, false)
 				if err := s.provisionUserPrivateGroups(ctx, user.ID); err != nil {
 					return "", nil, err
@@ -624,6 +627,9 @@ func (s *AuthService) LoginOrRegisterOAuth(ctx context.Context, email, username 
 
 	if !user.IsActive() {
 		return "", nil, ErrUserNotActive
+	}
+	if !created {
+		s.provisionUserPrivateGroupsBestEffort(ctx, user.ID)
 	}
 
 	// 尽力补全：当用户名为空时，使用第三方返回的用户名回填。
@@ -745,6 +751,9 @@ func (s *AuthService) loginOrRegisterOAuthWithTokenPair(ctx context.Context, ema
 	if !user.IsActive() {
 		return nil, nil, ErrUserNotActive
 	}
+	if !created {
+		s.provisionUserPrivateGroupsBestEffort(ctx, user.ID)
+	}
 
 	if user.Username == "" && username != "" {
 		user.Username = username
@@ -808,6 +817,12 @@ func (s *AuthService) provisionUserPrivateGroups(ctx context.Context, userID int
 		return fmt.Errorf("provision user private groups: %w", err)
 	}
 	return nil
+}
+
+func (s *AuthService) provisionUserPrivateGroupsBestEffort(ctx context.Context, userID int64) {
+	if err := s.provisionUserPrivateGroups(ctx, userID); err != nil {
+		logger.LegacyPrintf("service.auth", "[Auth] Failed to backfill private groups for existing user %d: %v", userID, err)
+	}
 }
 
 func (s *AuthService) resolveSignupGrantPlan(ctx context.Context, signupSource string) signupGrantPlan {
