@@ -32,12 +32,23 @@ describe('useModelWhitelist', () => {
     ]))
   })
 
-  it('xAI 模型列表包含 Grok 4.5 及 latest 别名', () => {
-    expect(getModelsByPlatform('xai')).toEqual(expect.arrayContaining([
+  it('Grok 模型列表包含最新文本模型及别名，不暴露图片模型', () => {
+    const models = getModelsByPlatform('grok')
+
+    expect(models).toEqual(expect.arrayContaining([
       'grok-4.5',
+      'grok-4.3',
+      'grok-build-0.1',
+      'grok-composer-2.5-fast',
+      'grok-4.20-0309-reasoning',
+      'grok-4.20-0309-non-reasoning',
+      'grok-4.20-multi-agent-0309',
       'grok-latest',
       'grok-4.5-latest'
     ]))
+    expect(getModelsByPlatform('xai')).toEqual(models)
+    expect(models.some((model) => model.startsWith('grok-imagine'))).toBe(false)
+    expect(models).not.toContain('grok-2-image')
   })
 
   it('openai 模型列表不再暴露已下线的 ChatGPT 登录 Codex 模型', () => {

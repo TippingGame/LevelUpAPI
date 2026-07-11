@@ -55,6 +55,31 @@ func TestCalculateCost_WithCacheTokens(t *testing.T) {
 	require.InDelta(t, expectedTotal, cost.TotalCost, 1e-10)
 }
 
+func TestCalculateCost_GrokNewTextAliasesUseFallbackAndCachePricing(t *testing.T) {
+	svc := newTestBillingService()
+	aliases := []string{
+		"grok-composer-2.5-fast",
+		"grok-4.20-0309-reasoning",
+		"grok-4.20-0309-non-reasoning",
+		"grok-4.20-multi-agent-0309",
+	}
+	for _, model := range aliases {
+		model := model
+		t.Run(model, func(t *testing.T) {
+			cost, err := svc.CalculateCost(model, UsageTokens{
+				InputTokens:     100,
+				OutputTokens:    50,
+				CacheReadTokens: 20,
+			}, 1)
+			require.NoError(t, err)
+			require.InDelta(t, 100*2e-6, cost.InputCost, 1e-12)
+			require.InDelta(t, 50*6e-6, cost.OutputCost, 1e-12)
+			require.InDelta(t, 20*0.5e-6, cost.CacheReadCost, 1e-12)
+			require.Greater(t, cost.TotalCost, 0.0)
+		})
+	}
+}
+
 func TestCalculateCost_RateMultiplier(t *testing.T) {
 	svc := newTestBillingService()
 

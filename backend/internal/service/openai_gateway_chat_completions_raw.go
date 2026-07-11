@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/xai"
 	"github.com/Wei-Shaw/sub2api/internal/util/responseheaders"
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
@@ -69,19 +70,17 @@ func (s *OpenAIGatewayService) forwardAsRawChatCompletions(
 		}
 	}
 
-	token := account.GetOpenAIApiKey()
-	if token == "" {
-		return nil, fmt.Errorf("account %d missing api_key", account.ID)
-	}
-	baseURL := account.GetOpenAIBaseURL()
-	if baseURL == "" {
-		baseURL = "https://api.openai.com"
-	}
-	validatedURL, err := s.validateUpstreamBaseURL(baseURL)
+	token, tokenKind, err := s.GetAccessToken(ctx, account)
 	if err != nil {
 		return nil, err
 	}
-	targetURL := buildOpenAIChatCompletionsURL(validatedURL)
+	if strings.TrimSpace(token) == "" {
+		return nil, fmt.Errorf("account %d missing %s credential", account.ID, tokenKind)
+	}
+	targetURL, err := s.rawChatCompletionsURL(account)
+	if err != nil {
+		return nil, err
+	}
 
 	upstreamCtx, releaseUpstreamCtx := detachStreamUpstreamContext(ctx, clientStream)
 	defer releaseUpstreamCtx()
@@ -109,6 +108,8 @@ func (s *OpenAIGatewayService) forwardAsRawChatCompletions(
 	}
 	if userAgent := strings.TrimSpace(account.GetOpenAIUserAgent()); userAgent != "" {
 		upstreamReq.Header.Set("user-agent", userAgent)
+	} else if account.Platform == PlatformGrok {
+		upstreamReq.Header.Set("user-agent", "sub2api-grok/1.0")
 	}
 
 	proxyURL := ""
@@ -127,6 +128,14 @@ func (s *OpenAIGatewayService) forwardAsRawChatCompletions(
 		resp.Body = io.NopCloser(bytes.NewReader(respBody))
 
 		upstreamMsg := sanitizeUpstreamErrorMessage(strings.TrimSpace(extractUpstreamErrorMessage(respBody)))
+		if account.Platform == PlatformGrok {
+			s.updateGrokUsageSnapshot(ctx, account.ID, xai.ParseQuotaHeaders(resp.Header, resp.StatusCode))
+			s.handleGrokAccountUpstreamError(ctx, account, resp.StatusCode, resp.Header, respBody)
+			if s.shouldFailoverUpstreamError(resp.StatusCode) {
+				return nil, &UpstreamFailoverError{StatusCode: resp.StatusCode, ResponseBody: respBody}
+			}
+			return s.handleChatCompletionsErrorResponse(resp, c, account, originalModel)
+		}
 		if s.shouldFailoverOpenAIUpstreamResponse(resp.StatusCode, upstreamMsg, respBody) {
 			appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
 				Platform:           account.Platform,
@@ -148,11 +157,33 @@ func (s *OpenAIGatewayService) forwardAsRawChatCompletions(
 		}
 		return s.handleChatCompletionsErrorResponse(resp, c, account, originalModel)
 	}
+	if account.Platform == PlatformGrok {
+		s.updateGrokUsageSnapshot(ctx, account.ID, xai.ParseQuotaHeaders(resp.Header, resp.StatusCode))
+	}
 
 	if clientStream {
 		return s.streamRawChatCompletions(c, resp, account, originalModel, billingModel, upstreamModel, reasoningEffort, serviceTier, startTime, len(body))
 	}
 	return s.bufferRawChatCompletions(c, resp, originalModel, billingModel, upstreamModel, reasoningEffort, serviceTier, startTime)
+}
+
+func (s *OpenAIGatewayService) rawChatCompletionsURL(account *Account) (string, error) {
+	if account != nil && account.Platform == PlatformGrok {
+		targetURL, err := xai.BuildChatCompletionsURL(account.GetGrokBaseURL())
+		if err != nil {
+			return "", fmt.Errorf("invalid grok base_url: %w", err)
+		}
+		return targetURL, nil
+	}
+	baseURL := account.GetOpenAIBaseURL()
+	if baseURL == "" {
+		baseURL = "https://api.openai.com"
+	}
+	validatedURL, err := s.validateUpstreamBaseURL(baseURL)
+	if err != nil {
+		return "", fmt.Errorf("invalid base_url: %w", err)
+	}
+	return buildOpenAIChatCompletionsURL(validatedURL), nil
 }
 
 func (s *OpenAIGatewayService) streamRawChatCompletions(

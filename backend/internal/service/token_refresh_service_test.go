@@ -1165,6 +1165,17 @@ func TestIsNonRetryableRefreshError(t *testing.T) {
 	}
 }
 
+func TestIsNonRetryableRefreshError_GrokEntitlementFailures(t *testing.T) {
+	for _, message := range []string{
+		"grok_oauth_entitlement_denied",
+		"invalid_scope: unknown scope",
+		"subscription required",
+		"no active Grok subscription",
+	} {
+		require.True(t, IsNonRetryableRefreshError(errors.New(message)), message)
+	}
+}
+
 // ========== Path A (refreshAPI) 测试用例 ==========
 
 // mockTokenCacheForRefreshAPI 用于 Path A 测试的 GeminiTokenCache mock

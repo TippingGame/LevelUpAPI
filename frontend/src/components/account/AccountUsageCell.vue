@@ -157,6 +157,10 @@
       </div>
     </template>
 
+    <template v-else-if="account.platform === 'grok' && account.type === 'oauth'">
+      <GrokQuotaProbeCell :account="account" :account-scope="accountScope" />
+    </template>
+
     <!-- Antigravity OAuth accounts: fetch usage from API -->
     <template v-else-if="account.platform === 'antigravity' && account.type === 'oauth'">
       <!-- 账户类型徽章 -->
@@ -496,6 +500,7 @@ import { formatGameCoins } from '@/utils/gameCurrency'
 import UsageProgressBar from './UsageProgressBar.vue'
 import AccountQuotaInfo from './AccountQuotaInfo.vue'
 import OpenAIQuotaResetCell from './OpenAIQuotaResetCell.vue'
+import GrokQuotaProbeCell from './GrokQuotaProbeCell.vue'
 
 type UsageLoader = (id: number, source?: 'passive' | 'active') => Promise<AccountUsageInfo>
 
@@ -564,6 +569,9 @@ const shouldFetchUsage = computed(() => {
   }
   if (props.account.platform === 'openai') {
     return props.account.type === 'oauth'
+  }
+  if (props.account.platform === 'grok') {
+    return false
   }
   return false
 })

@@ -17,6 +17,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/geminicli"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/xai"
 )
 
 var (
@@ -37,6 +38,7 @@ var (
 	ErrOwnedAnthropicAccountProxyRequired        = infraerrors.BadRequest("OWNED_ANTHROPIC_ACCOUNT_PROXY_REQUIRED", "Claude user accounts must select a proxy IP")
 	ErrOwnedGeminiAccountProxyRequired           = infraerrors.BadRequest("OWNED_GEMINI_ACCOUNT_PROXY_REQUIRED", "Gemini user accounts must select a proxy IP")
 	ErrOwnedAntigravityAccountProxyRequired      = infraerrors.BadRequest("OWNED_ANTIGRAVITY_ACCOUNT_PROXY_REQUIRED", "Antigravity user accounts must select a proxy IP")
+	ErrOwnedGrokAccountProxyRequired             = infraerrors.BadRequest("OWNED_GROK_ACCOUNT_PROXY_REQUIRED", "Grok OAuth accounts must select a visible proxy")
 	ErrOwnedAccountGroupPlatformMismatch         = infraerrors.BadRequest("OWNED_ACCOUNT_GROUP_PLATFORM_MISMATCH", "account group platform does not match account platform")
 	ErrOwnedAccountGroupValidationUnavailable    = infraerrors.InternalServer("OWNED_ACCOUNT_GROUP_VALIDATION_UNAVAILABLE", "owned account group validation is unavailable")
 	ErrOwnedAccountPublicPoolUnavailable         = infraerrors.BadRequest("OWNED_ACCOUNT_PUBLIC_POOL_UNAVAILABLE", "public shared account pool group is not configured for this account platform")
@@ -472,6 +474,9 @@ func (s *AccountService) createOwned(ctx context.Context, ownerUserID int64, req
 	if ownerUserID <= 0 {
 		return nil, ErrUserNotFound
 	}
+	if req.Platform == PlatformGrok && req.Type != AccountTypeOAuth {
+		return nil, infraerrors.BadRequest("OWNED_GROK_OAUTH_REQUIRED", "Grok user accounts only support official OAuth")
+	}
 	targetLevel := NormalizeAccountLevel(req.AccountLevel)
 	preserveProxy := RequiresUserAccountProxy(req.Platform, targetLevel)
 	proxyID := req.ProxyID
@@ -630,6 +635,8 @@ func ownedAccountProxyRequiredError(platform string) error {
 		return ErrOwnedGeminiAccountProxyRequired
 	case PlatformAntigravity:
 		return ErrOwnedAntigravityAccountProxyRequired
+	case PlatformGrok:
+		return ErrOwnedGrokAccountProxyRequired
 	default:
 		return ErrOwnedOpenAIAccountProxyRequired
 	}
@@ -716,6 +723,15 @@ func normalizeOptionalPositiveInt(value *int) *int {
 }
 
 func ownedPersonalDefaultModelMapping(platform string) map[string]any {
+	if platform == PlatformGrok {
+		defaults := xai.DefaultModelMapping()
+		mapping := make(map[string]any, len(defaults))
+		for requestedModel, upstreamModel := range defaults {
+			mapping[requestedModel] = upstreamModel
+		}
+		return mapping
+	}
+
 	models := make([]string, 0)
 	switch platform {
 	case PlatformOpenAI:
@@ -851,8 +867,13 @@ func applyOwnedPersonalAccountTemplateToCreate(req *CreateAccountRequest) error 
 		req.PrivatePriority = &priority
 	}
 	req.Concurrency = normalizeOwnedPersonalAccountConcurrency(req.Concurrency)
-	if err := validateOwnedPersonalAccountConcurrency(req.Concurrency); err != nil {
-		return err
+	if req.Platform == PlatformGrok {
+		req.Concurrency = 1
+	}
+	if req.Platform != PlatformGrok {
+		if err := validateOwnedPersonalAccountConcurrency(req.Concurrency); err != nil {
+			return err
+		}
 	}
 	loadFactor := OwnedPersonalDefaultLoadFactor
 	req.LoadFactor = &loadFactor
@@ -876,8 +897,14 @@ func sanitizeOwnedPersonalAccountUpdate(account *Account, req *UpdateAccountRequ
 	req.GroupIDs = nil
 	req.ProxyID = nil
 	if req.Concurrency != nil {
-		if err := validateOwnedPersonalAccountConcurrency(*req.Concurrency); err != nil {
-			return err
+		if account.Platform == PlatformGrok {
+			one := 1
+			req.Concurrency = &one
+		}
+		if account.Platform != PlatformGrok {
+			if err := validateOwnedPersonalAccountConcurrency(*req.Concurrency); err != nil {
+				return err
+			}
 		}
 	}
 	if req.LoadFactor != nil {
@@ -1566,6 +1593,11 @@ func accountDuplicateIdentityKeys(account *Account) []ownedAccountDuplicateKey {
 		if len(keys) == 0 {
 			addFolded("antigravity.email", account.GetCredential("email"))
 		}
+	case PlatformGrok:
+		if account.Type != AccountTypeOAuth {
+			return nil
+		}
+		addFolded("grok.email", account.GetCredential("email"))
 	}
 	if len(keys) == 0 {
 		return nil
@@ -2388,7 +2420,7 @@ func isOAuthOnlyGroup(group *Group) bool {
 		return false
 	}
 	switch group.Platform {
-	case PlatformOpenAI, PlatformAntigravity, PlatformAnthropic, PlatformGemini:
+	case PlatformOpenAI, PlatformAntigravity, PlatformAnthropic, PlatformGemini, PlatformGrok:
 		return true
 	default:
 		return false
@@ -2486,6 +2518,8 @@ func (s *AccountService) TestCredentials(ctx context.Context, id int64) error {
 		return nil
 	case PlatformGemini:
 		// TODO: 测试Gemini API凭证
+		return nil
+	case PlatformGrok:
 		return nil
 	default:
 		return fmt.Errorf("unsupported platform: %s", account.Platform)

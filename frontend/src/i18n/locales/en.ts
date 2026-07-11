@@ -4669,6 +4669,34 @@ export default {
                     validateAndCreate: 'Validate & Create',
                     pleaseEnterRefreshToken: 'Please enter Refresh Token',
                     failedToValidateRT: 'Failed to validate Refresh Token'
+                  },
+                  grok: {
+                    title: 'Grok Account Authorization',
+                    followSteps: 'Authorize your Grok account with official xAI OAuth:',
+                    step1GenerateUrl: 'Generate the authorization URL',
+                    generateAuthUrl: 'Generate Auth URL',
+                    step2OpenUrl: 'Open the URL through the selected proxy',
+                    openUrlDesc: 'Sign in to your own xAI account, then copy the callback URL or code.',
+                    step3EnterCode: 'Enter Callback URL or Code',
+                    authCodeDesc: 'Paste the complete callback URL (recommended) or the code.',
+                    authCode: 'Callback URL or Code',
+                    authCodePlaceholder: 'Paste callback URL or code...',
+                    authCodeHint: 'OAuth state and the PKCE session will be verified.',
+                    oauthOnlyHint: 'Official xAI OAuth only. User accounts require an owned/visible proxy and concurrency is fixed at 1.',
+                    failedToGenerateUrl: 'Failed to generate Grok auth URL',
+                    missingExchangeParams: 'Missing code, session ID, or state',
+                    failedToExchangeCode: 'Failed to exchange Grok auth code',
+                    refreshTokenAuth: 'Import Refresh Token',
+                    refreshTokenDesc: 'Import one or more Grok refresh tokens separated by lines or commas.',
+                    refreshTokenPlaceholder: 'One Grok Refresh Token per line...',
+                    validating: 'Validating...',
+                    validateAndCreate: 'Validate & Create',
+                    pleaseEnterRefreshToken: 'Please enter Refresh Token',
+                    failedToValidateRT: 'Failed to validate Grok Refresh Token',
+                    errors: {
+                      GROK_OAUTH_ENTITLEMENT_DENIED: 'This xAI account has no active Grok subscription or required scope.',
+                      GROK_OAUTH_PROXY_REQUIRED: 'Grok OAuth requires a proxy that can reach xAI.'
+                    }
                   }
                 },      // Gemini specific (platform-wide)
       gemini: {
@@ -4888,7 +4916,15 @@ export default {
         gemini3Image: 'G31FI',
         claude: 'Claude',
         passiveSampled: 'Passive',
-        activeQuery: 'Query'
+        activeQuery: 'Query',
+        grokProbe: 'Probe quota',
+        grokProbeTooltip: 'Send a minimal xAI text request and inspect quota headers',
+        grokResetUnsupported: 'No reset',
+        grokResetUnsupportedTooltip: 'xAI does not expose a quota reset API',
+        grokNoHeaders: 'No quota headers observed yet',
+        grokRequests: 'Requests',
+        grokTokens: 'Tokens',
+        grokRetryAfter: 'Retry in {time}'
       },
       openaiQuotaReset: {
         count: 'Credits',

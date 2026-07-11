@@ -37,6 +37,8 @@ type UserAccountHandler struct {
 	oauthService            *service.OAuthService
 	openaiOAuthService      *service.OpenAIOAuthService
 	openaiQuotaService      *service.OpenAIQuotaService
+	grokOAuthService        *service.GrokOAuthService
+	grokQuotaService        *service.GrokQuotaService
 	geminiOAuthService      *service.GeminiOAuthService
 	antigravityOAuthService *service.AntigravityOAuthService
 	sessionLimitCache       service.SessionLimitCache
@@ -54,6 +56,14 @@ func (h *UserAccountHandler) SetSharedOwnerSupport(proxyService *service.ProxySe
 	}
 	h.proxyService = proxyService
 	h.sharePolicyService = sharePolicyService
+}
+
+func (h *UserAccountHandler) SetGrokSupport(oauthService *service.GrokOAuthService, quotaService *service.GrokQuotaService) {
+	if h == nil {
+		return
+	}
+	h.grokOAuthService = oauthService
+	h.grokQuotaService = quotaService
 }
 
 type ownedProxyCreateRequest struct {
@@ -412,6 +422,14 @@ type userOpenAIExchangeCodeRequest struct {
 	ProxyID     *int64 `json:"proxy_id"`
 }
 
+type userGrokRefreshTokenRequest struct {
+	RefreshToken  string   `json:"refresh_token"`
+	RT            string   `json:"rt"`
+	RefreshTokens []string `json:"refresh_tokens"`
+	ClientID      string   `json:"client_id"`
+	ProxyID       *int64   `json:"proxy_id"`
+}
+
 type userGeminiGenerateAuthURLRequest struct {
 	ProxyID   *int64 `json:"proxy_id"`
 	ProjectID string `json:"project_id"`
@@ -511,6 +529,13 @@ func (h *UserAccountHandler) prepareUserAccountRequest(c *gin.Context, ownerUser
 	}
 	if req.Platform != service.PlatformOpenAI {
 		req.AccountLevel = service.AccountLevelUnknown
+		if req.Platform == service.PlatformGrok {
+			if req.Type != service.AccountTypeOAuth {
+				response.BadRequest(c, "Grok user accounts only support official OAuth")
+				return false
+			}
+			req.Concurrency = 1
+		}
 		if service.RequiresUserAccountProxy(req.Platform, req.AccountLevel) {
 			return h.requireVisibleUserProxy(c, ownerUserID, req.ProxyID, userAccountProxyRequiredError(req.Platform))
 		}
@@ -593,6 +618,8 @@ func userAccountProxyRequiredError(platform string) error {
 		return service.ErrOwnedGeminiAccountProxyRequired
 	case service.PlatformAntigravity:
 		return service.ErrOwnedAntigravityAccountProxyRequired
+	case service.PlatformGrok:
+		return infraerrors.BadRequest("OWNED_GROK_ACCOUNT_PROXY_REQUIRED", "Grok OAuth accounts require a visible proxy")
 	default:
 		return service.ErrOwnedOpenAIAccountProxyRequired
 	}
@@ -2209,6 +2236,18 @@ func (h *UserAccountHandler) refreshOwnedAccount(ctx context.Context, ownerUserI
 			_, _ = h.setOwnedAccountPrivacy(ctx, ownerUserID, updatedAccount)
 			return updatedAccount, "missing_project_id_temporary", nil
 		}
+	case account.Platform == service.PlatformGrok:
+		if h.grokOAuthService == nil {
+			return nil, "", service.ErrServiceUnavailable
+		}
+		tokenInfo, err := h.grokOAuthService.RefreshAccountToken(ctx, account)
+		if err != nil {
+			return nil, "", err
+		}
+		newCredentials = service.MergeCredentials(account.Credentials, h.grokOAuthService.BuildAccountCredentials(tokenInfo))
+		// User-owned accounts are pinned to xAI's official endpoint by the service;
+		// do not persist a user-editable upstream URL in their credential payload.
+		delete(newCredentials, "base_url")
 	default:
 		tokenInfo, err := h.oauthService.RefreshAccountToken(ctx, account)
 		if err != nil {
@@ -2496,6 +2535,158 @@ func (h *UserAccountHandler) ExchangeOpenAIOAuthCode(c *gin.Context) {
 
 func (h *UserAccountHandler) RefreshOpenAIToken(c *gin.Context) {
 	rejectUserManualCredentialAuth(c)
+}
+
+func (h *UserAccountHandler) GenerateGrokOAuthURL(c *gin.Context) {
+	subject, ok := middleware2.GetAuthSubjectFromContext(c)
+	if !ok {
+		response.Unauthorized(c, "User not authenticated")
+		return
+	}
+	if h.grokOAuthService == nil {
+		response.ErrorFrom(c, service.ErrServiceUnavailable)
+		return
+	}
+	var req userOpenAIGenerateAuthURLRequest
+	if !bindOptionalJSON(c, &req) {
+		return
+	}
+	if !h.requireVisibleUserProxy(c, subject.UserID, req.ProxyID, userAccountProxyRequiredError(service.PlatformGrok)) {
+		return
+	}
+	result, err := h.grokOAuthService.GenerateAuthURL(c.Request.Context(), req.ProxyID, req.RedirectURI)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, result)
+}
+
+func (h *UserAccountHandler) ExchangeGrokOAuthCode(c *gin.Context) {
+	subject, ok := middleware2.GetAuthSubjectFromContext(c)
+	if !ok {
+		response.Unauthorized(c, "User not authenticated")
+		return
+	}
+	if h.grokOAuthService == nil {
+		response.ErrorFrom(c, service.ErrServiceUnavailable)
+		return
+	}
+	var req userOpenAIExchangeCodeRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+	if !h.requireVisibleUserProxy(c, subject.UserID, req.ProxyID, userAccountProxyRequiredError(service.PlatformGrok)) {
+		return
+	}
+	result, err := h.grokOAuthService.ExchangeCode(c.Request.Context(), &service.GrokExchangeCodeInput{
+		SessionID: req.SessionID, Code: req.Code, State: req.State, RedirectURI: req.RedirectURI, ProxyID: req.ProxyID,
+	})
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, result)
+}
+
+func (h *UserAccountHandler) RefreshGrokToken(c *gin.Context) {
+	subject, ok := middleware2.GetAuthSubjectFromContext(c)
+	if !ok {
+		response.Unauthorized(c, "User not authenticated")
+		return
+	}
+	if h.grokOAuthService == nil {
+		response.ErrorFrom(c, service.ErrServiceUnavailable)
+		return
+	}
+	var req userGrokRefreshTokenRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+	if !h.requireVisibleUserProxy(c, subject.UserID, req.ProxyID, userAccountProxyRequiredError(service.PlatformGrok)) {
+		return
+	}
+	values := append([]string{}, req.RefreshTokens...)
+	values = append(values, req.RefreshToken, req.RT)
+	tokens := make([]string, 0, len(values))
+	seen := make(map[string]struct{})
+	for _, value := range values {
+		for _, line := range strings.FieldsFunc(value, func(r rune) bool { return r == '\n' || r == '\r' || r == ',' }) {
+			line = strings.TrimSpace(line)
+			if line == "" {
+				continue
+			}
+			if _, exists := seen[line]; exists {
+				continue
+			}
+			seen[line] = struct{}{}
+			tokens = append(tokens, line)
+		}
+	}
+	if len(tokens) == 0 {
+		response.BadRequest(c, "refresh_token is required")
+		return
+	}
+	results := make([]*service.GrokTokenInfo, 0, len(tokens))
+	for _, token := range tokens {
+		result, err := h.grokOAuthService.ValidateRefreshToken(c.Request.Context(), token, req.ProxyID)
+		if err != nil {
+			response.ErrorFrom(c, err)
+			return
+		}
+		results = append(results, result)
+	}
+	if len(results) == 1 {
+		response.Success(c, results[0])
+		return
+	}
+	response.Success(c, gin.H{"tokens": results})
+}
+
+func (h *UserAccountHandler) QueryGrokQuota(c *gin.Context) {
+	h.handleOwnedGrokQuota(c, false)
+}
+
+func (h *UserAccountHandler) ResetGrokQuota(c *gin.Context) {
+	h.handleOwnedGrokQuota(c, true)
+}
+
+func (h *UserAccountHandler) handleOwnedGrokQuota(c *gin.Context, reset bool) {
+	subject, ok := middleware2.GetAuthSubjectFromContext(c)
+	if !ok {
+		response.Unauthorized(c, "User not authenticated")
+		return
+	}
+	accountID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "Invalid account ID")
+		return
+	}
+	if h.grokQuotaService == nil {
+		response.ErrorFrom(c, service.ErrServiceUnavailable)
+		return
+	}
+	if _, err := h.accountService.GetOwnedByID(c.Request.Context(), subject.UserID, accountID); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	if reset {
+		result, err := h.grokQuotaService.ResetQuota(c.Request.Context(), accountID)
+		if err != nil {
+			response.ErrorFrom(c, err)
+			return
+		}
+		response.Success(c, result)
+		return
+	}
+	result, err := h.grokQuotaService.ProbeUsage(c.Request.Context(), accountID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, result)
 }
 
 func (h *UserAccountHandler) GetGeminiOAuthCapabilities(c *gin.Context) {

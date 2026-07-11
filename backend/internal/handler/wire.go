@@ -22,6 +22,7 @@ func ProvideAdminHandlers(
 	openaiOAuthHandler *admin.OpenAIOAuthHandler,
 	geminiOAuthHandler *admin.GeminiOAuthHandler,
 	antigravityOAuthHandler *admin.AntigravityOAuthHandler,
+	grokOAuthHandler *admin.GrokOAuthHandler,
 	proxyHandler *admin.ProxyHandler,
 	redeemHandler *admin.RedeemHandler,
 	promoHandler *admin.PromoHandler,
@@ -60,6 +61,7 @@ func ProvideAdminHandlers(
 		OpenAIOAuth:            openaiOAuthHandler,
 		GeminiOAuth:            geminiOAuthHandler,
 		AntigravityOAuth:       antigravityOAuthHandler,
+		GrokOAuth:              grokOAuthHandler,
 		Proxy:                  proxyHandler,
 		Redeem:                 redeemHandler,
 		Promo:                  promoHandler,
@@ -119,6 +121,8 @@ func ProvideUserAccountHandler(
 	accountBatchTaskService *service.AccountBatchTaskService,
 	proxyService *service.ProxyService,
 	accountSharePolicyService *service.AccountSharePolicyService,
+	grokOAuthService *service.GrokOAuthService,
+	grokQuotaService *service.GrokQuotaService,
 ) *UserAccountHandler {
 	h := NewUserAccountHandler(
 		accountService,
@@ -136,6 +140,7 @@ func ProvideUserAccountHandler(
 	h.SetUserService(userService)
 	h.SetOpenAIQuotaService(openaiQuotaService)
 	h.SetSharedOwnerSupport(proxyService, accountSharePolicyService)
+	h.SetGrokSupport(grokOAuthService, grokQuotaService)
 	h.SetRuntimeCapacityProviders(concurrencyService, sessionLimitCache, rpmCache)
 	return h
 }
@@ -232,6 +237,7 @@ var ProviderSet = wire.NewSet(
 	admin.NewOpenAIOAuthHandler,
 	admin.NewGeminiOAuthHandler,
 	admin.NewAntigravityOAuthHandler,
+	admin.NewGrokOAuthHandler,
 	admin.NewProxyHandler,
 	admin.NewRedeemHandler,
 	admin.NewPromoHandler,

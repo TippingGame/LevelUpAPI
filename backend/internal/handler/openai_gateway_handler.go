@@ -131,6 +131,20 @@ func wrapUsageRecordTaskContext(parent context.Context, task service.UsageRecord
 	}
 }
 
+func openAICompatibleRequestPlatform(apiKey *service.APIKey) string {
+	if apiKey != nil && apiKey.Group != nil && apiKey.Group.Platform == service.PlatformGrok {
+		return service.PlatformGrok
+	}
+	return service.PlatformOpenAI
+}
+
+func allowOpenAICompatibleMessagesDispatch(apiKey *service.APIKey) bool {
+	if apiKey == nil || apiKey.Group == nil || apiKey.Group.Platform == service.PlatformGrok {
+		return true
+	}
+	return apiKey.Group.AllowMessagesDispatch
+}
+
 // NewOpenAIGatewayHandler creates a new OpenAIGatewayHandler
 func NewOpenAIGatewayHandler(
 	gatewayService *service.OpenAIGatewayService,
@@ -381,6 +395,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 			service.OpenAIUpstreamTransportAny,
 			requireCompact,
 			sessionHashBody,
+			openAICompatibleRequestPlatform(currentAPIKey),
 		)
 		if err != nil {
 			reqLog.Warn("openai.account_select_failed",
@@ -783,7 +798,7 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 		if h.rejectIfCyberSessionBlocked(c, currentAPIKey, body, reqModel, cyberBlockFormatAnthropic) {
 			return
 		}
-		if currentAPIKey.Group != nil && !currentAPIKey.Group.AllowMessagesDispatch {
+		if !allowOpenAICompatibleMessagesDispatch(currentAPIKey) {
 			if routeCursor.skipToNext("messages_dispatch_not_allowed", reqLog, zap.Int64p("group_id", currentAPIKey.GroupID)) {
 				failedAccountIDs = make(map[int64]struct{})
 				sameAccountRetryCount = make(map[int64]int)
@@ -852,6 +867,7 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 			service.OpenAIUpstreamTransportAny,
 			false,
 			body,
+			openAICompatibleRequestPlatform(currentAPIKey),
 		)
 		if err != nil {
 			reqLog.Warn("openai_messages.account_select_failed",

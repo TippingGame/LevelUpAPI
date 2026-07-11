@@ -389,32 +389,33 @@ var ErrNoAvailableCompactAccounts = errors.New("no available OpenAI accounts sup
 
 // OpenAIGatewayService handles OpenAI API gateway operations
 type OpenAIGatewayService struct {
-	accountRepo             AccountRepository
-	accountSharePolicyRepo  AccountSharePolicyRepository
-	usageLogRepo            UsageLogRepository
-	usageBillingRepo        UsageBillingRepository
-	userRepo                UserRepository
-	userSubRepo             UserSubscriptionRepository
-	cache                   GatewayCache
-	cfg                     *config.Config
-	codexDetector           CodexClientRestrictionDetector
-	schedulerSnapshot       *SchedulerSnapshotService
-	concurrencyService      *ConcurrencyService
-	billingService          *BillingService
-	rateLimitService        *RateLimitService
-	billingCacheService     *BillingCacheService
-	userGroupRateResolver   *userGroupRateResolver
-	httpUpstream            HTTPUpstream
-	deferredService         *DeferredService
-	openAITokenProvider     *OpenAITokenProvider
-	toolCorrector           *CodexToolCorrector
-	openaiWSResolver        OpenAIWSProtocolResolver
-	resolver                *ModelPricingResolver
-	channelService          *ChannelService
-	balanceNotifyService    *BalanceNotifyService
-	settingService          *SettingService
-	accountService          *AccountService
-	proxyLatencyCache       ProxyLatencyCache
+	accountRepo            AccountRepository
+	accountSharePolicyRepo AccountSharePolicyRepository
+	usageLogRepo           UsageLogRepository
+	usageBillingRepo       UsageBillingRepository
+	userRepo               UserRepository
+	userSubRepo            UserSubscriptionRepository
+	cache                  GatewayCache
+	cfg                    *config.Config
+	codexDetector          CodexClientRestrictionDetector
+	schedulerSnapshot      *SchedulerSnapshotService
+	concurrencyService     *ConcurrencyService
+	billingService         *BillingService
+	rateLimitService       *RateLimitService
+	billingCacheService    *BillingCacheService
+	userGroupRateResolver  *userGroupRateResolver
+	httpUpstream           HTTPUpstream
+	deferredService        *DeferredService
+	openAITokenProvider    *OpenAITokenProvider
+	grokTokenProvider      *GrokTokenProvider
+	toolCorrector          *CodexToolCorrector
+	openaiWSResolver       OpenAIWSProtocolResolver
+	resolver               *ModelPricingResolver
+	channelService         *ChannelService
+	balanceNotifyService   *BalanceNotifyService
+	settingService         *SettingService
+	accountService         *AccountService
+	proxyLatencyCache      ProxyLatencyCache
 
 	openaiWSPoolOnce              sync.Once
 	openaiWSStateStoreOnce        sync.Once
@@ -458,7 +459,12 @@ func NewOpenAIGatewayService(
 	balanceNotifyService *BalanceNotifyService,
 	settingService *SettingService,
 	accountService *AccountService,
+	grokTokenProviders ...*GrokTokenProvider,
 ) *OpenAIGatewayService {
+	var grokTokenProvider *GrokTokenProvider
+	if len(grokTokenProviders) > 0 {
+		grokTokenProvider = grokTokenProviders[0]
+	}
 	svc := &OpenAIGatewayService{
 		accountRepo:            accountRepo,
 		accountSharePolicyRepo: accountSharePolicyRepo,
@@ -481,18 +487,19 @@ func NewOpenAIGatewayService(
 			nil,
 			"service.openai_gateway",
 		),
-		httpUpstream:            httpUpstream,
-		deferredService:         deferredService,
-		openAITokenProvider:     openAITokenProvider,
-		toolCorrector:           NewCodexToolCorrector(),
-		openaiWSResolver:        NewOpenAIWSProtocolResolver(cfg),
-		resolver:                resolver,
-		channelService:          channelService,
-		balanceNotifyService:    balanceNotifyService,
-		settingService:          settingService,
-		accountService:          accountService,
-		responseHeaderFilter:    compileResponseHeaderFilter(cfg),
-		codexSnapshotThrottle:   newAccountWriteThrottle(openAICodexSnapshotPersistMinInterval),
+		httpUpstream:          httpUpstream,
+		deferredService:       deferredService,
+		openAITokenProvider:   openAITokenProvider,
+		grokTokenProvider:     grokTokenProvider,
+		toolCorrector:         NewCodexToolCorrector(),
+		openaiWSResolver:      NewOpenAIWSProtocolResolver(cfg),
+		resolver:              resolver,
+		channelService:        channelService,
+		balanceNotifyService:  balanceNotifyService,
+		settingService:        settingService,
+		accountService:        accountService,
+		responseHeaderFilter:  compileResponseHeaderFilter(cfg),
+		codexSnapshotThrottle: newAccountWriteThrottle(openAICodexSnapshotPersistMinInterval),
 	}
 	svc.logOpenAIWSModeBootstrap()
 	return svc
@@ -503,6 +510,12 @@ func (s *OpenAIGatewayService) SetProxyLatencyCache(cache ProxyLatencyCache) {
 		return
 	}
 	s.proxyLatencyCache = cache
+}
+
+func (s *OpenAIGatewayService) SetGrokTokenProvider(provider *GrokTokenProvider) {
+	if s != nil {
+		s.grokTokenProvider = provider
+	}
 }
 
 // ResolveChannelMapping resolves channel-level model mapping.
@@ -2402,6 +2415,20 @@ func (s *OpenAIGatewayService) schedulingConfig() config.GatewaySchedulingConfig
 func (s *OpenAIGatewayService) GetAccessToken(ctx context.Context, account *Account) (string, string, error) {
 	switch account.Type {
 	case AccountTypeOAuth:
+		if account.Platform == PlatformGrok {
+			if s.grokTokenProvider != nil {
+				accessToken, err := s.grokTokenProvider.GetAccessToken(ctx, account)
+				if err != nil {
+					return "", "", err
+				}
+				return accessToken, "oauth", nil
+			}
+			accessToken := account.GetGrokAccessToken()
+			if accessToken == "" {
+				return "", "", errors.New("access_token not found in credentials")
+			}
+			return accessToken, "oauth", nil
+		}
 		// 浣跨敤 TokenProvider 鑾峰彇缂撳瓨鐨?token
 		if s.openAITokenProvider != nil {
 			accessToken, err := s.openAITokenProvider.GetAccessToken(ctx, account)
@@ -2417,6 +2444,9 @@ func (s *OpenAIGatewayService) GetAccessToken(ctx context.Context, account *Acco
 		}
 		return accessToken, "oauth", nil
 	case AccountTypeAPIKey:
+		if account.Platform == PlatformGrok {
+			return "", "", errors.New("Grok API key accounts are not supported; use official OAuth")
+		}
 		apiKey := account.GetOpenAIApiKey()
 		if apiKey == "" {
 			return "", "", errors.New("api_key not found in credentials")
@@ -2491,6 +2521,9 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	originalBody := body
 	reqModel, reqStream, promptCacheKey := extractOpenAIRequestMetaFromBody(body)
 	originalModel := reqModel
+	if account.Platform == PlatformGrok {
+		return s.forwardGrokResponses(ctx, c, account, body, originalModel, reqStream, startTime)
+	}
 
 	if account.Type == AccountTypeAPIKey && !openai_compat.ShouldUseResponsesAPI(account.Extra) {
 		return s.forwardResponsesViaRawChatCompletions(ctx, c, account, body)

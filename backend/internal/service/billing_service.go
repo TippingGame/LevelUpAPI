@@ -589,6 +589,14 @@ func (s *BillingService) matchAdditionalFallbackPricing(modelLower string) *Mode
 		return s.fallbackPrices["grok-4.3"]
 	case "grok-build", "grok-build-0.1":
 		return s.fallbackPrices["grok-build-0.1"]
+	case "grok-composer", "composer-2.5", "grok-composer-2.5-fast",
+		"grok-4.20-reasoning", "grok-4.20-0309-reasoning",
+		"grok-4.20-non-reasoning", "grok-4.20-0309-non-reasoning",
+		"grok-4.20-multi-agent-0309":
+		// xAI has not published stable fallback prices for these subscription
+		// aliases. Use the existing Grok 4.5 rate card so they can never become
+		// silently free when remote pricing is unavailable.
+		return s.fallbackPrices["grok-4.5"]
 	}
 	return nil
 }

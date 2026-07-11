@@ -6,6 +6,7 @@
 import { apiClient } from './client'
 import type { Account, AccountUsageInfo, AccountUsageStatsResponse, AdminDataPayload, CreateAccountRequest, PaginatedResponse, Proxy, UpdateAccountRequest, UserAccountQuotaPoolDashboard, WindowStats } from '@/types'
 import type { OpenAIQuotaResetResult, OpenAIQuotaUsage } from './admin/accounts'
+import type { GrokQuotaProbeResult, GrokQuotaResetResult, GrokTokenInfo } from './admin/grok'
 
 const USER_ACCOUNT_BULK_OPERATION_TIMEOUT_MS = 120000
 const USER_ACCOUNT_LEVEL_VERIFY_TIMEOUT_MS = 90000
@@ -298,6 +299,16 @@ export async function resetOpenAIQuota(id: number): Promise<OpenAIQuotaResetResu
   return data
 }
 
+export async function queryGrokQuota(id: number): Promise<GrokQuotaProbeResult> {
+  const { data } = await apiClient.get<GrokQuotaProbeResult>(`/accounts/${id}/grok-quota`)
+  return data
+}
+
+export async function resetGrokQuota(id: number): Promise<GrokQuotaResetResult> {
+  const { data } = await apiClient.post<GrokQuotaResetResult>(`/accounts/${id}/grok-quota/reset`)
+  return data
+}
+
 export async function getStats(id: number, days: number = 30): Promise<AccountUsageStatsResponse> {
   const { data } = await apiClient.get<AccountUsageStatsResponse>(`/accounts/${id}/stats`, {
     params: { days }
@@ -573,6 +584,43 @@ export async function refreshAntigravityToken(
   return data
 }
 
+export async function generateGrokOAuthUrl(
+  payload?: UserOAuthProxyPayload & { redirect_uri?: string }
+): Promise<UserOAuthAuthUrlResponse> {
+  const { data } = await apiClient.post<UserOAuthAuthUrlResponse>(
+    '/account-oauth/grok/auth-url',
+    compactPayload(payload)
+  )
+  return data
+}
+
+export async function exchangeGrokOAuthCode(
+  payload: UserOAuthExchangeCodePayload
+): Promise<GrokTokenInfo> {
+  const { data } = await apiClient.post<GrokTokenInfo>(
+    '/account-oauth/grok/exchange-code',
+    compactPayload(payload)
+  )
+  return data
+}
+
+export async function refreshGrokToken(
+  refreshTokens: string | string[],
+  proxyId?: number | null,
+  clientId?: string
+): Promise<GrokTokenInfo | { tokens: GrokTokenInfo[] }> {
+  const payload: Record<string, unknown> = Array.isArray(refreshTokens)
+    ? { refresh_tokens: refreshTokens }
+    : { refresh_token: refreshTokens }
+  if (proxyId) payload.proxy_id = proxyId
+  if (clientId) payload.client_id = clientId
+  const { data } = await apiClient.post<GrokTokenInfo | { tokens: GrokTokenInfo[] }>(
+    '/account-oauth/grok/refresh-token',
+    compactPayload(payload)
+  )
+  return data
+}
+
 export const accountsAPI = {
   list,
   getById,
@@ -597,6 +645,8 @@ export const accountsAPI = {
   getUsage,
   queryOpenAIQuota,
   resetOpenAIQuota,
+  queryGrokQuota,
+  resetGrokQuota,
   getStats,
   getTodayStats,
   getBatchTodayStats,
@@ -618,7 +668,10 @@ export const accountsAPI = {
   exchangeGeminiOAuthCode,
   generateAntigravityOAuthUrl,
   exchangeAntigravityOAuthCode,
-  refreshAntigravityToken
+  refreshAntigravityToken,
+  generateGrokOAuthUrl,
+  exchangeGrokOAuthCode,
+  refreshGrokToken
 }
 
 export default accountsAPI

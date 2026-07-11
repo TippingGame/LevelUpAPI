@@ -4230,7 +4230,15 @@ export default {
         gemini3Image: 'G31FI',
         claude: 'Claude',
         passiveSampled: '被动采样',
-        activeQuery: '查询'
+        activeQuery: '查询',
+        grokProbe: '探测额度',
+        grokProbeTooltip: '向 xAI 发起最小文本请求并读取额度响应头',
+        grokResetUnsupported: '不可重置',
+        grokResetUnsupportedTooltip: 'xAI 暂不提供额度重置接口',
+        grokNoHeaders: '尚未观察到额度响应头',
+        grokRequests: '请求',
+        grokTokens: 'Token',
+        grokRetryAfter: '重试 {time}'
       },
       openaiQuotaReset: {
         count: '次数',
@@ -4812,6 +4820,34 @@ export default {
           validateAndCreate: '验证并创建账号',
           pleaseEnterRefreshToken: '请输入 Refresh Token',
           failedToValidateRT: '验证 Refresh Token 失败'
+        },
+        grok: {
+          title: 'Grok 账号授权',
+          followSteps: '请使用 xAI 官方 OAuth 授权 Grok 账号：',
+          step1GenerateUrl: '点击下方按钮生成授权链接',
+          generateAuthUrl: '生成授权链接',
+          step2OpenUrl: '通过所选代理打开链接并完成授权',
+          openUrlDesc: '登录本人 xAI 账号，授权完成后复制完整回调链接或 code。',
+          step3EnterCode: '输入回调链接或 Code',
+          authCodeDesc: '粘贴授权完成后的完整回调链接（推荐）或仅粘贴 code。',
+          authCode: '回调链接或 Code',
+          authCodePlaceholder: '粘贴完整回调链接或 code...',
+          authCodeHint: '系统会校验 OAuth state 与 PKCE 会话。',
+          oauthOnlyHint: '仅支持 xAI 官方 OAuth；用户账号必须选择本人可见代理，并发固定为 1。',
+          failedToGenerateUrl: '生成 Grok 授权链接失败',
+          missingExchangeParams: '缺少 code / session_id / state',
+          failedToExchangeCode: 'Grok 授权码兑换失败',
+          refreshTokenAuth: '导入 Refresh Token',
+          refreshTokenDesc: '支持多行或逗号分隔的 Grok Refresh Token，验证后批量创建账号。',
+          refreshTokenPlaceholder: '每行一个 Grok Refresh Token...',
+          validating: '验证中...',
+          validateAndCreate: '验证并创建',
+          pleaseEnterRefreshToken: '请输入 Refresh Token',
+          failedToValidateRT: '验证 Grok Refresh Token 失败',
+          errors: {
+            GROK_OAUTH_ENTITLEMENT_DENIED: '该 xAI 账号没有有效的 Grok 订阅或授权范围。',
+            GROK_OAUTH_PROXY_REQUIRED: 'Grok OAuth 必须选择可访问 xAI 的代理。'
+          }
         }
       },
       // Gemini specific (platform-wide)

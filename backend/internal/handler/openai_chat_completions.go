@@ -177,6 +177,7 @@ routeLoop:
 			service.OpenAIUpstreamTransportAny,
 			false,
 			body,
+			openAICompatibleRequestPlatform(currentAPIKey),
 		)
 		if err != nil {
 			reqLog.Warn("openai_chat_completions.account_select_failed",

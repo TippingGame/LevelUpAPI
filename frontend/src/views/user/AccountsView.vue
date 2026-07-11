@@ -779,7 +779,8 @@ const platformOptions = computed<Array<{ value: AccountPlatform; label: string }
   { value: 'anthropic', label: 'Anthropic' },
   { value: 'openai', label: 'OpenAI' },
   { value: 'gemini', label: 'Gemini' },
-  { value: 'antigravity', label: 'Antigravity' }
+  { value: 'antigravity', label: 'Antigravity' },
+  { value: 'grok', label: 'Grok' }
 ])
 
 const typeOptions = computed<Array<{ value: AccountType; label: string }>>(() => [

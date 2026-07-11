@@ -703,6 +703,39 @@ func TestAccountServiceApproveOwnedPublicShareEnsuresMissingProSharedPool(t *tes
 	require.Equal(t, AccountShareStatusApproved, repo.updatedAccounts[0].ShareStatus)
 }
 
+func TestAccountServiceApproveOwnedGrokPublicShareUsesNormalSharedPool(t *testing.T) {
+	ownerID := int64(101)
+	accountID := int64(204)
+	proxyID := int64(303)
+	repo := &ownedAccountDuplicateRepoStub{getByIDAccounts: map[int64]*Account{
+		accountID: {
+			ID: accountID, Name: "pending-grok-share", Platform: PlatformGrok, Type: AccountTypeOAuth,
+			Credentials: map[string]any{"access_token": "token", "refresh_token": "refresh"},
+			OwnerUserID: &ownerID, ShareMode: AccountShareModePublic, ShareStatus: AccountShareStatusPending,
+			ProxyID: &proxyID, Proxy: &Proxy{ID: proxyID, Status: StatusActive},
+			Status: StatusActive, Schedulable: true, Concurrency: 1,
+		},
+	}}
+	svc := &AccountService{
+		accountRepo: repo,
+		groupRepo: &ownedPublicShareGroupRepoStub{groups: []Group{
+			{ID: 21, Name: "grok-default", Platform: PlatformGrok, Status: StatusActive, Scope: GroupScopePublic, SubscriptionType: SubscriptionTypeStandard},
+		}},
+		accountSharePolicyRepo: &ownedPublicSharePolicyRepoStub{policy: &AccountSharePolicy{
+			ID: 1, OwnerShareRatio: 0.85, Enabled: true,
+		}},
+		privateGroupProvisioner: &ownedPrivateGroupProvisionerStub{group: &Group{
+			ID: 99, Platform: PlatformGrok, Status: StatusActive, Scope: GroupScopeUserPrivate,
+		}},
+	}
+
+	account, err := svc.ApproveOwnedPublicShare(context.Background(), ownerID, accountID)
+
+	require.NoError(t, err)
+	require.Equal(t, AccountShareStatusApproved, account.ShareStatus)
+	require.Equal(t, []int64{99, 21}, repo.boundGroupIDs[accountID])
+}
+
 func TestAccountServiceResolveOwnedPublicShareGroupKeepsTeamPoolStrict(t *testing.T) {
 	svc := &AccountService{
 		groupRepo: &ownedPublicShareGroupRepoStub{
@@ -1023,7 +1056,7 @@ func TestAccountServiceCreateOwnedRejectsAnthropicWithoutProxy(t *testing.T) {
 	require.Empty(t, repo.createdAccounts)
 }
 
-func TestAccountServiceCreateOwnedRejectsGeminiAndAntigravityWithoutProxy(t *testing.T) {
+func TestAccountServiceCreateOwnedRejectsGeminiAntigravityAndGrokWithoutProxy(t *testing.T) {
 	cases := []struct {
 		name     string
 		platform string
@@ -1031,6 +1064,7 @@ func TestAccountServiceCreateOwnedRejectsGeminiAndAntigravityWithoutProxy(t *tes
 	}{
 		{name: "gemini", platform: PlatformGemini, wantErr: ErrOwnedGeminiAccountProxyRequired},
 		{name: "antigravity", platform: PlatformAntigravity, wantErr: ErrOwnedAntigravityAccountProxyRequired},
+		{name: "grok", platform: PlatformGrok, wantErr: ErrOwnedGrokAccountProxyRequired},
 	}
 
 	for _, tc := range cases {
@@ -1189,13 +1223,14 @@ func TestAccountServiceCreateOwnedAllowsProxyCapacityAvailable(t *testing.T) {
 	require.Equal(t, proxyID, *repo.createdAccounts[0].ProxyID)
 }
 
-func TestAccountServiceCreateOwnedKeepsGeminiAndAntigravityProxy(t *testing.T) {
+func TestAccountServiceCreateOwnedKeepsGeminiAntigravityAndGrokProxy(t *testing.T) {
 	cases := []struct {
 		name     string
 		platform string
 	}{
 		{name: "gemini", platform: PlatformGemini},
 		{name: "antigravity", platform: PlatformAntigravity},
+		{name: "grok", platform: PlatformGrok},
 	}
 
 	for _, tc := range cases {
@@ -1234,6 +1269,41 @@ func TestAccountServiceCreateOwnedKeepsGeminiAndAntigravityProxy(t *testing.T) {
 			require.Equal(t, proxyID, *repo.createdAccounts[0].ProxyID)
 		})
 	}
+}
+
+func TestAccountServiceCreateOwnedForcesGrokOAuthConcurrencyOne(t *testing.T) {
+	ownerID := int64(101)
+	proxyID := int64(7)
+	repo := &ownedAccountDuplicateRepoStub{}
+	svc := &AccountService{
+		accountRepo: repo,
+		proxyRepo: &ownedAccountProxyRepoStub{proxies: map[int64]*Proxy{
+			proxyID: {ID: proxyID, Status: StatusActive, MaxAccounts: 2},
+		}},
+		privateGroupProvisioner: &ownedPrivateGroupProvisionerStub{
+			group: &Group{ID: 99, Platform: PlatformGrok, Status: StatusActive, Scope: GroupScopeUserPrivate},
+		},
+	}
+
+	account, err := svc.CreateOwned(context.Background(), ownerID, CreateAccountRequest{
+		Name:        "grok-oauth",
+		Platform:    PlatformGrok,
+		Type:        AccountTypeOAuth,
+		Credentials: map[string]any{"access_token": "token", "refresh_token": "refresh"},
+		ProxyID:     &proxyID,
+		Concurrency: 25,
+		Priority:    1,
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, account)
+	require.Equal(t, 1, account.Concurrency)
+	mapping, ok := account.Credentials["model_mapping"].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "grok-4.5", mapping["grok-4.5"])
+	require.Equal(t, "grok-4.5", mapping["grok"])
+	require.Equal(t, "grok-composer-2.5-fast", mapping["grok-composer"])
+	require.Equal(t, "grok-4.20-0309-reasoning", mapping["grok-4.20-reasoning"])
 }
 
 func TestAccountServiceCreateOwnedRejectsOpenAILevelMismatch(t *testing.T) {

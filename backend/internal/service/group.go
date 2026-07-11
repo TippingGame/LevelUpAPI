@@ -216,7 +216,7 @@ func IsValidRequiredAccountLevel(level string) bool {
 }
 
 func SupportedUserPrivateGroupPlatforms() []string {
-	return []string{PlatformAnthropic, PlatformOpenAI, PlatformGemini, PlatformAntigravity}
+	return []string{PlatformAnthropic, PlatformOpenAI, PlatformGemini, PlatformAntigravity, PlatformGrok}
 }
 
 func IsSupportedUserPrivateGroupPlatform(platform string) bool {

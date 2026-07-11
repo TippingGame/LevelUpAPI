@@ -106,22 +106,33 @@ func (s *OpenAIGatewayService) SelectAccountWithCleanRelayScheduler(
 	requiredTransport OpenAIUpstreamTransport,
 	requireCompact bool,
 	bodyForSession []byte,
+	platform ...string,
 ) (*AccountSelectionResult, OpenAIAccountScheduleDecision, error) {
+	requestPlatform := PlatformOpenAI
+	if len(platform) > 0 && strings.EqualFold(strings.TrimSpace(platform[0]), PlatformGrok) {
+		requestPlatform = PlatformGrok
+	}
 	setOpenAICleanRelayGroupID(c, groupID)
 	effectiveModel := strings.TrimSpace(routingModel)
 	if effectiveModel == "" {
 		effectiveModel = strings.TrimSpace(requestedModel)
 	}
-	selection, decision, hit, err := s.selectOpenAICleanRelayMappedAccount(
-		ctx,
-		c,
-		groupID,
-		effectiveModel,
-		excludedIDs,
-		requiredTransport,
-		requireCompact,
-		bodyForSession,
-	)
+	var selection *AccountSelectionResult
+	var decision OpenAIAccountScheduleDecision
+	var hit bool
+	var err error
+	if requestPlatform == PlatformOpenAI {
+		selection, decision, hit, err = s.selectOpenAICleanRelayMappedAccount(
+			ctx,
+			c,
+			groupID,
+			effectiveModel,
+			excludedIDs,
+			requiredTransport,
+			requireCompact,
+			bodyForSession,
+		)
+	}
 	if err != nil {
 		return nil, decision, err
 	}
@@ -138,6 +149,7 @@ func (s *OpenAIGatewayService) SelectAccountWithCleanRelayScheduler(
 		requiredTransport,
 		OpenAIEndpointCapabilityChatCompletions,
 		requireCompact,
+		requestPlatform,
 	)
 }
 

@@ -3,6 +3,7 @@ package service
 import (
 	"container/heap"
 	"context"
+	"fmt"
 	"hash/fnv"
 	"log/slog"
 	"math"
@@ -1389,8 +1390,71 @@ func (s *OpenAIGatewayService) SelectAccountWithSchedulerForCapability(
 	requiredTransport OpenAIUpstreamTransport,
 	requiredCapability OpenAIEndpointCapability,
 	requireCompact bool,
+	platform ...string,
 ) (*AccountSelectionResult, OpenAIAccountScheduleDecision, error) {
+	if len(platform) > 0 && strings.EqualFold(strings.TrimSpace(platform[0]), PlatformGrok) {
+		return s.selectGrokOAuthAccount(ctx, groupID, requestedModel, excludedIDs, requiredCapability)
+	}
 	return s.selectAccountWithScheduler(ctx, groupID, previousResponseID, sessionHash, requestedModel, excludedIDs, requiredTransport, requiredCapability, "", requireCompact)
+}
+
+func (s *OpenAIGatewayService) selectGrokOAuthAccount(
+	ctx context.Context,
+	groupID *int64,
+	requestedModel string,
+	excludedIDs map[int64]struct{},
+	requiredCapability OpenAIEndpointCapability,
+) (*AccountSelectionResult, OpenAIAccountScheduleDecision, error) {
+	decision := OpenAIAccountScheduleDecision{Layer: openAIAccountScheduleLayerLoadBalance}
+	var (
+		accounts []Account
+		err      error
+	)
+	if s.schedulerSnapshot != nil {
+		accounts, _, err = s.schedulerSnapshot.ListSchedulableAccounts(ctx, groupID, PlatformGrok, false)
+	} else if s.cfg != nil && s.cfg.RunMode == "simple" {
+		accounts, err = s.accountRepo.ListSchedulableByPlatform(ctx, PlatformGrok)
+	} else if groupID != nil {
+		accounts, err = s.accountRepo.ListSchedulableByGroupIDAndPlatform(ctx, *groupID, PlatformGrok)
+	} else {
+		accounts, err = s.accountRepo.ListSchedulableUngroupedByPlatform(ctx, PlatformGrok)
+	}
+	if err != nil {
+		return nil, decision, fmt.Errorf("query Grok accounts failed: %w", err)
+	}
+	accounts = FilterAccountsVisibleToRequestUser(ctx, accounts)
+	eligible := make([]Account, 0, len(accounts))
+	for i := range accounts {
+		account := &accounts[i]
+		if _, excluded := excludedIDs[account.ID]; excluded {
+			continue
+		}
+		if !account.IsGrokOAuth() || !account.IsSchedulable() || !account.HasRequiredProxyForScheduling() {
+			continue
+		}
+		if requiredCapability != "" && !account.SupportsOpenAIEndpointCapability(requiredCapability) {
+			continue
+		}
+		if strings.TrimSpace(requestedModel) != "" && !account.IsModelSupported(requestedModel) {
+			continue
+		}
+		eligible = append(eligible, *account)
+	}
+	decision.CandidateCount = len(eligible)
+	sort.SliceStable(eligible, func(i, j int) bool {
+		return s.isBetterAccount(ctx, &eligible[i], &eligible[j])
+	})
+	for i := range eligible {
+		account := &eligible[i]
+		result, acquireErr := s.tryAcquireAccountSlot(ctx, account.ID, 1)
+		if acquireErr != nil || result == nil || !result.Acquired {
+			continue
+		}
+		decision.SelectedAccountID = account.ID
+		decision.SelectedAccountType = account.Type
+		return &AccountSelectionResult{Account: account, Acquired: true, ReleaseFunc: result.ReleaseFunc}, decision, nil
+	}
+	return nil, decision, ErrNoAvailableAccounts
 }
 
 func (s *OpenAIGatewayService) SelectAccountWithSchedulerForImages(

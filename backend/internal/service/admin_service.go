@@ -2753,6 +2753,13 @@ func (s *adminServiceImpl) GetAccountsByIDs(ctx context.Context, ids []int64) ([
 	return accounts, nil
 }
 
+func normalizeGrokOAuthConcurrency(platform, accountType string, concurrency int) int {
+	if platform == PlatformGrok && accountType == AccountTypeOAuth && concurrency <= 0 {
+		return 1
+	}
+	return concurrency
+}
+
 func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccountInput) (*Account, error) {
 	extra, err := NormalizeCodexQuotaLimitExtra(input.Platform, input.Type, input.Extra)
 	if err != nil {
@@ -2800,6 +2807,7 @@ func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccou
 	if err != nil {
 		return nil, err
 	}
+	concurrency = normalizeGrokOAuthConcurrency(input.Platform, input.Type, concurrency)
 	if err := ValidateAccountLoadFactor(input.LoadFactor); err != nil {
 		return nil, err
 	}
@@ -2970,7 +2978,7 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 	}
 	// 只在指针非 nil 时更新 Concurrency（支持设置为 0）
 	if input.Concurrency != nil {
-		account.Concurrency = *input.Concurrency
+		account.Concurrency = normalizeGrokOAuthConcurrency(account.Platform, account.Type, *input.Concurrency)
 	}
 	// 只在指针非 nil 时更新 Priority（支持设置为 0）
 	if input.Priority != nil {
@@ -4571,7 +4579,8 @@ func (s *adminServiceImpl) normalizeAccountIDsForGroupBinding(ctx context.Contex
 		(group.Platform == PlatformOpenAI ||
 			group.Platform == PlatformAntigravity ||
 			group.Platform == PlatformAnthropic ||
-			group.Platform == PlatformGemini)
+			group.Platform == PlatformGemini ||
+			group.Platform == PlatformGrok)
 	requiredLevel := NormalizeRequiredAccountLevel(group.RequiredAccountLevel)
 	requiresLevelCheck := group.Platform == PlatformOpenAI && requiredLevel != ""
 	if !requiresOAuthFilter && !requiresLevelCheck {

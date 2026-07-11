@@ -141,11 +141,13 @@ const metaModels = [
 // xAI Grok
 const xaiModels = [
   'grok-4.5',
-  'grok-4.3', 'grok-build-0.1',
+  'grok-4.3', 'grok-build-0.1', 'grok-composer-2.5-fast',
+  'grok-4.20-0309-reasoning', 'grok-4.20-0309-non-reasoning', 'grok-4.20-multi-agent-0309',
   'grok', 'grok-latest', 'grok-4.5-latest', 'grok-build', 'grok-build-latest',
+  'grok-composer', 'composer-2.5', 'grok-4.20-reasoning', 'grok-4.20-non-reasoning',
   'grok-4', 'grok-4-0709',
   'grok-3-beta', 'grok-3-mini-beta', 'grok-3-fast-beta',
-  'grok-2', 'grok-2-vision', 'grok-2-image',
+  'grok-2', 'grok-2-vision',
   'grok-beta', 'grok-vision-beta'
 ]
 
@@ -392,7 +394,8 @@ export function getModelsByPlatform(platform: string): string[] {
     case 'deepseek': return deepseekModels
     case 'mistral': return mistralModels
     case 'meta': return metaModels
-    case 'xai': return xaiModels
+    case 'xai':
+    case 'grok': return xaiModels
     case 'cohere': return cohereModels
     case 'yi': return yiModels
     case 'moonshot': return moonshotModels

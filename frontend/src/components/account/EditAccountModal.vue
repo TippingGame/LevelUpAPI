@@ -458,7 +458,7 @@
 
       <!-- OpenAI OAuth Model Mapping (OAuth 类型没有 apikey 容器，需要独立的模型映射区域) -->
       <div
-        v-if="!isUserScope && account.platform === 'openai' && account.type === 'oauth'"
+        v-if="!isUserScope && (account.platform === 'openai' || account.platform === 'grok') && account.type === 'oauth'"
         class="border-t border-gray-200 pt-4 dark:border-dark-600"
       >
         <label class="input-label">{{ t('admin.accounts.modelRestriction') }}</label>
@@ -1304,8 +1304,9 @@
           <input
             v-model.number="form.concurrency"
             type="number"
-            :min="isUserScope ? PERSONAL_ACCOUNT_MIN_CONCURRENCY : 1"
+            :min="account.platform === 'grok' && isUserScope ? 1 : isUserScope ? PERSONAL_ACCOUNT_MIN_CONCURRENCY : 1"
             :max="isUserScope ? PERSONAL_ACCOUNT_MAX_CONCURRENCY : undefined"
+            :disabled="account.platform === 'grok' && isUserScope"
             step="1"
             class="input"
             @input="normalizeConcurrencyInput"
@@ -2575,6 +2576,10 @@ const userLoadFactorCreditCost = computed(() => {
 const userLoadFactorCreditsInsufficient = computed(() => userLoadFactorCreditCost.value > userLoadFactorCreditsBalance.value)
 
 const normalizeConcurrencyInput = () => {
+  if (isUserScope.value && props.account?.platform === 'grok') {
+    form.concurrency = 1
+    return
+  }
   if (isUserScope.value) {
     form.concurrency = normalizePersonalAccountConcurrency(form.concurrency)
     return
@@ -2592,7 +2597,7 @@ const normalizeLoadFactorInput = () => {
 
 const applyUserScopeConcurrencyTemplate = () => {
   if (isUserScope.value) {
-    form.concurrency = normalizePersonalAccountConcurrency(form.concurrency)
+    form.concurrency = props.account?.platform === 'grok' ? 1 : normalizePersonalAccountConcurrency(form.concurrency)
     form.load_factor = normalizePersonalAccountLoadFactor(form.load_factor)
     return
   }
@@ -2681,7 +2686,7 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   form.account_level = newAccount.platform === 'openai' ? (newAccount.account_level || 'unknown') : 'unknown'
   form.proxy_id = newAccount.proxy_id
   form.concurrency = isUserScope.value
-    ? normalizePersonalAccountConcurrency(newAccount.concurrency)
+    ? newAccount.platform === 'grok' ? 1 : normalizePersonalAccountConcurrency(newAccount.concurrency)
     : newAccount.concurrency
   form.load_factor = isUserScope.value
     ? normalizePersonalAccountLoadFactor(newAccount.load_factor ?? PERSONAL_ACCOUNT_DEFAULT_LOAD_FACTOR)
@@ -2976,8 +2981,8 @@ const syncFormFromAccount = (newAccount: Account | null) => {
           : 'https://api.anthropic.com'
     editBaseUrl.value = platformDefaultUrl
 
-    // Load model mappings for OpenAI OAuth accounts
-    if (newAccount.platform === 'openai' && newAccount.credentials) {
+    // Load model mappings for OpenAI/Grok OAuth accounts
+    if ((newAccount.platform === 'openai' || newAccount.platform === 'grok') && newAccount.credentials) {
       const oauthCredentials = newAccount.credentials as Record<string, unknown>
       const existingMappings = oauthCredentials.model_mapping as Record<string, string> | undefined
       if (existingMappings && typeof existingMappings === 'object') {
@@ -3765,6 +3770,19 @@ const handleSubmit = async () => {
         delete newCredentials.compact_model_mapping
       }
 
+      updatePayload.credentials = newCredentials
+    }
+
+    if (!isUserScope.value && props.account.platform === 'grok' && props.account.type === 'oauth') {
+      const currentCredentials = (updatePayload.credentials as Record<string, unknown>) ||
+        ((props.account.credentials as Record<string, unknown>) || {})
+      const newCredentials: Record<string, unknown> = { ...currentCredentials }
+      const modelMapping = buildModelMappingObject(modelRestrictionMode.value, allowedModels.value, modelMappings.value)
+      if (modelMapping) {
+        newCredentials.model_mapping = modelMapping
+      } else {
+        delete newCredentials.model_mapping
+      }
       updatePayload.credentials = newCredentials
     }
 
