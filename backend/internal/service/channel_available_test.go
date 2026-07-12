@@ -175,3 +175,20 @@ func TestListAvailable_DefaultsEmptyBillingModelSource(t *testing.T) {
 	require.Equal(t, BillingModelSourceChannelMapped, byName["empty"])
 	require.Equal(t, BillingModelSourceUpstream, byName["explicit"])
 }
+
+func TestSynthesizePricingFromLiteLLM_IncludesImageTokenPrices(t *testing.T) {
+	pricing := synthesizePricingFromLiteLLM(&LiteLLMModelPricing{
+		InputCostPerImageToken:       8e-6,
+		CacheReadInputImageTokenCost: 2e-6,
+		OutputCostPerImageToken:      30e-6,
+	})
+
+	require.NotNil(t, pricing)
+	require.Equal(t, BillingModeToken, pricing.BillingMode)
+	require.NotNil(t, pricing.ImageInputPrice)
+	require.NotNil(t, pricing.ImageCacheReadPrice)
+	require.NotNil(t, pricing.ImageOutputPrice)
+	require.InDelta(t, 8e-6, *pricing.ImageInputPrice, 1e-12)
+	require.InDelta(t, 2e-6, *pricing.ImageCacheReadPrice, 1e-12)
+	require.InDelta(t, 30e-6, *pricing.ImageOutputPrice, 1e-12)
+}

@@ -631,6 +631,8 @@ func (s *BillingService) GetModelPricing(model string) (*ModelPricing, error) {
 				LongContextInputThreshold:          litellmPricing.LongContextInputTokenThreshold,
 				LongContextInputMultiplier:         litellmPricing.LongContextInputCostMultiplier,
 				LongContextOutputMultiplier:        litellmPricing.LongContextOutputCostMultiplier,
+				ImageInputPricePerToken:            litellmPricing.InputCostPerImageToken,
+				ImageCacheReadPricePerToken:        litellmPricing.CacheReadInputImageTokenCost,
 				ImageOutputPricePerToken:           litellmPricing.OutputCostPerImageToken,
 			}), nil
 		}

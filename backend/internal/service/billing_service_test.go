@@ -878,6 +878,9 @@ func TestGetModelPricing_MapsDynamicPriorityFieldsIntoBillingPricing(t *testing.
 				InputCostPerTokenPriority:           2e-6,
 				OutputCostPerToken:                  3e-6,
 				OutputCostPerTokenPriority:          6e-6,
+				InputCostPerImageToken:              8e-6,
+				CacheReadInputImageTokenCost:        2e-6,
+				OutputCostPerImageToken:             30e-6,
 				CacheCreationInputTokenCost:         4e-6,
 				CacheCreationInputTokenCostAbove1hr: 5e-6,
 				CacheReadInputTokenCost:             7e-7,
@@ -895,6 +898,9 @@ func TestGetModelPricing_MapsDynamicPriorityFieldsIntoBillingPricing(t *testing.
 	require.InDelta(t, 2e-6, pricing.InputPricePerTokenPriority, 1e-12)
 	require.InDelta(t, 3e-6, pricing.OutputPricePerToken, 1e-12)
 	require.InDelta(t, 6e-6, pricing.OutputPricePerTokenPriority, 1e-12)
+	require.InDelta(t, 8e-6, pricing.ImageInputPricePerToken, 1e-12)
+	require.InDelta(t, 2e-6, pricing.ImageCacheReadPricePerToken, 1e-12)
+	require.InDelta(t, 30e-6, pricing.ImageOutputPricePerToken, 1e-12)
 	require.InDelta(t, 4e-6, pricing.CacheCreation5mPrice, 1e-12)
 	require.InDelta(t, 5e-6, pricing.CacheCreation1hPrice, 1e-12)
 	require.True(t, pricing.SupportsCacheBreakdown)

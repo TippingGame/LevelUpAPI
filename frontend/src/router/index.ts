@@ -184,6 +184,18 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/agent',
+    name: 'AgentExperience',
+    component: () => import('@/views/user/AgentExperienceView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: false,
+      title: 'LevelUpAgent Online Experience',
+      titleKey: 'agentExperience.title',
+      descriptionKey: 'agentExperience.subtitle'
+    }
+  },
+  {
     path: '/keys',
     name: 'Keys',
     component: () => import('@/views/user/KeysView.vue'),
