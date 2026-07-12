@@ -1991,7 +1991,7 @@ func buildOAuthRefreshCandidatesQuery(refreshWindow time.Duration) (string, []an
 			WHERE deleted_at IS NULL
 				AND status = 'active'
 				AND type = 'oauth'
-				AND platform IN ('anthropic', 'openai', 'gemini', 'antigravity')
+				AND platform IN ('anthropic', 'openai', 'gemini', 'antigravity', 'grok')
 				AND credentials ? 'refresh_token'
 				AND btrim(credentials->>'refresh_token') <> ''
 				AND (
@@ -2033,6 +2033,13 @@ func buildOAuthRefreshCandidatesQuery(refreshWindow time.Duration) (string, []an
 				platform = 'antigravity'
 				AND credential_expires_at IS NOT NULL
 				AND credential_expires_at <= NOW() + INTERVAL '15 minutes'
+			)
+			OR (
+				platform = 'grok'
+				AND (
+					credential_expires_at IS NULL
+					OR credential_expires_at <= NOW() + (GREATEST($1::bigint, 3600) * INTERVAL '1 second')
+				)
 			)
 		ORDER BY priority ASC, id ASC
 	`, []any{refreshWindowSeconds}
