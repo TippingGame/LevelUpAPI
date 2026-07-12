@@ -305,6 +305,18 @@ func (s *openAISnapshotCacheStub) GetAccount(ctx context.Context, accountID int6
 	return &cloned, nil
 }
 
+func (s *openAISnapshotCacheStub) SetAccount(_ context.Context, account *Account) error {
+	if account == nil {
+		return nil
+	}
+	if s.accountsByID == nil {
+		s.accountsByID = make(map[int64]*Account)
+	}
+	cloned := *account
+	s.accountsByID[account.ID] = &cloned
+	return nil
+}
+
 func (s *openAICandidateSnapshotCacheStub) GetCandidateSnapshot(ctx context.Context, bucket SchedulerBucket, limit int) ([]*Account, bool, error) {
 	s.candidateHits++
 	if len(s.candidateAccounts) == 0 {
@@ -331,6 +343,76 @@ func (s *openAICandidateSnapshotCacheStub) GetSnapshot(ctx context.Context, buck
 		s.fullHits++
 	}
 	return s.openAISnapshotCacheStub.GetSnapshot(ctx, bucket)
+}
+
+func TestSelectGrokOAuthAccountRehydratesProxyFromRepository(t *testing.T) {
+	ownerID := int64(7001)
+	proxyID := int64(7002)
+	stale := &Account{
+		ID:          7003,
+		Platform:    PlatformGrok,
+		Type:        AccountTypeOAuth,
+		OwnerUserID: &ownerID,
+		ShareMode:   AccountShareModePublic,
+		ShareStatus: AccountShareStatusApproved,
+		ProxyID:     &proxyID,
+		Proxy:       &Proxy{ID: proxyID, Status: StatusActive, Protocol: "http", Host: "stale.proxy.test", Port: 8080},
+		Status:      StatusActive,
+		Schedulable: true,
+		Concurrency: 1,
+	}
+	fresh := *stale
+	fresh.Proxy = &Proxy{ID: proxyID, Status: StatusActive, Protocol: "socks5h", Host: "fresh.proxy.test", Port: 1080}
+	snapshotCache := &openAISnapshotCacheStub{
+		snapshotAccounts: []*Account{stale},
+		accountsByID:     map[int64]*Account{stale.ID: stale},
+	}
+	svc := &OpenAIGatewayService{
+		accountRepo:        schedulerTestOpenAIAccountRepo{accounts: []Account{fresh}},
+		schedulerSnapshot:  &SchedulerSnapshotService{cache: snapshotCache},
+		concurrencyService: NewConcurrencyService(schedulerTestConcurrencyCache{}),
+		cfg:                &config.Config{},
+	}
+
+	selection, _, err := svc.selectGrokOAuthAccount(context.Background(), nil, "grok-4.5", nil, "")
+	require.NoError(t, err)
+	require.NotNil(t, selection)
+	require.NotNil(t, selection.Account)
+	require.Equal(t, "socks5h://fresh.proxy.test:1080", selection.Account.Proxy.URL())
+}
+
+func TestSelectGrokOAuthAccountRejectsIncompleteAuthoritativeProxy(t *testing.T) {
+	ownerID := int64(7101)
+	proxyID := int64(7102)
+	stale := &Account{
+		ID:          7103,
+		Platform:    PlatformGrok,
+		Type:        AccountTypeOAuth,
+		OwnerUserID: &ownerID,
+		ShareMode:   AccountShareModePublic,
+		ShareStatus: AccountShareStatusApproved,
+		ProxyID:     &proxyID,
+		Proxy:       &Proxy{ID: proxyID, Status: StatusActive, Protocol: "http", Host: "stale.proxy.test", Port: 8080},
+		Status:      StatusActive,
+		Schedulable: true,
+		Concurrency: 1,
+	}
+	incomplete := *stale
+	incomplete.Proxy = &Proxy{ID: proxyID, Status: StatusActive}
+	snapshotCache := &openAISnapshotCacheStub{
+		snapshotAccounts: []*Account{stale},
+		accountsByID:     map[int64]*Account{stale.ID: stale},
+	}
+	svc := &OpenAIGatewayService{
+		accountRepo:        schedulerTestOpenAIAccountRepo{accounts: []Account{incomplete}},
+		schedulerSnapshot:  &SchedulerSnapshotService{cache: snapshotCache},
+		concurrencyService: NewConcurrencyService(schedulerTestConcurrencyCache{}),
+		cfg:                &config.Config{},
+	}
+
+	selection, _, err := svc.selectGrokOAuthAccount(context.Background(), nil, "grok-4.5", nil, "")
+	require.ErrorIs(t, err, ErrNoAvailableAccounts)
+	require.Nil(t, selection)
 }
 
 func TestOpenAIGatewayService_SelectAccountWithScheduler_DefaultDisabledUsesLegacyLoadAwareness(t *testing.T) {

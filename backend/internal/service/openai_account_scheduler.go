@@ -1429,7 +1429,7 @@ func (s *OpenAIGatewayService) selectGrokOAuthAccount(
 		if _, excluded := excludedIDs[account.ID]; excluded {
 			continue
 		}
-		if !account.IsGrokOAuth() || !account.IsSchedulable() || !account.HasRequiredProxyForScheduling() {
+		if !account.IsGrokOAuth() || !account.IsSchedulable() || !account.HasCompleteRequiredProxyForScheduling() {
 			continue
 		}
 		if requiredCapability != "" && !account.SupportsOpenAIEndpointCapability(requiredCapability) {
@@ -1450,11 +1450,55 @@ func (s *OpenAIGatewayService) selectGrokOAuthAccount(
 		if acquireErr != nil || result == nil || !result.Acquired {
 			continue
 		}
+		hydrated, hydrateErr := s.rehydrateSelectedGrokAccount(ctx, account, groupID, requestedModel, requiredCapability)
+		if hydrateErr != nil {
+			if result.ReleaseFunc != nil {
+				result.ReleaseFunc()
+			}
+			continue
+		}
 		decision.SelectedAccountID = account.ID
 		decision.SelectedAccountType = account.Type
-		return &AccountSelectionResult{Account: account, Acquired: true, ReleaseFunc: result.ReleaseFunc}, decision, nil
+		return &AccountSelectionResult{Account: hydrated, Acquired: true, ReleaseFunc: result.ReleaseFunc}, decision, nil
 	}
 	return nil, decision, ErrNoAvailableAccounts
+}
+
+// rehydrateSelectedGrokAccount performs a final authoritative read after the
+// scheduler chooses a shared-pool candidate. Snapshot metadata is intentionally
+// sparse and must never be allowed to turn a required account proxy into a
+// direct xAI connection.
+func (s *OpenAIGatewayService) rehydrateSelectedGrokAccount(
+	ctx context.Context,
+	account *Account,
+	groupID *int64,
+	requestedModel string,
+	requiredCapability OpenAIEndpointCapability,
+) (*Account, error) {
+	if account == nil || s.accountRepo == nil {
+		return nil, ErrNoAvailableAccounts
+	}
+	hydrated, err := s.accountRepo.GetByID(ctx, account.ID)
+	if err != nil || hydrated == nil {
+		return nil, ErrNoAvailableAccounts
+	}
+	if !IsAccountVisibleToRequestUser(ctx, hydrated) ||
+		!hydrated.IsGrokOAuth() ||
+		!hydrated.IsSchedulable() ||
+		!hydrated.HasCompleteRequiredProxyForScheduling() ||
+		!s.isOpenAIAccountInRequestGroup(hydrated, groupID) {
+		return nil, ErrNoAvailableAccounts
+	}
+	if requiredCapability != "" && !hydrated.SupportsOpenAIEndpointCapability(requiredCapability) {
+		return nil, ErrNoAvailableAccounts
+	}
+	if strings.TrimSpace(requestedModel) != "" && !hydrated.IsModelSupported(requestedModel) {
+		return nil, ErrNoAvailableAccounts
+	}
+	if s.schedulerSnapshot != nil {
+		_ = s.schedulerSnapshot.UpdateAccountInCache(context.WithoutCancel(ctx), hydrated)
+	}
+	return hydrated, nil
 }
 
 func (s *OpenAIGatewayService) SelectAccountWithSchedulerForImages(

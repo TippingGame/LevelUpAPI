@@ -162,7 +162,7 @@ func TestGetGeminiBaseURL(t *testing.T) {
 	}
 }
 
-func TestGetGrokBaseURLUsesSubscriptionProxyForOAuth(t *testing.T) {
+func TestGetGrokBaseURLUsesOfficialAPIForOAuth(t *testing.T) {
 	tests := []struct {
 		name     string
 		account  Account
@@ -171,21 +171,28 @@ func TestGetGrokBaseURLUsesSubscriptionProxyForOAuth(t *testing.T) {
 		{
 			name:     "oauth without base URL",
 			account:  Account{Type: AccountTypeOAuth, Platform: PlatformGrok, Credentials: map[string]any{}},
-			expected: xai.DefaultCLIBaseURL,
+			expected: xai.DefaultBaseURL,
 		},
 		{
 			name: "oauth legacy official API URL",
 			account: Account{Type: AccountTypeOAuth, Platform: PlatformGrok, Credentials: map[string]any{
 				"base_url": xai.DefaultBaseURL,
 			}},
-			expected: xai.DefaultCLIBaseURL,
+			expected: xai.DefaultBaseURL,
 		},
 		{
 			name: "oauth legacy official API root",
 			account: Account{Type: AccountTypeOAuth, Platform: PlatformGrok, Credentials: map[string]any{
 				"base_url": "HTTPS://API.X.AI:443/",
 			}},
-			expected: xai.DefaultCLIBaseURL,
+			expected: xai.DefaultBaseURL,
+		},
+		{
+			name: "oauth legacy CLI proxy URL",
+			account: Account{Type: AccountTypeOAuth, Platform: PlatformGrok, Credentials: map[string]any{
+				"base_url": xai.DefaultCLIBaseURL,
+			}},
+			expected: xai.DefaultBaseURL,
 		},
 		{
 			name: "oauth custom host remains explicit",

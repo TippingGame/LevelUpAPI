@@ -622,6 +622,26 @@ func (a *Account) HasRequiredProxyForScheduling() bool {
 	return a.Proxy != nil && a.Proxy.IsActive()
 }
 
+// HasCompleteRequiredProxyForScheduling is the fail-closed variant used by
+// Grok shared-pool forwarding. Scheduler metadata deliberately redacts proxy
+// endpoints, so this check distinguishes a hydrated account from an active but
+// unusable metadata-only proxy object.
+func (a *Account) HasCompleteRequiredProxyForScheduling() bool {
+	if a == nil || !a.RequiresProxyForScheduling() {
+		return true
+	}
+	if a.ProxyID == nil || *a.ProxyID <= 0 {
+		return false
+	}
+	proxy := a.Proxy
+	return proxy != nil &&
+		proxy.ID == *a.ProxyID &&
+		proxy.IsActive() &&
+		strings.TrimSpace(proxy.Protocol) != "" &&
+		strings.TrimSpace(proxy.Host) != "" &&
+		proxy.Port > 0
+}
+
 func (a *Account) RequiresProxyForScheduling() bool {
 	if a == nil {
 		return false
@@ -1805,8 +1825,12 @@ func (a *Account) GetGrokBaseURL() string {
 		return ""
 	}
 	baseURL := strings.TrimSpace(a.GetCredential("base_url"))
-	if a.IsGrokOAuth() && (baseURL == "" || isOfficialGrokAPIBaseURL(baseURL)) {
-		return xai.DefaultCLIBaseURL
+	// LevelUpAPI 1.1.219 briefly persisted the Grok CLI subscription proxy as
+	// the OAuth base URL. sub2api's supported HTTP forwarding path uses the
+	// official xAI API endpoint, so normalize those legacy values on read while
+	// the database migration rewrites them permanently.
+	if a.IsGrokOAuth() && (isOfficialGrokAPIBaseURL(baseURL) || isOfficialGrokCLIBaseURL(baseURL)) {
+		return xai.DefaultBaseURL
 	}
 	if baseURL != "" {
 		return baseURL
@@ -1814,12 +1838,20 @@ func (a *Account) GetGrokBaseURL() string {
 	return xai.DefaultBaseURL
 }
 
+func isOfficialGrokCLIBaseURL(raw string) bool {
+	return isOfficialGrokBaseURL(raw, xai.DefaultCLIBaseURL)
+}
+
 func isOfficialGrokAPIBaseURL(raw string) bool {
+	return isOfficialGrokBaseURL(raw, xai.DefaultBaseURL)
+}
+
+func isOfficialGrokBaseURL(raw, expected string) bool {
 	parsed, err := url.Parse(strings.TrimSpace(raw))
 	if err != nil || parsed == nil || parsed.Opaque != "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
 		return false
 	}
-	defaultURL, err := url.Parse(xai.DefaultBaseURL)
+	defaultURL, err := url.Parse(expected)
 	if err != nil {
 		return false
 	}

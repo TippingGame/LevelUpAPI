@@ -68,7 +68,7 @@ func TestAccountHasRequiredProxyForScheduling(t *testing.T) {
 				Type:        AccountTypeOAuth,
 				OwnerUserID: &ownerID,
 				ProxyID:     &proxyID,
-				Proxy:       &Proxy{ID: proxyID, Status: StatusActive},
+				Proxy:       &Proxy{ID: proxyID, Status: StatusActive, Protocol: "http", Host: "127.0.0.1", Port: 8080},
 			},
 			want: true,
 		},
@@ -80,7 +80,7 @@ func TestAccountHasRequiredProxyForScheduling(t *testing.T) {
 				Type:         AccountTypeOAuth,
 				OwnerUserID:  &ownerID,
 				ProxyID:      &proxyID,
-				Proxy:        &Proxy{ID: proxyID, Status: StatusActive},
+				Proxy:        &Proxy{ID: proxyID, Status: StatusActive, Protocol: "http", Host: "127.0.0.1", Port: 8080},
 			},
 			want: true,
 		},
@@ -101,6 +101,26 @@ func TestAccountHasRequiredProxyForScheduling(t *testing.T) {
 			require.Equal(t, tt.want, tt.acc.HasRequiredProxyForScheduling())
 		})
 	}
+}
+
+func TestAccountHasCompleteRequiredProxyForScheduling(t *testing.T) {
+	ownerID := int64(101)
+	proxyID := int64(7)
+	account := &Account{
+		Platform:    PlatformGrok,
+		Type:        AccountTypeOAuth,
+		OwnerUserID: &ownerID,
+		ProxyID:     &proxyID,
+		Proxy:       &Proxy{ID: proxyID, Status: StatusActive},
+	}
+
+	require.True(t, account.HasRequiredProxyForScheduling())
+	require.False(t, account.HasCompleteRequiredProxyForScheduling())
+
+	account.Proxy.Protocol = "socks5h"
+	account.Proxy.Host = "127.0.0.1"
+	account.Proxy.Port = 1080
+	require.True(t, account.HasCompleteRequiredProxyForScheduling())
 }
 
 func TestAccountIsSchedulableBlocksOwnedAnthropicWhenProxyInactive(t *testing.T) {

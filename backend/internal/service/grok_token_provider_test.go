@@ -85,7 +85,7 @@ func TestGrokTokenProviderRefreshesExpiredTokenOnRequestPath(t *testing.T) {
 	require.Equal(t, 1, repo.updateCredentialsCalls)
 	require.Equal(t, "new-access-token", repo.accountsByID[54].GetGrokAccessToken())
 	require.Equal(t, "refresh-token", repo.accountsByID[54].GetGrokRefreshToken())
-	require.Equal(t, xai.DefaultCLIBaseURL, repo.accountsByID[54].GetGrokBaseURL())
+	require.Equal(t, xai.DefaultBaseURL, repo.accountsByID[54].GetGrokBaseURL())
 	require.Equal(t, "grok:account:54", cache.setKey)
 	require.Equal(t, "new-access-token", cache.setToken)
 	require.Greater(t, cache.setTTL, time.Duration(0))
