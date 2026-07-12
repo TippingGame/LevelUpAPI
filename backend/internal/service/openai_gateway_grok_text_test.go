@@ -63,12 +63,44 @@ func TestPatchGrokResponsesBodyDropsUnsupportedToolChoice(t *testing.T) {
 	require.False(t, gjson.GetBytes(patched, "tool_choice").Exists())
 }
 
+func TestPatchGrokResponsesBodySupportsAgentToolsAndDropsPrivateInputCarrier(t *testing.T) {
+	body := []byte(`{
+		"model":"grok-4.5",
+		"instructions":"You are a coding agent.",
+		"input":[
+			{"type":"additional_tools","role":"developer","tools":[{"type":"custom","name":"exec"}]},
+			{"role":"user","content":[{"type":"input_text","text":"Inspect the project"}]}
+		],
+		"stream":true,
+		"store":false,
+		"tools":[{
+			"type":"function",
+			"name":"read_file",
+			"description":"Read a file.",
+			"parameters":{"type":"object","properties":{"path":{"type":"string"}},"required":["path"]},
+			"strict":false
+		}],
+		"tool_choice":"auto"
+	}`)
+
+	patched, err := patchGrokResponsesBody(body, "grok-4.5")
+	require.NoError(t, err)
+	require.True(t, json.Valid(patched))
+	require.False(t, gjson.GetBytes(patched, `input.#(type=="additional_tools")`).Exists())
+	require.Len(t, gjson.GetBytes(patched, "input").Array(), 1)
+	require.Equal(t, "read_file", gjson.GetBytes(patched, "tools.0.name").String())
+	require.True(t, gjson.GetBytes(patched, "tools.0.strict").Exists())
+	require.False(t, gjson.GetBytes(patched, "tools.0.strict").Bool())
+	require.Equal(t, "auto", gjson.GetBytes(patched, "tool_choice").String())
+	require.False(t, gjson.GetBytes(patched, "store").Bool())
+}
+
 func TestBuildGrokResponsesRequestUsesOfficialBearerEndpoint(t *testing.T) {
 	account := &Account{Platform: PlatformGrok, Type: AccountTypeOAuth}
 	req, err := buildGrokResponsesRequest(context.Background(), nil, account, []byte(`{"model":"grok-4.3"}`), "access-token")
 	require.NoError(t, err)
 	require.Equal(t, http.MethodPost, req.Method)
-	require.Equal(t, xai.DefaultBaseURL+"/responses", req.URL.String())
+	require.Equal(t, xai.DefaultCLIBaseURL+"/responses", req.URL.String())
 	require.Equal(t, "Bearer access-token", req.Header.Get("Authorization"))
 	require.True(t, strings.Contains(req.Header.Get("Accept"), "text/event-stream"))
 }

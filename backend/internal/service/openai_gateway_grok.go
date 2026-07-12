@@ -161,6 +161,10 @@ func patchGrokResponsesBody(body []byte, upstreamModel string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	out, err = sanitizeGrokResponsesInput(out)
+	if err != nil {
+		return nil, err
+	}
 	return sanitizeGrokResponsesTools(out)
 }
 
@@ -205,6 +209,36 @@ func deleteGrokJSONFields(value any, fields map[string]struct{}) bool {
 	default:
 		return false
 	}
+}
+
+// additional_tools is a private Codex/Responses carrier that is not part of
+// xAI's ModelInput union. Keep normal messages and top-level tools while
+// removing this item before forwarding to the Grok subscription proxy.
+func sanitizeGrokResponsesInput(body []byte) ([]byte, error) {
+	if !bytes.Contains(body, []byte(`"additional_tools"`)) {
+		return body, nil
+	}
+	input := gjson.GetBytes(body, "input")
+	if !input.Exists() || !input.IsArray() {
+		return body, nil
+	}
+
+	rawItems := input.Array()
+	filtered := make([]json.RawMessage, 0, len(rawItems))
+	for _, item := range rawItems {
+		if strings.TrimSpace(item.Get("type").String()) == "additional_tools" {
+			continue
+		}
+		filtered = append(filtered, json.RawMessage(item.Raw))
+	}
+	if len(filtered) == len(rawItems) {
+		return body, nil
+	}
+	encoded, err := json.Marshal(filtered)
+	if err != nil {
+		return nil, err
+	}
+	return sjson.SetRawBytes(body, "input", encoded)
 }
 
 var grokResponsesSupportedToolTypes = map[string]struct{}{
