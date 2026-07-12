@@ -28,9 +28,11 @@
           </span>
           <span
             v-if="item.group_name"
-            class="inline-flex items-center rounded-md px-1.5 py-0.5 text-[10px] font-medium bg-gray-100 text-gray-600 dark:bg-dark-700 dark:text-gray-300 flex-shrink-0"
+            class="inline-flex max-w-[9rem] flex-shrink-0 items-center rounded-md px-1.5 py-0.5 text-[10px] font-semibold"
+            :class="platformPillClass(item.provider)"
+            :title="item.group_name"
           >
-            {{ item.group_name }}
+            <span class="truncate">{{ item.group_name }}</span>
           </span>
         </div>
       </div>
@@ -80,6 +82,7 @@ import {
   useChannelMonitorFormat,
   providerGradient,
 } from '@/composables/useChannelMonitorFormat'
+import { platformPillClass } from '@/utils/platformColors'
 import ProviderIcon from './ProviderIcon.vue'
 import MonitorMetricPair from './MonitorMetricPair.vue'
 import MonitorAvailabilityRow from './MonitorAvailabilityRow.vue'

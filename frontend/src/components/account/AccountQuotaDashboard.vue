@@ -107,31 +107,33 @@
           :class="groupCardClass(groupHealth(summary))"
         >
           <div class="flex items-start justify-between gap-3">
-            <div class="flex min-w-0 items-start gap-2">
-              <PlatformIcon :platform="platformIconValue(summary.platform)" size="sm" />
-              <div class="min-w-0">
-                <div class="truncate text-sm font-semibold text-gray-900 dark:text-white">
-                  {{ groupName(summary) }}
-                </div>
-                <div class="mt-0.5 truncate text-xs text-gray-500 dark:text-gray-400">
-                  {{ platformLabel(summary.platform) }} · {{ t('admin.accounts.quotaDashboard.accountBaseMeta', {
-                    total: summary.account_count,
-                    active: summary.active_account_count
-                  }) }}
-                </div>
-                <div class="mt-1 text-xs font-semibold text-teal-700 dark:text-teal-300">
-                  {{ t('admin.accounts.quotaDashboard.schedulableCount', { count: summary.schedulable_account_count }) }}
-                </div>
-                <div
-                  v-if="groupConcurrencyCapacity(summary)"
-                  class="mt-0.5 text-xs font-semibold"
-                  :class="groupConcurrencyCapacityClass(groupConcurrencyCapacity(summary)!)"
-                >
-                  {{ t('admin.accounts.quotaDashboard.concurrencyAvailable', {
-                    available: groupConcurrencyAvailable(groupConcurrencyCapacity(summary)!),
-                    total: groupConcurrencyCapacity(summary)!.concurrency_max
-                  }) }}
-                </div>
+            <div class="min-w-0">
+              <span
+                class="inline-flex max-w-full items-center gap-1.5 rounded-md px-2 py-0.5 text-sm font-semibold"
+                :class="platformPillClass(summary.platform)"
+                :title="groupName(summary)"
+              >
+                <PlatformIcon :platform="platformIconValue(summary.platform)" size="sm" />
+                <span class="truncate">{{ groupName(summary) }}</span>
+              </span>
+              <div class="mt-0.5 truncate text-xs text-gray-500 dark:text-gray-400">
+                {{ platformLabel(summary.platform) }} · {{ t('admin.accounts.quotaDashboard.accountBaseMeta', {
+                  total: summary.account_count,
+                  active: summary.active_account_count
+                }) }}
+              </div>
+              <div class="mt-1 text-xs font-semibold text-teal-700 dark:text-teal-300">
+                {{ t('admin.accounts.quotaDashboard.schedulableCount', { count: summary.schedulable_account_count }) }}
+              </div>
+              <div
+                v-if="groupConcurrencyCapacity(summary)"
+                class="mt-0.5 text-xs font-semibold"
+                :class="groupConcurrencyCapacityClass(groupConcurrencyCapacity(summary)!)"
+              >
+                {{ t('admin.accounts.quotaDashboard.concurrencyAvailable', {
+                  available: groupConcurrencyAvailable(groupConcurrencyCapacity(summary)!),
+                  total: groupConcurrencyCapacity(summary)!.concurrency_max
+                }) }}
               </div>
             </div>
             <span
@@ -316,7 +318,7 @@ import PlatformIcon from '@/components/common/PlatformIcon.vue'
 import HelpTooltip from '@/components/common/HelpTooltip.vue'
 import { formatDateTime } from '@/utils/format'
 import { formatGameCoins } from '@/utils/gameCurrency'
-import { platformLabel } from '@/utils/platformColors'
+import { platformLabel, platformPillClass } from '@/utils/platformColors'
 import {
   accountQuotaGroupHealthRank,
   resolveAccountQuotaGroupHealth,

@@ -21,6 +21,7 @@ describe('GroupOptionItem platform colors', () => {
     })
 
     expect(wrapper.getComponent(GroupBadge).classes()).toContain(badgeClass)
+    expect(wrapper.getComponent(GroupBadge).attributes('title')).toBe(`${platform} pool`)
     expect(wrapper.get('span.rounded-full').classes()).toContain(rateClass)
   })
 })
