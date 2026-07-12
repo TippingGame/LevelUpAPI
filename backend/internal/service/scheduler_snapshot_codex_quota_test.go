@@ -172,7 +172,7 @@ func TestSchedulerSnapshotCacheHydratesRequiredProxyMetadata(t *testing.T) {
 		Concurrency:  1,
 	}
 	full := *cached
-	full.Proxy = &Proxy{ID: proxyID, Status: StatusActive}
+	full.Proxy = &Proxy{ID: proxyID, Status: StatusActive, Protocol: "http", Host: "127.0.0.1", Port: 8080}
 	cache := &schedulerSnapshotQuotaCache{
 		snapshotAccounts: []*Account{cached},
 		fullAccounts: map[int64]*Account{
@@ -188,6 +188,58 @@ func TestSchedulerSnapshotCacheHydratesRequiredProxyMetadata(t *testing.T) {
 	}
 	if len(accounts) != 1 || accounts[0].ID != full.ID {
 		t.Fatalf("returned accounts = %+v, want hydrated Pro account", accounts)
+	}
+	if len(cache.setAccountIDs) != 1 || cache.setAccountIDs[0] != full.ID {
+		t.Fatalf("set account IDs = %+v, want metadata refresh for account %d", cache.setAccountIDs, full.ID)
+	}
+}
+
+func TestSchedulerSnapshotCacheHydratesSparseGrokProxyMetadata(t *testing.T) {
+	ownerID := int64(10)
+	proxyID := int64(20)
+	groupID := int64(30)
+	cached := &Account{
+		ID:          1,
+		Platform:    PlatformGrok,
+		Type:        AccountTypeOAuth,
+		OwnerUserID: &ownerID,
+		ShareMode:   AccountShareModePublic,
+		ShareStatus: AccountShareStatusApproved,
+		ProxyID:     &proxyID,
+		Proxy: &Proxy{
+			ID:     proxyID,
+			Status: StatusActive,
+		},
+		Status:      StatusActive,
+		Schedulable: true,
+		Concurrency: 1,
+	}
+	full := *cached
+	full.Proxy = &Proxy{
+		ID:       proxyID,
+		Status:   StatusActive,
+		Protocol: "http",
+		Host:     "127.0.0.1",
+		Port:     8080,
+	}
+	cache := &schedulerSnapshotQuotaCache{
+		snapshotAccounts: []*Account{cached},
+		fullAccounts: map[int64]*Account{
+			full.ID: &full,
+		},
+	}
+	repo := &schedulerSnapshotQuotaAccountRepo{}
+	svc := NewSchedulerSnapshotService(cache, nil, repo, nil, nil)
+
+	accounts, _, err := svc.ListSchedulableAccounts(context.Background(), &groupID, PlatformGrok, false)
+	if err != nil {
+		t.Fatalf("ListSchedulableAccounts error: %v", err)
+	}
+	if len(accounts) != 1 || accounts[0].ID != full.ID {
+		t.Fatalf("returned accounts = %+v, want hydrated Grok account", accounts)
+	}
+	if accounts[0].Proxy == nil || accounts[0].Proxy.URL() != "http://127.0.0.1:8080" {
+		t.Fatalf("returned proxy = %+v, want complete proxy URL", accounts[0].Proxy)
 	}
 	if len(cache.setAccountIDs) != 1 || cache.setAccountIDs[0] != full.ID {
 		t.Fatalf("set account IDs = %+v, want metadata refresh for account %d", cache.setAccountIDs, full.ID)

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"log/slog"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -807,11 +808,18 @@ func (s *SchedulerSnapshotService) repairCachedAccountsMissingRequiredProxy(ctx 
 }
 
 func accountMissingRequiredProxyHydration(account *Account) bool {
-	return account != nil &&
-		account.RequiresProxyForScheduling() &&
-		account.ProxyID != nil &&
-		*account.ProxyID > 0 &&
-		account.Proxy == nil
+	if account == nil ||
+		!account.RequiresProxyForScheduling() ||
+		account.ProxyID == nil ||
+		*account.ProxyID <= 0 {
+		return false
+	}
+	proxy := account.Proxy
+	return proxy == nil ||
+		proxy.ID != *account.ProxyID ||
+		strings.TrimSpace(proxy.Protocol) == "" ||
+		strings.TrimSpace(proxy.Host) == "" ||
+		proxy.Port <= 0
 }
 
 func filterSchedulableAccountsForSnapshot(accounts []Account) []Account {
