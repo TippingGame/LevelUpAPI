@@ -243,6 +243,8 @@ gateway:
     # ingress 默认模式：off|ctx_pool|passthrough（仅 mode_router_v2_enabled=true 生效）
     # 兼容旧值：shared/dedicated 会按 ctx_pool 处理。
     ingress_mode_default: ctx_pool
+    # 每轮完成后等待客户端下一轮消息的最大空闲秒数；0 表示关闭。
+    ingress_inter_turn_idle_timeout_seconds: 300
     # 全局总开关，默认 true；关闭时所有请求保持原有 HTTP/SSE 路由
     enabled: true
     # 按账号类型细分开关

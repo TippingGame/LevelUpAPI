@@ -1157,6 +1157,21 @@ func filterCodexInput(input []any, preserveReferences bool) []any {
 		if !preserveReferences {
 			ensureCopy()
 			delete(newItem, "id")
+		} else if isCodexToolCallInputType(typ) {
+			// Replayed call-input items can carry client-side item_* IDs, but the
+			// Codex upstream validates these IDs as fc*. Keep call_id/name while
+			// dropping an ID that cannot refer to a real upstream object.
+			if id, ok := m["id"].(string); ok && id != "" && !strings.HasPrefix(id, "fc") {
+				ensureCopy()
+				delete(newItem, "id")
+			}
+		} else if typ == "message" {
+			// Message IDs have the same replay constraint, with msg* as the only
+			// valid upstream prefix. Never manufacture a replacement identifier.
+			if id, ok := m["id"].(string); ok && id != "" && !strings.HasPrefix(id, "msg") {
+				ensureCopy()
+				delete(newItem, "id")
+			}
 		}
 
 		filtered = append(filtered, newItem)
@@ -1176,6 +1191,20 @@ func isCodexToolCallItemType(typ string) bool {
 		"mcp_tool_call_output",
 		"custom_tool_call_output",
 		"tool_search_output":
+		return true
+	default:
+		return false
+	}
+}
+
+func isCodexToolCallInputType(typ string) bool {
+	switch typ {
+	case "function_call",
+		"tool_call",
+		"local_shell_call",
+		"tool_search_call",
+		"custom_tool_call",
+		"mcp_tool_call":
 		return true
 	default:
 		return false

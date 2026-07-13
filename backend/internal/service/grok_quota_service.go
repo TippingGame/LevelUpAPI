@@ -90,10 +90,18 @@ func (s *GrokQuotaService) ProbeUsage(ctx context.Context, accountID int64) (*Gr
 	}
 	defer func() { _ = resp.Body.Close() }()
 
+	now := time.Now()
 	snapshot := xai.ObserveQuotaHeaders(resp.Header, resp.StatusCode, "active_probe")
+	resetAt, limited := grokRateLimitResetAt(snapshot, now)
+	if limited {
+		normalizeGrokExhaustedWindowResets(snapshot, resetAt, now)
+	}
 	_ = s.accountRepo.UpdateExtra(ctx, account.ID, map[string]any{
 		grokQuotaSnapshotExtraKey: snapshot,
 	})
+	if limited {
+		persistGrokRateLimit(ctx, s.accountRepo, account, resetAt)
+	}
 
 	result := &GrokQuotaProbeResult{
 		Source:          "active_probe",
@@ -102,7 +110,7 @@ func (s *GrokQuotaService) ProbeUsage(ctx context.Context, accountID int64) (*Gr
 		StatusCode:      resp.StatusCode,
 		HeadersObserved: snapshot.HeadersObserved,
 		ResetSupported:  false,
-		FetchedAt:       time.Now().Unix(),
+		FetchedAt:       now.Unix(),
 	}
 	if resp.StatusCode == http.StatusTooManyRequests {
 		return result, nil

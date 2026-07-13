@@ -39,6 +39,13 @@ type openAIWSClientConn interface {
 	Close() error
 }
 
+// openAIWSIdlePingCapable is separate from openAIWSClientConn because some
+// WebSocket implementations require a concurrent reader to consume pong
+// frames. Pool health probes run while the connection is idle and readerless.
+type openAIWSIdlePingCapable interface {
+	SupportsIdlePingWithoutReader() bool
+}
+
 // openAIWSClientDialer 抽象 WS 建连器。
 type openAIWSClientDialer interface {
 	Dial(ctx context.Context, wsURL string, headers http.Header, proxyURL string) (openAIWSClientConn, int, http.Header, error)
@@ -299,6 +306,13 @@ func (c *coderOpenAIWSClientConn) Ping(ctx context.Context) error {
 		ctx = context.Background()
 	}
 	return c.conn.Ping(ctx)
+}
+
+// coder/websocket's Ping waits for a pong, while pong frames are consumed by
+// Read. An idle pooled connection has no reader, so probing it would time out
+// and incorrectly evict a healthy connection.
+func (*coderOpenAIWSClientConn) SupportsIdlePingWithoutReader() bool {
+	return false
 }
 
 func (c *coderOpenAIWSClientConn) Close() error {

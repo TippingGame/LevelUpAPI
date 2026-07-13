@@ -47,6 +47,7 @@ import UserDashboardRecentUsage from '@/components/user/dashboard/UserDashboardR
 import UserDashboardQuickActions from '@/components/user/dashboard/UserDashboardQuickActions.vue'
 import UserAccountSharingStats from '@/components/user/dashboard/UserAccountSharingStats.vue'
 import type { ModelStat, TrendDataPoint, UsageLog } from '@/types'
+import { formatDateLocalInput } from '@/utils/format'
 
 const authStore = useAuthStore()
 const user = computed(() => authStore.user)
@@ -63,14 +64,8 @@ const modelStats = ref<ModelStat[]>([])
 const recentUsage = ref<UsageLog[]>([])
 const accountSharingStats = ref<AccountSharingDashboardStats | null>(null)
 
-const formatLocalDate = (date: Date) => {
-  const year = date.getFullYear()
-  const month = String(date.getMonth() + 1).padStart(2, '0')
-  const day = String(date.getDate()).padStart(2, '0')
-  return `${year}-${month}-${day}`
-}
-const startDate = ref(formatLocalDate(new Date(Date.now() - 6 * 86400000)))
-const endDate = ref(formatLocalDate(new Date()))
+const startDate = ref(formatDateLocalInput(new Date(Date.now() - 6 * 86400000)))
+const endDate = ref(formatDateLocalInput(new Date()))
 const granularity = ref<'day' | 'hour'>('day')
 
 const loadStats = async () => {

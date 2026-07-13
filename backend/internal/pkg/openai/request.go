@@ -13,7 +13,9 @@ var CodexCLIUserAgentPrefixes = []string{
 // 该列表仅用于 OpenAI OAuth `codex_cli_only` 访问限制判定。
 var CodexOfficialClientUserAgentPrefixes = []string{
 	"codex_cli_rs/",
+	"codex-tui/",
 	"codex_vscode/",
+	"codex_vscode_copilot/",
 	"codex_app/",
 	"codex_chatgpt_desktop/",
 	"codex_atlas/",
@@ -27,8 +29,23 @@ var CodexOfficialClientUserAgentPrefixes = []string{
 // 例如 codex_cli_rs、codex_vscode、codex_chatgpt_desktop、codex_atlas、codex_exec、codex_sdk_ts 等。
 var CodexOfficialClientOriginatorPrefixes = []string{
 	"codex_",
+	"codex-tui",
 	"codex ",
 }
+
+var codexIdentityOriginators = map[string]bool{
+	"codex_cli_rs":          true,
+	"codex-tui":             true,
+	"codex_vscode":          true,
+	"codex_vscode_copilot":  true,
+	"codex_app":             true,
+	"codex_chatgpt_desktop": true,
+	"codex_atlas":           true,
+	"codex_exec":            true,
+	"codex_sdk_ts":          true,
+}
+
+const codexIdentityFamilyPrefix = "codex "
 
 // IsCodexCLIRequest checks if the User-Agent indicates a Codex CLI request
 func IsCodexCLIRequest(userAgent string) bool {
@@ -62,6 +79,64 @@ func IsCodexOfficialClientOriginator(originator string) bool {
 // official Codex client family request.
 func IsCodexOfficialClientByHeaders(userAgent, originator string) bool {
 	return IsCodexOfficialClientRequest(userAgent) || IsCodexOfficialClientOriginator(originator)
+}
+
+// PairCodexClientIdentity derives the originator required by ChatGPT's Codex
+// upstream from the final outbound User-Agent. Unknown identities are rejected
+// so callers can fall back to a known official pair instead of sending a 404-
+// inducing originator/User-Agent mismatch.
+func PairCodexClientIdentity(userAgent string) (originator string, pairedUA string, ok bool) {
+	ua := strings.TrimSpace(userAgent)
+	slash := strings.IndexByte(ua, '/')
+	if slash <= 0 {
+		return "", "", false
+	}
+	if leading := strings.TrimSpace(ua[:slash]); isPairableCodexOriginator(leading) {
+		leading = canonicalizeCodexIdentityOriginator(leading)
+		return leading, leading + ua[slash:], true
+	}
+	if trailer := codexUATrailerName(ua); trailer != "" && !strings.ContainsRune(trailer, '/') && isPairableCodexOriginator(trailer) {
+		trailer = canonicalizeCodexIdentityOriginator(trailer)
+		return trailer, trailer + ua[slash:], true
+	}
+	return "", "", false
+}
+
+func codexUATrailerName(ua string) string {
+	last := strings.LastIndex(ua, "(")
+	if last < 0 {
+		return ""
+	}
+	rest := ua[last+1:]
+	closeIdx := strings.Index(rest, ")")
+	if closeIdx < 0 {
+		return ""
+	}
+	inner := strings.TrimSpace(rest[:closeIdx])
+	if semi := strings.Index(inner, ";"); semi >= 0 {
+		inner = strings.TrimSpace(inner[:semi])
+	}
+	return inner
+}
+
+func isPairableCodexOriginator(name string) bool {
+	if name == "" || len(name) > 64 {
+		return false
+	}
+	for i := 0; i < len(name); i++ {
+		if name[i] < 0x20 || name[i] > 0x7e {
+			return false
+		}
+	}
+	normalized := normalizeCodexClientHeader(name)
+	return codexIdentityOriginators[normalized] || strings.HasPrefix(normalized, codexIdentityFamilyPrefix)
+}
+
+func canonicalizeCodexIdentityOriginator(name string) string {
+	if normalized := normalizeCodexClientHeader(name); codexIdentityOriginators[normalized] {
+		return normalized
+	}
+	return name
 }
 
 func normalizeCodexClientHeader(value string) string {

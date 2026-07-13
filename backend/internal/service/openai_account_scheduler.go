@@ -1429,7 +1429,10 @@ func (s *OpenAIGatewayService) selectGrokOAuthAccount(
 		if _, excluded := excludedIDs[account.ID]; excluded {
 			continue
 		}
-		if !account.IsGrokOAuth() || !account.IsSchedulable() || !account.HasCompleteRequiredProxyForScheduling() {
+		if s.isOpenAIAccountRuntimeBlocked(account) ||
+			!account.IsGrokOAuth() ||
+			!account.IsSchedulable() ||
+			!account.HasCompleteRequiredProxyForScheduling() {
 			continue
 		}
 		if requiredCapability != "" && !account.SupportsOpenAIEndpointCapability(requiredCapability) {
@@ -1483,6 +1486,7 @@ func (s *OpenAIGatewayService) rehydrateSelectedGrokAccount(
 		return nil, ErrNoAvailableAccounts
 	}
 	if !IsAccountVisibleToRequestUser(ctx, hydrated) ||
+		s.isOpenAIAccountRuntimeBlocked(hydrated) ||
 		!hydrated.IsGrokOAuth() ||
 		!hydrated.IsSchedulable() ||
 		!hydrated.HasCompleteRequiredProxyForScheduling() ||

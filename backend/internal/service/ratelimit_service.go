@@ -642,10 +642,11 @@ func (s *RateLimitService) handleUpstreamModelNotFound(ctx context.Context, acco
 		slog.Info("upstream_model_not_found_local_state_skipped", "account_id", account.ID, "status_code", statusCode, "model", requestedModel)
 		return false
 	}
-	if !isUpstreamModelNotFoundError(statusCode, responseBody) {
+	planGated := account.IsOpenAIOAuth() && isOpenAICodexPlanGatedModelError(statusCode, responseBody)
+	if !isUpstreamModelNotFoundError(statusCode, responseBody) && !planGated {
 		return false
 	}
-	modelKey, shouldCooldown := modelRateLimitKeyForUpstreamModelNotFound(ctx, account, requestedModel, hasExplicitModelNotFoundErrorType(responseBody))
+	modelKey, shouldCooldown := modelRateLimitKeyForUpstreamModelNotFound(ctx, account, requestedModel, planGated || hasExplicitModelNotFoundErrorType(responseBody))
 	if !shouldCooldown || modelKey == "" {
 		return false
 	}
@@ -657,6 +658,16 @@ func (s *RateLimitService) handleUpstreamModelNotFound(ctx context.Context, acco
 	}
 	slog.Info("upstream_model_not_found_model_rate_limited", "account_id", account.ID, "model", modelKey, "reset_at", resetAt)
 	return true
+}
+
+const openAICodexPlanGatedModelPhrase = "model is not supported when using codex"
+
+func isOpenAICodexPlanGatedModelError(statusCode int, body []byte) bool {
+	if statusCode != http.StatusBadRequest {
+		return false
+	}
+	normalized := normalizeModelNotFoundBody(body)
+	return normalized != "" && strings.Contains(normalized, openAICodexPlanGatedModelPhrase)
 }
 
 func isUpstreamModelNotFoundError(statusCode int, body []byte) bool {

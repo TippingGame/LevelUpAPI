@@ -415,6 +415,40 @@ func TestSelectGrokOAuthAccountRejectsIncompleteAuthoritativeProxy(t *testing.T)
 	require.Nil(t, selection)
 }
 
+func TestSelectGrokOAuthAccountSkipsRuntimeBlockedAccount(t *testing.T) {
+	ownerID := int64(7201)
+	proxyID := int64(7202)
+	account := &Account{
+		ID:          7203,
+		Platform:    PlatformGrok,
+		Type:        AccountTypeOAuth,
+		OwnerUserID: &ownerID,
+		ShareMode:   AccountShareModePublic,
+		ShareStatus: AccountShareStatusApproved,
+		ProxyID:     &proxyID,
+		Proxy:       &Proxy{ID: proxyID, Status: StatusActive, Protocol: "http", Host: "proxy.test", Port: 8080},
+		Status:      StatusActive,
+		Schedulable: true,
+		Concurrency: 1,
+	}
+	snapshotCache := &openAISnapshotCacheStub{
+		snapshotAccounts: []*Account{account},
+		accountsByID:     map[int64]*Account{account.ID: account},
+	}
+	svc := &OpenAIGatewayService{
+		accountRepo:        schedulerTestOpenAIAccountRepo{accounts: []Account{*account}},
+		schedulerSnapshot:  &SchedulerSnapshotService{cache: snapshotCache},
+		concurrencyService: NewConcurrencyService(schedulerTestConcurrencyCache{}),
+		cfg:                &config.Config{},
+	}
+	svc.BlockAccountScheduling(account, time.Now().Add(10*time.Minute), "429")
+
+	selection, _, err := svc.selectGrokOAuthAccount(context.Background(), nil, "grok-4.5", nil, "")
+
+	require.ErrorIs(t, err, ErrNoAvailableAccounts)
+	require.Nil(t, selection)
+}
+
 func TestOpenAIGatewayService_SelectAccountWithScheduler_DefaultDisabledUsesLegacyLoadAwareness(t *testing.T) {
 	resetOpenAIAdvancedSchedulerSettingCacheForTest()
 

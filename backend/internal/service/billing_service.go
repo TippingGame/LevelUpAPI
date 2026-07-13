@@ -411,13 +411,17 @@ func (s *BillingService) initAdditionalFallbackPricing() {
 	s.fallbackPrices["grok-4.3"] = &ModelPricing{
 		InputPricePerToken:         1.25e-6,
 		OutputPricePerToken:        2.5e-6,
+		CacheReadPricePerToken:     0.2e-6,
 		SupportsCacheBreakdown:     false,
 		LongContextInputThreshold:  1000000,
 		LongContextInputMultiplier: 1,
 	}
+	// Composer is available through Grok Build and has no standalone public
+	// rate card, so its aliases use the Build price instead of billing at zero.
 	s.fallbackPrices["grok-build-0.1"] = &ModelPricing{
 		InputPricePerToken:     1e-6,
 		OutputPricePerToken:    2e-6,
+		CacheReadPricePerToken: 0.2e-6,
 		SupportsCacheBreakdown: false,
 	}
 }
@@ -585,18 +589,13 @@ func (s *BillingService) matchAdditionalFallbackPricing(modelLower string) *Mode
 	switch modelLower {
 	case "grok", "grok-latest", "grok-4.5", "grok-4.5-latest", "grok-build-latest":
 		return s.fallbackPrices["grok-4.5"]
-	case "grok-4.3":
-		return s.fallbackPrices["grok-4.3"]
-	case "grok-build", "grok-build-0.1":
-		return s.fallbackPrices["grok-build-0.1"]
-	case "grok-composer", "composer-2.5", "grok-composer-2.5-fast",
+	case "grok-4.3",
 		"grok-4.20-reasoning", "grok-4.20-0309-reasoning",
 		"grok-4.20-non-reasoning", "grok-4.20-0309-non-reasoning",
 		"grok-4.20-multi-agent-0309":
-		// xAI has not published stable fallback prices for these subscription
-		// aliases. Use the existing Grok 4.5 rate card so they can never become
-		// silently free when remote pricing is unavailable.
-		return s.fallbackPrices["grok-4.5"]
+		return s.fallbackPrices["grok-4.3"]
+	case "grok-build", "grok-build-0.1", "grok-composer", "composer-2.5", "grok-composer-2.5-fast":
+		return s.fallbackPrices["grok-build-0.1"]
 	}
 	return nil
 }
@@ -1208,6 +1207,29 @@ type ImagePriceConfig struct {
 	Price1K *float64 // 1K 尺寸价格（nil 表示使用默认值）
 	Price2K *float64 // 2K 尺寸价格（nil 表示使用默认值）
 	Price4K *float64 // 4K 尺寸价格（nil 表示使用默认值）
+}
+
+const defaultWebSearchPricePerCall = 0.01
+
+// CalculateWebSearchCost 计算 Codex alpha/search 网页搜索按次费用。
+// groupPrice 为 nil 时使用默认价 0.01 USD/次；0 表示免费。
+func (s *BillingService) CalculateWebSearchCost(callCount int, groupPrice *float64, rateMultiplier float64) *CostBreakdown {
+	if callCount <= 0 {
+		return &CostBreakdown{}
+	}
+	unitPrice := defaultWebSearchPricePerCall
+	if groupPrice != nil && *groupPrice >= 0 {
+		unitPrice = *groupPrice
+	}
+	totalCost := unitPrice * float64(callCount)
+	if rateMultiplier < 0 {
+		rateMultiplier = 0
+	}
+	return &CostBreakdown{
+		TotalCost:   totalCost,
+		ActualCost:  totalCost * rateMultiplier,
+		BillingMode: string(BillingModePerRequest),
+	}
 }
 
 // CalculateImageCost 计算图片生成费用

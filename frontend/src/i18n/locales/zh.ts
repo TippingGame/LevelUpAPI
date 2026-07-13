@@ -3070,6 +3070,13 @@ export default {
         title: '图片生成计费',
         description: '配置图片生成模型的图片生成价格，留空则使用默认价格'
       },
+      webSearchPricing: {
+        title: 'Codex 网页搜索计费',
+        pricePerCall: '搜索单次价格（USD/次）',
+        pricePerCallHint:
+          '留空使用默认价 $0.01/次（官方定价 $10/1000 次）；填 0 表示免费。实际扣费会叠加分组费率倍数。',
+        finalPricePreview: '应用当前倍率后的单次价格：{price}'
+      },
       claudeCode: {
         title: 'Claude Code 客户端限制',
         tooltip:

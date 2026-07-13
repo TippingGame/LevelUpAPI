@@ -57,25 +57,55 @@ func TestCalculateCost_WithCacheTokens(t *testing.T) {
 
 func TestCalculateCost_GrokNewTextAliasesUseFallbackAndCachePricing(t *testing.T) {
 	svc := newTestBillingService()
-	aliases := []string{
-		"grok-composer-2.5-fast",
-		"grok-4.20-0309-reasoning",
-		"grok-4.20-0309-non-reasoning",
-		"grok-4.20-multi-agent-0309",
+	tests := []struct {
+		name      string
+		models    []string
+		input     float64
+		cacheRead float64
+		output    float64
+	}{
+		{
+			name: "Grok 4.3 family",
+			models: []string{
+				"grok-4.3",
+				"grok-4.20-reasoning",
+				"grok-4.20-0309-reasoning",
+				"grok-4.20-non-reasoning",
+				"grok-4.20-0309-non-reasoning",
+				"grok-4.20-multi-agent-0309",
+			},
+			input:     1.25e-6,
+			cacheRead: 0.2e-6,
+			output:    2.5e-6,
+		},
+		{
+			name: "Grok Build and Composer family",
+			models: []string{
+				"grok-build",
+				"grok-build-0.1",
+				"grok-composer",
+				"grok-composer-2.5-fast",
+				"composer-2.5",
+			},
+			input:     1e-6,
+			cacheRead: 0.2e-6,
+			output:    2e-6,
+		},
 	}
-	for _, model := range aliases {
-		model := model
-		t.Run(model, func(t *testing.T) {
-			cost, err := svc.CalculateCost(model, UsageTokens{
-				InputTokens:     100,
-				OutputTokens:    50,
-				CacheReadTokens: 20,
-			}, 1)
-			require.NoError(t, err)
-			require.InDelta(t, 100*2e-6, cost.InputCost, 1e-12)
-			require.InDelta(t, 50*6e-6, cost.OutputCost, 1e-12)
-			require.InDelta(t, 20*0.5e-6, cost.CacheReadCost, 1e-12)
-			require.Greater(t, cost.TotalCost, 0.0)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			for _, model := range tt.models {
+				cost, err := svc.CalculateCost(model, UsageTokens{
+					InputTokens:     100,
+					OutputTokens:    50,
+					CacheReadTokens: 20,
+				}, 1)
+				require.NoError(t, err, "model %s", model)
+				require.InDelta(t, 100*tt.input, cost.InputCost, 1e-12, "model %s input", model)
+				require.InDelta(t, 50*tt.output, cost.OutputCost, 1e-12, "model %s output", model)
+				require.InDelta(t, 20*tt.cacheRead, cost.CacheReadCost, 1e-12, "model %s cache read", model)
+				require.Greater(t, cost.TotalCost, 0.0, "model %s", model)
+			}
 		})
 	}
 }

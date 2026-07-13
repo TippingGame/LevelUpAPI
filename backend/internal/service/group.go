@@ -36,6 +36,9 @@ type Group struct {
 	ImagePrice1K         *float64
 	ImagePrice2K         *float64
 	ImagePrice4K         *float64
+	// Codex alpha/search 网页搜索单次价格（USD/次，仅 OpenAI 平台使用）。
+	// nil 表示使用默认价 0.01，0 表示免费。
+	WebSearchPricePerCall *float64
 
 	// Claude Code 客户端限制
 	ClaudeCodeOnly  bool

@@ -643,6 +643,46 @@ func TestRateLimitService_HandleUpstreamErrorForModel_OpenAI404SetsModelCooldown
 	require.Equal(t, 0, repo.tempCalls)
 }
 
+func TestRateLimitService_HandleUpstreamErrorForModel_CodexPlanGatedModelCooldownsOAuthAccount(t *testing.T) {
+	repo := &rateLimitAccountRepoStub{}
+	service := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+	account := &Account{ID: 2041, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+
+	shouldDisable := service.HandleUpstreamErrorForModel(
+		context.Background(),
+		account,
+		"gpt-5.6-sol",
+		http.StatusBadRequest,
+		http.Header{},
+		[]byte(`{"detail":"The 'gpt-5.6-sol' model is not supported when using Codex with a ChatGPT account."}`),
+	)
+
+	require.True(t, shouldDisable)
+	require.Len(t, repo.modelRateLimitCalls, 1)
+	require.Equal(t, account.ID, repo.modelRateLimitCalls[0].accountID)
+	require.Equal(t, "gpt-5.6-sol", repo.modelRateLimitCalls[0].modelKey)
+	require.Equal(t, 0, repo.setErrorCalls)
+	require.Equal(t, 0, repo.tempCalls)
+}
+
+func TestRateLimitService_HandleUpstreamErrorForModel_CodexPlanGatedModelIgnoresAPIKeyAccount(t *testing.T) {
+	repo := &rateLimitAccountRepoStub{}
+	service := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+	account := &Account{ID: 2042, Platform: PlatformOpenAI, Type: AccountTypeAPIKey}
+
+	shouldDisable := service.HandleUpstreamErrorForModel(
+		context.Background(),
+		account,
+		"gpt-5.6-sol",
+		http.StatusBadRequest,
+		http.Header{},
+		[]byte(`{"detail":"The 'gpt-5.6-sol' model is not supported when using Codex with a ChatGPT account."}`),
+	)
+
+	require.False(t, shouldDisable)
+	require.Empty(t, repo.modelRateLimitCalls)
+}
+
 func TestRateLimitService_HandleUpstreamErrorForModel_OpenAI404UnknownModelDoesNotCooldown(t *testing.T) {
 	repo := &rateLimitAccountRepoStub{}
 	service := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)

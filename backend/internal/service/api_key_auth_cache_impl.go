@@ -14,7 +14,7 @@ import (
 	"github.com/dgraph-io/ristretto"
 )
 
-const apiKeyAuthSnapshotVersion = 13 // v13: reload snapshots for exclusive group access checks; keeps v12 group availability fields
+const apiKeyAuthSnapshotVersion = 14 // v14: include group web search per-call pricing
 
 type apiKeyAuthCacheConfig struct {
 	l1Size        int
@@ -267,6 +267,7 @@ func (s *APIKeyService) snapshotFromAPIKey(ctx context.Context, apiKey *APIKey) 
 			ImagePrice1K:                    apiKey.Group.ImagePrice1K,
 			ImagePrice2K:                    apiKey.Group.ImagePrice2K,
 			ImagePrice4K:                    apiKey.Group.ImagePrice4K,
+			WebSearchPricePerCall:           apiKey.Group.WebSearchPricePerCall,
 			ClaudeCodeOnly:                  apiKey.Group.ClaudeCodeOnly,
 			FallbackGroupID:                 apiKey.Group.FallbackGroupID,
 			FallbackGroupIDOnInvalidRequest: apiKey.Group.FallbackGroupIDOnInvalidRequest,
@@ -383,6 +384,7 @@ func groupAuthSnapshotFromService(group *Group) *APIKeyAuthGroupSnapshot {
 		ImagePrice1K:                    group.ImagePrice1K,
 		ImagePrice2K:                    group.ImagePrice2K,
 		ImagePrice4K:                    group.ImagePrice4K,
+		WebSearchPricePerCall:           group.WebSearchPricePerCall,
 		ClaudeCodeOnly:                  group.ClaudeCodeOnly,
 		FallbackGroupID:                 group.FallbackGroupID,
 		FallbackGroupIDOnInvalidRequest: group.FallbackGroupIDOnInvalidRequest,
@@ -421,6 +423,7 @@ func groupFromAuthSnapshot(snapshot *APIKeyAuthGroupSnapshot) *Group {
 		ImagePrice1K:                    snapshot.ImagePrice1K,
 		ImagePrice2K:                    snapshot.ImagePrice2K,
 		ImagePrice4K:                    snapshot.ImagePrice4K,
+		WebSearchPricePerCall:           snapshot.WebSearchPricePerCall,
 		ClaudeCodeOnly:                  snapshot.ClaudeCodeOnly,
 		FallbackGroupID:                 snapshot.FallbackGroupID,
 		FallbackGroupIDOnInvalidRequest: snapshot.FallbackGroupIDOnInvalidRequest,
