@@ -189,3 +189,55 @@ func TestRunCheckForModel_ReplaceMode_EmptyResponseIsFailed(t *testing.T) {
 		t.Errorf("failure message should hint replace-mode, got %q", res.Message)
 	}
 }
+
+func TestCallProvider_GrokUsesOpenAICompatibleAPI(t *testing.T) {
+	swapMonitorHTTPClient(t)
+
+	var gotPath string
+	var gotAuthorization string
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotAuthorization = r.Header.Get("Authorization")
+		defer func() { _ = r.Body.Close() }()
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{
+				{"message": map[string]string{"content": "42"}},
+			},
+		})
+	}))
+	t.Cleanup(srv.Close)
+
+	text, _, status, err := callProvider(
+		context.Background(),
+		MonitorProviderGrok,
+		srv.URL,
+		"xai-test-key",
+		"grok-4",
+		"what is 40 + 2?",
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("callProvider returned error: %v", err)
+	}
+	if status != http.StatusOK {
+		t.Fatalf("expected HTTP 200, got %d", status)
+	}
+	if gotPath != providerOpenAIPath {
+		t.Errorf("expected Grok path %q, got %q", providerOpenAIPath, gotPath)
+	}
+	if gotAuthorization != "Bearer xai-test-key" {
+		t.Errorf("expected bearer auth, got %q", gotAuthorization)
+	}
+	if gotBody["model"] != "grok-4" {
+		t.Errorf("expected model grok-4, got %v", gotBody["model"])
+	}
+	if text != "42" {
+		t.Errorf("expected OpenAI-compatible response text, got %q", text)
+	}
+	if !isSupportedProvider(MonitorProviderGrok) {
+		t.Error("Grok should be registered as a supported monitor provider")
+	}
+}

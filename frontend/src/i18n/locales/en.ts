@@ -1333,7 +1333,8 @@ export default {
     providers: {
       openai: 'OpenAI',
       anthropic: 'Anthropic',
-      gemini: 'Gemini'
+      gemini: 'Gemini',
+      grok: 'Grok'
     },
     extraModelsHeader: 'Extra Models',
     extraModelsEmpty: 'No extra models',
@@ -3141,6 +3142,11 @@ export default {
       createError: 'Failed to create channel',
       updateError: 'Failed to update channel',
       deleteError: 'Failed to delete channel',
+      clearGroups: 'Clear Groups',
+      clearGroupsConfirmTitle: 'Clear Associated Groups',
+      clearGroupsConfirm: 'Clear all {count} groups currently associated with channel "{name}"? Other channel settings will not be changed.',
+      clearGroupsSuccess: 'All associated groups cleared',
+      clearGroupsError: 'Failed to clear associated groups',
       nameRequired: 'Please enter a channel name',
       duplicateModels: 'Model "{0}" appears in multiple pricing entries',
       modelConflict: "Model patterns '{model1}' and '{model2}' conflict: overlapping match range",

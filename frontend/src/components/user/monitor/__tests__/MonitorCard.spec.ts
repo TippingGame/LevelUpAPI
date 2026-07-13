@@ -27,7 +27,8 @@ describe('MonitorCard pool name colors', () => {
   it.each([
     ['openai', 'OpenAI 共享号池', 'bg-emerald-100'],
     ['anthropic', 'Claude 共享号池', 'bg-orange-100'],
-    ['gemini', 'Gemini 共享号池', 'bg-blue-100']
+    ['gemini', 'Gemini 共享号池', 'bg-blue-100'],
+    ['grok', 'Grok 共享号池', 'bg-zinc-100']
   ] as const)('uses %s platform color and exposes the full pool name', (provider, name, colorClass) => {
     const wrapper = mount(MonitorCard, {
       props: {

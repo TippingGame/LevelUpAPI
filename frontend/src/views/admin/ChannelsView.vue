@@ -280,12 +280,24 @@
           >
             <!-- Groups -->
             <div>
-              <label class="input-label text-xs">
-                {{ t('admin.channels.form.groups', 'Associated Groups') }} <span class="text-red-500">*</span>
-                <span v-if="section.group_ids.length > 0" class="ml-1 font-normal text-gray-400">
-                  ({{ t('admin.channels.form.selectedCount', { count: section.group_ids.length }, `已选 ${section.group_ids.length} 个`) }})
-                </span>
-              </label>
+              <div class="mb-1 flex items-center justify-between gap-3">
+                <label class="input-label mb-0 text-xs">
+                  {{ t('admin.channels.form.groups', 'Associated Groups') }} <span class="text-red-500">*</span>
+                  <span v-if="section.group_ids.length > 0" class="ml-1 font-normal text-gray-400">
+                    ({{ t('admin.channels.form.selectedCount', { count: section.group_ids.length }, `已选 ${section.group_ids.length} 个`) }})
+                  </span>
+                </label>
+                <button
+                  v-if="editingChannel && associatedGroupCount > 0"
+                  type="button"
+                  class="inline-flex flex-shrink-0 items-center gap-1 text-xs text-red-600 hover:text-red-700 disabled:cursor-not-allowed disabled:opacity-50 dark:text-red-400 dark:hover:text-red-300"
+                  :disabled="clearingGroups"
+                  @click="showClearGroupsDialog = true"
+                >
+                  <Icon name="trash" size="xs" />
+                  {{ t('admin.channels.clearGroups', 'Clear Groups') }}
+                </button>
+              </div>
               <div class="max-h-40 overflow-auto rounded-lg border border-gray-200 bg-gray-50 p-2 dark:border-dark-600 dark:bg-dark-900">
                 <div v-if="groupsLoading" class="py-2 text-center text-xs text-gray-500">
                   {{ t('common.loading', 'Loading...') }}
@@ -581,6 +593,18 @@
       @confirm="confirmDelete"
       @cancel="showDeleteDialog = false"
     />
+
+    <!-- Clear Associated Groups Confirmation -->
+    <ConfirmDialog
+      :show="showClearGroupsDialog"
+      :title="t('admin.channels.clearGroupsConfirmTitle', 'Clear Associated Groups')"
+      :message="clearGroupsConfirmMessage"
+      :confirm-text="t('admin.channels.clearGroups', 'Clear Groups')"
+      :cancel-text="t('common.cancel', 'Cancel')"
+      :danger="true"
+      @confirm="confirmClearGroups"
+      @cancel="showClearGroupsDialog = false"
+    />
   </AppLayout>
 </template>
 
@@ -695,6 +719,8 @@ const editingChannel = ref<Channel | null>(null)
 const submitting = ref(false)
 const showDeleteDialog = ref(false)
 const deletingChannel = ref<Channel | null>(null)
+const showClearGroupsDialog = ref(false)
+const clearingGroups = ref(false)
 const activeTab = ref<string>('basic')
 
 // Groups
@@ -728,6 +754,13 @@ function formatDate(value: string): string {
 
 // ── Platform section helpers ──
 const activePlatforms = computed(() => form.platforms.filter(s => s.enabled).map(s => s.platform))
+const associatedGroupCount = computed(() => {
+  const groupIds = new Set(editingChannel.value?.group_ids || [])
+  for (const section of form.platforms) {
+    section.group_ids.forEach(groupId => groupIds.add(groupId))
+  }
+  return groupIds.size
+})
 
 function addPlatformSection(platform: GroupPlatform) {
   form.platforms.push({
@@ -789,6 +822,15 @@ const deleteConfirmMessage = computed(() => {
     'admin.channels.deleteConfirm',
     { name },
     `Are you sure you want to delete channel "${name}"? This action cannot be undone.`
+  )
+})
+
+const clearGroupsConfirmMessage = computed(() => {
+  const name = editingChannel.value?.name || ''
+  return t(
+    'admin.channels.clearGroupsConfirm',
+    { name, count: associatedGroupCount.value },
+    `Clear all ${associatedGroupCount.value} groups associated with channel "${name}"? Other channel settings will not be changed.`
   )
 })
 
@@ -1318,6 +1360,7 @@ async function populateRuleAccountNameCache() {
 
 function closeDialog() {
   showDialog.value = false
+  showClearGroupsDialog.value = false
   editingChannel.value = null
   resetForm()
 }
@@ -1329,9 +1372,13 @@ async function handleSubmit() {
     return
   }
 
-  // Check for pricing entries with empty models (would be silently skipped)
-  for (const section of form.platforms.filter(s => s.enabled)) {
-    if (section.group_ids.length === 0) {
+  // Check for pricing entries with empty models (would be silently skipped).
+  // An existing channel may intentionally have all associations cleared, while a
+  // partially configured set of platforms should still be rejected.
+  const enabledSections = form.platforms.filter(s => s.enabled)
+  const editingWithoutGroups = !!editingChannel.value && enabledSections.every(s => s.group_ids.length === 0)
+  for (const section of enabledSections) {
+    if (section.group_ids.length === 0 && !editingWithoutGroups) {
       const platformLabel = t('admin.groups.platforms.' + section.platform, section.platform)
       appStore.showError(t('admin.channels.noGroupsSelected', { platform: platformLabel }, `${platformLabel} 平台未选择分组，请至少选择一个分组或禁用该平台`))
       activeTab.value = section.platform
@@ -1469,6 +1516,34 @@ async function toggleChannelStatus(channel: Channel) {
   } catch (error) {
     appStore.showError(t('admin.channels.updateError', 'Failed to update channel'))
     console.error('Error toggling channel status:', error)
+  }
+}
+
+// ── Clear associated groups ──
+async function confirmClearGroups() {
+  if (!editingChannel.value || clearingGroups.value) return
+
+  clearingGroups.value = true
+  showClearGroupsDialog.value = false
+  try {
+    const updated = await adminAPI.channels.update(editingChannel.value.id, { group_ids: [] })
+
+    for (const section of form.platforms) {
+      section.group_ids.splice(0)
+    }
+    editingChannel.value = updated
+
+    const syncClearedGroups = (channel: Channel) => {
+      if (channel.id === updated.id) channel.group_ids = []
+    }
+    channels.value.forEach(syncClearedGroups)
+    allChannelsForConflict.value.forEach(syncClearedGroups)
+
+    appStore.showSuccess(t('admin.channels.clearGroupsSuccess', 'All associated groups cleared'))
+  } catch (error: unknown) {
+    appStore.showError(extractApiErrorMessage(error, t('admin.channels.clearGroupsError', 'Failed to clear associated groups')))
+  } finally {
+    clearingGroups.value = false
   }
 }
 

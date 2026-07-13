@@ -1337,7 +1337,8 @@ export default {
     providers: {
       openai: 'OpenAI',
       anthropic: 'Anthropic',
-      gemini: 'Gemini'
+      gemini: 'Gemini',
+      grok: 'Grok'
     },
     extraModelsHeader: '附加模型',
     extraModelsEmpty: '无附加模型',
@@ -3217,6 +3218,11 @@ export default {
       createError: '创建渠道失败',
       updateError: '更新渠道失败',
       deleteError: '删除渠道失败',
+      clearGroups: '清理分组',
+      clearGroupsConfirmTitle: '清理关联分组',
+      clearGroupsConfirm: '确定要取消渠道「{name}」当前关联的全部 {count} 个分组吗？渠道的其他配置不会被修改。',
+      clearGroupsSuccess: '已清理渠道的全部关联分组',
+      clearGroupsError: '清理关联分组失败',
       nameRequired: '请输入渠道名称',
       duplicateModels: '模型「{0}」在多个定价条目中重复',
       modelConflict: "模型模式 '{model1}' 和 '{model2}' 冲突：匹配范围重叠",
