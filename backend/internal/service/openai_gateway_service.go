@@ -68,6 +68,7 @@ var openaiAllowedHeaders = map[string]bool{
 	"session_id":            true,
 	"x-codex-turn-state":    true,
 	"x-codex-turn-metadata": true,
+	responsesLiteHeaderKey:  true,
 }
 
 // OpenAI passthrough allowed headers whitelist.
@@ -83,6 +84,7 @@ var openaiPassthroughAllowedHeaders = map[string]bool{
 	"session_id":            true,
 	"x-codex-turn-state":    true,
 	"x-codex-turn-metadata": true,
+	responsesLiteHeaderKey:  true,
 }
 
 // codex_cli_only debug header whitelist for rejection diagnostics.
@@ -2655,7 +2657,11 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	}
 	// /responses/compact is a session compaction request; upstream rejects
 	// tool_choice there, and image_generation bridge injection is meaningless.
-	codexImageGenerationBridgeEnabled := isCodexCLI && imageGenerationAllowed && !isOpenAIResponsesCompactPath(c) && s.isCodexImageGenerationBridgeEnabled(ctx, account, apiKey)
+	codexImageGenerationBridgeEnabled := isCodexCLI &&
+		!isOpenAIResponsesLiteHeader(c.GetHeader(responsesLiteHeader)) &&
+		imageGenerationAllowed &&
+		!isOpenAIResponsesCompactPath(c) &&
+		s.isCodexImageGenerationBridgeEnabled(ctx, account, apiKey)
 
 	if codexImageGenerationBridgeEnabled && ensureOpenAIResponsesImageGenerationTool(reqBody) {
 		bodyModified = true

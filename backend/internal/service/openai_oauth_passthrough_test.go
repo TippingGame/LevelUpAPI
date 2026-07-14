@@ -379,11 +379,13 @@ func TestOpenAIGatewayService_ForwardCodexImageBridgeGated(t *testing.T) {
 	tests := []struct {
 		name          string
 		bridgeEnabled bool
+		responsesLite bool
 		wantTool      bool
 		wantBridge    bool
 	}{
 		{name: "disabled by default", bridgeEnabled: false, wantTool: false, wantBridge: false},
 		{name: "enabled by config", bridgeEnabled: true, wantTool: true, wantBridge: true},
+		{name: "responses lite preserves client image tools", bridgeEnabled: true, responsesLite: true, wantTool: false, wantBridge: false},
 	}
 
 	for _, tt := range tests {
@@ -393,6 +395,9 @@ func TestOpenAIGatewayService_ForwardCodexImageBridgeGated(t *testing.T) {
 			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(nil))
 			c.Request.Header.Set("User-Agent", "codex_cli_rs/0.124.0")
 			c.Request.Header.Set("Content-Type", "application/json")
+			if tt.responsesLite {
+				c.Request.Header.Set(responsesLiteHeader, "true")
+			}
 			c.Set("api_key", &APIKey{ID: 42, Group: &Group{AllowImageGeneration: true}})
 
 			upstream := &httpUpstreamRecorder{resp: &http.Response{
@@ -420,6 +425,9 @@ func TestOpenAIGatewayService_ForwardCodexImageBridgeGated(t *testing.T) {
 			require.NoError(t, err)
 			require.NotNil(t, result)
 			require.NotNil(t, upstream.lastReq)
+			if tt.responsesLite {
+				require.Equal(t, "true", upstream.lastReq.Header.Get(responsesLiteHeader))
+			}
 			require.Equal(t, tt.wantTool, gjson.GetBytes(upstream.lastBody, `tools.#(type=="image_generation")`).Exists())
 			instructions := gjson.GetBytes(upstream.lastBody, "instructions").String()
 			if tt.wantBridge {

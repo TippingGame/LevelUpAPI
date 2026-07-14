@@ -2726,6 +2726,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		wsPath = normalizeOpenAIWSLogValue(parsedURL.Path)
 	}
 	debugEnabled := isOpenAIWSModeDebugEnabled()
+	isCodexCLI := openai.IsCodexOfficialClientByHeaders(c.GetHeader("User-Agent"), c.GetHeader("originator")) || (s.cfg != nil && s.cfg.Gateway.ForceCodexCLI)
 
 	type openAIWSClientPayload struct {
 		payloadRaw         []byte
@@ -2822,6 +2823,36 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				return openAIWSClientPayload{}, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "invalid websocket request payload", setErr)
 			}
 			normalized = next
+		}
+		apiKey := getAPIKeyFromContext(c)
+		imageGenerationAllowed := GroupAllowsImageGeneration(apiKeyGroup(apiKey))
+		codexBridgeEnabled := isCodexCLI &&
+			!isOpenAIResponsesLiteWebSocketPayload(normalized) &&
+			imageGenerationAllowed &&
+			s.isCodexImageGenerationBridgeEnabled(ctx, account, apiKey)
+		if codexBridgeEnabled {
+			payloadMap := make(map[string]any)
+			if err := json.Unmarshal(normalized, &payloadMap); err != nil {
+				return openAIWSClientPayload{}, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "invalid websocket request payload", err)
+			}
+			bridgeModified := ensureOpenAIResponsesImageGenerationTool(payloadMap)
+			if ensureOpenAIResponsesImageGenerationToolChoiceAuto(payloadMap) {
+				bridgeModified = true
+			}
+			if normalizeOpenAIResponsesImageGenerationTools(payloadMap) {
+				bridgeModified = true
+			}
+			if applyCodexImageGenerationBridgeInstructions(payloadMap) {
+				bridgeModified = true
+			}
+			if bridgeModified {
+				rebuilt, marshalErr := json.Marshal(payloadMap)
+				if marshalErr != nil {
+					return openAIWSClientPayload{}, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "invalid websocket request payload", marshalErr)
+				}
+				normalized = rebuilt
+				logOpenAIWSModeInfo("ingress_ws_codex_image_bridge_applied account_id=%d", account.ID)
+			}
 		}
 		upstreamModel := normalizeOpenAIModelForUpstream(account, account.GetMappedModel(originalModel))
 		if upstreamModel != originalModel {
@@ -2956,7 +2987,6 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		}
 	}
 
-	isCodexCLI := openai.IsCodexOfficialClientByHeaders(c.GetHeader("User-Agent"), c.GetHeader("originator")) || (s.cfg != nil && s.cfg.Gateway.ForceCodexCLI)
 	wsHeaders, _ := s.buildOpenAIWSHeaders(c, account, token, wsDecision, isCodexCLI, turnState, strings.TrimSpace(c.GetHeader(openAIWSTurnMetadataHeader)), firstPayload.promptCacheKey)
 	baseAcquireReq := openAIWSAcquireRequest{
 		Account: account,
