@@ -344,7 +344,7 @@ func TestGrokQuotaServiceProbeUsageRedactsUpstreamErrorBodyFromErrorAndLogs(t *t
 	require.Contains(t, logs.String(), "GROK_QUOTA_PROBE_UPSTREAM_ERROR")
 	require.NotContains(t, logs.String(), upstreamSecret)
 	require.NotContains(t, logs.String(), "credential rejected")
-	require.Equal(t, xai.DefaultCLIBaseURL+"/responses", upstream.lastReq.URL.String())
+	require.Equal(t, xai.DefaultBaseURL+"/responses", upstream.lastReq.URL.String())
 }
 
 func TestGrokQuotaServiceProbeUsageLoadsProxyWhenAccountEdgeMissing(t *testing.T) {
