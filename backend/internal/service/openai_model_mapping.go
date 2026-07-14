@@ -26,20 +26,21 @@ var openAIOAuthForeignModelPrefixes = []string{
 	"yi-",
 }
 
-// resolveOpenAIForwardModel determines the upstream model for OpenAI-compatible
-// forwarding. The group-level messages default only applies to Claude-family
-// dispatch requests that did not match an explicit model_mapping rule.
-func resolveOpenAIForwardModel(account *Account, requestedModel, defaultMappedModel string) string {
+// resolveOpenAIForwardModel 解析 OpenAI 兼容转发使用的模型。
+// messagesDispatchMappedModel 是调用方已为 /v1/messages 解析的显式调度结果；
+// 普通 OpenAI 请求必须传空，避免将分组配置作为通用模型兜底。
+func resolveOpenAIForwardModel(account *Account, requestedModel, messagesDispatchMappedModel string) string {
+	messagesDispatchMappedModel = strings.TrimSpace(messagesDispatchMappedModel)
 	if account == nil {
-		if defaultMappedModel != "" && claudeMessagesDispatchFamily(requestedModel) != "" {
-			return defaultMappedModel
+		if messagesDispatchMappedModel != "" {
+			return messagesDispatchMappedModel
 		}
 		return requestedModel
 	}
 
 	mappedModel, matched := account.ResolveMappedModel(requestedModel)
-	if !matched && defaultMappedModel != "" && claudeMessagesDispatchFamily(requestedModel) != "" {
-		return defaultMappedModel
+	if !matched && messagesDispatchMappedModel != "" {
+		return messagesDispatchMappedModel
 	}
 	return mappedModel
 }
