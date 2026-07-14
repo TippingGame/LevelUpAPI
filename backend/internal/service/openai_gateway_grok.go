@@ -16,6 +16,8 @@ import (
 	"github.com/tidwall/sjson"
 )
 
+const grokDefaultResponsesModel = "grok-4.5"
+
 func (s *OpenAIGatewayService) forwardGrokResponses(
 	ctx context.Context,
 	c *gin.Context,
@@ -31,7 +33,7 @@ func (s *OpenAIGatewayService) forwardGrokResponses(
 
 	upstreamModel := account.GetMappedModel(originalModel)
 	if strings.TrimSpace(upstreamModel) == "" {
-		upstreamModel = "grok-4.3"
+		upstreamModel = grokDefaultResponsesModel
 	}
 	patchedBody, err := patchGrokResponsesBody(body, upstreamModel)
 	if err != nil {

@@ -775,7 +775,7 @@ func (s *AccountTestService) testGrokAccountConnection(c *gin.Context, account *
 	}
 	testModelID := strings.TrimSpace(modelID)
 	if testModelID == "" {
-		testModelID = "grok-4.3"
+		testModelID = grokDefaultResponsesModel
 	}
 	testModelID = account.GetMappedModel(testModelID)
 	token, err := s.grokTokenProvider.GetAccessToken(ctx, account)

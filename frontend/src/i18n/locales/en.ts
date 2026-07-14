@@ -4949,6 +4949,7 @@ export default {
         grokNoHeaders: 'No quota headers observed yet',
         grokRequests: 'Requests',
         grokTokens: 'Tokens',
+        grokWeeklyUsage: 'Weekly {percent}%',
         grokRetryAfter: 'Retry in {time}'
       },
       openaiQuotaReset: {

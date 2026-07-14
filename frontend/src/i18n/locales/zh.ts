@@ -4263,6 +4263,7 @@ export default {
         grokNoHeaders: '尚未观察到额度响应头',
         grokRequests: '请求',
         grokTokens: 'Token',
+        grokWeeklyUsage: '周额度已用 {percent}%',
         grokRetryAfter: '重试 {time}'
       },
       openaiQuotaReset: {

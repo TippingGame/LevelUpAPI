@@ -18,8 +18,11 @@ vi.mock('@/api/accounts', () => ({
 
 vi.mock('vue-i18n', () => ({
   useI18n: () => ({
-    t: (key: string, params?: Record<string, unknown>) =>
-      params?.time ? `${key}:${params.time}` : key
+    t: (key: string, params?: Record<string, unknown>) => {
+      if (params?.time) return `${key}:${params.time}`
+      if (params?.percent != null) return `${key}:${params.percent}`
+      return key
+    }
   })
 }))
 
@@ -81,5 +84,26 @@ describe('GrokQuotaProbeCell', () => {
     expect(adminQueryQuota).toHaveBeenCalledWith(42)
     expect(userQueryQuota).not.toHaveBeenCalled()
     expect(wrapper.text()).toContain('admin.accounts.usageWindow.grokNoHeaders')
+  })
+
+  it('keeps billing data while exposing a failed Free quota fallback', async () => {
+    adminQueryQuota.mockResolvedValueOnce({
+      source: 'hybrid_probe',
+      billing: { period_type: 'weekly', usage_percent: null },
+      headers_observed: false,
+      reset_supported: false,
+      fetched_at: 1,
+      probe_error: 'upstream returned 402 for probe model "grok-4.5"'
+    })
+
+    const wrapper = mount(GrokQuotaProbeCell, { props: { account } })
+    await wrapper.get('button:not([disabled])').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('upstream returned 402 for probe model "grok-4.5"')
+    expect(wrapper.emitted('probed')?.[0]?.[0]).toMatchObject({
+      billing: { period_type: 'weekly', usage_percent: null },
+      probe_error: 'upstream returned 402 for probe model "grok-4.5"'
+    })
   })
 })
