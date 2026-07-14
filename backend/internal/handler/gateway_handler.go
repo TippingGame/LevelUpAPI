@@ -1606,7 +1606,9 @@ func canSwitchAPIKeyGroupRouteAfterForward(c *gin.Context, cursor *apiKeyGroupRo
 	if cursor == nil || !cursor.canSwitchAfterFailure() || !shouldSwitchAPIKeyGroupRoute(failoverErr) || streamStarted {
 		return false
 	}
-	if c != nil && c.Writer != nil && c.Writer.Size() != writerSizeBeforeForward {
+	if c != nil && c.Writer != nil &&
+		c.Writer.Size() != writerSizeBeforeForward &&
+		service.OpenAIImagesJSONKeepaliveAdjustedWrittenSize(c) != writerSizeBeforeForward {
 		return false
 	}
 	return true
