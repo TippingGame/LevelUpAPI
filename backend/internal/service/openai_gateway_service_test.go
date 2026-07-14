@@ -2941,7 +2941,7 @@ func TestHandleSSEToJSON_ReconstructsImageGenerationOutputItemDone(t *testing.T)
 		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
 	}
 	body := []byte(strings.Join([]string{
-		`data: {"type":"response.output_item.done","item":{"id":"ig_123","type":"image_generation_call","result":"aGVsbG8=","revised_prompt":"draw a cat","output_format":"png"}}`,
+		`data: {"type":"response.output_item.done","item":{"id":"ig_123","type":"image_generation_call","status":"generating","result":"aGVsbG8=","revised_prompt":"draw a cat","output_format":"png"}}`,
 		`data: {"type":"response.completed","response":{"id":"resp_img","model":"gpt-5.4","output":[],"usage":{"input_tokens":7,"output_tokens":9,"output_tokens_details":{"image_tokens":4}}}}`,
 		`data: [DONE]`,
 	}, "\n"))
@@ -2953,8 +2953,51 @@ func TestHandleSSEToJSON_ReconstructsImageGenerationOutputItemDone(t *testing.T)
 	require.Equal(t, 1, usage.ImageCount)
 	require.NotContains(t, rec.Body.String(), "data:")
 	require.Equal(t, "image_generation_call", gjson.Get(rec.Body.String(), "output.0.type").String())
+	require.Equal(t, "completed", gjson.Get(rec.Body.String(), "output.0.status").String())
 	require.Equal(t, "aGVsbG8=", gjson.Get(rec.Body.String(), "output.0.result").String())
 	require.Equal(t, "draw a cat", gjson.Get(rec.Body.String(), "output.0.revised_prompt").String())
+}
+
+func TestNormalizeCompletedImageGenerationStatus(t *testing.T) {
+	tests := []struct {
+		name        string
+		input       string
+		want        string
+		wantChanged bool
+	}{
+		{
+			name:        "output item done with result",
+			input:       `{"type":"response.output_item.done","item":{"type":"image_generation_call","status":"generating","result":"image-data"}}`,
+			want:        `{"type":"response.output_item.done","item":{"type":"image_generation_call","status":"completed","result":"image-data"}}`,
+			wantChanged: true,
+		},
+		{
+			name:        "terminal response only changes completed image result",
+			input:       `{"type":"response.completed","response":{"output":[{"type":"image_generation_call","status":"in_progress","result":"image-data"},{"type":"image_generation_call","status":"failed","result":"partial-data"}]}}`,
+			want:        `{"type":"response.completed","response":{"output":[{"type":"image_generation_call","status":"completed","result":"image-data"},{"type":"image_generation_call","status":"failed","result":"partial-data"}]}}`,
+			wantChanged: true,
+		},
+		{
+			name:        "done item without result",
+			input:       `{"type":"response.output_item.done","item":{"type":"image_generation_call","status":"generating"}}`,
+			want:        `{"type":"response.output_item.done","item":{"type":"image_generation_call","status":"generating"}}`,
+			wantChanged: false,
+		},
+		{
+			name:        "non-final image event",
+			input:       `{"type":"response.output_item.added","item":{"type":"image_generation_call","status":"generating","result":"image-data"}}`,
+			want:        `{"type":"response.output_item.added","item":{"type":"image_generation_call","status":"generating","result":"image-data"}}`,
+			wantChanged: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, changed := normalizeCompletedImageGenerationStatus([]byte(tt.input))
+			require.Equal(t, tt.wantChanged, changed)
+			require.JSONEq(t, tt.want, string(got))
+		})
+	}
 }
 
 func TestHandleSSEToJSON_NoFinalResponseKeepsSSEBody(t *testing.T) {
