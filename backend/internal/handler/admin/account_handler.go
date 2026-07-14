@@ -64,6 +64,7 @@ type AccountHandler struct {
 	accountBatchTaskService   *service.AccountBatchTaskService
 	publicShareValidation     chan ownedPublicShareValidationJob
 	publicShareValidationOnce sync.Once
+	grokImportProber          grokUsageProber
 }
 
 // NewAccountHandler creates a new admin account handler
@@ -810,6 +811,7 @@ func (h *AccountHandler) Create(c *gin.Context) {
 		c.Header("X-Idempotency-Replayed", "true")
 	}
 	h.scheduleOpenAIResponsesProbe(createdAccount)
+	h.scheduleGrokImportProbe(createdAccount)
 	response.Success(c, result.Data)
 }
 
@@ -1657,6 +1659,7 @@ func (h *AccountHandler) BatchCreate(c *gin.Context) {
 			}
 			h.scheduleOpenAIResponsesProbe(account)
 			h.enqueueOwnedPublicShareValidation(account)
+			h.scheduleGrokImportProbe(account)
 			success++
 			results = append(results, gin.H{
 				"name":    item.Name,

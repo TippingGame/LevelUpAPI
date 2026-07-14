@@ -468,6 +468,7 @@ func (h *AccountHandler) importData(ctx context.Context, req DataImportRequest) 
 			privacyAccounts = append(privacyAccounts, created)
 		}
 		h.enqueueOwnedPublicShareValidation(created)
+		h.scheduleGrokImportProbe(created)
 		result.AccountCreated++
 	}
 
