@@ -2568,6 +2568,18 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		return nil, errors.New("openai ws v1 is temporarily unsupported; use ws v2")
 	}
 	passthroughEnabled := account.IsOpenAIPassthroughEnabled()
+	if shouldFlattenOpenAIResponsesNamespaces(account, wsDecision.Transport, passthroughEnabled) {
+		flattenedBody, flattenErr := flattenOpenAIResponsesNamespaces(c, body)
+		if flattenErr != nil {
+			setOpsUpstreamError(c, http.StatusBadRequest, flattenErr.Error(), "")
+			c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{
+				"type": "invalid_request_error", "message": flattenErr.Error(), "param": "tools",
+			}})
+			return nil, flattenErr
+		}
+		body = flattenedBody
+		originalBody = flattenedBody
+	}
 	if passthroughEnabled {
 		// 閫忎紶鍒嗘敮鍙渶瑕佽交閲忔彁鍙栧瓧娈碉紝閬垮厤鐑矾寰勫叏閲?Unmarshal銆?
 		reasoningEffort := extractOpenAIReasoningEffortFromBody(body, reqModel)
@@ -4109,6 +4121,15 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 				trimmedData = strings.TrimSpace(string(normalizedData))
 				line = "data: " + string(normalizedData)
 			}
+			restoredData, restoreErr := restoreOpenAIResponsesNamespacePayload(c, dataBytes)
+			if restoreErr != nil {
+				return resultWithUsage(), fmt.Errorf("restore OpenAI passthrough namespace response: %w", restoreErr)
+			}
+			if !bytes.Equal(restoredData, dataBytes) {
+				dataBytes = restoredData
+				trimmedData = strings.TrimSpace(string(restoredData))
+				line = "data: " + string(restoredData)
+			}
 			eventType := strings.TrimSpace(gjson.Get(trimmedData, "type").String())
 			if eventType == "response.failed" {
 				failedMessage = extractOpenAISSEErrorMessage(dataBytes)
@@ -4279,6 +4300,10 @@ func (s *OpenAIGatewayService) handleNonStreamingResponsePassthrough(
 	if originalModel != "" && mappedModel != "" && originalModel != mappedModel {
 		body = s.replaceModelInResponseBody(body, mappedModel, originalModel)
 	}
+	body, err = restoreOpenAIResponsesNamespacePayload(c, body)
+	if err != nil {
+		return nil, fmt.Errorf("restore OpenAI passthrough namespace response: %w", err)
+	}
 	c.Data(resp.StatusCode, contentType, body)
 	return usage, nil
 }
@@ -4314,6 +4339,11 @@ func (s *OpenAIGatewayService) handlePassthroughSSEToJSON(ctx context.Context, r
 		}
 		// Correct tool calls in final response
 		body = s.correctToolCallsInResponseBody(body)
+		restoredBody, restoreErr := restoreOpenAIResponsesNamespacePayload(c, body)
+		if restoreErr != nil {
+			return nil, fmt.Errorf("restore OpenAI passthrough namespace response: %w", restoreErr)
+		}
+		body = restoredBody
 	} else {
 		terminalType, terminalPayload, terminalOK := extractOpenAISSETerminalEvent(bodyText)
 		if terminalOK {
@@ -5049,6 +5079,17 @@ func (s *OpenAIGatewayService) handleStreamingResponse(ctx context.Context, resp
 				line = "data: " + data
 				eventType = strings.TrimSpace(gjson.GetBytes(dataBytes, "type").String())
 			}
+			restoredData, restoreErr := restoreOpenAIResponsesNamespacePayload(c, dataBytes)
+			if restoreErr != nil {
+				streamFailoverErr = fmt.Errorf("restore OpenAI namespace response: %w", restoreErr)
+				return
+			}
+			if !bytes.Equal(restoredData, dataBytes) {
+				dataBytes = restoredData
+				data = string(restoredData)
+				line = "data: " + data
+				eventType = strings.TrimSpace(gjson.GetBytes(dataBytes, "type").String())
+			}
 			if imageOutput, ok := extractImageGenerationOutputFromSSEData(dataBytes, streamSeenImages); ok {
 				streamImageOutputs = append(streamImageOutputs, imageOutput)
 			}
@@ -5709,6 +5750,10 @@ func (s *OpenAIGatewayService) handleNonStreamingResponse(ctx context.Context, r
 	if originalModel != mappedModel {
 		body = s.replaceModelInResponseBody(body, mappedModel, originalModel)
 	}
+	body, err = restoreOpenAIResponsesNamespacePayload(c, body)
+	if err != nil {
+		return nil, fmt.Errorf("restore OpenAI namespace response: %w", err)
+	}
 
 	responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
 
@@ -5757,6 +5802,11 @@ func (s *OpenAIGatewayService) handleSSEToJSON(ctx context.Context, resp *http.R
 		}
 		// Correct tool calls in final response
 		body = s.correctToolCallsInResponseBody(body)
+		restoredBody, restoreErr := restoreOpenAIResponsesNamespacePayload(c, body)
+		if restoreErr != nil {
+			return nil, fmt.Errorf("restore OpenAI namespace response: %w", restoreErr)
+		}
+		body = restoredBody
 	} else {
 		terminalType, terminalPayload, terminalOK := extractOpenAISSETerminalEvent(bodyText)
 		if terminalOK {
