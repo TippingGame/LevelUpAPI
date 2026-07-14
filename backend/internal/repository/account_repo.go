@@ -2877,8 +2877,10 @@ func (r *accountRepository) AutoPauseExpiredAccounts(ctx context.Context, now ti
 	}
 
 	if len(ids) > 0 {
-		if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventFullRebuild, nil, nil, nil); err != nil {
-			logger.LegacyPrintf("repository.account", "[SchedulerOutbox] enqueue auto pause rebuild failed: err=%v", err)
+		// 只刷新本次暂停的账号及其所属分组，避免少量账号到期触发所有调度桶重建。
+		payload := map[string]any{"account_ids": ids}
+		if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventAccountBulkChanged, nil, nil, payload); err != nil {
+			logger.LegacyPrintf("repository.account", "[SchedulerOutbox] enqueue auto pause account changes failed: err=%v", err)
 		}
 		r.syncSchedulerAccountSnapshots(ctx, ids)
 	}
