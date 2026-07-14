@@ -94,6 +94,9 @@ services:
       - JWT_SECRET=${JWT_SECRET:-}
       - JWT_EXPIRE_HOUR=${JWT_EXPIRE_HOUR:-24}
 
+      # Initial database migration timeout (seconds; 0 = 60s default)
+      - SETUP_MIGRATION_TIMEOUT_SECONDS=${SETUP_MIGRATION_TIMEOUT_SECONDS:-0}
+
       # =======================================================================
       # TOTP (2FA) Configuration
       # =======================================================================

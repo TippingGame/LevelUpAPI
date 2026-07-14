@@ -1878,7 +1878,8 @@ const exportToCSV = async () => {
       ...rows.map((row) => row.join(','))
     ].join('\n')
 
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
+    // Excel 在未带 BOM 的 UTF-8 CSV 上会按本地编码打开，中文容易乱码。
+    const blob = new Blob(['\uFEFF', csvContent], { type: 'text/csv;charset=utf-8;' })
     const url = window.URL.createObjectURL(blob)
     const link = document.createElement('a')
     link.href = url

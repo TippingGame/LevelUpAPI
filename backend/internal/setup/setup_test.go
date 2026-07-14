@@ -4,6 +4,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestDecideAdminBootstrap(t *testing.T) {
@@ -66,6 +67,29 @@ func TestSetupDefaultAdminConcurrency(t *testing.T) {
 		t.Setenv("RUN_MODE", "standard")
 		if got := setupDefaultAdminConcurrency(); got != defaultUserConcurrency {
 			t.Fatalf("setupDefaultAdminConcurrency()=%d, want %d", got, defaultUserConcurrency)
+		}
+	})
+}
+
+func TestSetupMigrationTimeout(t *testing.T) {
+	t.Run("uses default timeout when unset", func(t *testing.T) {
+		cfg := &SetupConfig{}
+		if got := cfg.migrationTimeout(); got != 60*time.Second {
+			t.Fatalf("migrationTimeout()=%s, want 60s", got)
+		}
+	})
+
+	t.Run("uses configured timeout", func(t *testing.T) {
+		cfg := &SetupConfig{MigrationTimeoutSeconds: 300}
+		if got := cfg.migrationTimeout(); got != 300*time.Second {
+			t.Fatalf("migrationTimeout()=%s, want 300s", got)
+		}
+	})
+
+	t.Run("non-positive values fall back to default", func(t *testing.T) {
+		cfg := &SetupConfig{MigrationTimeoutSeconds: -1}
+		if got := cfg.migrationTimeout(); got != defaultMigrationTimeout {
+			t.Fatalf("migrationTimeout()=%s, want %s", got, defaultMigrationTimeout)
 		}
 	})
 }

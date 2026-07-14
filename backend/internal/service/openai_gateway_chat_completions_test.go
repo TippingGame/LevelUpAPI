@@ -142,6 +142,7 @@ func TestForwardAsChatCompletions_FilteredFastTierBillsAsStandardWhenUpstreamOmi
 	require.NotNil(t, result)
 	require.Nil(t, result.ServiceTier, "上游未回显 service_tier 时，应按策略过滤后的请求体 fallback，而不是原始 fast 请求计费")
 	require.False(t, gjson.GetBytes(upstream.lastBody, "service_tier").Exists())
+	require.Equal(t, "application/json; charset=utf-8", rec.Header().Get("Content-Type"))
 }
 
 func TestForwardAsChatCompletions_NormalizesGLMReasoningEffortForRawUpstream(t *testing.T) {

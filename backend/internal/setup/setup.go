@@ -28,6 +28,7 @@ const (
 	InstallLockFile            = ".installed"
 	defaultUserConcurrency     = 5
 	simpleModeAdminConcurrency = 30
+	defaultMigrationTimeout    = 60 * time.Second
 )
 
 func setupDefaultAdminConcurrency() int {
@@ -73,13 +74,14 @@ func GetInstallLockPath() string {
 
 // SetupConfig holds the setup configuration
 type SetupConfig struct {
-	Database DatabaseConfig `json:"database" yaml:"database"`
-	Redis    RedisConfig    `json:"redis" yaml:"redis"`
-	Admin    AdminConfig    `json:"admin" yaml:"-"` // Not stored in config file
-	Server   ServerConfig   `json:"server" yaml:"server"`
-	JWT      JWTConfig      `json:"jwt" yaml:"jwt"`
-	Totp     TotpConfig     `json:"totp" yaml:"totp"`
-	Timezone string         `json:"timezone" yaml:"timezone"` // e.g. "Asia/Shanghai", "UTC"
+	Database                DatabaseConfig `json:"database" yaml:"database"`
+	Redis                   RedisConfig    `json:"redis" yaml:"redis"`
+	Admin                   AdminConfig    `json:"admin" yaml:"-"` // Not stored in config file
+	Server                  ServerConfig   `json:"server" yaml:"server"`
+	JWT                     JWTConfig      `json:"jwt" yaml:"jwt"`
+	Totp                    TotpConfig     `json:"totp" yaml:"totp"`
+	Timezone                string         `json:"timezone" yaml:"timezone"` // e.g. "Asia/Shanghai", "UTC"
+	MigrationTimeoutSeconds int            `json:"migration_timeout_seconds" yaml:"migration_timeout_seconds,omitempty"`
 }
 
 type DatabaseConfig struct {
@@ -369,9 +371,16 @@ func initializeDatabase(cfg *SetupConfig) error {
 		}
 	}()
 
-	migrationCtx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	migrationCtx, cancel := context.WithTimeout(context.Background(), cfg.migrationTimeout())
 	defer cancel()
 	return repository.ApplyMigrations(migrationCtx, db)
+}
+
+func (cfg *SetupConfig) migrationTimeout() time.Duration {
+	if cfg != nil && cfg.MigrationTimeoutSeconds > 0 {
+		return time.Duration(cfg.MigrationTimeoutSeconds) * time.Second
+	}
+	return defaultMigrationTimeout
 }
 
 func createAdminUser(cfg *SetupConfig) (bool, string, error) {
@@ -608,7 +617,8 @@ func AutoSetupFromEnv() error {
 		Totp: TotpConfig{
 			EncryptionKey: getEnvOrDefault("TOTP_ENCRYPTION_KEY", ""),
 		},
-		Timezone: tz,
+		Timezone:                tz,
+		MigrationTimeoutSeconds: getEnvIntOrDefault("SETUP_MIGRATION_TIMEOUT_SECONDS", 0),
 	}
 
 	// Generate JWT secret if not provided
