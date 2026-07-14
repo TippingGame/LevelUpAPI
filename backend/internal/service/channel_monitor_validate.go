@@ -110,3 +110,13 @@ func normalizeModels(in []string) []string {
 	}
 	return out
 }
+
+// normalizeMonitorPrimaryModel applies the Grok health-check default while
+// preserving the required-model behavior for every other provider.
+func normalizeMonitorPrimaryModel(provider, model string) string {
+	model = strings.TrimSpace(model)
+	if model == "" && provider == MonitorProviderGrok {
+		return MonitorDefaultGrokModel
+	}
+	return model
+}

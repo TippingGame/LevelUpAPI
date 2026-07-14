@@ -51,7 +51,7 @@
         <textarea
           v-model="textContent"
           class="input min-h-64 resize-y font-mono text-xs leading-5"
-          :placeholder="t('userAccounts.importTextPlaceholder')"
+          :placeholder="textPlaceholder || t('userAccounts.importTextPlaceholder')"
         />
         <p class="input-hint">{{ textHint || t('userAccounts.importTextHint') }}</p>
       </div>
@@ -168,6 +168,7 @@ interface Props {
   formId?: string
   submitDisabled?: boolean
   textHint?: string
+  textPlaceholder?: string
   importer: (contents: string[]) => Promise<ImportCredentialContentsResponse>
 }
 

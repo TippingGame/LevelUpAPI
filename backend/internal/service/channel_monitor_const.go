@@ -58,6 +58,9 @@ const (
 	MonitorProviderGemini    = "gemini"
 	MonitorProviderGrok      = "grok"
 
+	// MonitorDefaultGrokModel 是 Grok 监控未显式指定模型时使用的默认测活模型。
+	MonitorDefaultGrokModel = "grok-4.5"
+
 	// MonitorStatusOperational 等监控状态字符串常量（与 ent enum 一致）。
 	MonitorStatusOperational = "operational"
 	MonitorStatusDegraded    = "degraded"

@@ -286,7 +286,8 @@ type createUserAccountRequest struct {
 
 type importUserAccountCredentialsRequest struct {
 	Contents           []string `json:"contents" binding:"required"`
-	Platform           string   `json:"platform" binding:"required,oneof=anthropic openai gemini antigravity"`
+	Platform           string   `json:"platform" binding:"required,oneof=anthropic openai gemini antigravity grok"`
+	GrokImportMode     string   `json:"grok_import_mode" binding:"omitempty,oneof=oauth_credentials refresh_token web_sso"`
 	AccountLevel       string   `json:"account_level" binding:"omitempty,oneof=unknown free plus pro team"`
 	ShareMode          string   `json:"share_mode" binding:"omitempty,oneof=private public"`
 	ProxyID            *int64   `json:"proxy_id"`
@@ -1434,6 +1435,10 @@ func (h *UserAccountHandler) ImportCredentials(c *gin.Context) {
 	if req.Concurrency <= 0 {
 		req.Concurrency = userOwnedDefaultConcurrency
 	}
+	if req.Platform == service.PlatformGrok && req.GrokImportMode != "" && req.GrokImportMode != "oauth_credentials" {
+		h.importOwnedGrokCredentials(c, subject.UserID, req)
+		return
+	}
 
 	sources, parseErrors := service.ParseAccountCredentialImportContents(req.Contents)
 	if len(sources) == 0 && len(parseErrors) == 0 {
@@ -1482,6 +1487,178 @@ func (h *UserAccountHandler) ImportCredentials(c *gin.Context) {
 	}
 	result.Failed += len(parseErrors)
 	response.Success(c, result)
+}
+
+func (h *UserAccountHandler) importOwnedGrokCredentials(c *gin.Context, ownerUserID int64, req importUserAccountCredentialsRequest) {
+	if h.grokOAuthService == nil {
+		response.ErrorFrom(c, service.ErrServiceUnavailable)
+		return
+	}
+	if !h.requireVisibleUserProxy(c, ownerUserID, req.ProxyID, userAccountProxyRequiredError(service.PlatformGrok)) {
+		return
+	}
+
+	var tokens []string
+	switch req.GrokImportMode {
+	case "web_sso":
+		tokens = service.NormalizeGrokSSOTokens(req.Contents)
+	case "refresh_token":
+		tokens = normalizeGrokRefreshTokenImport(req.Contents)
+	default:
+		response.BadRequest(c, "unsupported Grok import mode")
+		return
+	}
+	if len(tokens) == 0 {
+		response.BadRequest(c, "No importable Grok credentials found")
+		return
+	}
+	importLimit, err := h.userAccountImportLimit(c.Request.Context())
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	if len(tokens) > importLimit {
+		response.BadRequest(c, fmt.Sprintf("Too many import items; maximum is %d", importLimit))
+		return
+	}
+
+	result := service.AccountCredentialImportResult{
+		Total:  len(tokens),
+		Errors: []service.AccountCredentialImportError{},
+	}
+	if req.GrokImportMode == "web_sso" {
+		h.importOwnedGrokSSOResults(c.Request.Context(), ownerUserID, req, tokens, &result)
+	} else {
+		h.importOwnedGrokRefreshTokens(c.Request.Context(), ownerUserID, req, tokens, &result)
+	}
+	response.Success(c, result)
+}
+
+func normalizeGrokRefreshTokenImport(contents []string) []string {
+	tokens := make([]string, 0, len(contents))
+	seen := make(map[string]struct{})
+	for _, content := range contents {
+		for _, token := range strings.FieldsFunc(content, func(r rune) bool {
+			return r == '\n' || r == '\r' || r == ','
+		}) {
+			token = strings.TrimSpace(token)
+			if token == "" {
+				continue
+			}
+			if _, exists := seen[token]; exists {
+				continue
+			}
+			seen[token] = struct{}{}
+			tokens = append(tokens, token)
+		}
+	}
+	return tokens
+}
+
+func (h *UserAccountHandler) importOwnedGrokSSOResults(
+	ctx context.Context,
+	ownerUserID int64,
+	req importUserAccountCredentialsRequest,
+	tokens []string,
+	result *service.AccountCredentialImportResult,
+) {
+	conversions := h.grokOAuthService.ConvertSSOBatch(ctx, tokens, req.ProxyID)
+	for _, conversion := range conversions {
+		if conversion.Err != nil || conversion.TokenInfo == nil {
+			appendOwnedGrokImportError(result, conversion.Index, "grok_web_sso", "", conversion.Err)
+			continue
+		}
+		name, err := h.createOwnedGrokAccountFromTokenInfo(ctx, ownerUserID, req, conversion.TokenInfo, conversion.Index, len(conversions))
+		if err != nil {
+			appendOwnedGrokImportError(result, conversion.Index, "grok_web_sso", name, err)
+			continue
+		}
+		result.Created++
+	}
+}
+
+func (h *UserAccountHandler) importOwnedGrokRefreshTokens(
+	ctx context.Context,
+	ownerUserID int64,
+	req importUserAccountCredentialsRequest,
+	tokens []string,
+	result *service.AccountCredentialImportResult,
+) {
+	for index, token := range tokens {
+		tokenInfo, err := h.grokOAuthService.ValidateRefreshToken(ctx, token, req.ProxyID)
+		if err != nil {
+			appendOwnedGrokImportError(result, index+1, "grok_refresh_token", "", err)
+			continue
+		}
+		name, err := h.createOwnedGrokAccountFromTokenInfo(ctx, ownerUserID, req, tokenInfo, index+1, len(tokens))
+		if err != nil {
+			appendOwnedGrokImportError(result, index+1, "grok_refresh_token", name, err)
+			continue
+		}
+		result.Created++
+	}
+}
+
+func appendOwnedGrokImportError(result *service.AccountCredentialImportResult, index int, kind, name string, err error) {
+	if result == nil {
+		return
+	}
+	result.Failed++
+	result.Errors = append(result.Errors, service.AccountCredentialImportError{
+		Index:   index,
+		Kind:    kind,
+		Name:    name,
+		Message: credentialImportFailureMessage(err),
+	})
+}
+
+func (h *UserAccountHandler) createOwnedGrokAccountFromTokenInfo(
+	ctx context.Context,
+	ownerUserID int64,
+	defaults importUserAccountCredentialsRequest,
+	tokenInfo *service.GrokTokenInfo,
+	sequence int,
+	total int,
+) (string, error) {
+	if tokenInfo == nil {
+		return "", infraerrors.BadRequest("OWNED_GROK_IMPORT_EMPTY_TOKEN", "Grok OAuth conversion returned no credentials")
+	}
+	name := strings.TrimSpace(tokenInfo.Email)
+	if name == "" {
+		name = "Grok OAuth Account"
+	}
+	if total > 1 {
+		name = fmt.Sprintf("%s #%d", name, sequence)
+	}
+
+	expiresAt := defaults.ExpiresAt
+	if strings.TrimSpace(tokenInfo.RefreshToken) == "" && tokenInfo.ExpiresAt > 0 {
+		if expiresAt == nil || *expiresAt <= 0 || tokenInfo.ExpiresAt < *expiresAt {
+			value := tokenInfo.ExpiresAt
+			expiresAt = &value
+		}
+	}
+	account, err := h.accountService.ImportOwned(ctx, ownerUserID, service.CreateAccountRequest{
+		Name:               name,
+		Platform:           service.PlatformGrok,
+		AccountLevel:       service.AccountLevelUnknown,
+		Type:               service.AccountTypeOAuth,
+		Credentials:        h.grokOAuthService.BuildAccountCredentials(tokenInfo),
+		Extra:              h.grokOAuthService.BuildAccountExtra(tokenInfo),
+		ShareMode:          defaults.ShareMode,
+		ProxyID:            defaults.ProxyID,
+		Concurrency:        1,
+		LoadFactor:         defaults.LoadFactor,
+		PrivatePriority:    defaults.PrivatePriority,
+		GroupIDs:           defaults.GroupIDs,
+		ExpiresAt:          userUnixSecondsToTime(expiresAt),
+		AutoPauseOnExpired: defaults.AutoPauseOnExpired,
+	})
+	if err != nil {
+		return name, err
+	}
+	_, err = h.activateOwnedPublicShareIfRequested(ctx, ownerUserID, account)
+	return name, err
 }
 
 func (h *UserAccountHandler) userAccountImportLimit(ctx context.Context) (int, error) {

@@ -262,7 +262,7 @@
               <PlatformTypeBadge
                 :platform="row.platform"
                 :type="row.type"
-                :plan-type="row.credentials?.plan_type"
+                :plan-type="resolveAccountPlanType(row)"
                 :privacy-mode="row.extra?.privacy_mode"
                 :subscription-expires-at="row.credentials?.subscription_expires_at"
               />
@@ -636,7 +636,7 @@ import ImportAccountsModal from '@/components/user/ImportAccountsModal.vue'
 import { ACCOUNT_STATUS_FILTER_OPTIONS } from '@/constants/account'
 import type { Account, AccountPlatform, AccountType, AdminGroup, Group, Proxy, WindowStats } from '@/types'
 import type { Column } from '@/components/common/types'
-import { formatDateTime, formatRelativeTime } from '@/utils/format'
+import { formatDateTime, formatRelativeTime, resolveAccountPlanType } from '@/utils/format'
 import { extractApiErrorMessage } from '@/utils/apiError'
 import { formatGameCoins } from '@/utils/gameCurrency'
 

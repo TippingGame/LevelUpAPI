@@ -325,6 +325,84 @@ func TestForwardAsAnthropicForGrokUsesResponsesConversion(t *testing.T) {
 	require.Contains(t, recorder.Body.String(), "ok")
 }
 
+func TestForwardAsAnthropicForGrokMapsThinkingNonStreaming(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	body := []byte(`{"model":"grok","max_tokens":64,"stream":false,"thinking":{"type":"enabled","budget_tokens":8000},"output_config":{"effort":"high"},"messages":[{"role":"user","content":"hi"}]}`)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(body))
+
+	account, repo := grokTextTestAccount(55)
+	upstreamBody := strings.Join([]string{
+		`data: {"type":"response.completed","response":{"id":"resp_grok_thinking","object":"response","model":"grok-4.5","status":"completed","output":[{"type":"reasoning","summary":[{"type":"summary_text","text":"Consider the answer."}]},{"type":"message","id":"msg_1","role":"assistant","status":"completed","content":[{"type":"output_text","text":"42"}]}],"usage":{"input_tokens":7,"output_tokens":4,"total_tokens":11}}}`,
+		"",
+		"data: [DONE]",
+		"",
+	}, "\n")
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body:       io.NopCloser(strings.NewReader(upstreamBody)),
+	}}
+	svc := &OpenAIGatewayService{httpUpstream: upstream, grokTokenProvider: NewGrokTokenProvider(repo, nil), accountRepo: repo}
+
+	result, err := svc.ForwardAsAnthropic(context.Background(), c, account, body, "", "")
+	require.NoError(t, err)
+	require.Equal(t, "high", gjson.GetBytes(upstream.lastBody, "reasoning.effort").String())
+	require.Equal(t, "auto", gjson.GetBytes(upstream.lastBody, "reasoning.summary").String())
+	require.Equal(t, "thinking", gjson.GetBytes(recorder.Body.Bytes(), "content.0.type").String())
+	require.Equal(t, "Consider the answer.", gjson.GetBytes(recorder.Body.Bytes(), "content.0.thinking").String())
+	require.Equal(t, "42", gjson.GetBytes(recorder.Body.Bytes(), "content.1.text").String())
+	require.NotNil(t, result.ReasoningEffort)
+	require.Equal(t, "high", *result.ReasoningEffort)
+}
+
+func TestForwardAsAnthropicForGrokMapsThinkingStreaming(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	body := []byte(`{"model":"grok","max_tokens":64,"stream":true,"thinking":{"type":"adaptive"},"output_config":{"effort":"low"},"messages":[{"role":"user","content":"hi"}]}`)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(body))
+
+	account, repo := grokTextTestAccount(56)
+	upstreamBody := strings.Join([]string{
+		`data: {"type":"response.created","response":{"id":"resp_grok_thinking_stream","model":"grok-4.5"}}`,
+		"",
+		`data: {"type":"response.output_item.added","output_index":0,"item":{"type":"reasoning"}}`,
+		"",
+		`data: {"type":"response.reasoning_summary_text.delta","output_index":0,"delta":"Considering..."}`,
+		"",
+		`data: {"type":"response.reasoning_summary_text.done","output_index":0}`,
+		"",
+		`data: {"type":"response.output_text.delta","output_index":1,"delta":"done"}`,
+		"",
+		`data: {"type":"response.output_text.done","output_index":1,"text":"done"}`,
+		"",
+		`data: {"type":"response.completed","response":{"id":"resp_grok_thinking_stream","model":"grok-4.5","status":"completed","usage":{"input_tokens":6,"output_tokens":3,"total_tokens":9}}}`,
+		"",
+		"data: [DONE]",
+		"",
+	}, "\n")
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body:       io.NopCloser(strings.NewReader(upstreamBody)),
+	}}
+	svc := &OpenAIGatewayService{httpUpstream: upstream, grokTokenProvider: NewGrokTokenProvider(repo, nil), accountRepo: repo}
+
+	result, err := svc.ForwardAsAnthropic(context.Background(), c, account, body, "", "")
+	require.NoError(t, err)
+	require.Equal(t, "low", gjson.GetBytes(upstream.lastBody, "reasoning.effort").String())
+	require.Contains(t, recorder.Body.String(), "event: content_block_start")
+	require.Contains(t, recorder.Body.String(), `"type":"thinking_delta"`)
+	require.Contains(t, recorder.Body.String(), `"thinking":"Considering..."`)
+	require.Contains(t, recorder.Body.String(), `"type":"text_delta"`)
+	require.NotNil(t, result.ReasoningEffort)
+	require.Equal(t, "low", *result.ReasoningEffort)
+	require.Equal(t, 6, result.Usage.InputTokens)
+	require.Equal(t, 3, result.Usage.OutputTokens)
+}
+
 func TestHandleGrokAccountUpstreamErrorAppliesCooldown(t *testing.T) {
 	tests := []struct {
 		name       string

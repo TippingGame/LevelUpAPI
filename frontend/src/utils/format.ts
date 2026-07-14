@@ -343,3 +343,50 @@ export function formatRelativeWithDateTime(date: string | Date | null | undefine
 
   return `${relativeTime} · ${dateTime}`
 }
+
+export interface AccountPlanTypeSource {
+  platform?: string
+  credentials?: Record<string, unknown> | null
+  extra?: Record<string, unknown> | null
+  parent_plan_type?: unknown
+}
+
+function asAccountPlanRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {}
+}
+
+function firstAccountPlanType(...values: unknown[]): string | undefined {
+  for (const value of values) {
+    if (typeof value !== 'string') continue
+    const normalized = value.trim()
+    if (normalized) return normalized
+  }
+  return undefined
+}
+
+// Grok's observed billing/quota snapshots are fresher than imported token
+// metadata. Keep legacy fields as fallbacks for accounts not probed yet.
+export function resolveAccountPlanType(account: AccountPlanTypeSource | null | undefined): string | undefined {
+  if (!account) return undefined
+  const credentials = asAccountPlanRecord(account.credentials)
+  const extra = asAccountPlanRecord(account.extra)
+  if (account.platform !== 'grok') {
+    return firstAccountPlanType(credentials.plan_type, account.parent_plan_type)
+  }
+
+  const billing = asAccountPlanRecord(extra.grok_billing_snapshot)
+  const usage = asAccountPlanRecord(extra.grok_usage_snapshot)
+  const legacyQuota = asAccountPlanRecord(extra.grok_quota_snapshot)
+  return firstAccountPlanType(
+    billing.plan,
+    billing.subscription_tier,
+    usage.subscription_tier,
+    legacyQuota.subscription_tier,
+    credentials.subscription_tier,
+    extra.subscription_tier,
+    credentials.plan_type,
+    account.parent_plan_type
+  )
+}

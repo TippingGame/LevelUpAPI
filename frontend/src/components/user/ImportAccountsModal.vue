@@ -5,6 +5,7 @@
     :hint="t('userAccounts.importHint')"
     :warning="importWarningText"
     :text-hint="importTextHint"
+    :text-placeholder="importTextPlaceholder"
     form-id="user-import-accounts-form"
     :submit-disabled="!canSubmitCredentialImport"
     :importer="importPersonalCredentials"
@@ -20,6 +21,11 @@
         v-if="selectedPlatform === 'openai'"
         :selected-level="selectedAccountLevel"
         @select="selectAccountLevel"
+      />
+      <GrokImportMethodSelector
+        v-if="selectedPlatform === 'grok'"
+        :selected-method="selectedGrokImportMode"
+        @select="selectGrokImportMode"
       />
       <div v-if="credentialImportProxyRequired">
         <div class="mb-2 flex items-center justify-between gap-3">
@@ -118,6 +124,7 @@ import type { AccountLevel, AccountPlatform, AccountShareMode, Proxy } from '@/t
 
 type SelectableOpenAILevel = Exclude<AccountLevel, 'unknown'>
 type ImportPlatform = AccountPlatform
+type GrokImportMode = 'oauth_credentials' | 'refresh_token' | 'web_sso'
 
 interface Props {
   show: boolean
@@ -138,6 +145,7 @@ const PROXY_PURCHASE_URL = 'https://www.seekproxy.com/user/reg?invite_id=106509'
 
 const selectedPlatform = ref<ImportPlatform | ''>('')
 const selectedAccountLevel = ref<SelectableOpenAILevel | ''>('')
+const selectedGrokImportMode = ref<GrokImportMode>('oauth_credentials')
 const selectedShareMode = ref<AccountShareMode>('private')
 const selectedPrivatePriority = ref(PERSONAL_ACCOUNT_DEFAULT_PRIORITY)
 const selectedProxyId = ref<number | null>(null)
@@ -157,6 +165,7 @@ const credentialImportProxyRequired = computed(() =>
   selectedPlatform.value === 'anthropic' ||
   selectedPlatform.value === 'gemini' ||
   selectedPlatform.value === 'antigravity' ||
+  selectedPlatform.value === 'grok' ||
   (selectedPlatform.value === 'openai' && selectedAccountLevel.value === 'pro')
 )
 
@@ -181,6 +190,8 @@ const importWarningText = computed(() => {
       return t('userAccounts.importWarningGemini', { max: importLimit.value })
     case 'antigravity':
       return t('userAccounts.importWarningAntigravity', { max: importLimit.value })
+    case 'grok':
+      return t('userAccounts.importWarningGrok', { max: importLimit.value })
     default:
       return t('userAccounts.importWarningChoosePlatform', { max: importLimit.value })
   }
@@ -196,9 +207,20 @@ const importTextHint = computed(() => {
       return t('userAccounts.importTextHintGemini')
     case 'antigravity':
       return t('userAccounts.importTextHintAntigravity')
+    case 'grok':
+      if (selectedGrokImportMode.value === 'web_sso') return t('userAccounts.importTextHintGrokSSO')
+      if (selectedGrokImportMode.value === 'refresh_token') return t('userAccounts.importTextHintGrokRefreshToken')
+      return t('userAccounts.importTextHintGrokOAuth')
     default:
       return t('userAccounts.importTextHintChoosePlatform')
   }
+})
+
+const importTextPlaceholder = computed(() => {
+  if (selectedPlatform.value !== 'grok') return t('userAccounts.importTextPlaceholder')
+  if (selectedGrokImportMode.value === 'web_sso') return t('userAccounts.importTextPlaceholderGrokSSO')
+  if (selectedGrokImportMode.value === 'refresh_token') return t('userAccounts.importTextPlaceholderGrokRefreshToken')
+  return t('userAccounts.importTextPlaceholderGrokOAuth')
 })
 
 const selectedPlatformHint = computed(() => {
@@ -209,6 +231,8 @@ const selectedPlatformHint = computed(() => {
       return t('userAccounts.importPlatformHintGemini')
     case 'antigravity':
       return t('userAccounts.importPlatformHintAntigravity')
+    case 'grok':
+      return t('userAccounts.importPlatformHintGrok')
     default:
       return ''
   }
@@ -243,11 +267,12 @@ const PlatformSelector = defineComponent({
       { value: 'anthropic', label: 'Claude', desc: t('userAccounts.importPlatformClaude') },
       { value: 'openai', label: 'OpenAI', desc: t('userAccounts.importPlatformOpenAI') },
       { value: 'gemini', label: 'Gemini', desc: t('userAccounts.importPlatformGemini') },
-      { value: 'antigravity', label: 'Antigravity', desc: t('userAccounts.importPlatformAntigravity') }
+      { value: 'antigravity', label: 'Antigravity', desc: t('userAccounts.importPlatformAntigravity') },
+      { value: 'grok', label: 'Grok', desc: t('userAccounts.importPlatformGrok') }
     ]
     return () => h('div', { class: 'space-y-2' }, [
       h('label', { class: 'input-label' }, t('userAccounts.importPlatform')),
-      h('div', { class: 'grid gap-2 sm:grid-cols-2 lg:grid-cols-4' }, options.map(option =>
+      h('div', { class: 'grid gap-2 sm:grid-cols-2 lg:grid-cols-5' }, options.map(option =>
         h(
           'button',
           {
@@ -255,6 +280,59 @@ const PlatformSelector = defineComponent({
             class: [
               'flex min-h-[76px] flex-col justify-center rounded-lg border px-3 py-2 text-left transition-colors',
               props.selectedPlatform === option.value
+                ? 'border-primary-400 bg-primary-50 text-primary-700 dark:border-primary-500 dark:bg-primary-900/30 dark:text-primary-300'
+                : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50 dark:border-dark-700 dark:bg-dark-800 dark:text-dark-200 dark:hover:bg-dark-700'
+            ],
+            onClick: () => emit('select', option.value)
+          },
+          [
+            h('span', { class: 'text-sm font-semibold' }, option.label),
+            h('span', { class: 'mt-1 text-xs text-gray-500 dark:text-dark-400' }, option.desc)
+          ]
+        )
+      ))
+    ])
+  }
+})
+
+const GrokImportMethodSelector = defineComponent({
+  name: 'UserGrokImportMethodSelector',
+  props: {
+    selectedMethod: {
+      type: String,
+      default: 'oauth_credentials'
+    }
+  },
+  emits: ['select'],
+  setup(props, { emit }) {
+    const options: Array<{ value: GrokImportMode; label: string; desc: string }> = [
+      {
+        value: 'oauth_credentials',
+        label: t('userAccounts.importGrokMethodOAuth'),
+        desc: t('userAccounts.importGrokMethodOAuthHint')
+      },
+      {
+        value: 'refresh_token',
+        label: t('userAccounts.importGrokMethodRefreshToken'),
+        desc: t('userAccounts.importGrokMethodRefreshTokenHint')
+      },
+      {
+        value: 'web_sso',
+        label: t('userAccounts.importGrokMethodSSO'),
+        desc: t('userAccounts.importGrokMethodSSOHint')
+      }
+    ]
+    return () => h('div', { class: 'space-y-2' }, [
+      h('label', { class: 'input-label' }, t('userAccounts.importGrokMethod')),
+      h('div', { class: 'grid gap-2 sm:grid-cols-3' }, options.map(option =>
+        h(
+          'button',
+          {
+            type: 'button',
+            'data-testid': `grok-import-method-${option.value}`,
+            class: [
+              'flex min-h-[82px] flex-col justify-center rounded-lg border px-3 py-2 text-left transition-colors',
+              props.selectedMethod === option.value
                 ? 'border-primary-400 bg-primary-50 text-primary-700 dark:border-primary-500 dark:bg-primary-900/30 dark:text-primary-300'
                 : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50 dark:border-dark-700 dark:bg-dark-800 dark:text-dark-200 dark:hover:bg-dark-700'
             ],
@@ -371,6 +449,9 @@ watch(
     if (platform !== 'openai') {
       selectedAccountLevel.value = ''
     }
+    if (platform !== 'grok') {
+      selectedGrokImportMode.value = 'oauth_credentials'
+    }
     selectedProxyId.value = null
     proxyLoadMessage.value = ''
     showProxyDialog.value = false
@@ -401,6 +482,10 @@ function selectAccountLevel(level: SelectableOpenAILevel | ''): void {
   selectedAccountLevel.value = level
 }
 
+function selectGrokImportMode(mode: GrokImportMode): void {
+  selectedGrokImportMode.value = mode
+}
+
 function selectShareMode(mode: AccountShareMode): void {
   selectedShareMode.value = mode
 }
@@ -408,6 +493,7 @@ function selectShareMode(mode: AccountShareMode): void {
 function resetOAuthImportState(): void {
   selectedPlatform.value = ''
   selectedAccountLevel.value = ''
+  selectedGrokImportMode.value = 'oauth_credentials'
   selectedShareMode.value = 'private'
   selectedPrivatePriority.value = PERSONAL_ACCOUNT_DEFAULT_PRIORITY
   selectedProxyId.value = null
@@ -445,6 +531,9 @@ function importPersonalCredentials(contents: string[]): Promise<ImportCredential
       return Promise.reject(new Error(t('userAccounts.importAccountLevelRequired')))
     }
     request.account_level = accountLevel
+  }
+  if (selectedPlatform.value === 'grok') {
+    request.grok_import_mode = selectedGrokImportMode.value
   }
   if (credentialImportProxyRequired.value) {
     if (!selectedProxyId.value) {

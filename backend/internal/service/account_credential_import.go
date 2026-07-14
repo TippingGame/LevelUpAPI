@@ -157,6 +157,8 @@ func DeriveAccountCredentialImportName(platform string, credentials, extra map[s
 		return fmt.Sprintf("Gemini OAuth Account #%d", sequence)
 	case PlatformAntigravity:
 		return fmt.Sprintf("Antigravity OAuth Account #%d", sequence)
+	case PlatformGrok:
+		return fmt.Sprintf("Grok OAuth Account #%d", sequence)
 	default:
 		return fmt.Sprintf("OpenAI OAuth Account #%d", sequence)
 	}
@@ -602,6 +604,8 @@ func normalizeCredentialImportPlatform(platform string) string {
 		return PlatformGemini
 	case "antigravity":
 		return PlatformAntigravity
+	case "grok", "xai", "x.ai":
+		return PlatformGrok
 	default:
 		return ""
 	}
@@ -614,6 +618,11 @@ func inferOAuthCredentialPlatform(credentials, extra map[string]any) string {
 	}
 	if importStringField(credentials, "project_id", "oauth_type", "tier_id") != "" {
 		return PlatformGemini
+	}
+	baseURL := strings.ToLower(importStringField(credentials, "base_url", "baseUrl"))
+	if strings.Contains(baseURL, "api.x.ai") || strings.Contains(baseURL, "grok.com") ||
+		importStringField(credentials, "team_id", "subscription_tier", "entitlement_status") != "" {
+		return PlatformGrok
 	}
 	if importStringField(credentials, "chatgpt_account_id", "chatgpt_user_id", "organization_id", "id_token") != "" {
 		return PlatformOpenAI

@@ -132,6 +132,8 @@ export function useGrokOAuth(scope: AccountApiScope = 'admin') {
       client_id: tokenInfo.client_id,
       scope: tokenInfo.scope,
       email: tokenInfo.email,
+      sub: tokenInfo.sub,
+      team_id: tokenInfo.team_id,
       subscription_tier: tokenInfo.subscription_tier,
       entitlement_status: tokenInfo.entitlement_status
     }
@@ -141,6 +143,8 @@ export function useGrokOAuth(scope: AccountApiScope = 'admin') {
   const buildExtraInfo = (tokenInfo: GrokTokenInfo): Record<string, unknown> => {
     const extra: Record<string, unknown> = {}
     if (tokenInfo.email) extra.email = tokenInfo.email
+    if (tokenInfo.sub) extra.sub = tokenInfo.sub
+    if (tokenInfo.team_id) extra.team_id = tokenInfo.team_id
     if (tokenInfo.subscription_tier) extra.subscription_tier = tokenInfo.subscription_tier
     if (tokenInfo.entitlement_status) extra.entitlement_status = tokenInfo.entitlement_status
     return extra

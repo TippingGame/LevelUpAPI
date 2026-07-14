@@ -81,6 +81,19 @@ func TestBuildOpsSystemLogsCleanupWhere_WithClientRequestIDAndUserID(t *testing.
 	}
 }
 
+func TestBuildOpsSystemLogsWhere_WithHost(t *testing.T) {
+	where, args, hasConstraint := buildOpsSystemLogsWhere(&service.OpsSystemLogFilter{Host: "api-node-1"})
+	if !hasConstraint {
+		t.Fatal("expected host to count as a constraint")
+	}
+	if len(args) != 1 || args[0] != "api-node-1" {
+		t.Fatalf("unexpected host args: %#v", args)
+	}
+	if !contains(where, "l.host = $1") {
+		t.Fatalf("where should include host condition: %s", where)
+	}
+}
+
 func contains(s string, sub string) bool {
 	return strings.Contains(s, sub)
 }

@@ -2920,6 +2920,7 @@
         :show-mobile-refresh-token-option="!isUserScope && form.platform === 'openai'"
         :show-session-token-option="false"
         :show-access-token-option="false"
+        :show-sso-option="form.platform === 'grok'"
         :platform="form.platform"
         :show-project-id="geminiOAuthType === 'code_assist'"
         @generate-url="handleGenerateUrl"
@@ -2927,6 +2928,7 @@
         @validate-refresh-token="handleValidateRefreshToken"
         @validate-mobile-refresh-token="handleOpenAIValidateMobileRT"
         @validate-session-token="handleValidateSessionToken"
+        @import-sso="handleGrokImportSSO"
       />
 
     </div>
@@ -3333,6 +3335,7 @@ interface OAuthFlowExposed {
   sessionKey: string
   refreshToken: string
   sessionToken: string
+  ssoCookie: string
   inputMethod: AuthInputMethod
   reset: () => void
 }
@@ -5174,6 +5177,91 @@ const handleGrokValidateRT = async (refreshTokenInput: string) => {
   } else {
     grokOAuth.error.value = errors.join('\n')
     appStore.showError(t('admin.accounts.oauth.batchFailed'))
+  }
+}
+
+const handleGrokImportSSO = async (ssoInput: string) => {
+  const ssoTokens = ssoInput
+    .split(/[\r\n,]+/)
+    .map(token => token.trim())
+    .filter(Boolean)
+  if (ssoTokens.length === 0) return
+  if (userAccountProxyRequired.value && !form.proxy_id) {
+    appStore.showError(t('userAccounts.importProxyRequired'))
+    return
+  }
+
+  grokOAuth.loading.value = true
+  grokOAuth.error.value = ''
+  try {
+    let successCount = 0
+    let failedItems: Array<{ index?: number; message: string }> = []
+
+    if (isUserScope.value) {
+      const result = await accountsAPI.importCredentialContents({
+        contents: [ssoInput],
+        platform: 'grok',
+        grok_import_mode: 'web_sso',
+        share_mode: form.share_mode,
+        proxy_id: form.proxy_id,
+        concurrency: 1,
+        private_priority: Math.max(1, form.priority || PERSONAL_ACCOUNT_DEFAULT_PRIORITY),
+        group_ids: [],
+        expires_at: form.expires_at,
+        auto_pause_on_expired: PERSONAL_ACCOUNT_DEFAULT_AUTO_PAUSE_ON_EXPIRED
+      })
+      successCount = result.created
+      failedItems = result.errors.map(item => ({ index: item.index, message: item.message }))
+    } else {
+      const credentials: Record<string, unknown> = {}
+      const modelMapping = buildModelMappingObject(modelRestrictionMode.value, allowedModels.value, modelMappings.value)
+      if (modelMapping) credentials.model_mapping = modelMapping
+      if (!applyTempUnschedConfig(credentials)) return
+
+      const result = await adminAPI.grok.createFromSSO({
+        sso_tokens: ssoTokens,
+        name: form.name || undefined,
+        notes: form.notes || undefined,
+        proxy_id: form.proxy_id,
+        group_ids: form.group_ids,
+        credentials,
+        concurrency: Math.max(1, form.concurrency || 1),
+        load_factor: form.load_factor ?? undefined,
+        priority: form.priority,
+        rate_multiplier: form.rate_multiplier,
+        expires_at: form.expires_at,
+        auto_pause_on_expired: autoPauseOnExpired.value
+      })
+      successCount = result.created.length
+      failedItems = result.failed.map(item => ({ index: item.index, message: item.error || t('common.error') }))
+    }
+
+    const failedCount = failedItems.length
+    if (successCount > 0 && failedCount === 0) {
+      appStore.showSuccess(
+        ssoTokens.length > 1
+          ? t('admin.accounts.oauth.batchSuccess', { count: successCount })
+          : t('admin.accounts.accountCreated')
+      )
+      emit('created')
+      handleClose()
+      return
+    }
+
+    grokOAuth.error.value = failedItems
+      .map(item => `#${item.index || '-'}: ${item.message}`)
+      .join('\n') || t('admin.accounts.oauth.grok.failedToConvertSSO')
+    if (successCount > 0) {
+      appStore.showWarning(t('admin.accounts.oauth.batchPartialSuccess', { success: successCount, failed: failedCount }))
+      emit('created')
+    } else {
+      appStore.showError(t('admin.accounts.oauth.batchFailed'))
+    }
+  } catch (error: any) {
+    grokOAuth.error.value = error.response?.data?.message || error.response?.data?.detail || error.message || t('admin.accounts.oauth.grok.failedToConvertSSO')
+    appStore.showError(grokOAuth.error.value)
+  } finally {
+    grokOAuth.loading.value = false
   }
 }
 

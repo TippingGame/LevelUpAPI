@@ -8,14 +8,16 @@ const {
   showErrorMock,
   showSuccessMock,
   generateAuthUrlMock,
-  resetOAuthStateMock
+  resetOAuthStateMock,
+  importCredentialContentsMock
 } = vi.hoisted(() => ({
   listProxiesMock: vi.fn(),
   createProxyMock: vi.fn(),
   showErrorMock: vi.fn(),
   showSuccessMock: vi.fn(),
   generateAuthUrlMock: vi.fn(),
-  resetOAuthStateMock: vi.fn()
+  resetOAuthStateMock: vi.fn(),
+  importCredentialContentsMock: vi.fn()
 }))
 
 vi.mock('vue-i18n', async () => {
@@ -31,7 +33,7 @@ vi.mock('vue-i18n', async () => {
 vi.mock('@/api', () => ({
   accountsAPI: {
     create: vi.fn(),
-    importCredentialContents: vi.fn(),
+    importCredentialContents: importCredentialContentsMock,
     listProxies: listProxiesMock,
     createProxy: createProxyMock
   }
@@ -40,6 +42,7 @@ vi.mock('@/api', () => ({
 vi.mock('@/api/accounts', () => ({
   accountsAPI: {
     create: vi.fn(),
+    importCredentialContents: importCredentialContentsMock,
     listProxies: listProxiesMock,
     createProxy: createProxyMock
   }
@@ -163,6 +166,10 @@ const CredentialImportModalStub = defineComponent({
     show: {
       type: Boolean,
       default: false
+    },
+    importer: {
+      type: Function,
+      required: true
     }
   },
   template: '<div v-if="show"><slot name="controls" /><slot /></div>'
@@ -226,6 +233,8 @@ describe('user proxy create entry buttons', () => {
     showSuccessMock.mockReset()
     generateAuthUrlMock.mockReset()
     resetOAuthStateMock.mockReset()
+    importCredentialContentsMock.mockReset()
+    importCredentialContentsMock.mockResolvedValue({ total: 1, created: 1, failed: 0, errors: [] })
   })
 
   it('shows the proxy selector by default for admin account creation', () => {
@@ -304,6 +313,35 @@ describe('user proxy create entry buttons', () => {
     await flushPromises()
     expect(wrapper.find('[data-testid="proxy-selector"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="import-open-user-proxy-panel"]').exists()).toBe(true)
+  })
+
+  it('offers explicit Grok OAuth, Refresh Token, and Web SSO batch import modes', async () => {
+    const wrapper = mount(ImportAccountsModal, {
+      props: { show: true },
+      global: { stubs: basicStubs }
+    })
+
+    await findButtonByText(wrapper, 'Grok').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="proxy-selector"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="grok-import-method-oauth_credentials"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="grok-import-method-refresh_token"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="grok-import-method-web_sso"]').exists()).toBe(true)
+
+    wrapper.findComponent(ProxySelectorStub).vm.$emit('update:modelValue', 42)
+    await wrapper.find('[data-testid="grok-import-method-web_sso"]').trigger('click')
+    await wrapper.vm.$nextTick()
+
+    const importer = wrapper.findComponent(CredentialImportModalStub).props('importer') as (contents: string[]) => Promise<unknown>
+    await importer(['sso=secret-one\nsecret-two'])
+
+    expect(importCredentialContentsMock).toHaveBeenCalledWith(expect.objectContaining({
+      contents: ['sso=secret-one\nsecret-two'],
+      platform: 'grok',
+      grok_import_mode: 'web_sso',
+      proxy_id: 42
+    }))
   })
 
   it('opens the inline proxy create panel from user OpenAI Pro account creation', async () => {

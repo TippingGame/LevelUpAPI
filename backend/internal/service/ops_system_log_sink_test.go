@@ -171,6 +171,9 @@ func TestOpsSystemLogSink_StartStopAndFlushSuccess(t *testing.T) {
 		t.Fatalf("captured len = %d, want 1", len(captured))
 	}
 	item := captured[0]
+	if strings.TrimSpace(item.Host) == "" {
+		t.Fatalf("host should be captured: %+v", item)
+	}
 	if item.RequestID != "req-1" || item.ClientRequestID != "creq-1" {
 		t.Fatalf("unexpected request ids: %+v", item)
 	}
@@ -195,6 +198,19 @@ func TestOpsSystemLogSink_StartStopAndFlushSuccess(t *testing.T) {
 	health := sink.Health()
 	if health.WrittenCount == 0 {
 		t.Fatalf("written_count should be >0")
+	}
+}
+
+func TestNormalizeSystemLogHostBoundsAndFallback(t *testing.T) {
+	if got := normalizeSystemLogHost(" node-1 ", nil); got != "node-1" {
+		t.Fatalf("normalized host = %q", got)
+	}
+	if got := normalizeSystemLogHost("", errors.New("hostname unavailable")); got != "unknown" {
+		t.Fatalf("fallback host = %q", got)
+	}
+	longHost := strings.Repeat("界", maxSystemLogHostLength+10)
+	if got := normalizeSystemLogHost(longHost, nil); len([]rune(got)) != maxSystemLogHostLength {
+		t.Fatalf("bounded host rune length = %d", len([]rune(got)))
 	}
 }
 
