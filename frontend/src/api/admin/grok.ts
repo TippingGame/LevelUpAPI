@@ -62,6 +62,7 @@ export interface GrokQuotaProbeResult {
   model?: string
   billing?: GrokBillingSummary | null
   snapshot?: GrokQuotaSnapshot | null
+  local_usage_24h?: WindowStats | null
   local_usage_7d?: WindowStats | null
   local_usage_monthly?: WindowStats | null
   status_code?: number

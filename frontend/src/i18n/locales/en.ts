@@ -4949,6 +4949,7 @@ export default {
         grokNoHeaders: 'No quota headers observed yet',
         grokRequests: 'Requests',
         grokTokens: 'Tokens',
+        grokFreeQuota24hHint: 'Estimated from local token usage over the rolling 24-hour window (2M limit)',
         grokWeeklyUsage: 'Weekly {percent}%',
         grokRetryAfter: 'Retry in {time}'
       },

@@ -4263,6 +4263,7 @@ export default {
         grokNoHeaders: '尚未观察到额度响应头',
         grokRequests: '请求',
         grokTokens: 'Token',
+        grokFreeQuota24hHint: '按 LevelUpAPI 近 24 小时本地 Token 用量估算（上限 2M）',
         grokWeeklyUsage: '周额度已用 {percent}%',
         grokRetryAfter: '重试 {time}'
       },
