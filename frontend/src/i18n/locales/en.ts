@@ -403,6 +403,10 @@ export default {
     usage: 'Usage',
     redeem: 'Redeem',
     affiliate: 'Affiliate Rebates',
+    affiliateManagement: 'Affiliate Management',
+    affiliateInviteRecords: 'Invite Records',
+    affiliateRebateRecords: 'Rebate Records',
+    affiliateTransferRecords: 'Balance Transfers',
     profile: 'Profile',
     users: 'Users',
     groups: 'Groups',
@@ -2030,6 +2034,56 @@ export default {
       requestsShort: 'Req',
       tokensShort: 'Tok',
       failedToLoad: 'Failed to load dashboard statistics'
+    },
+
+    affiliates: {
+      invitesTitle: 'Invite Relationships',
+      invitesDescription: 'Review inviters, invitees, and the actual binding time',
+      rebatesTitle: 'Affiliate Rebate Records',
+      rebatesDescription: 'Review invite credits created by usage settlements and their policy snapshots',
+      transfersTitle: 'Affiliate Balance Transfers',
+      transfersDescription: 'Review legacy affiliate quota transfers into user balances',
+      records: {
+        searchPlaceholder: 'Search users, requests, accounts, or IDs...',
+        startAt: 'Start date',
+        endAt: 'End date',
+        inviter: 'Inviter',
+        invitee: 'Invitee',
+        affCode: 'Invite code',
+        totalRebate: 'Total rebate',
+        invitedAt: 'Bound at',
+        request: 'Settlement request',
+        account: 'Consumed account',
+        consumerCharge: 'Consumer charge',
+        inviteShareRatio: 'Invite share',
+        rebateAmount: 'Rebate amount',
+        rebatedAt: 'Settled at',
+        user: 'User',
+        transferAmount: 'Transfer amount',
+        balanceAfter: 'Balance after',
+        availableQuotaAfter: 'Available quota after',
+        frozenQuotaAfter: 'Frozen quota after',
+        historyQuotaAfter: 'Lifetime quota',
+        transferredAt: 'Transferred at',
+        status: {
+          applied: 'Applied',
+          reversed: 'Reversed',
+          frozen: 'Frozen'
+        }
+      },
+      overview: {
+        title: 'Affiliate Overview',
+        affCode: 'Invite code',
+        inviteShare: 'Current invite share',
+        invitedCount: 'Invited users',
+        rebatedInviteeCount: 'Rebated invitees',
+        totalRebate: 'Lifetime realtime credit',
+        currentBalance: 'Current balance'
+      },
+      errors: {
+        USER_NOT_FOUND: 'User not found',
+        AFFILIATE_PROFILE_NOT_FOUND: 'The user has no affiliate profile'
+      }
     },
 
     revenue: {

@@ -1647,7 +1647,7 @@ func (h *UserAccountHandler) createOwnedGrokAccountFromTokenInfo(
 		Extra:              h.grokOAuthService.BuildAccountExtra(tokenInfo),
 		ShareMode:          defaults.ShareMode,
 		ProxyID:            defaults.ProxyID,
-		Concurrency:        1,
+		Concurrency:        defaults.Concurrency,
 		LoadFactor:         defaults.LoadFactor,
 		PrivatePriority:    defaults.PrivatePriority,
 		GroupIDs:           defaults.GroupIDs,

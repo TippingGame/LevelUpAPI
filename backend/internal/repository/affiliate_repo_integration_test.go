@@ -91,6 +91,19 @@ VALUES ($1, $2, $3, $3, NOW(), NOW())`, u.ID, affCode, 12.34)
 	ledgerCount := querySingleInt(t, txCtx, client,
 		"SELECT COUNT(*) FROM user_affiliate_ledger WHERE user_id = $1 AND action = 'transfer'", u.ID)
 	require.Equal(t, 1, ledgerCount)
+
+	ledgerBalanceAfter := querySingleFloat(t, txCtx, client,
+		"SELECT balance_after::double precision FROM user_affiliate_ledger WHERE user_id = $1 AND action = 'transfer'", u.ID)
+	require.InDelta(t, 17.84, ledgerBalanceAfter, 1e-9)
+	ledgerQuotaAfter := querySingleFloat(t, txCtx, client,
+		"SELECT aff_quota_after::double precision FROM user_affiliate_ledger WHERE user_id = $1 AND action = 'transfer'", u.ID)
+	require.InDelta(t, 0.0, ledgerQuotaAfter, 1e-9)
+	ledgerFrozenAfter := querySingleFloat(t, txCtx, client,
+		"SELECT aff_frozen_quota_after::double precision FROM user_affiliate_ledger WHERE user_id = $1 AND action = 'transfer'", u.ID)
+	require.InDelta(t, 0.0, ledgerFrozenAfter, 1e-9)
+	ledgerHistoryAfter := querySingleFloat(t, txCtx, client,
+		"SELECT aff_history_quota_after::double precision FROM user_affiliate_ledger WHERE user_id = $1 AND action = 'transfer'", u.ID)
+	require.InDelta(t, 12.34, ledgerHistoryAfter, 1e-9)
 }
 
 // TestAffiliateRepository_AccrueQuota_ReusesOuterTransaction guards the

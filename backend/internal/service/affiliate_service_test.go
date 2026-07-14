@@ -10,6 +10,25 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestNormalizeAffiliateRecordFilter(t *testing.T) {
+	t.Parallel()
+
+	filter := normalizeAffiliateRecordFilter(AffiliateRecordFilter{
+		Search:   "  alice@example.com  ",
+		Page:     -1,
+		PageSize: 1000,
+		SortBy:   "  created_at  ",
+	})
+	require.Equal(t, 1, filter.Page)
+	require.Equal(t, 100, filter.PageSize)
+	require.Equal(t, "alice@example.com", filter.Search)
+	require.Equal(t, "created_at", filter.SortBy)
+
+	defaults := normalizeAffiliateRecordFilter(AffiliateRecordFilter{})
+	require.Equal(t, 1, defaults.Page)
+	require.Equal(t, 20, defaults.PageSize)
+}
+
 // TestResolveRebateRatePercent_PerUserOverride verifies that per-inviter
 // AffRebateRatePercent overrides the global rate, that NULL falls back to the
 // global rate, and that out-of-range exclusive rates are clamped silently.

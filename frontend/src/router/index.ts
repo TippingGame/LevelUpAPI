@@ -688,6 +688,46 @@ const routes: RouteRecordRaw[] = [
       descriptionKey: 'admin.revenue.description'
     }
   },
+  {
+    path: '/admin/affiliates',
+    redirect: '/admin/affiliates/invites'
+  },
+  {
+    path: '/admin/affiliates/invites',
+    name: 'AdminAffiliateInvites',
+    component: () => import('@/views/admin/affiliates/AdminAffiliateInvitesView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      title: 'Affiliate Invites',
+      titleKey: 'admin.affiliates.invitesTitle',
+      descriptionKey: 'admin.affiliates.invitesDescription'
+    }
+  },
+  {
+    path: '/admin/affiliates/rebates',
+    name: 'AdminAffiliateRebates',
+    component: () => import('@/views/admin/affiliates/AdminAffiliateRebatesView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      title: 'Affiliate Rebates',
+      titleKey: 'admin.affiliates.rebatesTitle',
+      descriptionKey: 'admin.affiliates.rebatesDescription'
+    }
+  },
+  {
+    path: '/admin/affiliates/transfers',
+    name: 'AdminAffiliateTransfers',
+    component: () => import('@/views/admin/affiliates/AdminAffiliateTransfersView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      title: 'Affiliate Transfers',
+      titleKey: 'admin.affiliates.transfersTitle',
+      descriptionKey: 'admin.affiliates.transfersDescription'
+    }
+  },
 
 
   // ==================== Payment Admin Routes ====================

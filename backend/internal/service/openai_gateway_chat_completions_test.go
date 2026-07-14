@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/apicompat"
@@ -104,6 +105,127 @@ func TestNormalizeResponsesBodyServiceTier(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, tier)
 	require.False(t, gjson.GetBytes(body, "service_tier").Exists())
+}
+
+func TestForwardAsChatCompletions_DoneWithoutTerminalFailsOverBeforeClientOutput(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	body := []byte(`{"model":"gpt-5.5","stream":true,"messages":[{"role":"user","content":"hi"}]}`)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
+
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}, "X-Request-Id": []string{"rid_chat_missing_terminal"}},
+		Body:       io.NopCloser(strings.NewReader("data: [DONE]\n\n")),
+	}}
+	svc := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream}
+	account := &Account{
+		ID:       1,
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeOAuth,
+		Credentials: map[string]any{
+			"access_token":       "oauth-token",
+			"chatgpt_account_id": "chatgpt-account",
+		},
+	}
+
+	result, err := svc.ForwardAsChatCompletions(context.Background(), c, account, body, "", "")
+
+	require.Error(t, err)
+	require.NotNil(t, result)
+	var failoverErr *UpstreamFailoverError
+	require.ErrorAs(t, err, &failoverErr)
+	require.False(t, c.Writer.Written())
+	require.Empty(t, rec.Body.String())
+	require.Zero(t, result.Usage.InputTokens)
+	require.Zero(t, result.Usage.OutputTokens)
+}
+
+func TestForwardAsChatCompletions_MissingTerminalAfterOutputRecordsOps(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	body := []byte(`{"model":"gpt-5.5","stream":true,"messages":[{"role":"user","content":"hi"}]}`)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
+
+	upstreamSSE := strings.Join([]string{
+		`data: {"type":"response.created","response":{"id":"resp_partial","model":"gpt-5.5","status":"in_progress","output":[]}}`,
+		"",
+		`data: {"type":"response.output_text.delta","delta":"partial"}`,
+		"",
+	}, "\n")
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}, "X-Request-Id": []string{"rid_chat_partial"}},
+		Body:       io.NopCloser(strings.NewReader(upstreamSSE)),
+	}}
+	svc := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream}
+	account := &Account{
+		ID:       1,
+		Name:     "openai-oauth",
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeOAuth,
+		Credentials: map[string]any{
+			"access_token":       "oauth-token",
+			"chatgpt_account_id": "chatgpt-account",
+		},
+	}
+
+	result, err := svc.ForwardAsChatCompletions(context.Background(), c, account, body, "", "")
+
+	require.ErrorContains(t, err, "missing terminal event")
+	require.NotNil(t, result)
+	var failoverErr *UpstreamFailoverError
+	require.False(t, errors.As(err, &failoverErr))
+	require.True(t, c.Writer.Written())
+	require.Contains(t, rec.Body.String(), "partial")
+	rawEvents, ok := c.Get(OpsUpstreamErrorsKey)
+	require.True(t, ok)
+	events, ok := rawEvents.([]*OpsUpstreamErrorEvent)
+	require.True(t, ok)
+	require.Len(t, events, 1)
+	require.Equal(t, "stream_missing_terminal", events[0].Kind)
+	require.Equal(t, int64(1), events[0].AccountID)
+	require.Equal(t, "rid_chat_partial", events[0].UpstreamRequestID)
+}
+
+func TestHandleChatStreamingResponse_RespectsDataIntervalTimeoutWithoutKeepalive(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+
+	reader, writer := io.Pipe()
+	defer reader.Close()
+	defer writer.Close()
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body:       reader,
+	}
+	svc := &OpenAIGatewayService{cfg: &config.Config{Gateway: config.GatewayConfig{
+		StreamDataIntervalTimeout: 1,
+		StreamKeepaliveInterval:   0,
+		MaxLineSize:               defaultMaxLineSize,
+	}}}
+
+	start := time.Now()
+	result, err := svc.handleChatStreamingResponse(
+		resp,
+		c,
+		&Account{ID: 1, Platform: PlatformOpenAI},
+		"gpt-5.5",
+		"gpt-5.5",
+		"gpt-5.5",
+		start,
+		0,
+	)
+
+	require.ErrorContains(t, err, "stream data interval timeout")
+	require.NotNil(t, result)
+	require.GreaterOrEqual(t, time.Since(start), time.Second)
+	require.Less(t, time.Since(start), 3*time.Second)
 }
 
 func TestForwardAsChatCompletions_FilteredFastTierBillsAsStandardWhenUpstreamOmitsTier(t *testing.T) {

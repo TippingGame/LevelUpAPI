@@ -3085,7 +3085,7 @@ func TestGatewayService_SelectAccountWithLoadAwareness(t *testing.T) {
 	t.Run("最大会话限制-无稳定metadata时不使用内容hash占用会话", func(t *testing.T) {
 		repo := &mockAccountRepoForPlatform{
 			accounts: []Account{
-				{ID: 1, Platform: PlatformAnthropic, Type: AccountTypeOAuth, Priority: 1, Status: StatusActive, Schedulable: true, Concurrency: 5, Extra: map[string]any{"max_sessions": 1}},
+				{ID: 1, Platform: PlatformAnthropic, Type: AccountTypeOAuth, Priority: 1, Status: StatusActive, Schedulable: true, Concurrency: 5, ProxyID: ptr(int64(7)), Proxy: &Proxy{ID: 7, Status: StatusActive}, Extra: map[string]any{"max_sessions": 1}},
 			},
 			accountsByID: map[int64]*Account{},
 		}
@@ -3115,7 +3115,7 @@ func TestGatewayService_SelectAccountWithLoadAwareness(t *testing.T) {
 	t.Run("最大会话限制-使用metadata session id计数并复用", func(t *testing.T) {
 		repo := &mockAccountRepoForPlatform{
 			accounts: []Account{
-				{ID: 1, Platform: PlatformAnthropic, Type: AccountTypeOAuth, Priority: 1, Status: StatusActive, Schedulable: true, Concurrency: 5, Extra: map[string]any{"max_sessions": 1}},
+				{ID: 1, Platform: PlatformAnthropic, Type: AccountTypeOAuth, Priority: 1, Status: StatusActive, Schedulable: true, Concurrency: 5, ProxyID: ptr(int64(7)), Proxy: &Proxy{ID: 7, Status: StatusActive}, Extra: map[string]any{"max_sessions": 1}},
 			},
 			accountsByID: map[int64]*Account{},
 		}
@@ -3160,7 +3160,7 @@ func TestGatewayService_SelectAccountWithLoadAwareness(t *testing.T) {
 	t.Run("RPM限制-单账号触顶返回429语义错误", func(t *testing.T) {
 		repo := &mockAccountRepoForPlatform{
 			accounts: []Account{
-				{ID: 1, Platform: PlatformAnthropic, Type: AccountTypeOAuth, Priority: 1, Status: StatusActive, Schedulable: true, Concurrency: 5, Extra: map[string]any{"base_rpm": 1}},
+				{ID: 1, Platform: PlatformAnthropic, Type: AccountTypeOAuth, Priority: 1, Status: StatusActive, Schedulable: true, Concurrency: 5, ProxyID: ptr(int64(7)), Proxy: &Proxy{ID: 7, Status: StatusActive}, Extra: map[string]any{"base_rpm": 1}},
 			},
 			accountsByID: map[int64]*Account{},
 		}
@@ -3184,8 +3184,8 @@ func TestGatewayService_SelectAccountWithLoadAwareness(t *testing.T) {
 	t.Run("RPM限制-多账号跳过热账号选择冷账号", func(t *testing.T) {
 		repo := &mockAccountRepoForPlatform{
 			accounts: []Account{
-				{ID: 1, Platform: PlatformAnthropic, Type: AccountTypeOAuth, Priority: 1, Status: StatusActive, Schedulable: true, Concurrency: 5, Extra: map[string]any{"base_rpm": 1}},
-				{ID: 2, Platform: PlatformAnthropic, Type: AccountTypeOAuth, Priority: 1, Status: StatusActive, Schedulable: true, Concurrency: 5, Extra: map[string]any{"base_rpm": 1}},
+				{ID: 1, Platform: PlatformAnthropic, Type: AccountTypeOAuth, Priority: 1, Status: StatusActive, Schedulable: true, Concurrency: 5, ProxyID: ptr(int64(7)), Proxy: &Proxy{ID: 7, Status: StatusActive}, Extra: map[string]any{"base_rpm": 1}},
+				{ID: 2, Platform: PlatformAnthropic, Type: AccountTypeOAuth, Priority: 1, Status: StatusActive, Schedulable: true, Concurrency: 5, ProxyID: ptr(int64(8)), Proxy: &Proxy{ID: 8, Status: StatusActive}, Extra: map[string]any{"base_rpm": 1}},
 			},
 			accountsByID: map[int64]*Account{},
 		}

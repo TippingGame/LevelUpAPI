@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -17,6 +18,18 @@ import (
 	entsql "entgo.io/ent/dialect/sql"
 	_ "modernc.org/sqlite"
 )
+
+type apiKeyUsageLookupErrorSQL struct {
+	err error
+}
+
+func (s *apiKeyUsageLookupErrorSQL) ExecContext(context.Context, string, ...any) (sql.Result, error) {
+	return nil, s.err
+}
+
+func (s *apiKeyUsageLookupErrorSQL) QueryContext(context.Context, string, ...any) (*sql.Rows, error) {
+	return nil, s.err
+}
 
 func newAPIKeyRepoSQLite(t *testing.T) (*apiKeyRepository, *dbent.Client) {
 	t.Helper()
@@ -109,6 +122,27 @@ func TestAPIKeyRepositoryListByUserIDAttachesLastUsedIP(t *testing.T) {
 	require.Equal(t, newestIP, *byID[withLogs.ID].LastUsedIP)
 	require.Nil(t, byID[emptyOnly.ID].LastUsedIP)
 	require.Nil(t, byID[noLogs.ID].LastUsedIP)
+}
+
+func TestAPIKeyRepositoryListByUserIDKeepsKeysWhenLastUsedIPLookupFails(t *testing.T) {
+	repo, client := newAPIKeyRepoSQLite(t)
+	ctx := context.Background()
+	user := mustCreateAPIKeyRepoUser(t, ctx, client, "list-last-used-ip-fallback@test.com")
+	key := &service.APIKey{
+		UserID: user.ID,
+		Key:    "sk-list-last-used-ip-fallback",
+		Name:   "Fallback",
+		Status: service.StatusActive,
+	}
+	require.NoError(t, repo.Create(ctx, key))
+
+	repo.sql = &apiKeyUsageLookupErrorSQL{err: errors.New("usage log lookup unavailable")}
+	keys, _, err := repo.ListByUserID(ctx, user.ID, pagination.PaginationParams{Page: 1, PageSize: 10}, service.APIKeyListFilters{})
+
+	require.NoError(t, err)
+	require.Len(t, keys, 1)
+	require.Equal(t, key.ID, keys[0].ID)
+	require.Nil(t, keys[0].LastUsedIP)
 }
 
 func TestLatestUsageLogIPsQueryPostgresUsesPerKeyLateralLookup(t *testing.T) {

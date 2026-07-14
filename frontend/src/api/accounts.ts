@@ -137,8 +137,8 @@ export interface ImportCredentialContentsResponse {
 export async function importCredentialContents(
   request: ImportCredentialContentsRequest
 ): Promise<ImportCredentialContentsResponse> {
-  const timeout = request.grok_import_mode === 'web_sso'
-    ? getGrokCredentialImportTimeout(request.contents)
+  const timeout = request.grok_import_mode === 'web_sso' || request.grok_import_mode === 'refresh_token'
+    ? getGrokCredentialImportTimeout(request.contents, request.grok_import_mode)
     : undefined
   const { data } = await apiClient.post<ImportCredentialContentsResponse>(
     '/accounts/import-credentials',
@@ -148,15 +148,21 @@ export async function importCredentialContents(
   return data
 }
 
-function getGrokCredentialImportTimeout(contents: string[]): number {
+function getGrokCredentialImportTimeout(
+  contents: string[],
+  mode: 'refresh_token' | 'web_sso'
+): number {
   const itemCount = Math.max(
     1,
     contents.reduce((count, content) => {
       return count + content.split(/[\r\n,]+/).map(item => item.trim()).filter(Boolean).length
     }, 0)
   )
-  const batches = Math.ceil(itemCount / 3)
-  return batches * 90_000 + 120_000
+  if (mode === 'web_sso') {
+    const batches = Math.ceil(itemCount / 3)
+    return batches * 90_000 + 120_000
+  }
+  return itemCount * 60_000 + 60_000
 }
 
 export async function exportData(options?: {

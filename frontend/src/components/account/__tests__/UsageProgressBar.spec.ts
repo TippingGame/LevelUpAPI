@@ -88,4 +88,37 @@ describe('UsageProgressBar', () => {
     expect(wrapper.text()).toContain('A 0.00 coins')
     expect(wrapper.text()).toContain('U 0.00 coins')
   })
+
+  it('treats remaining capacity as healthy when high and critical when low', async () => {
+    const wrapper = mount(UsageProgressBar, {
+      props: {
+        label: 'req',
+        utilization: 90,
+        remainingCapacity: true,
+        color: 'indigo'
+      }
+    })
+
+    expect(wrapper.text()).toContain('90%')
+    expect(wrapper.find('.bg-green-500').exists()).toBe(true)
+    expect(wrapper.attributes()).not.toHaveProperty('remaining-capacity')
+
+    await wrapper.setProps({ utilization: 10 })
+    expect(wrapper.text()).toContain('10%')
+    expect(wrapper.find('.bg-red-500').exists()).toBe(true)
+  })
+
+  it('clamps remaining capacity to the zero-to-one-hundred range', () => {
+    const wrapper = mount(UsageProgressBar, {
+      props: {
+        label: 'tok',
+        utilization: 120,
+        remainingCapacity: true,
+        color: 'emerald'
+      }
+    })
+
+    expect(wrapper.text()).toContain('100%')
+    expect(wrapper.find('[style="width: 100%;"]').exists()).toBe(true)
+  })
 })

@@ -27,6 +27,75 @@ export interface ListAffiliateUsersParams {
   search?: string
 }
 
+export interface ListAffiliateRecordsParams {
+  page?: number
+  page_size?: number
+  search?: string
+  start_at?: string
+  end_at?: string
+  sort_by?: string
+  sort_order?: 'asc' | 'desc'
+  timezone?: string
+}
+
+export interface AffiliateInviteRecord {
+  inviter_id: number
+  inviter_email: string
+  inviter_username: string
+  invitee_id: number
+  invitee_email: string
+  invitee_username: string
+  aff_code: string
+  total_rebate: number
+  created_at: string
+}
+
+export interface AffiliateRebateRecord {
+  settlement_id: number
+  usage_log_id?: number
+  request_id: string
+  inviter_id: number
+  inviter_email: string
+  inviter_username: string
+  invitee_id: number
+  invitee_email: string
+  invitee_username: string
+  account_id: number
+  account_name: string
+  account_platform: string
+  consumer_charge: number
+  invite_share_ratio: number
+  rebate_amount: number
+  status: string
+  created_at: string
+}
+
+export interface AffiliateTransferRecord {
+  ledger_id: number
+  user_id: number
+  user_email: string
+  username: string
+  amount: number
+  balance_after?: number | null
+  available_quota_after?: number | null
+  frozen_quota_after?: number | null
+  history_quota_after?: number | null
+  snapshot_available: boolean
+  created_at: string
+}
+
+export interface AffiliateUserOverview {
+  user_id: number
+  email: string
+  username: string
+  aff_code: string
+  invite_share_percent: number
+  invited_count: number
+  rebated_invitee_count: number
+  total_rebate: number
+  current_balance: number
+}
+
 export interface UpdateAffiliateUserRequest {
   aff_code?: string
   aff_weekly_limit?: number
@@ -148,6 +217,56 @@ export async function extendInviteRewards(
   return data
 }
 
+function recordParams(params: ListAffiliateRecordsParams = {}) {
+  return {
+    page: params.page ?? 1,
+    page_size: params.page_size ?? 20,
+    search: params.search ?? '',
+    start_at: params.start_at || undefined,
+    end_at: params.end_at || undefined,
+    sort_by: params.sort_by || undefined,
+    sort_order: params.sort_order || undefined,
+    timezone: params.timezone || undefined,
+  }
+}
+
+export async function listInviteRecords(
+  params: ListAffiliateRecordsParams = {},
+): Promise<PaginatedResponse<AffiliateInviteRecord>> {
+  const { data } = await apiClient.get<PaginatedResponse<AffiliateInviteRecord>>(
+    '/admin/affiliates/invites',
+    { params: recordParams(params) },
+  )
+  return data
+}
+
+export async function listRebateRecords(
+  params: ListAffiliateRecordsParams = {},
+): Promise<PaginatedResponse<AffiliateRebateRecord>> {
+  const { data } = await apiClient.get<PaginatedResponse<AffiliateRebateRecord>>(
+    '/admin/affiliates/rebates',
+    { params: recordParams(params) },
+  )
+  return data
+}
+
+export async function listTransferRecords(
+  params: ListAffiliateRecordsParams = {},
+): Promise<PaginatedResponse<AffiliateTransferRecord>> {
+  const { data } = await apiClient.get<PaginatedResponse<AffiliateTransferRecord>>(
+    '/admin/affiliates/transfers',
+    { params: recordParams(params) },
+  )
+  return data
+}
+
+export async function getUserOverview(userId: number): Promise<AffiliateUserOverview> {
+  const { data } = await apiClient.get<AffiliateUserOverview>(
+    `/admin/affiliates/users/${userId}/overview`,
+  )
+  return data
+}
+
 export const affiliatesAPI = {
   listUsers,
   lookupUsers,
@@ -157,6 +276,10 @@ export const affiliatesAPI = {
   batchSetRate,
   bindInviter,
   extendInviteRewards,
+  listInviteRecords,
+  listRebateRecords,
+  listTransferRecords,
+  getUserOverview,
 }
 
 export default affiliatesAPI

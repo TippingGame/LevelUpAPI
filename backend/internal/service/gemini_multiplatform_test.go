@@ -410,7 +410,7 @@ func TestGeminiMessagesCompatService_SelectAccountForModelUsesPublicPriorityForS
 	ctx := context.WithValue(context.Background(), ctxkey.AuthenticatedUserID, consumerID)
 	repo := &mockAccountRepoForGemini{
 		accounts: []Account{
-			{ID: 1, Platform: PlatformGemini, Priority: 5, PrivatePriority: &privatePriority, OwnerUserID: &ownerID, ShareMode: AccountShareModePublic, ShareStatus: AccountShareStatusApproved, Status: StatusActive, Schedulable: true},
+			{ID: 1, Platform: PlatformGemini, Priority: 5, PrivatePriority: &privatePriority, OwnerUserID: &ownerID, ShareMode: AccountShareModePublic, ShareStatus: AccountShareStatusApproved, Status: StatusActive, Schedulable: true, ProxyID: ptr(int64(7)), Proxy: &Proxy{ID: 7, Status: StatusActive}},
 			{ID: 2, Platform: PlatformGemini, Priority: 1, Status: StatusActive, Schedulable: true},
 		},
 		accountsByID: map[int64]*Account{},
@@ -437,7 +437,7 @@ func TestGeminiMessagesCompatService_SelectAccountForModelUsesPrivatePriorityFor
 	ctx := context.WithValue(context.Background(), ctxkey.AuthenticatedUserID, ownerID)
 	repo := &mockAccountRepoForGemini{
 		accounts: []Account{
-			{ID: 1, Platform: PlatformGemini, Priority: 5, PrivatePriority: &privatePriority, OwnerUserID: &ownerID, ShareMode: AccountShareModePublic, ShareStatus: AccountShareStatusApproved, Status: StatusActive, Schedulable: true},
+			{ID: 1, Platform: PlatformGemini, Priority: 5, PrivatePriority: &privatePriority, OwnerUserID: &ownerID, ShareMode: AccountShareModePublic, ShareStatus: AccountShareStatusApproved, Status: StatusActive, Schedulable: true, ProxyID: ptr(int64(7)), Proxy: &Proxy{ID: 7, Status: StatusActive}},
 			{ID: 2, Platform: PlatformGemini, Priority: 2, Status: StatusActive, Schedulable: true},
 		},
 		accountsByID: map[int64]*Account{},
@@ -464,7 +464,7 @@ func TestGeminiMessagesCompatService_SelectAccountForAIStudioEndpointsUsesReques
 	ctx := context.WithValue(context.Background(), ctxkey.AuthenticatedUserID, ownerID)
 	repo := &mockAccountRepoForGemini{
 		accounts: []Account{
-			{ID: 1, Platform: PlatformGemini, Type: AccountTypeAPIKey, Credentials: map[string]any{"api_key": "key-1"}, Priority: 5, PrivatePriority: &privatePriority, OwnerUserID: &ownerID, ShareMode: AccountShareModePublic, ShareStatus: AccountShareStatusApproved, Status: StatusActive, Schedulable: true},
+			{ID: 1, Platform: PlatformGemini, Type: AccountTypeAPIKey, Credentials: map[string]any{"api_key": "key-1"}, Priority: 5, PrivatePriority: &privatePriority, OwnerUserID: &ownerID, ShareMode: AccountShareModePublic, ShareStatus: AccountShareStatusApproved, Status: StatusActive, Schedulable: true, ProxyID: ptr(int64(7)), Proxy: &Proxy{ID: 7, Status: StatusActive}},
 			{ID: 2, Platform: PlatformGemini, Type: AccountTypeAPIKey, Credentials: map[string]any{"api_key": "key-2"}, Priority: 2, Status: StatusActive, Schedulable: true},
 		},
 		accountsByID: map[int64]*Account{},

@@ -763,12 +763,16 @@ func registerChannelMonitorRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 func registerAffiliateRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 	affiliates := admin.Group("/affiliates")
 	{
+		affiliates.GET("/invites", h.Admin.Affiliate.ListInviteRecords)
+		affiliates.GET("/rebates", h.Admin.Affiliate.ListRebateRecords)
+		affiliates.GET("/transfers", h.Admin.Affiliate.ListTransferRecords)
 		affiliates.POST("/invite-rewards/extend", h.Admin.Affiliate.ExtendInviteRewards)
 
 		users := affiliates.Group("/users")
 		{
 			users.GET("", h.Admin.Affiliate.ListUsers)
 			users.GET("/lookup", h.Admin.Affiliate.LookupUsers)
+			users.GET("/:user_id/overview", h.Admin.Affiliate.GetUserOverview)
 			users.GET("/:user_id", h.Admin.Affiliate.GetUserSettings)
 			users.POST("/batch-rate", h.Admin.Affiliate.BatchSetRate)
 			users.POST("/:user_id/inviter", h.Admin.Affiliate.BindInviter)

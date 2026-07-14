@@ -403,6 +403,10 @@ export default {
     usage: '使用记录',
     redeem: '兑换',
     affiliate: '邀请返利',
+    affiliateManagement: '邀请返利管理',
+    affiliateInviteRecords: '邀请关系',
+    affiliateRebateRecords: '返利明细',
+    affiliateTransferRecords: '转余额记录',
     profile: '个人资料',
     users: '用户管理',
     groups: '分组管理',
@@ -2051,6 +2055,56 @@ export default {
       systemSettings: '系统设置',
       configureSystem: '配置系统设置',
       failedToLoad: '加载仪表盘数据失败'
+    },
+
+    affiliates: {
+      invitesTitle: '邀请关系',
+      invitesDescription: '查看邀请人、被邀请人及实际绑定时间',
+      rebatesTitle: '邀请返利明细',
+      rebatesDescription: '查看消费结算产生的邀请分成及策略快照',
+      transfersTitle: '返利转余额记录',
+      transfersDescription: '查看历史返利额度转入用户余额的审计记录',
+      records: {
+        searchPlaceholder: '搜索用户、请求、账号或编号...',
+        startAt: '开始日期',
+        endAt: '结束日期',
+        inviter: '邀请人',
+        invitee: '被邀请人',
+        affCode: '邀请码',
+        totalRebate: '累计返利',
+        invitedAt: '绑定时间',
+        request: '结算请求',
+        account: '消费账号',
+        consumerCharge: '用户消费',
+        inviteShareRatio: '邀请分成比例',
+        rebateAmount: '返利金额',
+        rebatedAt: '结算时间',
+        user: '用户',
+        transferAmount: '转入金额',
+        balanceAfter: '转入后余额',
+        availableQuotaAfter: '转入后可用返利',
+        frozenQuotaAfter: '转入后冻结返利',
+        historyQuotaAfter: '历史返利总额',
+        transferredAt: '转入时间',
+        status: {
+          applied: '已结算',
+          reversed: '已冲正',
+          frozen: '已冻结'
+        }
+      },
+      overview: {
+        title: '邀请返利概览',
+        affCode: '邀请码',
+        inviteShare: '当前邀请分成比例',
+        invitedCount: '邀请人数',
+        rebatedInviteeCount: '产生返利人数',
+        totalRebate: '累计实时返利',
+        currentBalance: '当前余额'
+      },
+      errors: {
+        USER_NOT_FOUND: '用户不存在',
+        AFFILIATE_PROFILE_NOT_FOUND: '用户尚无邀请返利资料'
+      }
     },
 
     revenue: {

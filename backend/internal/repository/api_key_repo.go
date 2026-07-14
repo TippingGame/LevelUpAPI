@@ -14,6 +14,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/group"
 	"github.com/Wei-Shaw/sub2api/ent/schema/mixins"
 	"github.com/Wei-Shaw/sub2api/ent/user"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/lib/pq"
 
@@ -376,7 +377,15 @@ func (r *apiKeyRepository) ListByUserID(ctx context.Context, userID int64, param
 		outKeys = append(outKeys, *apiKeyEntityToService(keys[i]))
 	}
 	if err := r.attachLastUsedIPs(ctx, outKeys); err != nil {
-		return nil, nil, err
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, nil, ctxErr
+		}
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return nil, nil, err
+		}
+		// Last-used IP is optional display metadata. A lagging usage-log
+		// migration or temporary analytics failure must not hide all API keys.
+		logger.LegacyPrintf("repository.api_key", "best-effort last-used IP enrichment failed: %v", err)
 	}
 
 	return outKeys, paginationResultFromTotal(int64(total), params), nil

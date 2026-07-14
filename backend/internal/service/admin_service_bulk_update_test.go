@@ -340,7 +340,7 @@ func TestAdminService_UpdateAccount_UsesObservedProPlanForGroupBinding(t *testin
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	require.NotNil(t, repo.updatedAccount)
-	require.Equal(t, AccountLevelPlus, repo.updatedAccount.AccountLevel)
+	require.Equal(t, AccountLevelPro, repo.updatedAccount.AccountLevel)
 	require.Equal(t, []int64{20}, repo.boundGroupIDs[1])
 }
 

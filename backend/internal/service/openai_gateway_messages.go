@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/apicompat"
@@ -557,6 +558,32 @@ func isOpenAICompatResponsesTerminalEvent(eventType string) bool {
 	}
 }
 
+func (s *OpenAIGatewayService) recordOpenAICompatStreamUpstreamError(c *gin.Context, account *Account, upstreamRequestID, kind, message string) {
+	if c == nil {
+		return
+	}
+	message = sanitizeUpstreamErrorMessage(message)
+	setOpsUpstreamError(c, http.StatusBadGateway, message, "")
+	event := OpsUpstreamErrorEvent{
+		Platform:           PlatformOpenAI,
+		UpstreamStatusCode: http.StatusBadGateway,
+		UpstreamRequestID:  strings.TrimSpace(upstreamRequestID),
+		Kind:               kind,
+		Message:            message,
+	}
+	if account != nil {
+		event.Platform = account.Platform
+		event.AccountID = account.ID
+		event.AccountName = account.Name
+	}
+	appendOpsUpstreamError(c, event)
+}
+
+func isOpenAICompatDoneSentinelLine(line string) bool {
+	payload, ok := extractOpenAISSEDataLine(line)
+	return ok && strings.TrimSpace(payload) == "[DONE]"
+}
+
 func copyOpenAIUsageFromResponsesUsage(usage *apicompat.ResponsesUsage) OpenAIUsage {
 	if usage == nil {
 		return OpenAIUsage{}
@@ -624,6 +651,19 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 		maxLineSize = s.cfg.Gateway.MaxLineSize
 	}
 	scanner.Buffer(make([]byte, 0, 64*1024), maxLineSize)
+	streamInterval := time.Duration(0)
+	if s.cfg != nil && s.cfg.Gateway.StreamDataIntervalTimeout > 0 {
+		streamInterval = time.Duration(s.cfg.Gateway.StreamDataIntervalTimeout) * time.Second
+	}
+	var intervalTicker *time.Ticker
+	if streamInterval > 0 {
+		intervalTicker = time.NewTicker(streamInterval)
+		defer intervalTicker.Stop()
+	}
+	var intervalCh <-chan time.Time
+	if intervalTicker != nil {
+		intervalCh = intervalTicker.C
+	}
 
 	// resultWithUsage builds the final result snapshot.
 	resultWithUsage := func() *OpenAIForwardResult {
@@ -819,6 +859,18 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 			)
 		}
 	}
+	missingTerminalErr := func() (*OpenAIForwardResult, error) {
+		result := resultWithUsage()
+		if clientDisconnected {
+			return result, errors.New("stream usage incomplete: missing terminal event")
+		}
+		message := "OpenAI messages stream ended before a terminal event"
+		if !clientOutputStarted {
+			return result, s.newOpenAIStreamFailoverError(c, account, false, requestID, nil, message)
+		}
+		s.recordOpenAICompatStreamUpstreamError(c, account, requestID, "stream_missing_terminal", message)
+		return result, errors.New("stream usage incomplete: missing terminal event")
+	}
 
 	// ── Determine keepalive interval ──
 	keepaliveInterval := time.Duration(0)
@@ -827,13 +879,19 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 	}
 
 	// ── No keepalive: fast synchronous path (no goroutine overhead) ──
-	if keepaliveInterval <= 0 {
+	if streamInterval <= 0 && keepaliveInterval <= 0 {
 		var parser openAICompatSSEFrameParser
 		for scanner.Scan() {
 			line := scanner.Text()
+			if isOpenAICompatDoneSentinelLine(line) {
+				return missingTerminalErr()
+			}
 			frame, ok := parser.AddLine(line)
-			if !ok || strings.TrimSpace(frame.Data) == "[DONE]" {
+			if !ok {
 				continue
+			}
+			if strings.TrimSpace(frame.Data) == "[DONE]" {
+				return missingTerminalErr()
 			}
 			if processFrame(frame) {
 				if terminalErr != nil {
@@ -842,14 +900,22 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 				return finalizeStream()
 			}
 		}
-		handleScanErr(scanner.Err())
-		if frame, ok := parser.Finish(); ok && strings.TrimSpace(frame.Data) != "[DONE]" && processFrame(frame) {
-			if terminalErr != nil {
-				return resultWithUsage(), terminalErr
-			}
-			return finalizeStream()
+		if err := scanner.Err(); err != nil {
+			handleScanErr(err)
+			return resultWithUsage(), fmt.Errorf("stream usage incomplete: %w", err)
 		}
-		return finalizeStream()
+		if frame, ok := parser.Finish(); ok {
+			if strings.TrimSpace(frame.Data) == "[DONE]" {
+				return missingTerminalErr()
+			}
+			if processFrame(frame) {
+				if terminalErr != nil {
+					return resultWithUsage(), terminalErr
+				}
+				return finalizeStream()
+			}
+		}
+		return missingTerminalErr()
 	}
 
 	// ── With keepalive: goroutine + channel + select ──
@@ -859,6 +925,8 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 	}
 	events := make(chan scanEvent, 16)
 	done := make(chan struct{})
+	var lastReadAt int64
+	atomic.StoreInt64(&lastReadAt, time.Now().UnixNano())
 	sendEvent := func(ev scanEvent) bool {
 		select {
 		case events <- ev:
@@ -870,6 +938,7 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 	go func() {
 		defer close(events)
 		for scanner.Scan() {
+			atomic.StoreInt64(&lastReadAt, time.Now().UnixNano())
 			if !sendEvent(scanEvent{line: scanner.Text()}) {
 				return
 			}
@@ -880,8 +949,15 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 	}()
 	defer close(done)
 
-	keepaliveTicker := time.NewTicker(keepaliveInterval)
-	defer keepaliveTicker.Stop()
+	var keepaliveTicker *time.Ticker
+	if keepaliveInterval > 0 {
+		keepaliveTicker = time.NewTicker(keepaliveInterval)
+		defer keepaliveTicker.Stop()
+	}
+	var keepaliveCh <-chan time.Time
+	if keepaliveTicker != nil {
+		keepaliveCh = keepaliveTicker.C
+	}
 	lastDataAt := time.Now()
 	var parser openAICompatSSEFrameParser
 
@@ -889,24 +965,34 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 		select {
 		case ev, ok := <-events:
 			if !ok {
-				// Upstream closed
-				if frame, ok := parser.Finish(); ok && strings.TrimSpace(frame.Data) != "[DONE]" && processFrame(frame) {
-					if terminalErr != nil {
-						return resultWithUsage(), terminalErr
+				if frame, ok := parser.Finish(); ok {
+					if strings.TrimSpace(frame.Data) == "[DONE]" {
+						return missingTerminalErr()
 					}
-					return finalizeStream()
+					if processFrame(frame) {
+						if terminalErr != nil {
+							return resultWithUsage(), terminalErr
+						}
+						return finalizeStream()
+					}
 				}
-				return finalizeStream()
+				return missingTerminalErr()
 			}
 			if ev.err != nil {
 				handleScanErr(ev.err)
-				return finalizeStream()
+				return resultWithUsage(), fmt.Errorf("stream usage incomplete: %w", ev.err)
 			}
 			lastDataAt = time.Now()
 			line := ev.line
+			if isOpenAICompatDoneSentinelLine(line) {
+				return missingTerminalErr()
+			}
 			frame, ok := parser.AddLine(line)
-			if !ok || strings.TrimSpace(frame.Data) == "[DONE]" {
+			if !ok {
 				continue
+			}
+			if strings.TrimSpace(frame.Data) == "[DONE]" {
+				return missingTerminalErr()
 			}
 			if processFrame(frame) {
 				if terminalErr != nil {
@@ -915,7 +1001,22 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 				return finalizeStream()
 			}
 
-		case <-keepaliveTicker.C:
+		case <-intervalCh:
+			lastRead := time.Unix(0, atomic.LoadInt64(&lastReadAt))
+			if time.Since(lastRead) < streamInterval {
+				continue
+			}
+			if clientDisconnected {
+				return resultWithUsage(), errors.New("stream usage incomplete after timeout")
+			}
+			logger.L().Warn("openai messages stream: data interval timeout",
+				zap.String("request_id", requestID),
+				zap.String("model", originalModel),
+				zap.Duration("interval", streamInterval),
+			)
+			return resultWithUsage(), errors.New("stream data interval timeout")
+
+		case <-keepaliveCh:
 			if clientDisconnected {
 				continue
 			}
