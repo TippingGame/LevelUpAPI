@@ -519,7 +519,7 @@ function importPersonalCredentials(contents: string[]): Promise<ImportCredential
     contents,
     platform: selectedPlatform.value,
     share_mode: selectedShareMode.value,
-    concurrency: PERSONAL_ACCOUNT_DEFAULT_CONCURRENCY,
+    concurrency: selectedPlatform.value === 'grok' ? 1 : PERSONAL_ACCOUNT_DEFAULT_CONCURRENCY,
     private_priority: normalizedPrivatePriority.value,
     group_ids: [],
     auto_pause_on_expired: PERSONAL_ACCOUNT_DEFAULT_AUTO_PAUSE_ON_EXPIRED

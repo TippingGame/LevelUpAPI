@@ -195,16 +195,23 @@ func TestGetGrokBaseURLUsesOfficialAPIForOAuth(t *testing.T) {
 			expected: xai.DefaultBaseURL,
 		},
 		{
-			name: "oauth custom host remains explicit",
+			name: "oauth untrusted custom host falls back to official API",
 			account: Account{Type: AccountTypeOAuth, Platform: PlatformGrok, Credentials: map[string]any{
 				"base_url": "https://custom.example.com/v1",
 			}},
-			expected: "https://custom.example.com/v1",
+			expected: xai.DefaultBaseURL,
 		},
 		{
 			name:     "API key remains on credit API",
 			account:  Account{Type: AccountTypeAPIKey, Platform: PlatformGrok, Credentials: map[string]any{}},
 			expected: xai.DefaultBaseURL,
+		},
+		{
+			name: "API key keeps public custom base URL",
+			account: Account{Type: AccountTypeAPIKey, Platform: PlatformGrok, Credentials: map[string]any{
+				"base_url": "https://grok.example.test/v1",
+			}},
+			expected: "https://grok.example.test/v1",
 		},
 	}
 

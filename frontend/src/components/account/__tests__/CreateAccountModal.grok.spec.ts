@@ -2,9 +2,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import CreateAccountModal from '../CreateAccountModal.vue'
 
-const { showError, createAccount } = vi.hoisted(() => ({
+const { showError, createAccount, adminCreateAccount } = vi.hoisted(() => ({
   showError: vi.fn(),
-  createAccount: vi.fn()
+  createAccount: vi.fn(),
+  adminCreateAccount: vi.fn()
 }))
 
 vi.mock('vue-i18n', async () => {
@@ -31,14 +32,14 @@ vi.mock('@/stores/auth', () => ({
 vi.mock('@/api/admin', () => ({
   adminAPI: {
     accounts: {
-      create: vi.fn(),
+      create: adminCreateAccount,
       checkMixedChannelRisk: vi.fn()
     },
     settings: {
-      getSettings: vi.fn(),
-      getWebSearchEmulationConfig: vi.fn()
+      getSettings: vi.fn().mockResolvedValue({}),
+      getWebSearchEmulationConfig: vi.fn().mockResolvedValue({ enabled: false, providers: [] })
     },
-    tlsFingerprintProfiles: { list: vi.fn() },
+    tlsFingerprintProfiles: { list: vi.fn().mockResolvedValue([]) },
     grok: {
       generateAuthUrl: vi.fn(),
       exchangeCode: vi.fn(),
@@ -60,10 +61,10 @@ const dialogStub = {
   template: '<div><slot /><slot name="footer" /></div>'
 }
 
-const mountModal = () => mount(CreateAccountModal, {
+const mountModal = (accountScope: 'admin' | 'user' = 'user') => mount(CreateAccountModal, {
   props: {
     show: true,
-    accountScope: 'user',
+    accountScope,
     proxies: [],
     groups: []
   },
@@ -86,6 +87,7 @@ const mountModal = () => mount(CreateAccountModal, {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  adminCreateAccount.mockResolvedValue({})
 })
 
 describe('CreateAccountModal Grok user accounts', () => {
@@ -113,6 +115,37 @@ describe('CreateAccountModal Grok user accounts', () => {
     await flushPromises()
 
     expect(showError).toHaveBeenCalledWith('userAccounts.importProxyRequired')
+    expect(createAccount).not.toHaveBeenCalled()
+  })
+
+  it('offers API Key only to admins and submits the official xAI default', async () => {
+    const wrapper = mountModal('admin')
+    const grokButton = wrapper.findAll('button').find((button) => button.text().trim() === 'Grok')
+    expect(grokButton).toBeDefined()
+    await grokButton!.trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).not.toContain('admin.accounts.oauth.grok.oauthOnlyHint')
+    await wrapper.get('[data-testid="grok-account-type-api-key"]').trigger('click')
+    await flushPromises()
+
+    await wrapper.get('input[data-tour="account-form-name"]').setValue('Admin Grok API Key')
+    const baseURLInput = wrapper.get('input[placeholder="https://api.x.ai/v1"]')
+    expect((baseURLInput.element as HTMLInputElement).value).toBe('https://api.x.ai/v1')
+    await wrapper.get('input[placeholder="xai-..."]').setValue('xai-test-key')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+
+    expect(adminCreateAccount).toHaveBeenCalledTimes(1)
+    expect(adminCreateAccount.mock.calls[0]?.[0]).toMatchObject({
+      name: 'Admin Grok API Key',
+      platform: 'grok',
+      type: 'apikey',
+      credentials: {
+        api_key: 'xai-test-key',
+        base_url: 'https://api.x.ai/v1'
+      }
+    })
     expect(createAccount).not.toHaveBeenCalled()
   })
 })

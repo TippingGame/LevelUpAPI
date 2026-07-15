@@ -2418,7 +2418,7 @@ func (s *OpenAIGatewayService) schedulingConfig() config.GatewaySchedulingConfig
 	}
 }
 
-// GetAccessToken gets the access token for an OpenAI account
+// GetAccessToken gets the bearer credential for an OpenAI-compatible account.
 func (s *OpenAIGatewayService) GetAccessToken(ctx context.Context, account *Account) (string, string, error) {
 	switch account.Type {
 	case AccountTypeOAuth:
@@ -2451,10 +2451,10 @@ func (s *OpenAIGatewayService) GetAccessToken(ctx context.Context, account *Acco
 		}
 		return accessToken, "oauth", nil
 	case AccountTypeAPIKey:
-		if account.Platform == PlatformGrok {
-			return "", "", errors.New("Grok API key accounts are not supported; use official OAuth")
-		}
 		apiKey := account.GetOpenAIApiKey()
+		if account.Platform == PlatformGrok {
+			apiKey = account.GetGrokAPIKey()
+		}
 		if apiKey == "" {
 			return "", "", errors.New("api_key not found in credentials")
 		}

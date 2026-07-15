@@ -82,6 +82,20 @@ type schedulerTestConcurrencyCache struct {
 	skipDefaultLoad bool
 }
 
+type grokRecordingConcurrencyCache struct {
+	ConcurrencyCache
+	maxConcurrency int
+}
+
+func (c *grokRecordingConcurrencyCache) AcquireAccountSlot(_ context.Context, _ int64, maxConcurrency int, _ string) (bool, error) {
+	c.maxConcurrency = maxConcurrency
+	return true, nil
+}
+
+func (c *grokRecordingConcurrencyCache) ReleaseAccountSlot(context.Context, int64, string) error {
+	return nil
+}
+
 func (c schedulerTestConcurrencyCache) AcquireAccountSlot(ctx context.Context, accountID int64, maxConcurrency int, requestID string) (bool, error) {
 	if c.acquireResults != nil {
 		if result, ok := c.acquireResults[accountID]; ok {
@@ -345,7 +359,7 @@ func (s *openAICandidateSnapshotCacheStub) GetSnapshot(ctx context.Context, buck
 	return s.openAISnapshotCacheStub.GetSnapshot(ctx, bucket)
 }
 
-func TestSelectGrokOAuthAccountRehydratesProxyFromRepository(t *testing.T) {
+func TestSelectGrokAccountRehydratesProxyFromRepository(t *testing.T) {
 	ownerID := int64(7001)
 	proxyID := int64(7002)
 	stale := &Account{
@@ -374,14 +388,14 @@ func TestSelectGrokOAuthAccountRehydratesProxyFromRepository(t *testing.T) {
 		cfg:                &config.Config{},
 	}
 
-	selection, _, err := svc.selectGrokOAuthAccount(context.Background(), nil, "grok-4.5", nil, "")
+	selection, _, err := svc.selectGrokAccount(context.Background(), nil, "grok-4.5", nil, "")
 	require.NoError(t, err)
 	require.NotNil(t, selection)
 	require.NotNil(t, selection.Account)
 	require.Equal(t, "socks5h://fresh.proxy.test:1080", selection.Account.Proxy.URL())
 }
 
-func TestSelectGrokOAuthAccountRejectsIncompleteAuthoritativeProxy(t *testing.T) {
+func TestSelectGrokAccountRejectsIncompleteAuthoritativeProxy(t *testing.T) {
 	ownerID := int64(7101)
 	proxyID := int64(7102)
 	stale := &Account{
@@ -410,12 +424,12 @@ func TestSelectGrokOAuthAccountRejectsIncompleteAuthoritativeProxy(t *testing.T)
 		cfg:                &config.Config{},
 	}
 
-	selection, _, err := svc.selectGrokOAuthAccount(context.Background(), nil, "grok-4.5", nil, "")
+	selection, _, err := svc.selectGrokAccount(context.Background(), nil, "grok-4.5", nil, "")
 	require.ErrorIs(t, err, ErrNoAvailableAccounts)
 	require.Nil(t, selection)
 }
 
-func TestSelectGrokOAuthAccountSkipsRuntimeBlockedAccount(t *testing.T) {
+func TestSelectGrokAccountSkipsRuntimeBlockedAccount(t *testing.T) {
 	ownerID := int64(7201)
 	proxyID := int64(7202)
 	account := &Account{
@@ -443,7 +457,60 @@ func TestSelectGrokOAuthAccountSkipsRuntimeBlockedAccount(t *testing.T) {
 	}
 	svc.BlockAccountScheduling(account, time.Now().Add(10*time.Minute), "429")
 
-	selection, _, err := svc.selectGrokOAuthAccount(context.Background(), nil, "grok-4.5", nil, "")
+	selection, _, err := svc.selectGrokAccount(context.Background(), nil, "grok-4.5", nil, "")
+
+	require.ErrorIs(t, err, ErrNoAvailableAccounts)
+	require.Nil(t, selection)
+}
+
+func TestSelectGrokAccountAllowsAdminAPIKeyWithoutProxy(t *testing.T) {
+	account := Account{
+		ID:          7301,
+		Platform:    PlatformGrok,
+		Type:        AccountTypeAPIKey,
+		Status:      StatusActive,
+		Schedulable: true,
+		Concurrency: 4,
+		Credentials: map[string]any{"api_key": "xai-test-key"},
+	}
+	cache := &grokRecordingConcurrencyCache{}
+	svc := &OpenAIGatewayService{
+		accountRepo:        schedulerTestOpenAIAccountRepo{accounts: []Account{account}},
+		concurrencyService: NewConcurrencyService(cache),
+		cfg:                &config.Config{RunMode: "simple"},
+	}
+
+	selection, _, err := svc.selectGrokAccount(context.Background(), nil, "grok-4.5", nil, "")
+
+	require.NoError(t, err)
+	require.NotNil(t, selection)
+	require.Equal(t, AccountTypeAPIKey, selection.Account.Type)
+	require.Nil(t, selection.Account.ProxyID)
+	require.Equal(t, 4, cache.maxConcurrency)
+}
+
+func TestSelectGrokAccountRejectsUserOwnedAPIKey(t *testing.T) {
+	ownerID := int64(7401)
+	proxyID := int64(7402)
+	account := Account{
+		ID:          7403,
+		Platform:    PlatformGrok,
+		Type:        AccountTypeAPIKey,
+		OwnerUserID: &ownerID,
+		ProxyID:     &proxyID,
+		Proxy:       &Proxy{ID: proxyID, Status: StatusActive, Protocol: "http", Host: "proxy.test", Port: 8080},
+		Status:      StatusActive,
+		Schedulable: true,
+		Concurrency: 1,
+		Credentials: map[string]any{"api_key": "xai-test-key"},
+	}
+	svc := &OpenAIGatewayService{
+		accountRepo:        schedulerTestOpenAIAccountRepo{accounts: []Account{account}},
+		concurrencyService: NewConcurrencyService(schedulerTestConcurrencyCache{}),
+		cfg:                &config.Config{RunMode: "simple"},
+	}
+
+	selection, _, err := svc.selectGrokAccount(context.Background(), nil, "grok-4.5", nil, "")
 
 	require.ErrorIs(t, err, ErrNoAvailableAccounts)
 	require.Nil(t, selection)

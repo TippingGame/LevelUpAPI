@@ -12,6 +12,7 @@ import (
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/xai"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
 )
@@ -251,6 +252,34 @@ func (h *AccountHandler) createAccountFromCredentialImportSource(
 		if input.Name == "" {
 			input.Name = fmt.Sprintf("OpenAI OAuth Account #%d", sequence)
 		}
+	case service.AccountCredentialImportKindGrokRefreshToken:
+		if h.grokCredentialImporter == nil {
+			return nil, fmt.Errorf("Grok OAuth service is unavailable")
+		}
+		proxyURL, err := h.resolveCredentialImportProxyURL(ctx, defaults.ProxyID)
+		if err != nil {
+			return nil, err
+		}
+		clientID := strings.TrimSpace(source.ClientID)
+		if clientID == "" {
+			clientID = xai.EffectiveClientID()
+		}
+		tokenInfo, err := h.grokCredentialImporter.RefreshToken(ctx, source.Token, proxyURL, clientID)
+		if err != nil {
+			return nil, fmt.Errorf("validate Grok refresh token: %w", err)
+		}
+		input.Platform = service.PlatformGrok
+		input.Credentials = h.grokCredentialImporter.BuildAccountCredentials(tokenInfo)
+		input.Extra = h.grokCredentialImporter.BuildAccountExtra(tokenInfo)
+		if defaults.Concurrency <= 0 {
+			input.Concurrency = 1
+		}
+		if input.Name == "" {
+			input.Name = strings.TrimSpace(tokenInfo.Email)
+		}
+		if input.Name == "" {
+			input.Name = fmt.Sprintf("Grok OAuth Account #%d", sequence)
+		}
 	case service.AccountCredentialImportKindClaudeSessionKey:
 		tokenInfo, err := h.oauthService.CookieAuth(ctx, &service.CookieAuthInput{
 			SessionKey: source.Token,
@@ -288,6 +317,7 @@ func (h *AccountHandler) createAccountFromCredentialImportSource(
 	h.adminService.ForceAntigravityPrivacy(ctx, account)
 	h.adminService.ForceOpenAIPrivacy(ctx, account)
 	h.enqueueOwnedPublicShareValidation(account)
+	h.scheduleGrokImportProbe(account)
 	return account, nil
 }
 

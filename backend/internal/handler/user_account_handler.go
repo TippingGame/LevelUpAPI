@@ -575,6 +575,8 @@ func credentialImportSourcePlatform(source service.AccountCredentialImportSource
 	switch source.Kind {
 	case service.AccountCredentialImportKindOpenAIRefreshToken:
 		return service.PlatformOpenAI
+	case service.AccountCredentialImportKindGrokRefreshToken:
+		return service.PlatformGrok
 	case service.AccountCredentialImportKindClaudeSessionKey:
 		return service.PlatformAnthropic
 	default:
@@ -1643,7 +1645,7 @@ func (h *UserAccountHandler) createOwnedGrokAccountFromTokenInfo(
 		Platform:           service.PlatformGrok,
 		AccountLevel:       service.AccountLevelUnknown,
 		Type:               service.AccountTypeOAuth,
-		Credentials:        h.grokOAuthService.BuildAccountCredentials(tokenInfo),
+		Credentials:        buildOwnedGrokAccountCredentials(h.grokOAuthService, tokenInfo),
 		Extra:              h.grokOAuthService.BuildAccountExtra(tokenInfo),
 		ShareMode:          defaults.ShareMode,
 		ProxyID:            defaults.ProxyID,
@@ -1745,6 +1747,24 @@ func (h *UserAccountHandler) createOwnedAccountFromCredentialImportSource(
 		if req.Name == "" {
 			req.Name = fmt.Sprintf("OpenAI OAuth Account #%d", sequence)
 		}
+	case service.AccountCredentialImportKindGrokRefreshToken:
+		if h.grokOAuthService == nil {
+			return nil, service.ErrServiceUnavailable
+		}
+		tokenInfo, err := h.grokOAuthService.ValidateRefreshToken(ctx, source.Token, defaults.ProxyID)
+		if err != nil {
+			return nil, infraerrors.BadRequest("OWNED_ACCOUNT_IMPORT_GROK_REFRESH_FAILED", "Grok Refresh Token 校验失败，请检查账号凭证后重试")
+		}
+		req.Platform = service.PlatformGrok
+		req.Credentials = buildOwnedGrokAccountCredentials(h.grokOAuthService, tokenInfo)
+		req.Extra = h.grokOAuthService.BuildAccountExtra(tokenInfo)
+		req.Concurrency = 1
+		if req.Name == "" {
+			req.Name = strings.TrimSpace(tokenInfo.Email)
+		}
+		if req.Name == "" {
+			req.Name = fmt.Sprintf("Grok OAuth Account #%d", sequence)
+		}
 	case service.AccountCredentialImportKindClaudeSessionKey:
 		if h.oauthService == nil {
 			return nil, service.ErrServiceUnavailable
@@ -1787,6 +1807,19 @@ func (h *UserAccountHandler) createOwnedAccountFromCredentialImportSource(
 		return nil, err
 	}
 	return h.activateOwnedPublicShareIfRequested(ctx, ownerUserID, account)
+}
+
+// User-owned Grok accounts always route through the official xAI endpoint.
+// Keep that routing decision server-side instead of persisting an importable
+// upstream URL in user-controlled credentials.
+func buildOwnedGrokAccountCredentials(oauthService *service.GrokOAuthService, tokenInfo *service.GrokTokenInfo) map[string]any {
+	if oauthService == nil {
+		return nil
+	}
+	credentials := oauthService.BuildAccountCredentials(tokenInfo)
+	delete(credentials, "base_url")
+	delete(credentials, "baseUrl")
+	return credentials
 }
 
 func (h *UserAccountHandler) Update(c *gin.Context) {

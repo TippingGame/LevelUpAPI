@@ -46,6 +46,12 @@ func NewOAuthHandler(oauthService *service.OAuthService) *OAuthHandler {
 }
 
 // AccountHandler handles admin account management
+type grokCredentialImportService interface {
+	RefreshToken(ctx context.Context, refreshToken, proxyURL, clientID string) (*service.GrokTokenInfo, error)
+	BuildAccountCredentials(tokenInfo *service.GrokTokenInfo) map[string]any
+	BuildAccountExtra(tokenInfo *service.GrokTokenInfo) map[string]any
+}
+
 type AccountHandler struct {
 	adminService              service.AdminService
 	accountService            *service.AccountService
@@ -65,6 +71,7 @@ type AccountHandler struct {
 	publicShareValidation     chan ownedPublicShareValidationJob
 	publicShareValidationOnce sync.Once
 	grokImportProber          grokUsageProber
+	grokCredentialImporter    grokCredentialImportService
 }
 
 // NewAccountHandler creates a new admin account handler

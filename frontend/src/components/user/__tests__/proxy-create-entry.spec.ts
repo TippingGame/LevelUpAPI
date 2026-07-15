@@ -330,10 +330,22 @@ describe('user proxy create entry buttons', () => {
     expect(wrapper.find('[data-testid="grok-import-method-web_sso"]').exists()).toBe(true)
 
     wrapper.findComponent(ProxySelectorStub).vm.$emit('update:modelValue', 42)
+    const importer = wrapper.findComponent(CredentialImportModalStub).props('importer') as (contents: string[]) => Promise<unknown>
+    const oauthJSON = '{"platform":"grok","type":"oauth","credentials":{"access_token":"access","refresh_token":"refresh"}}'
+    await importer([oauthJSON])
+
+    expect(importCredentialContentsMock).toHaveBeenCalledWith(expect.objectContaining({
+      contents: [oauthJSON],
+      platform: 'grok',
+      grok_import_mode: 'oauth_credentials',
+      proxy_id: 42,
+      concurrency: 1
+    }))
+
+    importCredentialContentsMock.mockClear()
     await wrapper.find('[data-testid="grok-import-method-web_sso"]').trigger('click')
     await wrapper.vm.$nextTick()
 
-    const importer = wrapper.findComponent(CredentialImportModalStub).props('importer') as (contents: string[]) => Promise<unknown>
     await importer(['sso=secret-one\nsecret-two'])
 
     expect(importCredentialContentsMock).toHaveBeenCalledWith(expect.objectContaining({

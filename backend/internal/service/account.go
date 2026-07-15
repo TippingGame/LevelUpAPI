@@ -728,6 +728,10 @@ func (a *Account) IsGrokOAuth() bool {
 	return a.IsGrok() && a.Type == AccountTypeOAuth
 }
 
+func (a *Account) IsGrokAPIKey() bool {
+	return a.IsGrok() && a.Type == AccountTypeAPIKey
+}
+
 func (a *Account) IsOpenAICompatible() bool {
 	return a != nil && (a.Platform == PlatformOpenAI || a.Platform == PlatformGrok)
 }
@@ -1832,6 +1836,12 @@ func (a *Account) GetGrokBaseURL() string {
 	if a.IsGrokOAuth() && (isOfficialGrokAPIBaseURL(baseURL) || isOfficialGrokCLIBaseURL(baseURL)) {
 		return xai.DefaultBaseURL
 	}
+	if a.IsGrokOAuth() {
+		if _, err := xai.ValidateTrustedBaseURL(baseURL); err == nil {
+			return baseURL
+		}
+		return xai.DefaultBaseURL
+	}
 	if baseURL != "" {
 		return baseURL
 	}
@@ -1880,6 +1890,13 @@ func (a *Account) GetGrokRefreshToken() string {
 		return ""
 	}
 	return a.GetCredential("refresh_token")
+}
+
+func (a *Account) GetGrokAPIKey() string {
+	if !a.IsGrokAPIKey() {
+		return ""
+	}
+	return a.GetCredential("api_key")
 }
 
 func (a *Account) GetOpenAIIDToken() string {

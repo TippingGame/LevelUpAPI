@@ -139,6 +139,49 @@ func TestBuildGrokResponsesRequestUsesOfficialBearerEndpoint(t *testing.T) {
 	require.True(t, strings.Contains(req.Header.Get("Accept"), "text/event-stream"))
 }
 
+func TestForwardGrokResponsesAPIKeyUsesPublicCustomEndpoint(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	body := []byte(`{"model":"grok","input":"hi","stream":true}`)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(body))
+
+	account := &Account{
+		ID:          57,
+		Name:        "grok-api-key",
+		Platform:    PlatformGrok,
+		Type:        AccountTypeAPIKey,
+		Concurrency: 3,
+		Credentials: map[string]any{
+			"api_key":  "xai-test-key",
+			"base_url": "https://grok.example.test/v1",
+		},
+	}
+	upstreamBody := strings.Join([]string{
+		`data: {"type":"response.output_text.delta","sequence_number":0,"delta":"ok"}`,
+		"",
+		`data: {"type":"response.completed","sequence_number":1,"response":{"id":"resp_grok_api_key","model":"grok-4.5","usage":{"input_tokens":2,"output_tokens":1}}}`,
+		"",
+	}, "\n")
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body:       io.NopCloser(strings.NewReader(upstreamBody)),
+	}}
+	svc := &OpenAIGatewayService{httpUpstream: upstream}
+
+	result, err := svc.forwardGrokResponses(context.Background(), c, account, body, "grok", true, time.Now())
+
+	require.NoError(t, err)
+	require.Equal(t, "https://grok.example.test/v1/responses", upstream.lastReq.URL.String())
+	require.Equal(t, "Bearer xai-test-key", upstream.lastReq.Header.Get("Authorization"))
+	require.Equal(t, 3, upstream.lastConcurrency)
+	require.Equal(t, "grok-4.5", gjson.GetBytes(upstream.lastBody, "model").String())
+	require.Equal(t, "resp_grok_api_key", result.ResponseID)
+	require.Equal(t, 2, result.Usage.InputTokens)
+	require.Equal(t, 1, result.Usage.OutputTokens)
+}
+
 func TestExtractGrokReasoningEffort(t *testing.T) {
 	effort := extractOpenAIReasoningEffortFromBody([]byte(`{"model":"grok-4.3","reasoning_effort":"high"}`), "grok-4.3")
 	require.NotNil(t, effort)
@@ -411,8 +454,8 @@ func TestHandleGrokAccountUpstreamErrorAppliesCooldown(t *testing.T) {
 		wantReason string
 		cooldown   time.Duration
 	}{
-		{name: "unauthorized", status: http.StatusUnauthorized, wantReason: "grok oauth token unauthorized", cooldown: 10 * time.Minute},
-		{name: "forbidden", status: http.StatusForbidden, wantReason: "grok entitlement or subscription tier denied", cooldown: 30 * time.Minute},
+		{name: "unauthorized", status: http.StatusUnauthorized, wantReason: "grok credentials unauthorized", cooldown: 10 * time.Minute},
+		{name: "forbidden", status: http.StatusForbidden, wantReason: "grok access or entitlement denied", cooldown: 30 * time.Minute},
 		{name: "server error", status: http.StatusBadGateway, wantReason: "grok upstream temporary error", cooldown: 2 * time.Minute},
 	}
 

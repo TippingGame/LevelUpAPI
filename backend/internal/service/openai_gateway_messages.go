@@ -337,7 +337,7 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 		// Non-failover error: return Anthropic-formatted error to client
 		return s.handleAnthropicErrorResponse(resp, c, account, originalModel)
 	}
-	if account.Platform == PlatformGrok && account.Type == AccountTypeOAuth {
+	if account.Platform == PlatformGrok {
 		s.updateGrokUsageSnapshot(ctx, account, xai.ParseQuotaHeaders(resp.Header, resp.StatusCode))
 	}
 

@@ -767,10 +767,10 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 
 func (s *AccountTestService) testGrokAccountConnection(c *gin.Context, account *Account, modelID string) error {
 	ctx := c.Request.Context()
-	if account == nil || !account.IsGrokOAuth() {
-		return s.sendErrorAndEnd(c, "Only Grok OAuth accounts are supported")
+	if account == nil || !account.IsGrok() {
+		return s.sendErrorAndEnd(c, "Invalid Grok account")
 	}
-	if s.grokTokenProvider == nil || s.httpUpstream == nil {
+	if s.httpUpstream == nil {
 		return s.sendErrorAndEnd(c, "Grok test service is not configured")
 	}
 	testModelID := strings.TrimSpace(modelID)
@@ -778,9 +778,24 @@ func (s *AccountTestService) testGrokAccountConnection(c *gin.Context, account *
 		testModelID = grokDefaultResponsesModel
 	}
 	testModelID = account.GetMappedModel(testModelID)
-	token, err := s.grokTokenProvider.GetAccessToken(ctx, account)
-	if err != nil {
-		return s.sendErrorAndEnd(c, "Failed to get Grok access token: "+err.Error())
+	var token string
+	switch account.Type {
+	case AccountTypeOAuth:
+		if s.grokTokenProvider == nil {
+			return s.sendErrorAndEnd(c, "Grok token provider is not configured")
+		}
+		var err error
+		token, err = s.grokTokenProvider.GetAccessToken(ctx, account)
+		if err != nil {
+			return s.sendErrorAndEnd(c, "Failed to get Grok access token: "+err.Error())
+		}
+	case AccountTypeAPIKey:
+		token = strings.TrimSpace(account.GetGrokAPIKey())
+		if token == "" {
+			return s.sendErrorAndEnd(c, "Grok API key is missing")
+		}
+	default:
+		return s.sendErrorAndEnd(c, fmt.Sprintf("Unsupported Grok account type: %s", account.Type))
 	}
 	apiURL, err := xai.BuildResponsesURL(account.GetGrokBaseURL())
 	if err != nil {
@@ -808,7 +823,7 @@ func (s *AccountTestService) testGrokAccountConnection(c *gin.Context, account *
 	if account.Proxy != nil {
 		proxyURL = account.Proxy.URL()
 	}
-	resp, err := s.httpUpstream.Do(req, proxyURL, account.ID, 1)
+	resp, err := s.httpUpstream.Do(req, proxyURL, account.ID, account.Concurrency)
 	if err != nil {
 		return s.sendErrorAndEnd(c, "Grok Responses API request failed: "+err.Error())
 	}

@@ -35,6 +35,7 @@ type AccountCredentialImportKind string
 const (
 	AccountCredentialImportKindOAuthCredentials   AccountCredentialImportKind = "oauth_credentials"
 	AccountCredentialImportKindOpenAIRefreshToken AccountCredentialImportKind = "openai_refresh_token"
+	AccountCredentialImportKindGrokRefreshToken   AccountCredentialImportKind = "grok_refresh_token"
 	AccountCredentialImportKindClaudeSessionKey   AccountCredentialImportKind = "claude_session_key"
 )
 
@@ -260,6 +261,11 @@ func accountCredentialImportSourceFromMap(item map[string]any) (AccountCredentia
 		return source, err
 	}
 
+	var err error
+	item, err = sanitizeGrokOAuthCredentialImportItem(item)
+	if err != nil {
+		return AccountCredentialImportSource{}, err
+	}
 	if field, found := findDisallowedCredentialImportField(item); found {
 		return AccountCredentialImportSource{}, fmt.Errorf("disallowed credential field: %s", field)
 	}
@@ -304,14 +310,14 @@ func accountCredentialImportSourceFromMap(item map[string]any) (AccountCredentia
 				Extra:       extra,
 			}, nil
 		}
-		if refreshToken := importStringField(credentials, "refresh_token", "refreshToken"); refreshToken != "" && platform == PlatformOpenAI {
-			return AccountCredentialImportSource{
-				Kind:     AccountCredentialImportKindOpenAIRefreshToken,
-				Name:     name,
-				Notes:    notes,
-				Token:    refreshToken,
-				ClientID: importStringField(credentials, "client_id", "clientId"),
-			}, nil
+		if refreshToken := importStringField(credentials, "refresh_token", "refreshToken"); refreshToken != "" {
+			return accountCredentialImportRefreshTokenSource(
+				platform,
+				refreshToken,
+				name,
+				notes,
+				importStringField(credentials, "client_id", "clientId"),
+			)
 		}
 		return AccountCredentialImportSource{}, fmt.Errorf("OAuth credentials must include access_token")
 	}
@@ -319,13 +325,13 @@ func accountCredentialImportSourceFromMap(item map[string]any) (AccountCredentia
 	if tokens := importMapField(item, "tokens", "token"); len(tokens) > 0 {
 		tokenName := credentialImportFirstNonEmptyString(name, importStringField(tokens, "email", "email_address"))
 		if refreshToken := importStringField(tokens, "refresh_token", "refreshToken"); refreshToken != "" && importStringField(tokens, "access_token", "accessToken") == "" {
-			return AccountCredentialImportSource{
-				Kind:     AccountCredentialImportKindOpenAIRefreshToken,
-				Name:     tokenName,
-				Notes:    notes,
-				Token:    refreshToken,
-				ClientID: importStringField(tokens, "client_id", "clientId"),
-			}, nil
+			return accountCredentialImportRefreshTokenSource(
+				platform,
+				refreshToken,
+				tokenName,
+				notes,
+				importStringField(tokens, "client_id", "clientId"),
+			)
 		}
 		if accessToken := importStringField(tokens, "access_token", "accessToken"); accessToken != "" {
 			tokens["access_token"] = accessToken
@@ -347,16 +353,13 @@ func accountCredentialImportSourceFromMap(item map[string]any) (AccountCredentia
 	}
 
 	if refreshToken := importStringField(item, "refresh_token", "refreshToken"); refreshToken != "" {
-		if platform != "" && platform != PlatformOpenAI {
-			return AccountCredentialImportSource{}, fmt.Errorf("refresh-token credential import currently supports OpenAI only; use OAuth JSON for this platform")
-		}
-		return AccountCredentialImportSource{
-			Kind:     AccountCredentialImportKindOpenAIRefreshToken,
-			Name:     name,
-			Notes:    notes,
-			Token:    refreshToken,
-			ClientID: importStringField(item, "client_id", "clientId"),
-		}, nil
+		return accountCredentialImportRefreshTokenSource(
+			platform,
+			refreshToken,
+			name,
+			notes,
+			importStringField(item, "client_id", "clientId"),
+		)
 	}
 
 	if accessToken := importStringField(item, "access_token", "accessToken"); accessToken != "" {
@@ -382,6 +385,77 @@ func accountCredentialImportSourceFromMap(item map[string]any) (AccountCredentia
 		return accountCredentialImportSourceFromString(value, name, notes)
 	}
 	return AccountCredentialImportSource{}, fmt.Errorf("unsupported credential import item")
+}
+
+func accountCredentialImportRefreshTokenSource(
+	platform string,
+	refreshToken string,
+	name string,
+	notes *string,
+	clientID string,
+) (AccountCredentialImportSource, error) {
+	kind := AccountCredentialImportKindOpenAIRefreshToken
+	normalizedPlatform := PlatformOpenAI
+	switch platform {
+	case "", PlatformOpenAI:
+	case PlatformGrok:
+		kind = AccountCredentialImportKindGrokRefreshToken
+		normalizedPlatform = PlatformGrok
+	default:
+		return AccountCredentialImportSource{}, fmt.Errorf("refresh-token credential import supports OpenAI and Grok only; use OAuth JSON for this platform")
+	}
+	return AccountCredentialImportSource{
+		Kind:     kind,
+		Name:     name,
+		Notes:    notes,
+		Platform: normalizedPlatform,
+		Token:    refreshToken,
+		ClientID: clientID,
+	}, nil
+}
+
+// sanitizeGrokOAuthCredentialImportItem accepts the official xAI base URL that
+// Sub2API exports with Grok OAuth credentials, but never persists an imported
+// endpoint. API-key and arbitrary-upstream fields remain blocked by the common
+// credential safety checks below.
+func sanitizeGrokOAuthCredentialImportItem(item map[string]any) (map[string]any, error) {
+	if normalizeCredentialImportPlatform(importStringField(item, "platform", "provider", "service")) != PlatformGrok {
+		return item, nil
+	}
+
+	sanitized := copyImportMap(item)
+	if err := removeOfficialGrokOAuthImportBaseURL(sanitized); err != nil {
+		return nil, err
+	}
+	for key := range sanitized {
+		if normalizeCredentialImportKey(key) != "credentials" {
+			continue
+		}
+		credentials, ok := sanitized[key].(map[string]any)
+		if !ok {
+			break
+		}
+		credentials = copyImportMap(credentials)
+		if err := removeOfficialGrokOAuthImportBaseURL(credentials); err != nil {
+			return nil, err
+		}
+		sanitized[key] = credentials
+		break
+	}
+	return sanitized, nil
+}
+
+func removeOfficialGrokOAuthImportBaseURL(values map[string]any) error {
+	baseURL := importStringField(values, "base_url", "baseUrl")
+	if baseURL == "" {
+		return nil
+	}
+	if !isOfficialGrokAPIBaseURL(baseURL) && !isOfficialGrokCLIBaseURL(baseURL) {
+		return fmt.Errorf("disallowed credential field: base_url")
+	}
+	removeImportMapField(values, "base_url")
+	removeImportMapField(values, "baseUrl")
+	return nil
 }
 
 func accountCredentialImportSourceFromCodexManagerExport(item map[string]any) (AccountCredentialImportSource, bool, error) {

@@ -184,6 +184,7 @@ func ProvideAccountHandler(
 	tokenCacheInvalidator service.TokenCacheInvalidator,
 	accountBatchTaskService *service.AccountBatchTaskService,
 	grokQuotaService *service.GrokQuotaService,
+	grokOAuthService *service.GrokOAuthService,
 ) *AccountHandler {
 	handler := NewAccountHandler(
 		adminService,
@@ -203,5 +204,6 @@ func ProvideAccountHandler(
 		accountBatchTaskService,
 	)
 	handler.grokImportProber = grokQuotaService
+	handler.grokCredentialImporter = grokOAuthService
 	return handler
 }

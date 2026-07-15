@@ -2,6 +2,7 @@ package admin
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -11,6 +12,34 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
+
+type stubGrokCredentialImporter struct {
+	refreshToken string
+	proxyURL     string
+	clientID     string
+}
+
+func (s *stubGrokCredentialImporter) RefreshToken(_ context.Context, refreshToken, proxyURL, clientID string) (*service.GrokTokenInfo, error) {
+	s.refreshToken = refreshToken
+	s.proxyURL = proxyURL
+	s.clientID = clientID
+	return &service.GrokTokenInfo{
+		AccessToken:  "grok-access-token",
+		RefreshToken: refreshToken,
+		Email:        "grok@example.com",
+	}, nil
+}
+
+func (s *stubGrokCredentialImporter) BuildAccountCredentials(tokenInfo *service.GrokTokenInfo) map[string]any {
+	return map[string]any{
+		"access_token":  tokenInfo.AccessToken,
+		"refresh_token": tokenInfo.RefreshToken,
+	}
+}
+
+func (s *stubGrokCredentialImporter) BuildAccountExtra(tokenInfo *service.GrokTokenInfo) map[string]any {
+	return map[string]any{"email": tokenInfo.Email}
+}
 
 type dataResponse struct {
 	Code int         `json:"code"`
@@ -47,6 +76,10 @@ type dataAccount struct {
 }
 
 func setupAccountDataRouter() (*gin.Engine, *stubAdminService) {
+	return setupAccountDataRouterWithGrokImporter(nil)
+}
+
+func setupAccountDataRouterWithGrokImporter(importer grokCredentialImportService) (*gin.Engine, *stubAdminService) {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	adminSvc := newStubAdminService()
@@ -67,6 +100,7 @@ func setupAccountDataRouter() (*gin.Engine, *stubAdminService) {
 		nil,
 		nil,
 	)
+	h.grokCredentialImporter = importer
 
 	router.GET("/api/v1/admin/accounts/data", h.ExportData)
 	router.POST("/api/v1/admin/accounts/data", h.ImportData)
@@ -395,4 +429,34 @@ func TestImportCredentialsAddsDefaultOpenAIModelMapping(t *testing.T) {
 	mapping, ok := adminSvc.createdAccounts[0].Credentials["model_mapping"].(map[string]any)
 	require.True(t, ok)
 	require.Equal(t, "gpt-5.4-2026-03-05", mapping["gpt-5.4-2026-03-05"])
+}
+
+func TestImportCredentialsExchangesGrokRefreshTokenJSON(t *testing.T) {
+	importer := &stubGrokCredentialImporter{}
+	router, adminSvc := setupAccountDataRouterWithGrokImporter(importer)
+	payload := map[string]any{
+		"contents": []string{
+			`{"platform":"grok","refresh_token":"grok-refresh-token"}`,
+		},
+		"skip_default_group_bind": true,
+	}
+	body, _ := json.Marshal(payload)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/accounts/import-credentials", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, "grok-refresh-token", importer.refreshToken)
+	require.Empty(t, importer.proxyURL)
+	require.NotEmpty(t, importer.clientID)
+	require.Len(t, adminSvc.createdAccounts, 1)
+	created := adminSvc.createdAccounts[0]
+	require.Equal(t, service.PlatformGrok, created.Platform)
+	require.Equal(t, service.AccountTypeOAuth, created.Type)
+	require.Equal(t, "grok@example.com", created.Name)
+	require.Equal(t, 1, created.Concurrency)
+	require.Equal(t, "grok-access-token", created.Credentials["access_token"])
+	require.Equal(t, "grok-refresh-token", created.Credentials["refresh_token"])
 }

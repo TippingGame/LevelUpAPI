@@ -18,8 +18,9 @@ import (
 
 type grokImportAdminService struct {
 	*stubAdminService
-	mu     sync.Mutex
-	nextID int64
+	mu        sync.Mutex
+	nextID    int64
+	lastInput *service.CreateAccountInput
 }
 
 func newGrokImportAdminService() *grokImportAdminService {
@@ -33,6 +34,8 @@ func (s *grokImportAdminService) CreateAccount(_ context.Context, input *service
 	s.mu.Lock()
 	s.nextID++
 	id := s.nextID
+	clonedInput := *input
+	s.lastInput = &clonedInput
 	s.mu.Unlock()
 	return &service.Account{
 		ID:          id,
@@ -69,4 +72,32 @@ func TestAccountCreateWithoutAutomaticGrokProbeServiceStillSucceeds(t *testing.T
 	router.ServeHTTP(recorder, request)
 
 	require.Equal(t, http.StatusOK, recorder.Code)
+}
+
+func TestAccountCreateAllowsAdminGrokAPIKey(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	adminSvc := newGrokImportAdminService()
+	handler := NewAccountHandler(
+		adminSvc,
+		nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil,
+	)
+
+	router := gin.New()
+	router.POST("/api/v1/admin/accounts", handler.Create)
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/api/v1/admin/accounts",
+		strings.NewReader(`{"name":"grok-api-key","platform":"grok","type":"apikey","credentials":{"api_key":"xai-test-key","base_url":"https://api.x.ai/v1"},"concurrency":4}`),
+	)
+	request.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	require.NotNil(t, adminSvc.lastInput)
+	require.Equal(t, service.PlatformGrok, adminSvc.lastInput.Platform)
+	require.Equal(t, service.AccountTypeAPIKey, adminSvc.lastInput.Type)
+	require.Equal(t, "xai-test-key", adminSvc.lastInput.Credentials["api_key"])
+	require.Equal(t, "https://api.x.ai/v1", adminSvc.lastInput.Credentials["base_url"])
+	require.Equal(t, 4, adminSvc.lastInput.Concurrency)
 }

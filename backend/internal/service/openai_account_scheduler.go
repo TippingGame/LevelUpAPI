@@ -1393,12 +1393,12 @@ func (s *OpenAIGatewayService) SelectAccountWithSchedulerForCapability(
 	platform ...string,
 ) (*AccountSelectionResult, OpenAIAccountScheduleDecision, error) {
 	if len(platform) > 0 && strings.EqualFold(strings.TrimSpace(platform[0]), PlatformGrok) {
-		return s.selectGrokOAuthAccount(ctx, groupID, requestedModel, excludedIDs, requiredCapability)
+		return s.selectGrokAccount(ctx, groupID, requestedModel, excludedIDs, requiredCapability)
 	}
 	return s.selectAccountWithScheduler(ctx, groupID, previousResponseID, sessionHash, requestedModel, excludedIDs, requiredTransport, requiredCapability, "", requireCompact)
 }
 
-func (s *OpenAIGatewayService) selectGrokOAuthAccount(
+func (s *OpenAIGatewayService) selectGrokAccount(
 	ctx context.Context,
 	groupID *int64,
 	requestedModel string,
@@ -1430,7 +1430,7 @@ func (s *OpenAIGatewayService) selectGrokOAuthAccount(
 			continue
 		}
 		if s.isOpenAIAccountRuntimeBlocked(account) ||
-			!account.IsGrokOAuth() ||
+			!isSchedulableGrokAccountType(account) ||
 			!account.IsSchedulable() ||
 			!account.HasCompleteRequiredProxyForScheduling() {
 			continue
@@ -1449,7 +1449,7 @@ func (s *OpenAIGatewayService) selectGrokOAuthAccount(
 	})
 	for i := range eligible {
 		account := &eligible[i]
-		result, acquireErr := s.tryAcquireAccountSlot(ctx, account.ID, 1)
+		result, acquireErr := s.tryAcquireAccountSlot(ctx, account.ID, account.Concurrency)
 		if acquireErr != nil || result == nil || !result.Acquired {
 			continue
 		}
@@ -1487,7 +1487,7 @@ func (s *OpenAIGatewayService) rehydrateSelectedGrokAccount(
 	}
 	if !IsAccountVisibleToRequestUser(ctx, hydrated) ||
 		s.isOpenAIAccountRuntimeBlocked(hydrated) ||
-		!hydrated.IsGrokOAuth() ||
+		!isSchedulableGrokAccountType(hydrated) ||
 		!hydrated.IsSchedulable() ||
 		!hydrated.HasCompleteRequiredProxyForScheduling() ||
 		!s.isOpenAIAccountInRequestGroup(hydrated, groupID) {
@@ -1503,6 +1503,18 @@ func (s *OpenAIGatewayService) rehydrateSelectedGrokAccount(
 		_ = s.schedulerSnapshot.UpdateAccountInCache(context.WithoutCancel(ctx), hydrated)
 	}
 	return hydrated, nil
+}
+
+func isSchedulableGrokAccountType(account *Account) bool {
+	if account == nil {
+		return false
+	}
+	if account.IsGrokOAuth() {
+		return true
+	}
+	// User-owned Grok accounts remain OAuth-only. API-key accounts are
+	// schedulable only in the administrator-managed shared pool.
+	return account.IsGrokAPIKey() && account.OwnerUserID == nil
 }
 
 func (s *OpenAIGatewayService) SelectAccountWithSchedulerForImages(
