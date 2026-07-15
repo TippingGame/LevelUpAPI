@@ -2,10 +2,29 @@ package service
 
 import (
 	"encoding/json"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 )
+
+func TestLoadPricingData_Gemini31PreviewIncludesLongContextTiers(t *testing.T) {
+	svc := &PricingService{}
+	path := filepath.Join("..", "..", "resources", "model-pricing", "model_prices_and_context_window.json")
+	require.NoError(t, svc.loadPricingData(path))
+
+	pricing := svc.GetModelPricing("gemini-3.1-pro-preview")
+	require.NotNil(t, pricing)
+	require.Equal(t, 200000, pricing.LongContextInputTokenThreshold)
+	require.InDelta(t, 2e-6, pricing.InputCostPerToken, 1e-12)
+	require.InDelta(t, 4e-6, pricing.LongContextInputCostPerToken, 1e-12)
+	require.InDelta(t, 12e-6, pricing.OutputCostPerToken, 1e-12)
+	require.InDelta(t, 18e-6, pricing.LongContextOutputCostPerToken, 1e-12)
+	require.InDelta(t, 0.2e-6, pricing.CacheReadInputTokenCost, 1e-12)
+	require.InDelta(t, 0.4e-6, pricing.LongContextCacheReadInputTokenCost, 1e-12)
+	require.InDelta(t, 3.6e-6, pricing.InputCostPerTokenPriority, 1e-12)
+	require.InDelta(t, 7.2e-6, pricing.LongContextInputCostPerTokenPriority, 1e-12)
+}
 
 func TestParsePricingData_ParsesPriorityAndServiceTierFields(t *testing.T) {
 	svc := &PricingService{}
@@ -326,4 +345,63 @@ func TestParsePricingData_PreservesServiceTierPriorityFields(t *testing.T) {
 	require.InDelta(t, 0.00000625, pricing.CacheReadInputTokenCost, 1e-12)
 	require.InDelta(t, 0.0000125, pricing.CacheReadInputTokenCostPriority, 1e-12)
 	require.True(t, pricing.SupportsServiceTier)
+}
+
+func TestParsePricingData_DerivesGeminiLongContextTierFromLiteLLMFields(t *testing.T) {
+	svc := &PricingService{}
+	pricingData, err := svc.parsePricingData([]byte(`{
+		"gemini-3.1-pro-preview": {
+			"input_cost_per_token": 0.000002,
+			"input_cost_per_token_above_200k_tokens": 0.000004,
+			"input_cost_per_token_priority": 0.0000036,
+			"input_cost_per_token_above_200k_tokens_priority": 0.0000072,
+			"output_cost_per_token": 0.000012,
+			"output_cost_per_token_above_200k_tokens": 0.000018,
+			"output_cost_per_token_priority": 0.0000216,
+			"output_cost_per_token_above_200k_tokens_priority": 0.0000324,
+			"cache_read_input_token_cost": 0.0000002,
+			"cache_read_input_token_cost_above_200k_tokens": 0.0000004,
+			"cache_read_input_token_cost_priority": 0.00000036,
+			"cache_read_input_token_cost_above_200k_tokens_priority": 0.00000072,
+			"cache_creation_input_token_cost_above_200k_tokens": 0.00000025,
+			"litellm_provider": "vertex_ai-language-models",
+			"mode": "chat"
+		}
+	}`))
+	require.NoError(t, err)
+
+	pricing := pricingData["gemini-3.1-pro-preview"]
+	require.NotNil(t, pricing)
+	require.Equal(t, 200000, pricing.LongContextInputTokenThreshold)
+	require.InDelta(t, 2.0, pricing.LongContextInputCostMultiplier, 1e-12)
+	require.InDelta(t, 1.5, pricing.LongContextOutputCostMultiplier, 1e-12)
+	require.InDelta(t, 4e-6, pricing.LongContextInputCostPerToken, 1e-12)
+	require.InDelta(t, 7.2e-6, pricing.LongContextInputCostPerTokenPriority, 1e-12)
+	require.InDelta(t, 18e-6, pricing.LongContextOutputCostPerToken, 1e-12)
+	require.InDelta(t, 32.4e-6, pricing.LongContextOutputCostPerTokenPriority, 1e-12)
+	require.InDelta(t, 0.4e-6, pricing.LongContextCacheReadInputTokenCost, 1e-12)
+	require.InDelta(t, 0.72e-6, pricing.LongContextCacheReadInputTokenCostPriority, 1e-12)
+	require.InDelta(t, 0.25e-6, pricing.LongContextCacheCreationInputTokenCost, 1e-12)
+}
+
+func TestParsePricingData_SelectsExplicitLongContextThreshold(t *testing.T) {
+	svc := &PricingService{}
+	pricingData, err := svc.parsePricingData([]byte(`{
+		"gpt-test": {
+			"input_cost_per_token": 1,
+			"output_cost_per_token": 1,
+			"long_context_input_token_threshold": 272000,
+			"input_cost_per_token_above_200k_tokens": 2,
+			"input_cost_per_token_above_272k_tokens": 3,
+			"output_cost_per_token_above_200k_tokens": 2,
+			"output_cost_per_token_above_272k_tokens": 4
+		}
+	}`))
+	require.NoError(t, err)
+
+	pricing := pricingData["gpt-test"]
+	require.NotNil(t, pricing)
+	require.Equal(t, 272000, pricing.LongContextInputTokenThreshold)
+	require.InDelta(t, 3.0, pricing.LongContextInputCostPerToken, 1e-12)
+	require.InDelta(t, 4.0, pricing.LongContextOutputCostPerToken, 1e-12)
 }

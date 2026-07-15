@@ -231,7 +231,7 @@ const openAITestModeOptions = computed(() => [
   { value: 'compact', label: t('admin.accounts.openai.testModeCompact') }
 ])
 const defaultOpenAITestModel = 'gpt-5.5'
-const prioritizedGeminiModels = ['gemini-3.5-flash', 'gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-3-flash-preview', 'gemini-3-pro-preview', 'gemini-2.0-flash']
+const prioritizedGeminiModels = ['gemini-3.1-pro-preview', 'gemini-3.5-flash', 'gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-3-flash-preview', 'gemini-3-pro-preview', 'gemini-2.0-flash']
 const isImageGenerationModel = (modelId: string) => {
   const modelID = modelId.toLowerCase()
   const generationSegment = 'image'
@@ -309,8 +309,15 @@ const getUserDefaultTestModels = (account: Account): ClaudeModel[] => {
     case 'openai':
       return [{ id: defaultOpenAITestModel, type: 'model', display_name: defaultOpenAITestModel, created_at: '' }]
     case 'gemini':
+      return [
+        { id: 'gemini-2.5-flash', type: 'model', display_name: 'gemini-2.5-flash', created_at: '' },
+        { id: 'gemini-3.1-pro-preview', type: 'model', display_name: 'gemini-3.1-pro-preview', created_at: '' }
+      ]
     case 'antigravity':
-      return [{ id: 'gemini-2.5-flash', type: 'model', display_name: 'gemini-2.5-flash', created_at: '' }]
+      return [
+        { id: 'gemini-2.5-flash', type: 'model', display_name: 'gemini-2.5-flash', created_at: '' },
+        { id: 'gemini-3.1-pro-preview', type: 'model', display_name: 'gemini-3.1-pro-preview', created_at: '' }
+      ]
     case 'grok':
       return [{ id: 'grok-4.3', type: 'model', display_name: 'Grok 4.3', created_at: '' }]
     default:

@@ -11,7 +11,10 @@ func TestDefaultModels_ContainsFallbackCatalogModels(t *testing.T) {
 		byName[model.Name] = model
 	}
 
-	required := []string{"models/gemini-3.1-pro-preview-customtools"}
+	required := []string{
+		"models/gemini-3.1-pro-preview",
+		"models/gemini-3.1-pro-preview-customtools",
+	}
 	for _, name := range required {
 		model, ok := byName[name]
 		if !ok {

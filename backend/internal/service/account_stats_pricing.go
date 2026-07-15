@@ -61,33 +61,11 @@ func resolveAccountStatsCost(
 
 // tryModelFilePricing 使用模型定价文件（LiteLLM/fallback）中的标准价格计算费用。
 func tryModelFilePricing(billingService *BillingService, model string, tokens UsageTokens) *float64 {
-	pricing, err := billingService.GetModelPricing(model)
-	if err != nil || pricing == nil {
+	breakdown, err := billingService.CalculateCost(model, tokens, 1)
+	if err != nil || breakdown == nil || breakdown.TotalCost <= 0 {
 		return nil
 	}
-	imageInputPrice := pricing.ImageInputPricePerToken
-	if imageInputPrice == 0 {
-		imageInputPrice = pricing.InputPricePerToken
-	}
-	imageCacheReadPrice := pricing.ImageCacheReadPricePerToken
-	if imageCacheReadPrice == 0 {
-		imageCacheReadPrice = pricing.CacheReadPricePerToken
-	}
-	imageCacheReadTokens := clampImageCacheReadTokens(tokens)
-	textOutputTokens := tokens.OutputTokens - tokens.ImageOutputTokens
-	if textOutputTokens < 0 {
-		textOutputTokens = 0
-	}
-	cost := float64(tokens.InputTokens+tokens.TextInputTokens)*pricing.InputPricePerToken +
-		float64(tokens.ImageInputTokens)*imageInputPrice +
-		float64(textOutputTokens)*pricing.OutputPricePerToken +
-		billingService.computeCacheCreationCost(pricing, tokens) +
-		float64(tokens.CacheReadTokens-imageCacheReadTokens)*pricing.CacheReadPricePerToken +
-		float64(imageCacheReadTokens)*imageCacheReadPrice +
-		float64(tokens.ImageOutputTokens)*pricing.ImageOutputPricePerToken
-	if cost <= 0 {
-		return nil
-	}
+	cost := breakdown.TotalCost
 	return &cost
 }
 

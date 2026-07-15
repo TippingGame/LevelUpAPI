@@ -209,4 +209,32 @@ describe('AccountTestModal', () => {
       mode: 'default'
     })
   })
+
+  it('exposes Gemini 3.1 Pro Preview in user-scoped test models', async () => {
+    const account = { ...buildAccount(), platform: 'gemini' }
+    const wrapper = mount(AccountTestModal, {
+      props: {
+        show: false,
+        account: account as any,
+        accountScope: 'user'
+      },
+      global: {
+        stubs: {
+          BaseDialog: BaseDialogStub,
+          Select: SelectStub,
+          TextArea: TextAreaStub,
+          Icon: true
+        }
+      }
+    })
+
+    await wrapper.setProps({ show: true })
+    await flushPromises()
+
+    expect((wrapper.vm as any).availableModels.map((model: { id: string }) => model.id)).toEqual([
+      'gemini-3.1-pro-preview',
+      'gemini-2.5-flash'
+    ])
+    expect(getAvailableModelsMock).not.toHaveBeenCalled()
+  })
 })

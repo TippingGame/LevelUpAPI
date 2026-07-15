@@ -110,6 +110,23 @@ describe('useModelWhitelist', () => {
     expect(getModelsByPlatform('gemini')).toContain('gemini-3.5-flash')
   })
 
+  it('gemini 模型列表包含 Gemini 3.1 Pro Preview 及 customtools 变体', () => {
+    expect(getModelsByPlatform('gemini')).toEqual(expect.arrayContaining([
+      'gemini-3.1-pro-preview',
+      'gemini-3.1-pro-preview-customtools'
+    ]))
+    expect(getPresetMappingsByPlatform('gemini')).toContainEqual(
+      expect.objectContaining({ from: 'gemini-3.1-pro-preview', to: 'gemini-3.1-pro-preview' })
+    )
+  })
+
+  it('antigravity 模型列表包含 Gemini 3.1 Pro 别名', () => {
+    expect(getModelsByPlatform('antigravity')).toEqual(expect.arrayContaining([
+      'gemini-3.1-pro',
+      'gemini-3.1-pro-preview'
+    ]))
+  })
+
   it('antigravity 模型列表会把新的 Gemini 图片模型排在前面', () => {
     const models = getModelsByPlatform('antigravity')
 

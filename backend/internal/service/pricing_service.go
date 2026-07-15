@@ -9,6 +9,8 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -22,6 +24,7 @@ import (
 var (
 	openAIModelDatePattern        = regexp.MustCompile(`-\d{8}$`)
 	openAIModelBasePattern        = regexp.MustCompile(`^(gpt-\d+(?:\.\d+)?)(?:-|$)`)
+	longContextPriceFieldPattern  = regexp.MustCompile(`^(input_cost_per_token|output_cost_per_token|cache_creation_input_token_cost|cache_read_input_token_cost)_above_(\d+)([kmKM]?)_tokens(_priority)?$`)
 	defaultOpenAITextPricingModel = "gpt-5.1-codex"
 	openAIGPT56SolFallbackPricing = &LiteLLMModelPricing{
 		InputCostPerToken:                   5e-06,
@@ -139,14 +142,27 @@ type LiteLLMModelPricing struct {
 	LongContextInputTokenThreshold      int     `json:"long_context_input_token_threshold,omitempty"`
 	LongContextInputCostMultiplier      float64 `json:"long_context_input_cost_multiplier,omitempty"`
 	LongContextOutputCostMultiplier     float64 `json:"long_context_output_cost_multiplier,omitempty"`
-	SupportsServiceTier                 bool    `json:"supports_service_tier"`
-	LiteLLMProvider                     string  `json:"litellm_provider"`
-	Mode                                string  `json:"mode"`
-	SupportsPromptCaching               bool    `json:"supports_prompt_caching"`
-	InputCostPerImageToken              float64 `json:"input_cost_per_image_token"`        // 图片输入 token 价格
-	CacheReadInputImageTokenCost        float64 `json:"cache_read_input_image_token_cost"` // 图片缓存读取 token 价格
-	OutputCostPerImage                  float64 `json:"output_cost_per_image"`             // 图片生成模型每张图片价格
-	OutputCostPerImageToken             float64 `json:"output_cost_per_image_token"`       // 图片输出 token 价格
+	// LiteLLM publishes long-context prices as fields such as
+	// input_cost_per_token_above_200k_tokens. Keep the exact tier prices in
+	// addition to the legacy multiplier fields so models whose long tier is
+	// not a simple input multiplier (or whose base cache-write price is 0)
+	// can still be billed correctly.
+	LongContextInputCostPerToken                   float64 `json:"long_context_input_cost_per_token,omitempty"`
+	LongContextInputCostPerTokenPriority           float64 `json:"long_context_input_cost_per_token_priority,omitempty"`
+	LongContextOutputCostPerToken                  float64 `json:"long_context_output_cost_per_token,omitempty"`
+	LongContextOutputCostPerTokenPriority          float64 `json:"long_context_output_cost_per_token_priority,omitempty"`
+	LongContextCacheCreationInputTokenCost         float64 `json:"long_context_cache_creation_input_token_cost,omitempty"`
+	LongContextCacheCreationInputTokenCostPriority float64 `json:"long_context_cache_creation_input_token_cost_priority,omitempty"`
+	LongContextCacheReadInputTokenCost             float64 `json:"long_context_cache_read_input_token_cost,omitempty"`
+	LongContextCacheReadInputTokenCostPriority     float64 `json:"long_context_cache_read_input_token_cost_priority,omitempty"`
+	SupportsServiceTier                            bool    `json:"supports_service_tier"`
+	LiteLLMProvider                                string  `json:"litellm_provider"`
+	Mode                                           string  `json:"mode"`
+	SupportsPromptCaching                          bool    `json:"supports_prompt_caching"`
+	InputCostPerImageToken                         float64 `json:"input_cost_per_image_token"`        // 图片输入 token 价格
+	CacheReadInputImageTokenCost                   float64 `json:"cache_read_input_image_token_cost"` // 图片缓存读取 token 价格
+	OutputCostPerImage                             float64 `json:"output_cost_per_image"`             // 图片生成模型每张图片价格
+	OutputCostPerImageToken                        float64 `json:"output_cost_per_image_token"`       // 图片输出 token 价格
 }
 
 // PricingRemoteClient 远程价格数据获取接口
@@ -451,6 +467,7 @@ func (s *PricingService) parsePricingData(body []byte) (map[string]*LiteLLMModel
 			skipped++
 			continue
 		}
+		longTier := parseLongContextTier(rawEntry, entry.LongContextInputTokenThreshold)
 
 		// 只保留有有效价格的条目
 		if entry.InputCostPerToken == nil &&
@@ -458,7 +475,8 @@ func (s *PricingService) parsePricingData(body []byte) (map[string]*LiteLLMModel
 			entry.InputCostPerImageToken == nil &&
 			entry.CacheReadInputImageTokenCost == nil &&
 			entry.OutputCostPerImage == nil &&
-			entry.OutputCostPerImageToken == nil {
+			entry.OutputCostPerImageToken == nil &&
+			!longTier.hasAny {
 			continue
 		}
 
@@ -505,6 +523,29 @@ func (s *PricingService) parsePricingData(body []byte) (map[string]*LiteLLMModel
 		if entry.LongContextOutputCostMultiplier != nil {
 			pricing.LongContextOutputCostMultiplier = *entry.LongContextOutputCostMultiplier
 		}
+		if longTier.hasAny {
+			if pricing.LongContextInputTokenThreshold <= 0 {
+				pricing.LongContextInputTokenThreshold = longTier.threshold
+			}
+			pricing.LongContextInputCostPerToken = longTier.input
+			pricing.LongContextInputCostPerTokenPriority = longTier.inputPriority
+			pricing.LongContextOutputCostPerToken = longTier.output
+			pricing.LongContextOutputCostPerTokenPriority = longTier.outputPriority
+			pricing.LongContextCacheCreationInputTokenCost = longTier.cacheCreation
+			pricing.LongContextCacheCreationInputTokenCostPriority = longTier.cacheCreationPriority
+			pricing.LongContextCacheReadInputTokenCost = longTier.cacheRead
+			pricing.LongContextCacheReadInputTokenCostPriority = longTier.cacheReadPriority
+
+			// Older pricing files do not carry the internal multiplier fields.
+			// Derive them from the published tier prices so callers using the
+			// existing ModelPricing API still get the correct whole-session tier.
+			if pricing.LongContextInputCostMultiplier <= 0 && pricing.InputCostPerToken > 0 && longTier.input > 0 {
+				pricing.LongContextInputCostMultiplier = longTier.input / pricing.InputCostPerToken
+			}
+			if pricing.LongContextOutputCostMultiplier <= 0 && pricing.OutputCostPerToken > 0 && longTier.output > 0 {
+				pricing.LongContextOutputCostMultiplier = longTier.output / pricing.OutputCostPerToken
+			}
+		}
 		if entry.InputCostPerImageToken != nil {
 			pricing.InputCostPerImageToken = *entry.InputCostPerImageToken
 		}
@@ -530,6 +571,99 @@ func (s *PricingService) parsePricingData(body []byte) (map[string]*LiteLLMModel
 	}
 
 	return result, nil
+}
+
+// longContextTierPrices is the normalized representation of LiteLLM fields
+// such as input_cost_per_token_above_200k_tokens. LiteLLM has used both 200k
+// and 272k thresholds over time, so the parser intentionally accepts either
+// (and future numeric k/M thresholds) instead of hard-coding Gemini only.
+type longContextTierPrices struct {
+	threshold                            int
+	hasAny                               bool
+	input, inputPriority                 float64
+	output, outputPriority               float64
+	cacheCreation, cacheCreationPriority float64
+	cacheRead, cacheReadPriority         float64
+}
+
+func parseLongContextTier(rawEntry json.RawMessage, explicitThreshold *int) longContextTierPrices {
+	var rawFields map[string]json.RawMessage
+	if err := json.Unmarshal(rawEntry, &rawFields); err != nil {
+		return longContextTierPrices{}
+	}
+
+	byThreshold := make(map[int]longContextTierPrices)
+	for field, rawValue := range rawFields {
+		matches := longContextPriceFieldPattern.FindStringSubmatch(strings.ToLower(strings.TrimSpace(field)))
+		if len(matches) == 0 {
+			continue
+		}
+		n, err := strconv.Atoi(matches[2])
+		if err != nil || n <= 0 {
+			continue
+		}
+		switch strings.ToLower(matches[3]) {
+		case "k":
+			n *= 1000
+		case "m":
+			n *= 1000000
+		}
+		var value float64
+		if err := json.Unmarshal(rawValue, &value); err != nil {
+			continue
+		}
+		tier := byThreshold[n]
+		tier.threshold = n
+		tier.hasAny = true
+		priority := matches[4] != ""
+		switch matches[1] {
+		case "input_cost_per_token":
+			if priority {
+				tier.inputPriority = value
+			} else {
+				tier.input = value
+			}
+		case "output_cost_per_token":
+			if priority {
+				tier.outputPriority = value
+			} else {
+				tier.output = value
+			}
+		case "cache_creation_input_token_cost":
+			if priority {
+				tier.cacheCreationPriority = value
+			} else {
+				tier.cacheCreation = value
+			}
+		case "cache_read_input_token_cost":
+			if priority {
+				tier.cacheReadPriority = value
+			} else {
+				tier.cacheRead = value
+			}
+		}
+		byThreshold[n] = tier
+	}
+
+	if len(byThreshold) == 0 {
+		return longContextTierPrices{}
+	}
+
+	threshold := 0
+	if explicitThreshold != nil && *explicitThreshold > 0 {
+		if _, ok := byThreshold[*explicitThreshold]; ok {
+			threshold = *explicitThreshold
+		}
+	}
+	if threshold == 0 {
+		thresholds := make([]int, 0, len(byThreshold))
+		for candidate := range byThreshold {
+			thresholds = append(thresholds, candidate)
+		}
+		sort.Ints(thresholds)
+		threshold = thresholds[0]
+	}
+	return byThreshold[threshold]
 }
 
 // loadPricingData 从本地文件加载价格数据

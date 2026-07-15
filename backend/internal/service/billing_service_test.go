@@ -379,6 +379,65 @@ func TestGetFallbackPricing_FamilyMatching(t *testing.T) {
 		})
 	}
 }
+
+func TestCalculateCost_Gemini31ProLongContextUsesPublishedWholeSessionTier(t *testing.T) {
+	svc := newTestBillingService()
+	tokens := UsageTokens{
+		InputTokens:         190000,
+		OutputTokens:        1000,
+		CacheReadTokens:     11000,
+		CacheCreationTokens: 100,
+	}
+
+	cost, err := svc.CalculateCost("gemini-3.1-pro-preview", tokens, 1)
+	require.NoError(t, err)
+	require.InDelta(t, float64(tokens.InputTokens)*4e-6, cost.InputCost, 1e-10)
+	require.InDelta(t, float64(tokens.OutputTokens)*18e-6, cost.OutputCost, 1e-10)
+	require.InDelta(t, float64(tokens.CacheReadTokens)*0.4e-6, cost.CacheReadCost, 1e-10)
+	require.InDelta(t, float64(tokens.CacheCreationTokens)*0.25e-6, cost.CacheCreationCost, 1e-10)
+	require.InDelta(t, cost.InputCost+cost.OutputCost+cost.CacheReadCost+cost.CacheCreationCost, cost.TotalCost, 1e-10)
+}
+
+func TestCalculateCost_Gemini31ProAtThresholdKeepsBaseTier(t *testing.T) {
+	svc := newTestBillingService()
+	cost, err := svc.CalculateCost("gemini-3.1-pro-preview", UsageTokens{
+		InputTokens:     200000,
+		OutputTokens:    1000,
+		CacheReadTokens: 0,
+	}, 1)
+	require.NoError(t, err)
+	require.InDelta(t, 200000*2e-6, cost.InputCost, 1e-10)
+	require.InDelta(t, 1000*12e-6, cost.OutputCost, 1e-10)
+}
+
+func TestCalculateCostWithLongContext_GeminiUsesModelTierInsteadOfExcessOnly(t *testing.T) {
+	svc := newTestBillingService()
+	cost, err := svc.CalculateCostWithLongContext("gemini-3.1-pro-preview", UsageTokens{
+		InputTokens:  210000,
+		OutputTokens: 1000,
+	}, 1, 200000, 2)
+	require.NoError(t, err)
+	require.InDelta(t, 210000*4e-6, cost.InputCost, 1e-10)
+	require.InDelta(t, 1000*18e-6, cost.OutputCost, 1e-10)
+}
+
+func TestFallbackPricing_GeminiPreviewAliasesKeepLongContextTier(t *testing.T) {
+	svc := newTestBillingService()
+	for _, model := range []string{
+		"gemini-3-pro-preview",
+		"gemini-3.1-pro-preview",
+		"gemini-3.1-pro-preview-customtools",
+	} {
+		t.Run(model, func(t *testing.T) {
+			pricing := svc.getFallbackPricing(model)
+			require.NotNil(t, pricing)
+			require.Equal(t, 200000, pricing.LongContextInputThreshold)
+			require.InDelta(t, 4e-6, pricing.LongContextInputPricePerToken, 1e-12)
+			require.InDelta(t, 18e-6, pricing.LongContextOutputPricePerToken, 1e-12)
+		})
+	}
+}
+
 func TestCalculateCostWithLongContext_BelowThreshold(t *testing.T) {
 	svc := newTestBillingService()
 

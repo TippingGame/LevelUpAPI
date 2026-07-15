@@ -152,17 +152,25 @@ func (r *ModelPricingResolver) applyTokenOverrides(chPricing *ChannelModelPricin
 	if chPricing.InputPrice != nil {
 		resolved.BasePricing.InputPricePerToken = *chPricing.InputPrice
 		resolved.BasePricing.InputPricePerTokenPriority = 0
+		resolved.BasePricing.LongContextInputPricePerToken = 0
+		resolved.BasePricing.LongContextInputPricePerTokenPriority = 0
 	}
 	if chPricing.OutputPrice != nil {
 		resolved.BasePricing.OutputPricePerToken = *chPricing.OutputPrice
 		resolved.BasePricing.OutputPricePerTokenPriority = 0
+		resolved.BasePricing.LongContextOutputPricePerToken = 0
+		resolved.BasePricing.LongContextOutputPricePerTokenPriority = 0
 	}
 	if chPricing.CacheWritePrice != nil {
 		applyCacheWritePriceOverride(resolved.BasePricing, *chPricing.CacheWritePrice, resolved.BasePricing)
+		resolved.BasePricing.LongContextCacheCreationPricePerToken = 0
+		resolved.BasePricing.LongContextCacheCreationPricePerTokenPriority = 0
 	}
 	if chPricing.CacheReadPrice != nil {
 		resolved.BasePricing.CacheReadPricePerToken = *chPricing.CacheReadPrice
 		resolved.BasePricing.CacheReadPricePerTokenPriority = 0
+		resolved.BasePricing.LongContextCacheReadPricePerToken = 0
+		resolved.BasePricing.LongContextCacheReadPricePerTokenPriority = 0
 	}
 	if chPricing.ImageInputPrice != nil {
 		resolved.BasePricing.ImageInputPricePerToken = *chPricing.ImageInputPrice

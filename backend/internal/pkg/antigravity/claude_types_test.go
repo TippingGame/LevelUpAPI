@@ -20,6 +20,8 @@ func TestDefaultModels_ContainsNewAndLegacyImageModels(t *testing.T) {
 		"gemini-3.1-flash-image",
 		"gemini-3.1-flash-image-preview",
 		"gemini-3-pro-image",
+		"gemini-3.1-pro",
+		"gemini-3.1-pro-preview",
 	}
 
 	for _, id := range requiredIDs {

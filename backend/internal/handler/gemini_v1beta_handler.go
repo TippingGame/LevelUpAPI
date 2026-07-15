@@ -617,22 +617,24 @@ geminiRouteLoop:
 			inboundEndpoint := GetInboundEndpoint(c)
 			upstreamEndpoint := GetUpstreamEndpoint(c, account.Platform)
 			h.submitUsageRecordTask(c.Request.Context(), func(ctx context.Context) {
-				if err := h.gatewayService.RecordUsageWithLongContext(ctx, &service.RecordUsageLongContextInput{
-					Result:                result,
-					APIKey:                currentAPIKey,
-					User:                  currentAPIKey.User,
-					Account:               account,
-					Subscription:          currentSubscription,
-					InboundEndpoint:       inboundEndpoint,
-					UpstreamEndpoint:      upstreamEndpoint,
-					UserAgent:             userAgent,
-					IPAddress:             clientIP,
-					RequestPayloadHash:    requestPayloadHash,
-					LongContextThreshold:  200000, // Gemini 200K 阈值
-					LongContextMultiplier: 2.0,    // 超出部分双倍计费
-					ForceCacheBilling:     fs.ForceCacheBilling,
-					APIKeyService:         h.apiKeyService,
-					ChannelUsageFields:    channelMapping.ToUsageFields(reqModel, result.UpstreamModel),
+				// Gemini long-context pricing is resolved from the model pricing
+				// catalog. Keep this path on the common usage recorder so the
+				// published 200K input/output/cache tiers are applied consistently
+				// with compatible endpoints and account statistics.
+				if err := h.gatewayService.RecordUsage(ctx, &service.RecordUsageInput{
+					Result:             result,
+					APIKey:             currentAPIKey,
+					User:               currentAPIKey.User,
+					Account:            account,
+					Subscription:       currentSubscription,
+					InboundEndpoint:    inboundEndpoint,
+					UpstreamEndpoint:   upstreamEndpoint,
+					UserAgent:          userAgent,
+					IPAddress:          clientIP,
+					RequestPayloadHash: requestPayloadHash,
+					ForceCacheBilling:  fs.ForceCacheBilling,
+					APIKeyService:      h.apiKeyService,
+					ChannelUsageFields: channelMapping.ToUsageFields(reqModel, result.UpstreamModel),
 				}); err != nil {
 					logger.L().With(
 						zap.String("component", "handler.gemini_v1beta.models"),

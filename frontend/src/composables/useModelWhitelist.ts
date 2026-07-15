@@ -50,6 +50,8 @@ const geminiModels = [
   'gemini-3-flash',
   'gemini-3-flash-preview',
   'gemini-3-pro-preview',
+  'gemini-3.1-pro-preview',
+  'gemini-3.1-pro-preview-customtools',
   'gemini-3.1-flash-image-preview',
   'gemini-embedding-2',
   'gemini-embedding-2-preview'
@@ -80,6 +82,8 @@ const antigravityModels = [
   'gemini-3-pro-high',
   'gemini-3-pro-low',
   // Gemini 3.1 系列
+  'gemini-3.1-pro',
+  'gemini-3.1-pro-preview',
   'gemini-pro-agent',
   'gemini-3.1-pro-high',
   'gemini-3.1-pro-low',
@@ -291,6 +295,8 @@ const geminiPresetMappings = [
   { label: '2.5 Image', from: 'gemini-2.5-flash-image', to: 'gemini-2.5-flash-image', color: 'bg-sky-100 text-sky-700 hover:bg-sky-200 dark:bg-sky-900/30 dark:text-sky-400' },
   { label: '2.5 Pro', from: 'gemini-2.5-pro', to: 'gemini-2.5-pro', color: 'bg-purple-100 text-purple-700 hover:bg-purple-200 dark:bg-purple-900/30 dark:text-purple-400' },
   { label: '3.5 Flash', from: 'gemini-3.5-flash', to: 'gemini-3.5-flash', color: 'bg-violet-100 text-violet-700 hover:bg-violet-200 dark:bg-violet-900/30 dark:text-violet-400' },
+  { label: '3.1-Pro-Preview', from: 'gemini-3.1-pro-preview', to: 'gemini-3.1-pro-preview', color: 'bg-amber-100 text-amber-700 hover:bg-amber-200 dark:bg-amber-900/30 dark:text-amber-400' },
+  { label: '3.1-Pro-Customtools', from: 'gemini-3.1-pro-preview-customtools', to: 'gemini-3.1-pro-preview-customtools', color: 'bg-orange-100 text-orange-700 hover:bg-orange-200 dark:bg-orange-900/30 dark:text-orange-400' },
   { label: '3.1 Image', from: 'gemini-3.1-flash-image', to: 'gemini-3.1-flash-image', color: 'bg-sky-100 text-sky-700 hover:bg-sky-200 dark:bg-sky-900/30 dark:text-sky-400' }
 ]
 
@@ -308,6 +314,7 @@ const antigravityPresetMappings = [
   { label: 'Opus4.5→4.6', from: 'claude-opus-4-5-20251101', to: 'claude-opus-4-6-thinking', color: 'bg-violet-100 text-violet-700 hover:bg-violet-200 dark:bg-violet-900/30 dark:text-violet-400' },
   // Gemini 3→3.1 映射
   { label: '3-Pro-Preview→Agent', from: 'gemini-3-pro-preview', to: 'gemini-pro-agent', color: 'bg-amber-100 text-amber-700 hover:bg-amber-200 dark:bg-amber-900/30 dark:text-amber-400' },
+  { label: '3.1-Pro-Preview→Agent', from: 'gemini-3.1-pro-preview', to: 'gemini-pro-agent', color: 'bg-amber-100 text-amber-700 hover:bg-amber-200 dark:bg-amber-900/30 dark:text-amber-400' },
   { label: '3-Pro-High→Agent', from: 'gemini-3-pro-high', to: 'gemini-pro-agent', color: 'bg-orange-100 text-orange-700 hover:bg-orange-200 dark:bg-orange-900/30 dark:text-orange-400' },
   { label: '3-Pro-Low→3.1-Pro-Low', from: 'gemini-3-pro-low', to: 'gemini-3.1-pro-low', color: 'bg-yellow-100 text-yellow-700 hover:bg-yellow-200 dark:bg-yellow-900/30 dark:text-yellow-400' },
   { label: '3.1-Pro-High→Agent', from: 'gemini-3.1-pro-high', to: 'gemini-pro-agent', color: 'bg-orange-100 text-orange-700 hover:bg-orange-200 dark:bg-orange-900/30 dark:text-orange-400' },
