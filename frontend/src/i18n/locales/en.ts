@@ -4329,6 +4329,37 @@ export default {
       apiKeyRequired: 'API Key *',
       apiKeyPlaceholder: 'sk-ant-api03-...',
       apiKeyHint: 'Your Claude Console API Key',
+      anthropicApiKeyAuthScheme: 'API Key authentication protocol',
+      anthropicApiKeyAuthSchemeXApiKey: 'x-api-key (Anthropic native)',
+      anthropicApiKeyAuthSchemeBearer: 'Authorization: Bearer (Anthropic-compatible upstream)',
+      anthropicApiKeyAuthSchemeHint: 'Use Bearer only when the upstream follows the Anthropic-compatible Bearer protocol.',
+      headerOverride: {
+        title: 'Request header overrides',
+        hint: 'Admin-only compatibility escape hatch for API Key accounts and Grok OAuth. Authentication, host, and session-isolation headers remain protected.',
+        info: 'Values are sent to the selected upstream after built-in headers are set.',
+        addRow: 'Add header',
+        namePlaceholder: 'Header name',
+        valuePlaceholder: 'Header value',
+        emptyValueHint: 'Empty values are ignored. Authorization, x-api-key, Cookie, Host, Content-Type, and session headers cannot be overridden.',
+        importJson: 'Import JSON',
+        copyJson: 'Copy JSON',
+        importJsonApply: 'Apply',
+        importJsonCancel: 'Cancel',
+        importJsonHint: 'Paste a flat JSON object whose values are strings, numbers, or booleans.',
+        importJsonInvalid: 'Invalid header JSON',
+        invalidName: 'Header name is invalid',
+        blockedName: 'This header is protected and cannot be overridden',
+        duplicateName: 'Duplicate header names are not allowed',
+        invalidValue: 'Header value is invalid or too long',
+        tooManyEntries: 'Too many header overrides'
+      },
+      grokCustomBaseUrl: {
+        title: 'Custom Grok forwarding URL',
+        hint: 'Only changes the forwarding endpoint. OAuth authorization and token refresh always remain on official xAI endpoints.',
+        placeholder: 'https://relay.example.com/v1',
+        required: 'Please enter a custom Grok forwarding URL',
+        invalid: 'The custom Grok forwarding URL must be an http(s) URL'
+      },
       // OpenAI specific hints
       openai: {
         baseUrlHint: 'Leave default for official OpenAI API',

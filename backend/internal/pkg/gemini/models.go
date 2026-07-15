@@ -2,7 +2,10 @@
 // It is used when upstream model listing is unavailable (e.g. OAuth token missing AI Studio scopes).
 package gemini
 
-import "strings"
+import (
+	"encoding/json"
+	"strings"
+)
 
 type Model struct {
 	Name                       string   `json:"name"`
@@ -49,6 +52,64 @@ func HasFallbackModel(model string) bool {
 
 func FallbackModelsList() ModelsListResponse {
 	return ModelsListResponse{Models: DefaultModels()}
+}
+
+// MergeFallbackModelsListJSON keeps upstream model metadata intact while
+// ensuring models supported locally are visible to clients. Google's model
+// catalog can lag behind a newly available model even when the credential can
+// already invoke it, so blindly proxying a successful but stale list hides
+// supported models from SDK and UI selectors.
+func MergeFallbackModelsListJSON(body []byte) ([]byte, bool) {
+	var payload struct {
+		Models []json.RawMessage `json:"models"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil || payload.Models == nil {
+		return body, false
+	}
+
+	existing := make(map[string]struct{}, len(payload.Models))
+	for _, rawModel := range payload.Models {
+		var model struct {
+			Name string `json:"name"`
+		}
+		if err := json.Unmarshal(rawModel, &model); err == nil {
+			existing[strings.TrimSpace(model.Name)] = struct{}{}
+		}
+	}
+
+	changed := false
+	for _, fallback := range DefaultModels() {
+		if _, ok := existing[fallback.Name]; ok {
+			continue
+		}
+		rawModel, err := json.Marshal(fallback)
+		if err != nil {
+			return body, false
+		}
+		payload.Models = append(payload.Models, rawModel)
+		existing[fallback.Name] = struct{}{}
+		changed = true
+	}
+	if !changed {
+		return body, false
+	}
+
+	// Preserve top-level fields such as nextPageToken while replacing only the
+	// models array.
+	var root map[string]json.RawMessage
+	if err := json.Unmarshal(body, &root); err != nil {
+		return body, false
+	}
+	modelsJSON, err := json.Marshal(payload.Models)
+	if err != nil {
+		return body, false
+	}
+	root["models"] = modelsJSON
+	merged, err := json.Marshal(root)
+	if err != nil {
+		return body, false
+	}
+	return merged, true
 }
 
 func FallbackModel(model string) Model {

@@ -75,6 +75,14 @@ type Account struct {
 	modelMappingCacheRawPtr         uintptr
 	modelMappingCacheRawLen         int
 	modelMappingCacheRawSig         uint64
+
+	// header_overrides 热路径缓存（非持久化字段）
+	headerOverrideCache               map[string]string
+	headerOverrideCacheReady          bool
+	headerOverrideCacheCredentialsPtr uintptr
+	headerOverrideCacheRawPtr         uintptr
+	headerOverrideCacheRawLen         int
+	headerOverrideCacheRawSig         uint64
 }
 
 type OpenAIEndpointCapability string
@@ -1832,18 +1840,15 @@ func (a *Account) GetGrokBaseURL() string {
 		return ""
 	}
 	baseURL := strings.TrimSpace(a.GetCredential("base_url"))
-	// LevelUpAPI 1.1.219 briefly persisted the Grok CLI subscription proxy as
-	// the OAuth base URL. sub2api's supported HTTP forwarding path uses the
-	// official xAI API endpoint, so normalize those legacy values on read while
-	// the database migration rewrites them permanently.
-	if a.IsGrokOAuth() && (isOfficialGrokAPIBaseURL(baseURL) || isOfficialGrokCLIBaseURL(baseURL)) {
-		return xai.DefaultBaseURL
-	}
+	// The stored base_url only controls forwarding/probing. OAuth authorization
+	// and refresh continue to use the official xAI issuer in GrokOAuthService.
+	// Empty and official-host values are the normal subscription default; a
+	// non-official host is an explicit, operator-controlled forwarding relay.
 	if a.IsGrokOAuth() {
-		if _, err := xai.ValidateTrustedBaseURL(baseURL); err == nil {
-			return baseURL
+		if baseURL == "" || xai.IsOfficialBaseURL(baseURL) {
+			return xai.DefaultCLIBaseURL
 		}
-		return xai.DefaultBaseURL
+		return baseURL
 	}
 	if baseURL != "" {
 		return baseURL

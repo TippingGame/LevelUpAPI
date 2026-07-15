@@ -94,6 +94,21 @@ func BuildBillingURL(formatCredits bool) string {
 	return base + BillingMonthlyPath
 }
 
+// BuildBillingURLWithValidator builds a billing endpoint from the account's
+// resolved forwarding base URL. The caller supplies the same outbound URL
+// policy used by normal Grok forwarding so a probe cannot bypass SSRF or
+// allowlist checks and send an OAuth token to a rejected host.
+func BuildBillingURLWithValidator(baseURL string, formatCredits bool, validator BaseURLValidator) (string, error) {
+	validatedBaseURL, err := validatedBaseURLWithValidator(baseURL, validator)
+	if err != nil {
+		return "", fmt.Errorf("invalid base url: %w", err)
+	}
+	if formatCredits {
+		return validatedBaseURL + BillingWeeklyPath, nil
+	}
+	return validatedBaseURL + BillingMonthlyPath, nil
+}
+
 // ApplyCLIBillingHeaders sets Authorization + CLI identity headers for billing GETs.
 func ApplyCLIBillingHeaders(req *http.Request, accessToken string) {
 	if req == nil {

@@ -109,8 +109,12 @@ func (s *OpenAIGatewayService) forwardAsRawChatCompletions(
 	if userAgent := strings.TrimSpace(account.GetOpenAIUserAgent()); userAgent != "" {
 		upstreamReq.Header.Set("user-agent", userAgent)
 	} else if account.Platform == PlatformGrok {
-		upstreamReq.Header.Set("user-agent", "sub2api-grok/1.0")
+		upstreamReq.Header.Set("user-agent", grokUpstreamUserAgent)
+		if account.IsGrokOAuth() {
+			applyGrokCLIHeaders(upstreamReq.Header)
+		}
 	}
+	account.ApplyHeaderOverrides(upstreamReq.Header)
 
 	proxyURL := ""
 	if account.Proxy != nil {
@@ -168,7 +172,7 @@ func (s *OpenAIGatewayService) forwardAsRawChatCompletions(
 
 func (s *OpenAIGatewayService) rawChatCompletionsURL(account *Account) (string, error) {
 	if account != nil && account.Platform == PlatformGrok {
-		targetURL, err := xai.BuildChatCompletionsURL(account.GetGrokBaseURL())
+		targetURL, err := buildGrokChatCompletionsURL(account, s.cfg)
 		if err != nil {
 			return "", fmt.Errorf("invalid grok base_url: %w", err)
 		}

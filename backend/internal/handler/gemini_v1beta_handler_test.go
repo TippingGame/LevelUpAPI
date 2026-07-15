@@ -276,6 +276,7 @@ func TestGeminiV1BetaListModels_RoutesAcrossAPIKeyGroups(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.Equal(t, []int64{accountID}, upstream.accountIDs)
 	require.Contains(t, rec.Body.String(), "gemini-2.5-pro")
+	require.Contains(t, rec.Body.String(), "gemini-3.1-pro-preview")
 }
 
 func TestGeminiV1BetaModels_RoutesAcrossAPIKeyGroups(t *testing.T) {

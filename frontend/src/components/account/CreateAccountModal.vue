@@ -1198,6 +1198,30 @@
           <p v-if="apiKeyHint" class="input-hint">{{ apiKeyHint }}</p>
         </div>
 
+        <div v-if="form.platform === 'anthropic'" class="space-y-2">
+          <label class="input-label">{{ t('admin.accounts.anthropicApiKeyAuthScheme') }}</label>
+          <select v-model="anthropicAPIKeyAuthScheme" class="input">
+            <option value="x_api_key">{{ t('admin.accounts.anthropicApiKeyAuthSchemeXApiKey') }}</option>
+            <option value="authorization_bearer">{{ t('admin.accounts.anthropicApiKeyAuthSchemeBearer') }}</option>
+          </select>
+          <p class="input-hint">{{ t('admin.accounts.anthropicApiKeyAuthSchemeHint') }}</p>
+        </div>
+
+        <div v-if="!isUserScope && isHeaderOverrideCapable(form.platform, 'apikey')" class="border-t border-gray-200 pt-4 dark:border-dark-600">
+          <div class="mb-3 flex items-center justify-between">
+            <div>
+              <label class="input-label mb-0">{{ t('admin.accounts.headerOverride.title') }}</label>
+              <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.accounts.headerOverride.hint') }}</p>
+            </div>
+            <button type="button" class="relative inline-flex h-6 w-11 rounded-full border-2 border-transparent transition-colors" :class="headerOverrideEnabled ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600'" @click="headerOverrideEnabled = !headerOverrideEnabled">
+              <span class="pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow transition" :class="headerOverrideEnabled ? 'translate-x-5' : 'translate-x-0'" />
+            </button>
+          </div>
+          <div v-if="headerOverrideEnabled" class="space-y-3">
+            <HeaderOverrideEditor v-model:rows="headerOverrideRows" />
+          </div>
+        </div>
+
         <!-- Gemini API Key tier selection -->
         <div v-if="form.platform === 'gemini'">
           <label class="input-label">{{ t('admin.accounts.gemini.tier.label') }}</label>
@@ -1893,6 +1917,37 @@
           @update:resetTimezone="editResetTimezone = $event"
         />
       </div>
+
+      <!-- Grok OAuth admin forwarding controls (OAuth lifecycle remains official xAI) -->
+      <template v-if="!isUserScope && form.platform === 'grok' && accountCategory === 'oauth-based'">
+        <div class="border-t border-gray-200 pt-4 dark:border-dark-600">
+          <div class="mb-3 flex items-center justify-between">
+            <div>
+              <label class="input-label mb-0">{{ t('admin.accounts.grokCustomBaseUrl.title') }}</label>
+              <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.accounts.grokCustomBaseUrl.hint') }}</p>
+            </div>
+            <button type="button" data-testid="grok-custom-base-url-toggle" class="relative inline-flex h-6 w-11 rounded-full border-2 border-transparent transition-colors" :class="grokOAuthCustomBaseUrlEnabled ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600'" @click="grokOAuthCustomBaseUrlEnabled = !grokOAuthCustomBaseUrlEnabled">
+              <span class="pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow transition" :class="grokOAuthCustomBaseUrlEnabled ? 'translate-x-5' : 'translate-x-0'" />
+            </button>
+          </div>
+          <input v-if="grokOAuthCustomBaseUrlEnabled" v-model="grokOAuthBaseUrl" type="text" class="input" data-testid="grok-custom-base-url-input" :placeholder="t('admin.accounts.grokCustomBaseUrl.placeholder')" />
+        </div>
+
+        <div class="border-t border-gray-200 pt-4 dark:border-dark-600">
+          <div class="mb-3 flex items-center justify-between">
+            <div>
+              <label class="input-label mb-0">{{ t('admin.accounts.headerOverride.title') }}</label>
+              <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.accounts.headerOverride.hint') }}</p>
+            </div>
+            <button type="button" class="relative inline-flex h-6 w-11 rounded-full border-2 border-transparent transition-colors" :class="headerOverrideEnabled ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600'" @click="headerOverrideEnabled = !headerOverrideEnabled">
+              <span class="pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow transition" :class="headerOverrideEnabled ? 'translate-x-5' : 'translate-x-0'" />
+            </button>
+          </div>
+          <div v-if="headerOverrideEnabled">
+            <HeaderOverrideEditor v-model:rows="headerOverrideRows" />
+          </div>
+        </div>
+      </template>
 
       <!-- OpenAI OAuth Model Mapping (OAuth 类型没有 apikey 容器，需要独立的模型映射区域) -->
       <div
@@ -3357,7 +3412,14 @@ import PlatformIcon from '@/components/common/PlatformIcon.vue'
 import ModelWhitelistSelector from '@/components/account/ModelWhitelistSelector.vue'
 import QuotaLimitCard from '@/components/account/QuotaLimitCard.vue'
 import UserProxyQuickCreatePanel from '@/components/user/UserProxyQuickCreatePanel.vue'
-import { applyInterceptWarmup } from '@/components/account/credentialsBuilder'
+import HeaderOverrideEditor from '@/components/account/HeaderOverrideEditor.vue'
+import {
+  applyHeaderOverride,
+  applyInterceptWarmup,
+  isHeaderOverrideCapable,
+  validateHeaderOverrideRows,
+  type HeaderOverrideRow
+} from '@/components/account/credentialsBuilder'
 import {
   customErrorCodeTokensIncludeCode,
   customErrorCodeTokensToPayload,
@@ -3516,6 +3578,7 @@ const accountCategory = ref<'oauth-based' | 'apikey' | 'bedrock' | 'service_acco
 const addMethod = ref<AddMethod>('oauth') // For oauth-based: 'oauth' or 'setup-token'
 const apiKeyBaseUrl = ref('https://api.anthropic.com')
 const apiKeyValue = ref('')
+const anthropicAPIKeyAuthScheme = ref<'x_api_key' | 'authorization_bearer'>('x_api_key')
 const editQuotaLimit = ref<number | null>(null)
 const editQuotaDailyLimit = ref<number | null>(null)
 const editQuotaWeeklyLimit = ref<number | null>(null)
@@ -3547,6 +3610,10 @@ const CODEX_QUOTA_DEFAULT_LIMIT_PERCENT = 100
 const codex5hLimitPercent = ref(CODEX_QUOTA_DEFAULT_LIMIT_PERCENT)
 const codex7dLimitPercent = ref(CODEX_QUOTA_DEFAULT_LIMIT_PERCENT)
 const anthropicPassthroughEnabled = ref(false)
+const headerOverrideEnabled = ref(false)
+const headerOverrideRows = ref<HeaderOverrideRow[]>([])
+const grokOAuthCustomBaseUrlEnabled = ref(false)
+const grokOAuthBaseUrl = ref('')
 const webSearchEmulationMode = ref('default')
 const webSearchGlobalEnabled = ref(false)
 const {
@@ -4071,7 +4138,12 @@ watch(
           ? 'https://generativelanguage.googleapis.com'
           : newPlatform === 'grok'
             ? 'https://api.x.ai/v1'
-          : 'https://api.anthropic.com'
+            : 'https://api.anthropic.com'
+    anthropicAPIKeyAuthScheme.value = 'x_api_key'
+    headerOverrideEnabled.value = false
+    headerOverrideRows.value = []
+    grokOAuthCustomBaseUrlEnabled.value = false
+    grokOAuthBaseUrl.value = ''
     // Clear model-related settings
     allowedModels.value = []
     modelMappings.value = []
@@ -4589,6 +4661,11 @@ const resetForm = () => {
   codex5hLimitPercent.value = CODEX_QUOTA_DEFAULT_LIMIT_PERCENT
   codex7dLimitPercent.value = CODEX_QUOTA_DEFAULT_LIMIT_PERCENT
   anthropicPassthroughEnabled.value = false
+  anthropicAPIKeyAuthScheme.value = 'x_api_key'
+  headerOverrideEnabled.value = false
+  headerOverrideRows.value = []
+  grokOAuthCustomBaseUrlEnabled.value = false
+  grokOAuthBaseUrl.value = ''
   webSearchEmulationMode.value = 'default'
   // Reset quota control state
   windowCostEnabled.value = false
@@ -4694,6 +4771,11 @@ const buildAnthropicExtra = (base?: Record<string, unknown>): Record<string, unk
   }
 
   const extra: Record<string, unknown> = { ...(base || {}) }
+  if (anthropicAPIKeyAuthScheme.value === 'authorization_bearer') {
+    extra.anthropic_apikey_auth_scheme = 'authorization_bearer'
+  } else {
+    delete extra.anthropic_apikey_auth_scheme
+  }
   if (anthropicPassthroughEnabled.value) {
     extra.anthropic_passthrough = true
   } else {
@@ -4706,6 +4788,33 @@ const buildAnthropicExtra = (base?: Record<string, unknown>): Record<string, unk
   }
 
   return Object.keys(extra).length > 0 ? extra : undefined
+}
+
+const validateGrokOAuthUpstreamConfig = (): boolean => {
+  if (grokOAuthCustomBaseUrlEnabled.value) {
+    const value = grokOAuthBaseUrl.value.trim()
+    if (!value) {
+      appStore.showError(t('admin.accounts.grokCustomBaseUrl.required'))
+      return false
+    }
+    if (!/^https?:\/\//i.test(value)) {
+      appStore.showError(t('admin.accounts.grokCustomBaseUrl.invalid'))
+      return false
+    }
+  }
+  if (headerOverrideEnabled.value) {
+    const error = validateHeaderOverrideRows(headerOverrideRows.value)
+    if (error) {
+      appStore.showError(t(`admin.accounts.headerOverride.${error}`))
+      return false
+    }
+  }
+  return true
+}
+
+const applyGrokOAuthUpstreamConfig = (credentials: Record<string, unknown>) => {
+  if (grokOAuthCustomBaseUrlEnabled.value) credentials.base_url = grokOAuthBaseUrl.value.trim()
+  applyHeaderOverride(credentials, headerOverrideEnabled.value, headerOverrideRows.value, 'create')
 }
 
 // Helper function to create account with mixed channel warning handling
@@ -4850,6 +4959,9 @@ const handleSubmit = async () => {
   if (isOAuthFlow.value) {
     if (!form.name.trim()) {
       appStore.showError(t('admin.accounts.pleaseEnterAccountName'))
+      return
+    }
+    if (!isUserScope.value && form.platform === 'grok' && !validateGrokOAuthUpstreamConfig()) {
       return
     }
     const canContinue = await ensureAntigravityMixedChannelConfirmed(async () => {
@@ -5018,6 +5130,17 @@ const handleSubmit = async () => {
     if (compactModelMapping) {
       credentials.compact_model_mapping = compactModelMapping
     }
+  }
+
+  if (isHeaderOverrideCapable(form.platform, 'apikey')) {
+    if (headerOverrideEnabled.value) {
+      const error = validateHeaderOverrideRows(headerOverrideRows.value)
+      if (error) {
+        appStore.showError(t(`admin.accounts.headerOverride.${error}`))
+        return
+      }
+    }
+    applyHeaderOverride(credentials, headerOverrideEnabled.value, headerOverrideRows.value, 'create')
   }
 
   // Add pool mode if enabled
@@ -5191,6 +5314,7 @@ const handleGrokValidateRT = async (refreshTokenInput: string) => {
     appStore.showError(t('userAccounts.importProxyRequired'))
     return
   }
+  if (!isUserScope.value && !validateGrokOAuthUpstreamConfig()) return
 
   const tokenInfos = await grokOAuth.validateRefreshTokens(refreshTokens, form.proxy_id)
   if (tokenInfos.length === 0) return
@@ -5201,6 +5325,7 @@ const handleGrokValidateRT = async (refreshTokenInput: string) => {
     const tokenInfo = tokenInfos[index]
     try {
       const credentials = grokOAuth.buildCredentials(tokenInfo)
+      if (!isUserScope.value) applyGrokOAuthUpstreamConfig(credentials)
       const modelMapping = buildModelMappingObject(modelRestrictionMode.value, allowedModels.value, modelMappings.value)
       if (modelMapping) credentials.model_mapping = modelMapping
       if (!applyTempUnschedConfig(credentials)) return
@@ -5258,6 +5383,7 @@ const handleGrokImportSSO = async (ssoInput: string) => {
     appStore.showError(t('userAccounts.importProxyRequired'))
     return
   }
+  if (!isUserScope.value && !validateGrokOAuthUpstreamConfig()) return
 
   grokOAuth.loading.value = true
   grokOAuth.error.value = ''
@@ -5282,6 +5408,7 @@ const handleGrokImportSSO = async (ssoInput: string) => {
       failedItems = result.errors.map(item => ({ index: item.index, message: item.message }))
     } else {
       const credentials: Record<string, unknown> = {}
+      applyGrokOAuthUpstreamConfig(credentials)
       const modelMapping = buildModelMappingObject(modelRestrictionMode.value, allowedModels.value, modelMappings.value)
       if (modelMapping) credentials.model_mapping = modelMapping
       if (!applyTempUnschedConfig(credentials)) return
@@ -5335,6 +5462,7 @@ const handleGrokImportSSO = async (ssoInput: string) => {
 
 const handleGrokExchange = async (authCode: string) => {
   if (!authCode.trim() || !grokOAuth.sessionId.value) return
+  if (!isUserScope.value && !validateGrokOAuthUpstreamConfig()) return
   const stateToUse = (oauthFlowRef.value?.oauthState || grokOAuth.state.value || '').trim()
   if (!stateToUse) {
     grokOAuth.error.value = t('admin.accounts.oauth.authFailed')
@@ -5348,6 +5476,7 @@ const handleGrokExchange = async (authCode: string) => {
   })
   if (!tokenInfo) return
   const credentials = grokOAuth.buildCredentials(tokenInfo)
+  if (!isUserScope.value) applyGrokOAuthUpstreamConfig(credentials)
   const modelMapping = buildModelMappingObject(modelRestrictionMode.value, allowedModels.value, modelMappings.value)
   if (modelMapping) credentials.model_mapping = modelMapping
   await createAccountAndFinish('grok', 'oauth', credentials, grokOAuth.buildExtraInfo(tokenInfo))

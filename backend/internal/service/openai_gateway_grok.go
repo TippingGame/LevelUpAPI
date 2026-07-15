@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/xai"
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
@@ -47,7 +48,7 @@ func (s *OpenAIGatewayService) forwardGrokResponses(
 
 	upstreamCtx, releaseUpstreamCtx := detachStreamUpstreamContext(ctx, reqStream)
 	defer releaseUpstreamCtx()
-	upstreamReq, err := buildGrokResponsesRequest(upstreamCtx, c, account, patchedBody, token)
+	upstreamReq, err := buildGrokResponsesRequest(upstreamCtx, c, account, patchedBody, token, s.cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -396,8 +397,12 @@ func shouldDropGrokToolChoice(toolChoice gjson.Result, tools []json.RawMessage) 
 	return true
 }
 
-func buildGrokResponsesRequest(ctx context.Context, c *gin.Context, account *Account, body []byte, token string) (*http.Request, error) {
-	targetURL, err := xai.BuildResponsesURL(account.GetGrokBaseURL())
+func buildGrokResponsesRequest(ctx context.Context, c *gin.Context, account *Account, body []byte, token string, configs ...*config.Config) (*http.Request, error) {
+	var cfg *config.Config
+	if len(configs) > 0 {
+		cfg = configs[0]
+	}
+	targetURL, err := buildGrokResponsesURL(account, cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -409,12 +414,31 @@ func buildGrokResponsesRequest(ctx context.Context, c *gin.Context, account *Acc
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json, text/event-stream")
 	req.Header.Set("User-Agent", "sub2api-grok/1.0")
+	if account.IsGrokOAuth() {
+		applyGrokCLIHeaders(req.Header)
+	}
 	if c != nil {
 		if v := c.GetHeader("OpenAI-Beta"); strings.TrimSpace(v) != "" {
 			req.Header.Set("OpenAI-Beta", v)
 		}
 	}
+	// Apply account overrides after built-in defaults. Security filtering in
+	// Account.ApplyHeaderOverrides prevents authentication/session takeover.
+	account.ApplyHeaderOverrides(req.Header)
 	return req, nil
+}
+
+const grokUpstreamUserAgent = "sub2api-grok/1.0"
+
+// applyGrokCLIHeaders identifies subscription traffic as a supported Grok CLI
+// client. The official CLI gateway rejects otherwise valid OAuth requests
+// without these headers. They are only added for OAuth accounts.
+func applyGrokCLIHeaders(headers http.Header) {
+	if headers == nil {
+		return
+	}
+	headers.Set("User-Agent", grokUpstreamUserAgent)
+	headers.Set(xai.CLIClientVersionHeader, xai.CLIClientVersion)
 }
 
 func (s *OpenAIGatewayService) handleGrokAccountUpstreamError(ctx context.Context, account *Account, statusCode int, headers http.Header, responseBody []byte) {

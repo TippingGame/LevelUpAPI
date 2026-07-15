@@ -52,6 +52,10 @@ type grokCredentialImportService interface {
 	BuildAccountExtra(tokenInfo *service.GrokTokenInfo) map[string]any
 }
 
+type grokAccountRefreshService interface {
+	RefreshAccountToken(ctx context.Context, account *service.Account) (*service.GrokTokenInfo, error)
+}
+
 type AccountHandler struct {
 	adminService              service.AdminService
 	accountService            *service.AccountService
@@ -1129,6 +1133,21 @@ func (h *AccountHandler) refreshSingleAccount(ctx context.Context, account *serv
 			if _, clearErr := h.adminService.ClearAccountError(ctx, account.ID); clearErr != nil {
 				return nil, "", fmt.Errorf("failed to clear account error: %w", clearErr)
 			}
+		}
+	} else if account.Platform == service.PlatformGrok {
+		refresher, ok := h.grokCredentialImporter.(grokAccountRefreshService)
+		if !ok || refresher == nil {
+			return nil, "", infraerrors.New(http.StatusServiceUnavailable, "GROK_OAUTH_NOT_CONFIGURED", "grok oauth service is not configured")
+		}
+		tokenInfo, err := refresher.RefreshAccountToken(ctx, account)
+		if err != nil {
+			return nil, "", fmt.Errorf("failed to refresh Grok credentials: %w", err)
+		}
+		newCredentials = service.MergeCredentials(account.Credentials, h.grokCredentialImporter.BuildAccountCredentials(tokenInfo))
+		// Keep an administrator's explicit forwarding address and any header
+		// override settings while replacing only refreshed token fields.
+		if baseURL := strings.TrimSpace(account.GetCredential("base_url")); baseURL != "" {
+			newCredentials["base_url"] = baseURL
 		}
 	} else {
 		// Use Anthropic/Claude OAuth service to refresh token

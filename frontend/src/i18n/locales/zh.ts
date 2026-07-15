@@ -4504,6 +4504,37 @@ export default {
       apiKeyRequired: 'API Key *',
       apiKeyPlaceholder: 'sk-ant-api03-...',
       apiKeyHint: '您的 Claude Console API Key',
+      anthropicApiKeyAuthScheme: 'API Key 认证协议',
+      anthropicApiKeyAuthSchemeXApiKey: 'x-api-key（Anthropic 原生）',
+      anthropicApiKeyAuthSchemeBearer: 'Authorization: Bearer（Anthropic 兼容上游）',
+      anthropicApiKeyAuthSchemeHint: '仅当上游采用 Anthropic 兼容的 Bearer 协议时选择 Bearer。',
+      headerOverride: {
+        title: '请求头覆写',
+        hint: '仅管理员可用，适用于 API Key 账号和 Grok OAuth。认证、Host 与会话隔离请求头仍受保护。',
+        info: '覆写值会在内置请求头设置完成后发送到所选上游。',
+        addRow: '添加请求头',
+        namePlaceholder: '请求头名称',
+        valuePlaceholder: '请求头值',
+        emptyValueHint: '空值会被忽略。Authorization、x-api-key、Cookie、Host、Content-Type 和会话请求头不能覆写。',
+        importJson: '导入 JSON',
+        copyJson: '复制 JSON',
+        importJsonApply: '应用',
+        importJsonCancel: '取消',
+        importJsonHint: '粘贴扁平 JSON 对象，值支持字符串、数字或布尔值。',
+        importJsonInvalid: '请求头 JSON 格式无效',
+        invalidName: '请求头名称无效',
+        blockedName: '该请求头受保护，不能覆写',
+        duplicateName: '请求头名称不能重复',
+        invalidValue: '请求头值无效或过长',
+        tooManyEntries: '请求头覆写条目过多'
+      },
+      grokCustomBaseUrl: {
+        title: 'Grok 自定义转发地址',
+        hint: '只改变转发端点；OAuth 授权和 token 刷新始终使用 xAI 官方端点。',
+        placeholder: 'https://relay.example.com/v1',
+        required: '请输入 Grok 自定义转发地址',
+        invalid: 'Grok 自定义转发地址必须是 http(s) URL'
+      },
       // OpenAI specific hints
       openai: {
         baseUrlHint: '留空使用官方 OpenAI API',

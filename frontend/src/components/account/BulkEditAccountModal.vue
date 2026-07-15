@@ -115,6 +115,39 @@
         </p>
       </div>
 
+      <div v-if="allHeaderOverrideCapable" class="border-t border-gray-200 pt-4 dark:border-dark-600">
+        <div class="mb-3 flex items-center justify-between">
+          <div>
+            <label class="input-label mb-0">{{ t('admin.accounts.headerOverride.title') }}</label>
+            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.accounts.headerOverride.hint') }}</p>
+          </div>
+          <input v-model="enableHeaderOverrides" type="checkbox" class="rounded border-gray-300 text-primary-600 focus:ring-primary-500" />
+        </div>
+        <div v-if="enableHeaderOverrides" class="space-y-3">
+          <div class="flex items-center gap-3">
+            <span class="text-sm text-gray-600 dark:text-gray-300">{{ t('admin.accounts.headerOverride.title') }}</span>
+            <button type="button" class="relative inline-flex h-6 w-11 rounded-full border-2 border-transparent transition-colors" :class="headerOverrideEnabled ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600'" @click="headerOverrideEnabled = !headerOverrideEnabled">
+              <span class="pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow transition" :class="headerOverrideEnabled ? 'translate-x-5' : 'translate-x-0'" />
+            </button>
+          </div>
+          <HeaderOverrideEditor v-if="headerOverrideEnabled" v-model:rows="headerOverrideRows" />
+        </div>
+      </div>
+
+      <div v-if="allAnthropicAPIKey" class="border-t border-gray-200 pt-4 dark:border-dark-600">
+        <div class="mb-3 flex items-center justify-between">
+          <div>
+            <label class="input-label mb-0">{{ t('admin.accounts.anthropicApiKeyAuthScheme') }}</label>
+            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.accounts.anthropicApiKeyAuthSchemeHint') }}</p>
+          </div>
+          <input v-model="enableAnthropicAPIKeyAuthScheme" type="checkbox" class="rounded border-gray-300 text-primary-600 focus:ring-primary-500" />
+        </div>
+        <select v-if="enableAnthropicAPIKeyAuthScheme" v-model="anthropicAPIKeyAuthScheme" class="input">
+          <option value="x_api_key">{{ t('admin.accounts.anthropicApiKeyAuthSchemeXApiKey') }}</option>
+          <option value="authorization_bearer">{{ t('admin.accounts.anthropicApiKeyAuthSchemeBearer') }}</option>
+        </select>
+      </div>
+
       <!-- Model restriction -->
       <div v-if="canManageModelRestriction" class="border-t border-gray-200 pt-4 dark:border-dark-600">
         <div class="mb-3 flex items-center justify-between">
@@ -1224,6 +1257,13 @@ import ProxySelector from '@/components/common/ProxySelector.vue'
 import GroupSelector from '@/components/common/GroupSelector.vue'
 import ModelWhitelistSelector from '@/components/account/ModelWhitelistSelector.vue'
 import Icon from '@/components/icons/Icon.vue'
+import HeaderOverrideEditor from '@/components/account/HeaderOverrideEditor.vue'
+import {
+  applyHeaderOverride,
+  isHeaderOverrideCapable,
+  validateHeaderOverrideRows,
+  type HeaderOverrideRow
+} from '@/components/account/credentialsBuilder'
 import {
   customErrorCodeTokensIncludeCode,
   customErrorCodeTokensToPayload,
@@ -1369,6 +1409,15 @@ const allOpenAIAPIKey = computed(() => {
   )
 })
 
+const allHeaderOverrideCapable = computed(() => {
+  if (isUserScope.value || targetSelectedPlatforms.value.length !== 1 || targetSelectedTypes.value.length !== 1) return false
+  return isHeaderOverrideCapable(targetSelectedPlatforms.value[0], targetSelectedTypes.value[0])
+})
+const allAnthropicAPIKey = computed(() =>
+  !isUserScope.value && targetSelectedPlatforms.value.length === 1 && targetSelectedPlatforms.value[0] === 'anthropic' &&
+  targetSelectedTypes.value.length === 1 && targetSelectedTypes.value[0] === 'apikey'
+)
+
 // 是否全部为 Anthropic OAuth/SetupToken（RPM 配置仅在此条件下显示）
 const allAnthropicOAuthOrSetupToken = computed(() => {
   return (
@@ -1422,6 +1471,11 @@ const enableCodexQuotaLimit = ref(false)
 const enableOpenAICompactMode = ref(false)
 const enableOpenAICompactModelMapping = ref(false)
 const enableRpmLimit = ref(false)
+const enableHeaderOverrides = ref(false)
+const headerOverrideEnabled = ref(false)
+const headerOverrideRows = ref<HeaderOverrideRow[]>([])
+const anthropicAPIKeyAuthScheme = ref<'x_api_key' | 'authorization_bearer'>('x_api_key')
+const enableAnthropicAPIKeyAuthScheme = ref(false)
 
 // State - field values
 const submitting = ref(false)
@@ -1774,8 +1828,29 @@ const buildUpdatePayload = (): Record<string, unknown> | null => {
     credentialsChanged = true
   }
 
+  if (allHeaderOverrideCapable.value && enableHeaderOverrides.value) {
+    if (headerOverrideEnabled.value) {
+      const error = validateHeaderOverrideRows(headerOverrideRows.value)
+      if (error) {
+        appStore.showError(t(`admin.accounts.headerOverride.${error}`))
+        return null
+      }
+    }
+    applyHeaderOverride(credentials, headerOverrideEnabled.value, headerOverrideRows.value, 'edit')
+    credentialsChanged = true
+  }
+
   if (credentialsChanged) {
     updates.credentials = credentials
+  }
+
+  if (allAnthropicAPIKey.value && enableAnthropicAPIKeyAuthScheme.value) {
+    const extra = ensureExtra()
+    if (anthropicAPIKeyAuthScheme.value === 'authorization_bearer') {
+      extra.anthropic_apikey_auth_scheme = 'authorization_bearer'
+    } else {
+      extra.anthropic_apikey_auth_scheme = 'x_api_key'
+    }
   }
 
   // RPM limit settings (写入 extra 字段)
@@ -2054,6 +2129,11 @@ watch(
       enableOpenAICompactMode.value = false
       enableOpenAICompactModelMapping.value = false
       enableRpmLimit.value = false
+      enableHeaderOverrides.value = false
+      headerOverrideEnabled.value = false
+      headerOverrideRows.value = []
+      enableAnthropicAPIKeyAuthScheme.value = false
+      anthropicAPIKeyAuthScheme.value = 'x_api_key'
 
       // Reset all values
       baseUrl.value = ''

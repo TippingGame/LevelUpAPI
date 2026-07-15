@@ -171,35 +171,35 @@ func TestGetGrokBaseURLUsesOfficialAPIForOAuth(t *testing.T) {
 		{
 			name:     "oauth without base URL",
 			account:  Account{Type: AccountTypeOAuth, Platform: PlatformGrok, Credentials: map[string]any{}},
-			expected: xai.DefaultBaseURL,
+			expected: xai.DefaultCLIBaseURL,
 		},
 		{
 			name: "oauth legacy official API URL",
 			account: Account{Type: AccountTypeOAuth, Platform: PlatformGrok, Credentials: map[string]any{
 				"base_url": xai.DefaultBaseURL,
 			}},
-			expected: xai.DefaultBaseURL,
+			expected: xai.DefaultCLIBaseURL,
 		},
 		{
 			name: "oauth legacy official API root",
 			account: Account{Type: AccountTypeOAuth, Platform: PlatformGrok, Credentials: map[string]any{
 				"base_url": "HTTPS://API.X.AI:443/",
 			}},
-			expected: xai.DefaultBaseURL,
+			expected: xai.DefaultCLIBaseURL,
 		},
 		{
 			name: "oauth legacy CLI proxy URL",
 			account: Account{Type: AccountTypeOAuth, Platform: PlatformGrok, Credentials: map[string]any{
 				"base_url": xai.DefaultCLIBaseURL,
 			}},
-			expected: xai.DefaultBaseURL,
+			expected: xai.DefaultCLIBaseURL,
 		},
 		{
-			name: "oauth untrusted custom host falls back to official API",
+			name: "oauth custom host is retained for policy validation",
 			account: Account{Type: AccountTypeOAuth, Platform: PlatformGrok, Credentials: map[string]any{
 				"base_url": "https://custom.example.com/v1",
 			}},
-			expected: xai.DefaultBaseURL,
+			expected: "https://custom.example.com/v1",
 		},
 		{
 			name:     "API key remains on credit API",

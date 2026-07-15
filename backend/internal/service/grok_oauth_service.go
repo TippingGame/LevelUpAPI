@@ -363,7 +363,10 @@ func (s *GrokOAuthService) BuildAccountCredentials(tokenInfo *GrokTokenInfo) map
 	if tokenInfo.EntitlementStatus != "" {
 		creds["entitlement_status"] = tokenInfo.EntitlementStatus
 	}
-	creds["base_url"] = xai.DefaultBaseURL
+	// Subscription OAuth traffic uses the official CLI gateway by default.
+	// This is only a forwarding hint; authorization and refresh still use the
+	// official auth.x.ai endpoints and never this stored value.
+	creds["base_url"] = xai.DefaultCLIBaseURL
 	return creds
 }
 

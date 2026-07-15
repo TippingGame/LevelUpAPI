@@ -1201,6 +1201,7 @@ func (s *OpenAIGatewayService) buildOpenAIWSHeaders(
 		enforceCodexIdentityHeaders(headers)
 	}
 	applyOpenAICleanRelayWSHeaders(c, headers)
+	account.ApplyHeaderOverrides(headers)
 
 	return headers, sessionResolution
 }

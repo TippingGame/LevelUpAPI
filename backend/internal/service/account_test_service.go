@@ -23,7 +23,6 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/geminicli"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai_compat"
-	"github.com/Wei-Shaw/sub2api/internal/pkg/xai"
 	"github.com/Wei-Shaw/sub2api/internal/util/urlvalidator"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -422,7 +421,7 @@ func (s *AccountTestService) testClaudeAccountConnection(c *gin.Context, account
 		req.Header.Set("Authorization", "Bearer "+authToken)
 	} else {
 		req.Header.Set("Accept", "application/json")
-		req.Header.Set("x-api-key", authToken)
+		setAnthropicAPIKeyAuthHeader(req.Header, account, authToken)
 	}
 
 	// Get proxy URL
@@ -797,7 +796,7 @@ func (s *AccountTestService) testGrokAccountConnection(c *gin.Context, account *
 	default:
 		return s.sendErrorAndEnd(c, fmt.Sprintf("Unsupported Grok account type: %s", account.Type))
 	}
-	apiURL, err := xai.BuildResponsesURL(account.GetGrokBaseURL())
+	apiURL, err := buildGrokResponsesURL(account, s.cfg)
 	if err != nil {
 		return s.sendErrorAndEnd(c, "Invalid Grok base URL: "+err.Error())
 	}
@@ -818,7 +817,11 @@ func (s *AccountTestService) testGrokAccountConnection(c *gin.Context, account *
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json, text/event-stream")
 	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("User-Agent", "sub2api-grok/1.0")
+	req.Header.Set("User-Agent", grokUpstreamUserAgent)
+	if account.IsGrokOAuth() {
+		applyGrokCLIHeaders(req.Header)
+	}
+	account.ApplyHeaderOverrides(req.Header)
 	proxyURL := ""
 	if account.Proxy != nil {
 		proxyURL = account.Proxy.URL()

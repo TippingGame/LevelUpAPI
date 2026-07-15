@@ -124,6 +124,28 @@
           <p class="input-hint">{{ t('admin.accounts.leaveEmptyToKeep') }}</p>
         </div>
 
+        <div v-if="account.platform === 'anthropic'" class="space-y-2">
+          <label class="input-label">{{ t('admin.accounts.anthropicApiKeyAuthScheme') }}</label>
+          <select v-model="anthropicAPIKeyAuthScheme" class="input">
+            <option value="x_api_key">{{ t('admin.accounts.anthropicApiKeyAuthSchemeXApiKey') }}</option>
+            <option value="authorization_bearer">{{ t('admin.accounts.anthropicApiKeyAuthSchemeBearer') }}</option>
+          </select>
+          <p class="input-hint">{{ t('admin.accounts.anthropicApiKeyAuthSchemeHint') }}</p>
+        </div>
+
+        <div v-if="isHeaderOverrideCapable(account.platform, account.type)" class="border-t border-gray-200 pt-4 dark:border-dark-600">
+          <div class="mb-3 flex items-center justify-between">
+            <div>
+              <label class="input-label mb-0">{{ t('admin.accounts.headerOverride.title') }}</label>
+              <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.accounts.headerOverride.hint') }}</p>
+            </div>
+            <button type="button" class="relative inline-flex h-6 w-11 rounded-full border-2 border-transparent transition-colors" :class="headerOverrideEnabled ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600'" @click="headerOverrideEnabled = !headerOverrideEnabled">
+              <span class="pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow transition" :class="headerOverrideEnabled ? 'translate-x-5' : 'translate-x-0'" />
+            </button>
+          </div>
+          <HeaderOverrideEditor v-if="headerOverrideEnabled" v-model:rows="headerOverrideRows" />
+        </div>
+
         <!-- Model Restriction Section (不适用于 Antigravity) -->
         <div v-if="account.platform !== 'antigravity'" class="border-t border-gray-200 pt-4 dark:border-dark-600">
           <label class="input-label">{{ t('admin.accounts.modelRestriction') }}</label>
@@ -458,6 +480,31 @@
           </div>
         </div>
 
+      </div>
+
+      <!-- Grok OAuth forwarding controls are admin-only; OAuth lifecycle remains official xAI. -->
+      <div v-if="!isUserScope && account.platform === 'grok' && account.type === 'oauth'" class="border-t border-gray-200 pt-4 dark:border-dark-600">
+        <div class="mb-3 flex items-center justify-between">
+          <div>
+            <label class="input-label mb-0">{{ t('admin.accounts.grokCustomBaseUrl.title') }}</label>
+            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.accounts.grokCustomBaseUrl.hint') }}</p>
+          </div>
+          <button type="button" data-testid="grok-custom-base-url-toggle" class="relative inline-flex h-6 w-11 rounded-full border-2 border-transparent transition-colors" :class="grokOAuthCustomBaseUrlEnabled ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600'" @click="grokOAuthCustomBaseUrlEnabled = !grokOAuthCustomBaseUrlEnabled">
+            <span class="pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow transition" :class="grokOAuthCustomBaseUrlEnabled ? 'translate-x-5' : 'translate-x-0'" />
+          </button>
+        </div>
+        <input v-if="grokOAuthCustomBaseUrlEnabled" v-model="grokOAuthBaseUrl" type="text" class="input mb-4" data-testid="grok-custom-base-url-input" :placeholder="t('admin.accounts.grokCustomBaseUrl.placeholder')" />
+
+        <div class="mb-3 flex items-center justify-between">
+          <div>
+            <label class="input-label mb-0">{{ t('admin.accounts.headerOverride.title') }}</label>
+            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.accounts.headerOverride.hint') }}</p>
+          </div>
+          <button type="button" class="relative inline-flex h-6 w-11 rounded-full border-2 border-transparent transition-colors" :class="headerOverrideEnabled ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600'" @click="headerOverrideEnabled = !headerOverrideEnabled">
+            <span class="pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow transition" :class="headerOverrideEnabled ? 'translate-x-5' : 'translate-x-0'" />
+          </button>
+        </div>
+        <HeaderOverrideEditor v-if="headerOverrideEnabled" v-model:rows="headerOverrideRows" />
       </div>
 
       <!-- OpenAI OAuth Model Mapping (OAuth 类型没有 apikey 容器，需要独立的模型映射区域) -->
@@ -2233,7 +2280,15 @@ import ProxySelector from '@/components/common/ProxySelector.vue'
 import GroupSelector from '@/components/common/GroupSelector.vue'
 import ModelWhitelistSelector from '@/components/account/ModelWhitelistSelector.vue'
 import QuotaLimitCard from '@/components/account/QuotaLimitCard.vue'
-import { applyInterceptWarmup } from '@/components/account/credentialsBuilder'
+import HeaderOverrideEditor from '@/components/account/HeaderOverrideEditor.vue'
+import {
+  applyHeaderOverride,
+  applyInterceptWarmup,
+  isHeaderOverrideCapable,
+  splitHeaderOverridesObject,
+  validateHeaderOverrideRows,
+  type HeaderOverrideRow
+} from '@/components/account/credentialsBuilder'
 import {
   customErrorCodeTokensFromValue,
   customErrorCodeTokensIncludeCode,
@@ -2331,6 +2386,7 @@ interface TempUnschedRuleForm {
 const submitting = ref(false)
 const editBaseUrl = ref('https://api.anthropic.com')
 const editApiKey = ref('')
+const anthropicAPIKeyAuthScheme = ref<'x_api_key' | 'authorization_bearer'>('x_api_key')
 // Bedrock credentials
 const editBedrockAccessKeyId = ref('')
 const editBedrockSecretAccessKey = ref('')
@@ -2414,6 +2470,10 @@ const CODEX_QUOTA_DEFAULT_LIMIT_PERCENT = 100
 const codex5hLimitPercent = ref(CODEX_QUOTA_DEFAULT_LIMIT_PERCENT)
 const codex7dLimitPercent = ref(CODEX_QUOTA_DEFAULT_LIMIT_PERCENT)
 const anthropicPassthroughEnabled = ref(false)
+const headerOverrideEnabled = ref(false)
+const headerOverrideRows = ref<HeaderOverrideRow[]>([])
+const grokOAuthCustomBaseUrlEnabled = ref(false)
+const grokOAuthBaseUrl = ref('')
 const webSearchEmulationMode = ref('default')
 const webSearchGlobalEnabled = ref(false)
 const {
@@ -2721,6 +2781,24 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   mixedScheduling.value = false
   allowOverages.value = false
   const extra = newAccount.extra as Record<string, unknown> | undefined
+  anthropicAPIKeyAuthScheme.value = extra?.anthropic_apikey_auth_scheme === 'authorization_bearer'
+    ? 'authorization_bearer'
+    : 'x_api_key'
+  headerOverrideEnabled.value = false
+  headerOverrideRows.value = []
+  grokOAuthCustomBaseUrlEnabled.value = false
+  grokOAuthBaseUrl.value = ''
+  if (!isUserScope.value && isHeaderOverrideCapable(newAccount.platform, newAccount.type)) {
+    headerOverrideEnabled.value = credentials?.header_override_enabled === true
+    headerOverrideRows.value = splitHeaderOverridesObject(credentials?.header_overrides)
+  }
+  if (!isUserScope.value && newAccount.platform === 'grok' && newAccount.type === 'oauth') {
+    const rawBaseUrl = typeof credentials?.base_url === 'string' ? credentials.base_url.trim() : ''
+    if (rawBaseUrl && !/^https?:\/\/api\.x\.ai(?:\/|$)/i.test(rawBaseUrl) && !/^https?:\/\/cli-chat-proxy\.grok\.com(?:\/|$)/i.test(rawBaseUrl)) {
+      grokOAuthCustomBaseUrlEnabled.value = true
+      grokOAuthBaseUrl.value = rawBaseUrl
+    }
+  }
   mixedScheduling.value = extra?.mixed_scheduling === true
   allowOverages.value = extra?.allow_overages === true
 
@@ -3586,6 +3664,17 @@ const handleSubmit = async () => {
         return
       }
 
+      if (isHeaderOverrideCapable(props.account.platform, props.account.type)) {
+        if (headerOverrideEnabled.value) {
+          const error = validateHeaderOverrideRows(headerOverrideRows.value)
+          if (error) {
+            appStore.showError(t(`admin.accounts.headerOverride.${error}`))
+            return
+          }
+        }
+        applyHeaderOverride(newCredentials, headerOverrideEnabled.value, headerOverrideRows.value, 'edit')
+      }
+
       // Add model mapping if configured（OpenAI 开启自动透传时保留现有映射，不再编辑）
       if (shouldApplyModelMapping) {
         const modelMapping = buildModelMappingObject(modelRestrictionMode.value, allowedModels.value, modelMappings.value)
@@ -3793,6 +3882,24 @@ const handleSubmit = async () => {
       } else {
         delete newCredentials.model_mapping
       }
+      if (headerOverrideEnabled.value) {
+        const error = validateHeaderOverrideRows(headerOverrideRows.value)
+        if (error) {
+          appStore.showError(t(`admin.accounts.headerOverride.${error}`))
+          return
+        }
+      }
+      applyHeaderOverride(newCredentials, headerOverrideEnabled.value, headerOverrideRows.value, 'edit')
+      if (grokOAuthCustomBaseUrlEnabled.value) {
+        const value = grokOAuthBaseUrl.value.trim()
+        if (!value || !/^https?:\/\//i.test(value)) {
+          appStore.showError(value ? t('admin.accounts.grokCustomBaseUrl.invalid') : t('admin.accounts.grokCustomBaseUrl.required'))
+          return
+        }
+        newCredentials.base_url = value
+      } else {
+        delete newCredentials.base_url
+      }
       updatePayload.credentials = newCredentials
     }
 
@@ -3938,6 +4045,11 @@ const handleSubmit = async () => {
         delete newExtra.web_search_emulation
       } else {
         newExtra.web_search_emulation = webSearchEmulationMode.value
+      }
+      if (anthropicAPIKeyAuthScheme.value === 'authorization_bearer') {
+        newExtra.anthropic_apikey_auth_scheme = 'authorization_bearer'
+      } else {
+        delete newExtra.anthropic_apikey_auth_scheme
       }
       updatePayload.extra = newExtra
     }

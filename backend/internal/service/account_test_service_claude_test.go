@@ -96,6 +96,25 @@ func TestAccountTestService_ClaudeAPIKeyConnectionUsesStandardAnthropicRequest(t
 	require.NotContains(t, string(upstream.lastBody), "Claude Code")
 }
 
+func TestAccountTestService_ClaudeAPIKeyConnectionSupportsAuthorizationBearer(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := newTestContext()
+	upstream := &httpUpstreamRecorder{resp: claudeTestSSEOKResponse()}
+	svc := &AccountTestService{httpUpstream: upstream, cfg: &config.Config{}}
+	account := &Account{
+		ID:          43,
+		Platform:    PlatformAnthropic,
+		Type:        AccountTypeAPIKey,
+		Concurrency: 1,
+		Credentials: map[string]any{"api_key": "sk-test"},
+		Extra:       map[string]any{"anthropic_apikey_auth_scheme": AnthropicAPIKeyAuthSchemeAuthorizationBearer},
+	}
+
+	require.NoError(t, svc.testClaudeAccountConnection(c, account, "claude-opus-4-8"))
+	require.Equal(t, "Bearer sk-test", getHeaderRaw(upstream.lastReq.Header, "authorization"))
+	require.Empty(t, getHeaderRaw(upstream.lastReq.Header, "x-api-key"))
+}
+
 func TestAccountTestService_ClaudeOAuthConnectionUsesClaudeCodeMimicry(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	c, _ := newTestContext()

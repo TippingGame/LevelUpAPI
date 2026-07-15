@@ -76,6 +76,7 @@ func (s *OpenAIGatewayService) ForwardEmbeddings(
 	if userAgent := strings.TrimSpace(account.GetOpenAIUserAgent()); userAgent != "" {
 		upstreamReq.Header.Set("User-Agent", userAgent)
 	}
+	account.ApplyHeaderOverrides(upstreamReq.Header)
 
 	logger.L().Debug("openai embeddings: forwarding",
 		zap.Int64("account_id", account.ID),

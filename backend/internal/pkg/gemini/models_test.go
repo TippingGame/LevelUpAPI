@@ -1,6 +1,11 @@
 package gemini
 
-import "testing"
+import (
+	"encoding/json"
+	"testing"
+
+	"github.com/stretchr/testify/require"
+)
 
 func TestDefaultModels_ContainsFallbackCatalogModels(t *testing.T) {
 	t.Parallel()
@@ -52,4 +57,48 @@ func TestHasFallbackModel_RecognizesCustomtoolsModel(t *testing.T) {
 	if HasFallbackModel("gemini-unknown") {
 		t.Fatalf("did not expect unknown model to exist in fallback catalog")
 	}
+}
+
+func TestMergeFallbackModelsListJSON(t *testing.T) {
+	t.Parallel()
+
+	body := []byte(`{"models":[{"name":"models/gemini-2.5-pro","displayName":"Upstream metadata"}],"nextPageToken":"next"}`)
+	merged, changed := MergeFallbackModelsListJSON(body)
+	require.True(t, changed)
+
+	var payload struct {
+		Models []struct {
+			Name        string `json:"name"`
+			DisplayName string `json:"displayName"`
+		} `json:"models"`
+		NextPageToken string `json:"nextPageToken"`
+	}
+	require.NoError(t, json.Unmarshal(merged, &payload))
+	require.Equal(t, "next", payload.NextPageToken)
+
+	seen := make(map[string]int, len(payload.Models))
+	for _, model := range payload.Models {
+		seen[model.Name]++
+		if model.Name == "models/gemini-2.5-pro" {
+			require.Equal(t, "Upstream metadata", model.DisplayName)
+		}
+	}
+	require.Equal(t, 1, seen["models/gemini-2.5-pro"])
+	require.Equal(t, 1, seen["models/gemini-3.1-pro-preview"])
+	require.Equal(t, 1, seen["models/gemini-3.1-pro-preview-customtools"])
+}
+
+func TestMergeFallbackModelsListJSONLeavesInvalidOrCompletePayloadAlone(t *testing.T) {
+	t.Parallel()
+
+	invalid := []byte(`{"models":`)
+	merged, changed := MergeFallbackModelsListJSON(invalid)
+	require.False(t, changed)
+	require.Equal(t, invalid, merged)
+
+	completeJSON, err := json.Marshal(FallbackModelsList())
+	require.NoError(t, err)
+	merged, changed = MergeFallbackModelsListJSON(completeJSON)
+	require.False(t, changed)
+	require.Equal(t, completeJSON, merged)
 }

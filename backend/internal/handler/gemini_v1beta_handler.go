@@ -93,6 +93,11 @@ func (h *GatewayHandler) GeminiV1BetaListModels(c *gin.Context) {
 			c.JSON(http.StatusOK, gemini.FallbackModelsList())
 			return
 		}
+		if res.StatusCode >= http.StatusOK && res.StatusCode < http.StatusMultipleChoices {
+			if merged, changed := gemini.MergeFallbackModelsListJSON(res.Body); changed {
+				res.Body = merged
+			}
+		}
 		writeUpstreamResponse(c, res)
 		return
 	}

@@ -115,9 +115,10 @@ func ProvideGrokQuotaService(
 	proxyRepo ProxyRepository,
 	tokenProvider *GrokTokenProvider,
 	httpUpstream HTTPUpstream,
+	cfg *config.Config,
 	usageLogRepo UsageLogRepository,
 ) *GrokQuotaService {
-	return NewGrokQuotaService(accountRepo, proxyRepo, tokenProvider, httpUpstream, usageLogRepo)
+	return NewGrokQuotaServiceWithConfig(accountRepo, proxyRepo, tokenProvider, httpUpstream, cfg, usageLogRepo)
 }
 
 func ProvideAccountTestService(

@@ -6880,6 +6880,9 @@ func (s *GatewayService) buildUpstreamRequestAnthropicAPIKeyPassthrough(
 	if c != nil && c.Request != nil {
 		clientBeta = getHeaderRaw(c.Request.Header, "anthropic-beta")
 	}
+	if overrideBeta, ok := account.HeaderOverrideValue("anthropic-beta"); ok {
+		clientBeta = overrideBeta
+	}
 	if bridgeClaudeCode && strings.TrimSpace(clientBeta) == "" {
 		clientBeta = defaultAPIKeyBetaHeader(body)
 	}
@@ -6910,7 +6913,7 @@ func (s *GatewayService) buildUpstreamRequestAnthropicAPIKeyPassthrough(
 	req.Header.Del("x-api-key")
 	req.Header.Del("x-goog-api-key")
 	req.Header.Del("cookie")
-	setHeaderRaw(req.Header, "x-api-key", token)
+	setAnthropicAPIKeyAuthHeader(req.Header, account, token)
 
 	if getHeaderRaw(req.Header, "content-type") == "" {
 		setHeaderRaw(req.Header, "content-type", "application/json")
@@ -6930,6 +6933,7 @@ func (s *GatewayService) buildUpstreamRequestAnthropicAPIKeyPassthrough(
 			}
 		}
 	}
+	account.ApplyHeaderOverrides(req.Header)
 	if c != nil {
 		c.Set(claudeMimicDebugInfoKey, buildClaudeMimicDebugLine(req, body, account, "apikey", bridgeClaudeCode))
 	}
@@ -8036,6 +8040,10 @@ func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Contex
 	finalBetaHeader, finalBetaShouldSet := s.computeFinalAnthropicBeta(
 		tokenType, mimicClaudeCode, modelID, clientHeaders, body, effectiveDropSet,
 	)
+	if overrideBeta, ok := account.HeaderOverrideValue("anthropic-beta"); ok {
+		finalBetaHeader = overrideBeta
+		finalBetaShouldSet = true
+	}
 	if sanitized, changed := sanitizeAnthropicBodyForBetaTokens(body, finalBetaHeader); changed {
 		body = sanitized
 	}
@@ -8049,7 +8057,7 @@ func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Contex
 	if tokenType == "oauth" {
 		setHeaderRaw(req.Header, "authorization", "Bearer "+token)
 	} else {
-		setHeaderRaw(req.Header, "x-api-key", token)
+		setAnthropicAPIKeyAuthHeader(req.Header, account, token)
 	}
 
 	// 白名单透传 headers
@@ -8102,6 +8110,7 @@ func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Contex
 			}
 		}
 	}
+	account.ApplyHeaderOverrides(req.Header)
 
 	// === DEBUG: 打印上游转发请求（headers + body 摘要），与 CLIENT_ORIGINAL 对比 ===
 	s.debugLogGatewaySnapshot("UPSTREAM_FORWARD", req.Header, body, map[string]string{
@@ -11650,6 +11659,9 @@ func (s *GatewayService) buildCountTokensRequestAnthropicAPIKeyPassthrough(
 	if c != nil && c.Request != nil {
 		clientBeta = getHeaderRaw(c.Request.Header, "anthropic-beta")
 	}
+	if overrideBeta, ok := account.HeaderOverrideValue("anthropic-beta"); ok {
+		clientBeta = overrideBeta
+	}
 	if sanitized, changed := sanitizeAnthropicBodyForBetaTokens(body, clientBeta); changed {
 		body = sanitized
 	}
@@ -11676,7 +11688,7 @@ func (s *GatewayService) buildCountTokensRequestAnthropicAPIKeyPassthrough(
 	req.Header.Del("x-api-key")
 	req.Header.Del("x-goog-api-key")
 	req.Header.Del("cookie")
-	req.Header.Set("x-api-key", token)
+	setAnthropicAPIKeyAuthHeader(req.Header, account, token)
 
 	if req.Header.Get("content-type") == "" {
 		req.Header.Set("content-type", "application/json")
@@ -11684,6 +11696,7 @@ func (s *GatewayService) buildCountTokensRequestAnthropicAPIKeyPassthrough(
 	if req.Header.Get("anthropic-version") == "" {
 		req.Header.Set("anthropic-version", "2023-06-01")
 	}
+	account.ApplyHeaderOverrides(req.Header)
 
 	return req, nil
 }
@@ -11750,6 +11763,10 @@ func (s *GatewayService) buildCountTokensRequest(ctx context.Context, c *gin.Con
 	finalBetaHeader, finalBetaShouldSet := s.computeFinalCountTokensAnthropicBeta(
 		tokenType, mimicClaudeCode, modelID, clientHeaders, body, ctEffectiveDropSet,
 	)
+	if overrideBeta, ok := account.HeaderOverrideValue("anthropic-beta"); ok {
+		finalBetaHeader = overrideBeta
+		finalBetaShouldSet = true
+	}
 	if sanitized, changed := sanitizeAnthropicBodyForBetaTokens(body, finalBetaHeader); changed {
 		body = sanitized
 	}
@@ -11763,7 +11780,7 @@ func (s *GatewayService) buildCountTokensRequest(ctx context.Context, c *gin.Con
 	if tokenType == "oauth" {
 		setHeaderRaw(req.Header, "authorization", "Bearer "+token)
 	} else {
-		setHeaderRaw(req.Header, "x-api-key", token)
+		setAnthropicAPIKeyAuthHeader(req.Header, account, token)
 	}
 
 	// 白名单透传 headers（恢复真实 wire casing）
@@ -11810,6 +11827,7 @@ func (s *GatewayService) buildCountTokensRequest(ctx context.Context, c *gin.Con
 			}
 		}
 	}
+	account.ApplyHeaderOverrides(req.Header)
 
 	if c != nil && tokenType == "oauth" {
 		c.Set(claudeMimicDebugInfoKey, buildClaudeMimicDebugLine(req, body, account, tokenType, mimicClaudeCode))

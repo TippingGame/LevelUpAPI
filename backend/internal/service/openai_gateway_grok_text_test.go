@@ -134,8 +134,10 @@ func TestBuildGrokResponsesRequestUsesOfficialBearerEndpoint(t *testing.T) {
 	req, err := buildGrokResponsesRequest(context.Background(), nil, account, []byte(`{"model":"grok-4.3"}`), "access-token")
 	require.NoError(t, err)
 	require.Equal(t, http.MethodPost, req.Method)
-	require.Equal(t, xai.DefaultBaseURL+"/responses", req.URL.String())
+	require.Equal(t, xai.DefaultCLIBaseURL+"/responses", req.URL.String())
 	require.Equal(t, "Bearer access-token", req.Header.Get("Authorization"))
+	require.Equal(t, grokUpstreamUserAgent, req.Header.Get("User-Agent"))
+	require.Equal(t, xai.CLIClientVersion, req.Header.Get(xai.CLIClientVersionHeader))
 	require.True(t, strings.Contains(req.Header.Get("Accept"), "text/event-stream"))
 }
 
@@ -249,8 +251,10 @@ func TestForwardAsChatCompletionsForGrokUsesXAIAndCapturesUsage(t *testing.T) {
 
 	result, err := svc.ForwardAsChatCompletions(context.Background(), c, account, body, "", "")
 	require.NoError(t, err)
-	require.Equal(t, xai.DefaultBaseURL+"/chat/completions", upstream.lastReq.URL.String())
+	require.Equal(t, xai.DefaultCLIBaseURL+"/chat/completions", upstream.lastReq.URL.String())
 	require.Equal(t, "Bearer access-token", upstream.lastReq.Header.Get("Authorization"))
+	require.Equal(t, grokUpstreamUserAgent, upstream.lastReq.Header.Get("User-Agent"))
+	require.Equal(t, xai.CLIClientVersion, upstream.lastReq.Header.Get(xai.CLIClientVersionHeader))
 	require.Equal(t, "grok-4.5", gjson.GetBytes(upstream.lastBody, "model").String())
 	require.Equal(t, 5, result.Usage.InputTokens)
 	require.Equal(t, 2, result.Usage.OutputTokens)
@@ -289,7 +293,9 @@ func TestForwardGrokResponsesStreamingCapturesReasoningCacheAndQuota(t *testing.
 
 	result, err := svc.forwardGrokResponses(context.Background(), c, account, body, "grok", true, time.Now())
 	require.NoError(t, err)
-	require.Equal(t, xai.DefaultBaseURL+"/responses", upstream.lastReq.URL.String())
+	require.Equal(t, xai.DefaultCLIBaseURL+"/responses", upstream.lastReq.URL.String())
+	require.Equal(t, grokUpstreamUserAgent, upstream.lastReq.Header.Get("User-Agent"))
+	require.Equal(t, xai.CLIClientVersion, upstream.lastReq.Header.Get(xai.CLIClientVersionHeader))
 	require.Equal(t, "responses=experimental", upstream.lastReq.Header.Get("OpenAI-Beta"))
 	require.Equal(t, "grok-4.5", gjson.GetBytes(upstream.lastBody, "model").String())
 	require.Equal(t, "resp_grok", result.ResponseID)
@@ -335,7 +341,9 @@ func TestForwardAsChatCompletionsForGrokStreamingCapturesUsage(t *testing.T) {
 
 	result, err := svc.ForwardAsChatCompletions(context.Background(), c, account, body, "", "")
 	require.NoError(t, err)
-	require.Equal(t, xai.DefaultBaseURL+"/chat/completions", upstream.lastReq.URL.String())
+	require.Equal(t, xai.DefaultCLIBaseURL+"/chat/completions", upstream.lastReq.URL.String())
+	require.Equal(t, grokUpstreamUserAgent, upstream.lastReq.Header.Get("User-Agent"))
+	require.Equal(t, xai.CLIClientVersion, upstream.lastReq.Header.Get(xai.CLIClientVersionHeader))
 	require.Equal(t, "text/event-stream", upstream.lastReq.Header.Get("Accept"))
 	require.True(t, gjson.GetBytes(upstream.lastBody, "stream_options.include_usage").Bool())
 	require.Equal(t, 6, result.Usage.InputTokens)
@@ -358,8 +366,9 @@ func TestForwardAsAnthropicForGrokUsesResponsesConversion(t *testing.T) {
 
 	result, err := svc.ForwardAsAnthropic(context.Background(), c, account, body, "", "")
 	require.NoError(t, err)
-	require.Equal(t, xai.DefaultBaseURL+"/responses", upstream.lastReq.URL.String())
+	require.Equal(t, xai.DefaultCLIBaseURL+"/responses", upstream.lastReq.URL.String())
 	require.Equal(t, "sub2api-grok/1.0", upstream.lastReq.Header.Get("User-Agent"))
+	require.Equal(t, xai.CLIClientVersion, upstream.lastReq.Header.Get(xai.CLIClientVersionHeader))
 	require.Equal(t, "grok-4.5", gjson.GetBytes(upstream.lastBody, "model").String())
 	require.True(t, gjson.GetBytes(upstream.lastBody, "stream").Bool())
 	require.Equal(t, 5, result.Usage.InputTokens)

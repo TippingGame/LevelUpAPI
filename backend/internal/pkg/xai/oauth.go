@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -164,6 +165,23 @@ func ValidatedBaseURL(override string) (string, error) {
 	return ValidateBaseURL(EffectiveBaseURL(override))
 }
 
+// BaseURLValidator applies the caller's outbound URL trust policy before xAI
+// endpoint paths are appended. The service layer uses this to enforce the
+// application's global URL allowlist for account-level forwarding addresses.
+type BaseURLValidator func(string) (string, error)
+
+func validatedBaseURLWithValidator(override string, validator BaseURLValidator) (string, error) {
+	if validator == nil {
+		return ValidatedBaseURL(override)
+	}
+	raw := EffectiveBaseURL(override)
+	validated, err := validator(raw)
+	if err != nil {
+		return "", err
+	}
+	return normalizeKnownBaseURLPath(validated)
+}
+
 type RuntimeSanityCheck struct {
 	Value     string `json:"value"`
 	Valid     bool   `json:"valid"`
@@ -282,7 +300,16 @@ func ValidateTrustedBaseURL(raw string) (string, error) {
 func normalizeKnownBaseURLPath(raw string) (string, error) {
 	parsed, err := url.Parse(raw)
 	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
-		return "", fmt.Errorf("invalid url: %s", raw)
+		return "", errors.New("invalid base URL")
+	}
+	if parsed.User != nil {
+		return "", errors.New("base URL must not include userinfo")
+	}
+	if parsed.ForceQuery || parsed.RawQuery != "" {
+		return "", errors.New("base URL must not include a query")
+	}
+	if parsed.Fragment != "" {
+		return "", errors.New("base URL must not include a fragment")
 	}
 	path := strings.TrimRight(parsed.Path, "/")
 	if path == "" {
@@ -290,12 +317,41 @@ func normalizeKnownBaseURLPath(raw string) (string, error) {
 		parsed.RawPath = ""
 		return strings.TrimRight(parsed.String(), "/"), nil
 	}
-	if path != "/v1" {
+	if path != "/v1" && IsOfficialBaseURLHost(parsed.Hostname()) {
 		return "", fmt.Errorf("base URL path must be /v1")
 	}
 	parsed.Path = path
 	parsed.RawPath = ""
 	return strings.TrimRight(parsed.String(), "/"), nil
+}
+
+// IsOfficialBaseURLHost reports whether host belongs to an official xAI API
+// or CLI gateway. It intentionally checks only the host; path validation is
+// handled by normalizeKnownBaseURLPath.
+func IsOfficialBaseURLHost(host string) bool {
+	host = strings.ToLower(strings.TrimSpace(host))
+	for _, allowed := range baseURLAllowedHosts {
+		if host == allowed {
+			return true
+		}
+	}
+	return false
+}
+
+// IsOfficialBaseURL reports whether raw points at an official xAI host.
+// Empty or malformed values are treated as official so callers fall back to
+// the safe default instead of accidentally routing a token to an undefined
+// destination.
+func IsOfficialBaseURL(raw string) bool {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return true
+	}
+	parsed, err := url.Parse(trimmed)
+	if err != nil || parsed.Host == "" {
+		return true
+	}
+	return IsOfficialBaseURLHost(parsed.Hostname())
 }
 
 func AllowUnsafeURLOverrides() bool {
@@ -435,7 +491,11 @@ func ParseAuthorizationInput(raw string) AuthorizationInput {
 }
 
 func BuildResponsesURL(baseURL string) (string, error) {
-	validatedBaseURL, err := ValidatedBaseURL(baseURL)
+	return BuildResponsesURLWithValidator(baseURL, nil)
+}
+
+func BuildResponsesURLWithValidator(baseURL string, validator BaseURLValidator) (string, error) {
+	validatedBaseURL, err := validatedBaseURLWithValidator(baseURL, validator)
 	if err != nil {
 		return "", fmt.Errorf("invalid base url: %w", err)
 	}
@@ -443,11 +503,67 @@ func BuildResponsesURL(baseURL string) (string, error) {
 }
 
 func BuildChatCompletionsURL(baseURL string) (string, error) {
-	validatedBaseURL, err := ValidatedBaseURL(baseURL)
+	return BuildChatCompletionsURLWithValidator(baseURL, nil)
+}
+
+func BuildChatCompletionsURLWithValidator(baseURL string, validator BaseURLValidator) (string, error) {
+	validatedBaseURL, err := validatedBaseURLWithValidator(baseURL, validator)
 	if err != nil {
 		return "", fmt.Errorf("invalid base url: %w", err)
 	}
 	return validatedBaseURL + "/chat/completions", nil
+}
+
+func BuildImagesGenerationsURLWithValidator(baseURL string, validator BaseURLValidator) (string, error) {
+	validatedBaseURL, err := validatedBaseURLWithValidator(baseURL, validator)
+	if err != nil {
+		return "", fmt.Errorf("invalid base url: %w", err)
+	}
+	return validatedBaseURL + "/images/generations", nil
+}
+
+func BuildImagesEditsURLWithValidator(baseURL string, validator BaseURLValidator) (string, error) {
+	validatedBaseURL, err := validatedBaseURLWithValidator(baseURL, validator)
+	if err != nil {
+		return "", fmt.Errorf("invalid base url: %w", err)
+	}
+	return validatedBaseURL + "/images/edits", nil
+}
+
+func BuildVideosGenerationsURLWithValidator(baseURL string, validator BaseURLValidator) (string, error) {
+	validatedBaseURL, err := validatedBaseURLWithValidator(baseURL, validator)
+	if err != nil {
+		return "", fmt.Errorf("invalid base url: %w", err)
+	}
+	return validatedBaseURL + "/videos/generations", nil
+}
+
+func BuildVideosEditsURLWithValidator(baseURL string, validator BaseURLValidator) (string, error) {
+	validatedBaseURL, err := validatedBaseURLWithValidator(baseURL, validator)
+	if err != nil {
+		return "", fmt.Errorf("invalid base url: %w", err)
+	}
+	return validatedBaseURL + "/videos/edits", nil
+}
+
+func BuildVideosExtensionsURLWithValidator(baseURL string, validator BaseURLValidator) (string, error) {
+	validatedBaseURL, err := validatedBaseURLWithValidator(baseURL, validator)
+	if err != nil {
+		return "", fmt.Errorf("invalid base url: %w", err)
+	}
+	return validatedBaseURL + "/videos/extensions", nil
+}
+
+func BuildVideoURLWithValidator(baseURL, requestID string, validator BaseURLValidator) (string, error) {
+	validatedBaseURL, err := validatedBaseURLWithValidator(baseURL, validator)
+	if err != nil {
+		return "", fmt.Errorf("invalid base url: %w", err)
+	}
+	requestID = strings.TrimSpace(requestID)
+	if requestID == "" {
+		return "", errors.New("request id is required")
+	}
+	return validatedBaseURL + "/videos/" + url.PathEscape(requestID), nil
 }
 
 // TokenResponse represents xAI OAuth token responses.

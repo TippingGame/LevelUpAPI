@@ -20,7 +20,7 @@ type grokOAuthClientStub struct {
 	exchangeCalls   int
 }
 
-func TestGrokOAuthServiceBuildAccountCredentialsUsesOfficialAPI(t *testing.T) {
+func TestGrokOAuthServiceBuildAccountCredentialsUsesOfficialCLIForwardingBase(t *testing.T) {
 	svc := NewGrokOAuthService(nil, &grokOAuthClientStub{})
 	defer svc.Stop()
 
@@ -29,7 +29,7 @@ func TestGrokOAuthServiceBuildAccountCredentialsUsesOfficialAPI(t *testing.T) {
 		ExpiresAt:   time.Now().Add(time.Hour).Unix(),
 	})
 
-	require.Equal(t, xai.DefaultBaseURL, credentials["base_url"])
+	require.Equal(t, xai.DefaultCLIBaseURL, credentials["base_url"])
 }
 
 func (s *grokOAuthClientStub) ExchangeCode(context.Context, string, string, string, string, string) (*xai.TokenResponse, error) {
