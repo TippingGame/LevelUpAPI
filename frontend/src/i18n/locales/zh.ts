@@ -964,7 +964,6 @@ export default {
     importFileMode: '文件/目录',
     importTextLabel: '账号数据',
     importTextPlaceholder: '普通 Token 可每行一个；完整 JSON / JSON 数组可整段粘贴。',
-    importTextPlaceholderGrokOAuth: '{\n  "platform": "grok",\n  "type": "oauth",\n  "credentials": { "access_token": "...", "refresh_token": "..." }\n}',
     importTextPlaceholderGrokRefreshToken: '每行一个 xAI refresh token',
     importTextPlaceholderGrokSSO: '每行一个 SSO key；也支持 sso=... 或完整 Cookie: ...',
     importTextHint: '普通 Token 默认按 OpenAI Refresh Token 处理；Claude Session Key 会自动识别并兑换为 OAuth 凭证。',

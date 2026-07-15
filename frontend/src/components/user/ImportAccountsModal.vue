@@ -142,6 +142,11 @@ const { t } = useI18n()
 const appStore = useAppStore()
 
 const PROXY_PURCHASE_URL = 'https://www.seekproxy.com/user/reg?invite_id=106509'
+const GROK_OAUTH_JSON_PLACEHOLDER = `{
+  "platform": "grok",
+  "type": "oauth",
+  "credentials": { "access_token": "...", "refresh_token": "..." }
+}`
 
 const selectedPlatform = ref<ImportPlatform | ''>('')
 const selectedAccountLevel = ref<SelectableOpenAILevel | ''>('')
@@ -220,7 +225,7 @@ const importTextPlaceholder = computed(() => {
   if (selectedPlatform.value !== 'grok') return t('userAccounts.importTextPlaceholder')
   if (selectedGrokImportMode.value === 'web_sso') return t('userAccounts.importTextPlaceholderGrokSSO')
   if (selectedGrokImportMode.value === 'refresh_token') return t('userAccounts.importTextPlaceholderGrokRefreshToken')
-  return t('userAccounts.importTextPlaceholderGrokOAuth')
+  return GROK_OAUTH_JSON_PLACEHOLDER
 })
 
 const selectedPlatformHint = computed(() => {

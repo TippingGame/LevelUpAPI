@@ -170,6 +170,10 @@ const CredentialImportModalStub = defineComponent({
     importer: {
       type: Function,
       required: true
+    },
+    textPlaceholder: {
+      type: String,
+      default: ''
     }
   },
   template: '<div v-if="show"><slot name="controls" /><slot /></div>'
@@ -328,6 +332,7 @@ describe('user proxy create entry buttons', () => {
     expect(wrapper.find('[data-testid="grok-import-method-oauth_credentials"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="grok-import-method-refresh_token"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="grok-import-method-web_sso"]').exists()).toBe(true)
+    expect(wrapper.findComponent(CredentialImportModalStub).props('textPlaceholder')).toContain('"platform": "grok"')
 
     wrapper.findComponent(ProxySelectorStub).vm.$emit('update:modelValue', 42)
     const importer = wrapper.findComponent(CredentialImportModalStub).props('importer') as (contents: string[]) => Promise<unknown>

@@ -965,7 +965,6 @@ export default {
     importFileMode: 'Files / Folder',
     importTextLabel: 'Account Data',
     importTextPlaceholder: 'Paste one token per line, or paste a complete JSON object / JSON array.',
-    importTextPlaceholderGrokOAuth: '{\n  "platform": "grok",\n  "type": "oauth",\n  "credentials": { "access_token": "...", "refresh_token": "..." }\n}',
     importTextPlaceholderGrokRefreshToken: 'One xAI refresh token per line',
     importTextPlaceholderGrokSSO: 'One SSO key per line; sso=... and full Cookie: ... are also accepted',
     importTextHint: 'Plain tokens are treated as OpenAI Refresh Tokens unless they are Claude Session Keys.',
