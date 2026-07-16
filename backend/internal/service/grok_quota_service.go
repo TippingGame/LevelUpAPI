@@ -48,13 +48,14 @@ type GrokQuotaResetResult struct {
 }
 
 type GrokQuotaService struct {
-	accountRepo   AccountRepository
-	proxyRepo     ProxyRepository
-	tokenProvider *GrokTokenProvider
-	httpUpstream  HTTPUpstream
-	usageLogRepo  UsageLogRepository
-	cfg           *config.Config
-	probeFlight   singleflight.Group
+	accountRepo    AccountRepository
+	proxyRepo      ProxyRepository
+	tokenProvider  *GrokTokenProvider
+	httpUpstream   HTTPUpstream
+	usageLogRepo   UsageLogRepository
+	cfg            *config.Config
+	settingService *SettingService
+	probeFlight    singleflight.Group
 }
 
 func NewGrokQuotaService(
@@ -90,6 +91,15 @@ func NewGrokQuotaServiceWithConfig(
 		usageLogRepo:  usageLogRepo,
 		cfg:           cfg,
 	}
+}
+
+// SetSettingService injects the runtime settings reader used to merge
+// database-managed upstream allowlist additions with config-defined hosts.
+func (s *GrokQuotaService) SetSettingService(settingService *SettingService) {
+	if s == nil {
+		return
+	}
+	s.settingService = settingService
 }
 
 // QueryQuota combines xAI billing data with an active quota-header probe for
@@ -152,7 +162,7 @@ func (s *GrokQuotaService) probeUsage(ctx context.Context, accountID int64) (*Gr
 	if err != nil {
 		return nil, infraerrors.Newf(http.StatusBadRequest, "GROK_QUOTA_PROBE_BODY_ERROR", "failed to build probe body: %v", err)
 	}
-	targetURL, err := buildGrokResponsesURL(account, s.cfg)
+	targetURL, err := buildGrokResponsesURL(account, s.cfg, s.settingService)
 	if err != nil {
 		return nil, infraerrors.Newf(http.StatusBadRequest, "GROK_QUOTA_BASE_URL_INVALID", "invalid Grok base_url: %v", err)
 	}
@@ -324,7 +334,7 @@ func (s *GrokQuotaService) fetchBilling(
 	proxyURL string,
 	weekly bool,
 ) (*xai.BillingSummary, int, error) {
-	billingURL, err := buildGrokBillingURL(account, s.cfg, weekly)
+	billingURL, err := buildGrokBillingURL(account, s.cfg, weekly, s.settingService)
 	if err != nil {
 		return nil, 0, infraerrors.Newf(http.StatusBadRequest, "GROK_QUOTA_BASE_URL_INVALID", "invalid Grok base_url: %v", err)
 	}

@@ -117,8 +117,11 @@ func ProvideGrokQuotaService(
 	httpUpstream HTTPUpstream,
 	cfg *config.Config,
 	usageLogRepo UsageLogRepository,
+	settingService *SettingService,
 ) *GrokQuotaService {
-	return NewGrokQuotaServiceWithConfig(accountRepo, proxyRepo, tokenProvider, httpUpstream, cfg, usageLogRepo)
+	svc := NewGrokQuotaServiceWithConfig(accountRepo, proxyRepo, tokenProvider, httpUpstream, cfg, usageLogRepo)
+	svc.SetSettingService(settingService)
+	return svc
 }
 
 func ProvideAccountTestService(

@@ -244,7 +244,7 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 	upstreamCtx, releaseUpstreamCtx := detachStreamUpstreamContext(ctx, true)
 	var upstreamReq *http.Request
 	if account.Platform == PlatformGrok {
-		upstreamReq, err = buildGrokResponsesRequest(upstreamCtx, c, account, responsesBody, token, s.cfg)
+		upstreamReq, err = buildGrokResponsesRequestWithPolicy(upstreamCtx, c, account, responsesBody, token, s.settingService, s.cfg)
 	} else {
 		upstreamReq, err = s.buildUpstreamRequest(upstreamCtx, c, account, responsesBody, token, isStream, promptCacheKey, false)
 	}

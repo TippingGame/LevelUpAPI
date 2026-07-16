@@ -58,6 +58,26 @@ func TestGrokAPIKeyBaseURLUsesAllowlist(t *testing.T) {
 	require.Equal(t, "https://relay.example.test/v1/chat/completions", target)
 }
 
+func TestGrokAPIKeyBaseURLUsesDatabaseAllowlistAdditions(t *testing.T) {
+	account := &Account{
+		Platform: PlatformGrok,
+		Type:     AccountTypeAPIKey,
+		Credentials: map[string]any{
+			"base_url": "https://db-relay.example.test/v1",
+		},
+	}
+	cfg := &config.Config{}
+	cfg.Security.URLAllowlist.Enabled = true
+	cfg.Security.URLAllowlist.UpstreamHosts = []string{"other.example.test"}
+	settings := NewSettingService(&settingValueRepoStub{values: map[string]string{
+		SettingKeyUpstreamURLAllowlistExtraHosts: `["db-relay.example.test"]`,
+	}}, cfg)
+
+	target, err := buildGrokChatCompletionsURL(account, cfg, settings)
+	require.NoError(t, err)
+	require.Equal(t, "https://db-relay.example.test/v1/chat/completions", target)
+}
+
 func TestGrokBillingURLFollowsForwardingBaseURL(t *testing.T) {
 	account := &Account{
 		Platform: PlatformGrok,

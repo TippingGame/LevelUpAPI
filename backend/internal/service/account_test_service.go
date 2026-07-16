@@ -796,7 +796,7 @@ func (s *AccountTestService) testGrokAccountConnection(c *gin.Context, account *
 	default:
 		return s.sendErrorAndEnd(c, fmt.Sprintf("Unsupported Grok account type: %s", account.Type))
 	}
-	apiURL, err := buildGrokResponsesURL(account, s.cfg)
+	apiURL, err := buildGrokResponsesURL(account, s.cfg, s.settingService)
 	if err != nil {
 		return s.sendErrorAndEnd(c, "Invalid Grok base URL: "+err.Error())
 	}

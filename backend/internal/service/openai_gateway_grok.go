@@ -48,7 +48,7 @@ func (s *OpenAIGatewayService) forwardGrokResponses(
 
 	upstreamCtx, releaseUpstreamCtx := detachStreamUpstreamContext(ctx, reqStream)
 	defer releaseUpstreamCtx()
-	upstreamReq, err := buildGrokResponsesRequest(upstreamCtx, c, account, patchedBody, token, s.cfg)
+	upstreamReq, err := buildGrokResponsesRequestWithPolicy(upstreamCtx, c, account, patchedBody, token, s.settingService, s.cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -397,12 +397,12 @@ func shouldDropGrokToolChoice(toolChoice gjson.Result, tools []json.RawMessage) 
 	return true
 }
 
-func buildGrokResponsesRequest(ctx context.Context, c *gin.Context, account *Account, body []byte, token string, configs ...*config.Config) (*http.Request, error) {
-	var cfg *config.Config
-	if len(configs) > 0 {
-		cfg = configs[0]
-	}
-	targetURL, err := buildGrokResponsesURL(account, cfg)
+func buildGrokResponsesRequest(ctx context.Context, c *gin.Context, account *Account, body []byte, token string) (*http.Request, error) {
+	return buildGrokResponsesRequestWithPolicy(ctx, c, account, body, token, nil, nil)
+}
+
+func buildGrokResponsesRequestWithPolicy(ctx context.Context, c *gin.Context, account *Account, body []byte, token string, settingService *SettingService, cfg *config.Config) (*http.Request, error) {
+	targetURL, err := buildGrokResponsesURL(account, cfg, settingService)
 	if err != nil {
 		return nil, err
 	}

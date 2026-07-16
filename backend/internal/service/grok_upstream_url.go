@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"errors"
 	"fmt"
 
@@ -13,12 +14,12 @@ import (
 // OAuth lifecycle endpoints are never routed through this helper: they remain
 // pinned to xAI's official authorization/token hosts. This validator only
 // governs forwarding and probing endpoints.
-func grokBaseURLValidator(account *Account, cfg *config.Config) (xai.BaseURLValidator, error) {
+func grokBaseURLValidator(account *Account, cfg *config.Config, settingServices ...*SettingService) (xai.BaseURLValidator, error) {
 	if account == nil || !account.IsGrok() {
 		return nil, fmt.Errorf("grok account is required")
 	}
 
-	policyValidator := grokOperatorPolicyValidator(cfg)
+	policyValidator := grokOperatorPolicyValidator(cfg, settingServices...)
 	if account.IsGrokOAuth() {
 		// Official xAI hosts are trusted even when the operator allowlist is
 		// restrictive. A custom OAuth forwarding host still goes through the
@@ -36,9 +37,13 @@ func grokBaseURLValidator(account *Account, cfg *config.Config) (xai.BaseURLVali
 	return nil, fmt.Errorf("unsupported grok account type: %s", account.Type)
 }
 
-func grokOperatorPolicyValidator(cfg *config.Config) xai.BaseURLValidator {
+func grokOperatorPolicyValidator(cfg *config.Config, settingServices ...*SettingService) xai.BaseURLValidator {
 	if cfg == nil {
 		return xai.ValidateBaseURL
+	}
+	var settingService *SettingService
+	if len(settingServices) > 0 {
+		settingService = settingServices[0]
 	}
 	if !cfg.Security.URLAllowlist.Enabled {
 		return func(raw string) (string, error) {
@@ -46,8 +51,12 @@ func grokOperatorPolicyValidator(cfg *config.Config) xai.BaseURLValidator {
 		}
 	}
 	return func(raw string) (string, error) {
+		allowedHosts, err := upstreamAllowlistHosts(context.Background(), cfg, settingService)
+		if err != nil {
+			return "", err
+		}
 		return urlvalidator.ValidateHTTPSURL(raw, urlvalidator.ValidationOptions{
-			AllowedHosts:     cfg.Security.URLAllowlist.UpstreamHosts,
+			AllowedHosts:     allowedHosts,
 			RequireAllowlist: true,
 			AllowPrivate:     cfg.Security.URLAllowlist.AllowPrivateHosts,
 		})
@@ -66,24 +75,24 @@ func redactedGrokBaseURLValidator(validator xai.BaseURLValidator) xai.BaseURLVal
 	}
 }
 
-func buildGrokResponsesURL(account *Account, cfg *config.Config) (string, error) {
-	validator, err := grokBaseURLValidator(account, cfg)
+func buildGrokResponsesURL(account *Account, cfg *config.Config, settingServices ...*SettingService) (string, error) {
+	validator, err := grokBaseURLValidator(account, cfg, settingServices...)
 	if err != nil {
 		return "", err
 	}
 	return xai.BuildResponsesURLWithValidator(account.GetGrokBaseURL(), validator)
 }
 
-func buildGrokChatCompletionsURL(account *Account, cfg *config.Config) (string, error) {
-	validator, err := grokBaseURLValidator(account, cfg)
+func buildGrokChatCompletionsURL(account *Account, cfg *config.Config, settingServices ...*SettingService) (string, error) {
+	validator, err := grokBaseURLValidator(account, cfg, settingServices...)
 	if err != nil {
 		return "", err
 	}
 	return xai.BuildChatCompletionsURLWithValidator(account.GetGrokBaseURL(), validator)
 }
 
-func buildGrokBillingURL(account *Account, cfg *config.Config, weekly bool) (string, error) {
-	validator, err := grokBaseURLValidator(account, cfg)
+func buildGrokBillingURL(account *Account, cfg *config.Config, weekly bool, settingServices ...*SettingService) (string, error) {
+	validator, err := grokBaseURLValidator(account, cfg, settingServices...)
 	if err != nil {
 		return "", err
 	}
