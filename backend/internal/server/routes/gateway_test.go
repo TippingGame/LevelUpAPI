@@ -159,7 +159,7 @@ func TestGatewayRoutesOpenAIAlphaSearchPathsAreRegistered(t *testing.T) {
 		if route.Method == http.MethodPost {
 			registered[route.Path] = struct{}{}
 		}
- 	}
+	}
 	for _, path := range []string{
 		"/v1/alpha/search",
 		"/alpha/search",
@@ -223,29 +223,5 @@ func TestGatewayRoutesNonGrokVideosAreRejectedAtPlatformGate(t *testing.T) {
 		router.ServeHTTP(w, req)
 		require.Equal(t, http.StatusNotFound, w.Code, "method=%s path=%s", tc.method, tc.path)
 		require.Contains(t, w.Body.String(), "Videos API is not supported for this platform")
-	}
-}
-
-func TestGatewayRoutesGrokAllowsCLICompatibilityEntrypoints(t *testing.T) {
-	router := newGatewayRoutesTestRouterForPlatform(service.PlatformGrok)
-
-	for _, tc := range []struct {
-		method string
-		path   string
-	}{
-		{http.MethodPost, "/v1/messages"},
-		{http.MethodPost, "/v1/chat/completions"},
-		{http.MethodPost, "/chat/completions"},
-		{http.MethodGet, "/v1/responses"},
-		{http.MethodGet, "/responses"},
-		{http.MethodGet, "/backend-api/codex/responses"},
-	} {
-		req := httptest.NewRequest(tc.method, tc.path, strings.NewReader(`{"model":"grok"}`))
-		req.Header.Set("Content-Type", "application/json")
-		w := httptest.NewRecorder()
-
-		router.ServeHTTP(w, req)
-		require.NotEqual(t, http.StatusNotFound, w.Code, "method=%s path=%s", tc.method, tc.path)
-		require.NotContains(t, w.Body.String(), "not supported for Grok groups")
 	}
 }

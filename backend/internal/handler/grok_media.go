@@ -95,7 +95,7 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 	}
 
 	reqLog = reqLog.With(zap.String("model", requestModel))
-	setOpsRequestContext(c, requestModel, false)
+	setOpsRequestContext(c, requestModel, false, body)
 	setOpsEndpointContext(c, "", int16(service.RequestTypeSync))
 
 	if endpoint.IsGenerationRequest() {
@@ -109,13 +109,6 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 				h.errorResponse(c, contentModerationStatus(decision), contentModerationErrorCode(decision), decision.Message)
 				return
 			}
-		}
-		imageReleaseFunc, acquired := h.acquireImageGenerationSlot(c, streamStarted)
-		if !acquired {
-			return
-		}
-		if imageReleaseFunc != nil {
-			defer imageReleaseFunc()
 		}
 	}
 
@@ -134,7 +127,7 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 		defer userReleaseFunc()
 	}
 
-	if err := h.billingCacheService.CheckBillingEligibility(c.Request.Context(), apiKey.User, apiKey, apiKey.Group, subscription, service.QuotaPlatform(c.Request.Context(), apiKey)); err != nil {
+	if err := h.billingCacheService.CheckBillingEligibility(c.Request.Context(), apiKey.User, apiKey, apiKey.Group, subscription); err != nil {
 		reqLog.Info("grok_media.billing_eligibility_check_failed", zap.Error(err))
 		status, code, message, retryAfter := billingErrorDetails(err)
 		if retryAfter > 0 {
@@ -182,11 +175,7 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 				zap.Int("excluded_account_count", len(failedAccountIDs)),
 			)
 			if len(failedAccountIDs) == 0 {
-				cls := classifyNoAccountErrorFromGin(c, h.gatewayService, apiKey, requestModel, requestModel, service.PlatformGrok)
-				if !cls.ModelNotFound {
-					markOpsRoutingCapacityLimitedIfNoAvailable(c, err)
-				}
-				h.errorResponse(c, cls.Status, cls.ErrType, cls.Message)
+				h.errorResponse(c, http.StatusServiceUnavailable, "api_error", openAIAccountSelectionUnavailableMessage(err))
 				return
 			}
 			if lastFailoverErr != nil {
@@ -197,11 +186,7 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 			return
 		}
 		if selection == nil || selection.Account == nil {
-			cls := classifyNoAccountErrorFromGin(c, h.gatewayService, apiKey, requestModel, requestModel, service.PlatformGrok)
-			if !cls.ModelNotFound {
-				markOpsRoutingCapacityLimited(c)
-			}
-			h.errorResponse(c, cls.Status, cls.ErrType, cls.Message)
+			h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "No available Grok accounts")
 			return
 		}
 
@@ -342,12 +327,11 @@ func recordGrokMediaUsage(
 	}
 	inboundEndpoint := GetInboundEndpoint(c)
 	upstreamEndpoint := GetUpstreamEndpoint(c, account.Platform)
-	quotaPlatform := service.QuotaPlatform(c.Request.Context(), apiKey)
 	channelUsageFields := service.ChannelUsageFields{
 		OriginalModel:      requestModel,
 		ChannelMappedModel: requestModel,
 	}
-	h.submitOpenAIUsageRecordTask(c.Request.Context(), result, func(ctx context.Context) {
+	h.submitUsageRecordTask(c.Request.Context(), func(ctx context.Context) {
 		if err := h.gatewayService.RecordUsage(ctx, &service.OpenAIRecordUsageInput{
 			Result:             result,
 			APIKey:             apiKey,
@@ -360,7 +344,6 @@ func recordGrokMediaUsage(
 			IPAddress:          clientIP,
 			RequestPayloadHash: service.HashUsageRequestPayload(payloadForHash),
 			APIKeyService:      h.apiKeyService,
-			QuotaPlatform:      quotaPlatform,
 			ChannelUsageFields: channelUsageFields,
 		}); err != nil {
 			logger.L().With(

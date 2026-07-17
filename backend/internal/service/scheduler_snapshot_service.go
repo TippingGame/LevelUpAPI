@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"sort"
 	"strconv"
 	"sync"
 	"time"
@@ -666,6 +667,30 @@ func (s *SchedulerSnapshotService) rebuildBucketsForPlatform(ctx context.Context
 		}
 	}
 	return firstErr
+}
+
+func (s *SchedulerSnapshotService) bucketsForPlatform(platform string, groupIDs []int64, seen map[batchSeenKey]struct{}) []SchedulerBucket {
+	if platform == "" {
+		return nil
+	}
+	buckets := make([]SchedulerBucket, 0, len(groupIDs)*3)
+	for _, groupID := range groupIDs {
+		if seen != nil {
+			key := batchSeenKey{groupID: groupID, platform: platform}
+			if _, exists := seen[key]; exists {
+				continue
+			}
+			seen[key] = struct{}{}
+		}
+		buckets = append(buckets,
+			SchedulerBucket{GroupID: groupID, Platform: platform, Mode: SchedulerModeSingle},
+			SchedulerBucket{GroupID: groupID, Platform: platform, Mode: SchedulerModeForced},
+		)
+		if platform == PlatformAnthropic || platform == PlatformGemini {
+			buckets = append(buckets, SchedulerBucket{GroupID: groupID, Platform: platform, Mode: SchedulerModeMixed})
+		}
+	}
+	return buckets
 }
 
 func (s *SchedulerSnapshotService) rebuildBuckets(ctx context.Context, buckets []SchedulerBucket, reason string) error {

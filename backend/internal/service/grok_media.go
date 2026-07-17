@@ -67,7 +67,7 @@ func (r GrokMediaRequestInfo) ModerationBody() []byte {
 		}
 	}
 	for _, upload := range r.Uploads {
-		if dataURL := upload.ModerationDataURL(); dataURL != "" {
+		if dataURL, err := openAIImageUploadToDataURL(upload); err == nil && dataURL != "" {
 			images = append(images, map[string]string{"image_url": dataURL})
 		}
 	}
@@ -75,7 +75,7 @@ func (r GrokMediaRequestInfo) ModerationBody() []byte {
 		images = append(images, map[string]string{"image_url": maskURL})
 	}
 	if r.MaskUpload != nil {
-		if dataURL := r.MaskUpload.ModerationDataURL(); dataURL != "" {
+		if dataURL, err := openAIImageUploadToDataURL(*r.MaskUpload); err == nil && dataURL != "" {
 			images = append(images, map[string]string{"image_url": dataURL})
 		}
 	}
@@ -306,7 +306,7 @@ func (s *OpenAIGatewayService) ForwardGrokMedia(
 	if endpoint.RequiresRequestBody() {
 		bodyReader = bytes.NewReader(body)
 	}
-	upstreamCtx, releaseUpstreamCtx := detachUpstreamContext(ctx)
+	upstreamCtx, releaseUpstreamCtx := detachStreamUpstreamContext(ctx, false)
 	defer releaseUpstreamCtx()
 	upstreamReq, err := http.NewRequestWithContext(upstreamCtx, endpoint.httpMethod(), targetURL, bodyReader)
 	if err != nil {
@@ -339,11 +339,11 @@ func (s *OpenAIGatewayService) ForwardGrokMedia(
 	requestInfo := ParseGrokMediaRequest(contentType, body)
 	requestModel := requestInfo.Model
 	if resp.StatusCode >= 400 {
-		s.updateGrokUsageSnapshot(ctx, account.ID, xai.ParseQuotaHeaders(resp.Header, resp.StatusCode))
+		s.updateGrokUsageSnapshot(ctx, account, xai.ParseQuotaHeaders(resp.Header, resp.StatusCode))
 		return s.handleGrokMediaErrorResponse(ctx, resp, c, account, requestIDHeader, requestModel)
 	}
 
-	s.updateGrokUsageSnapshot(ctx, account.ID, xai.ParseQuotaHeaders(resp.Header, resp.StatusCode))
+	s.updateGrokUsageSnapshot(ctx, account, xai.ParseQuotaHeaders(resp.Header, resp.StatusCode))
 	respBody, err := ReadUpstreamResponseBody(resp.Body, s.cfg, c, openAITooLargeError)
 	if err != nil {
 		return nil, err
@@ -351,18 +351,16 @@ func (s *OpenAIGatewayService) ForwardGrokMedia(
 	writeGrokMediaResponse(c, resp, respBody, s.responseHeaderFilter)
 	usage := grokMediaUsageFromResponse(endpoint, requestInfo, respBody)
 	return &OpenAIForwardResult{
-		RequestID:        requestIDHeader,
-		ResponseID:       usage.ResponseID,
-		Usage:            usage.Usage,
-		Model:            requestModel,
-		BillingModel:     requestModel,
-		UpstreamModel:    requestModel,
-		ResponseHeaders:  resp.Header.Clone(),
-		Duration:         time.Since(startTime),
-		ImageCount:       usage.ImageCount,
-		ImageSize:        usage.ImageSize,
-		ImageInputSize:   usage.ImageInputSize,
-		ImageOutputSizes: usage.ImageOutputSizes,
+		RequestID:       requestIDHeader,
+		ResponseID:      usage.ResponseID,
+		Usage:           usage.Usage,
+		Model:           requestModel,
+		BillingModel:    requestModel,
+		UpstreamModel:   requestModel,
+		ResponseHeaders: resp.Header.Clone(),
+		Duration:        time.Since(startTime),
+		ImageCount:      usage.ImageCount,
+		ImageSize:       usage.ImageSize,
 	}, nil
 }
 
@@ -422,7 +420,7 @@ func prepareGrokMediaForwardBody(endpoint GrokMediaEndpoint, body []byte, conten
 		payload["mask"] = map[string]string{"image_url": maskImageURL}
 	}
 
-	out, err := marshalOpenAIUpstreamJSON(payload)
+	out, err := json.Marshal(payload)
 	if err != nil {
 		return nil, "", err
 	}
@@ -465,12 +463,10 @@ func normalizeGrokMediaModelForEndpoint(endpoint GrokMediaEndpoint, model string
 }
 
 type grokMediaUsageMetadata struct {
-	ResponseID       string
-	Usage            OpenAIUsage
-	ImageCount       int
-	ImageSize        string
-	ImageInputSize   string
-	ImageOutputSizes []string
+	ResponseID string
+	Usage      OpenAIUsage
+	ImageCount int
+	ImageSize  string
 }
 
 func grokMediaUsageFromResponse(endpoint GrokMediaEndpoint, requestInfo GrokMediaRequestInfo, responseBody []byte) grokMediaUsageMetadata {
@@ -487,13 +483,10 @@ func grokMediaUsageFromResponse(endpoint GrokMediaEndpoint, requestInfo GrokMedi
 		}
 		meta.ImageCount = imageCount
 		meta.ImageSize = requestInfo.SizeTier
-		meta.ImageInputSize = requestInfo.Size
-		meta.ImageOutputSizes = collectOpenAIResponseImageOutputSizesFromJSONBytes(responseBody)
 	case GrokMediaEndpointVideosGenerations:
 		meta.ResponseID = extractGrokMediaVideoRequestID(responseBody)
 		meta.ImageCount = 1
 		meta.ImageSize = requestInfo.SizeTier
-		meta.ImageInputSize = requestInfo.Size
 	}
 	return meta
 }
@@ -518,7 +511,7 @@ func (s *OpenAIGatewayService) handleGrokMediaErrorResponse(
 	requestIDHeader string,
 	requestedModel string,
 ) (*OpenAIForwardResult, error) {
-	body := s.readUpstreamErrorBody(resp)
+	body := readGrokMediaErrorBody(resp)
 	upstreamMsg := sanitizeUpstreamErrorMessage(strings.TrimSpace(extractUpstreamErrorMessage(body)))
 	if upstreamMsg == "" {
 		upstreamMsg = fmt.Sprintf("xAI upstream returned status %d", resp.StatusCode)
@@ -543,7 +536,6 @@ func (s *OpenAIGatewayService) handleGrokMediaErrorResponse(
 		"upstream_error",
 		"Upstream request failed",
 	); matched {
-		MarkResponseCommitted(c)
 		writeGrokMediaErrorResponse(c, status, errType, errMsg)
 		return nil, fmt.Errorf("upstream error: %d (passthrough rule matched) message=%s", resp.StatusCode, upstreamMsg)
 	}
@@ -559,7 +551,6 @@ func (s *OpenAIGatewayService) handleGrokMediaErrorResponse(
 			Message:            upstreamMsg,
 			Detail:             upstreamDetail,
 		})
-		MarkResponseCommitted(c)
 		writeGrokMediaErrorResponse(c, http.StatusInternalServerError, "upstream_error", "Upstream gateway error")
 		return nil, fmt.Errorf("upstream error: %d (not in custom error codes) message=%s", resp.StatusCode, upstreamMsg)
 	}
@@ -587,9 +578,16 @@ func (s *OpenAIGatewayService) handleGrokMediaErrorResponse(
 		}
 	}
 
-	MarkResponseCommitted(c)
 	writeGrokMediaErrorResponse(c, resp.StatusCode, grokMediaErrorType(resp.StatusCode), upstreamMsg)
 	return nil, fmt.Errorf("upstream error: %d %s", resp.StatusCode, upstreamMsg)
+}
+
+func readGrokMediaErrorBody(resp *http.Response) []byte {
+	if resp == nil || resp.Body == nil {
+		return nil
+	}
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	return body
 }
 
 func grokMediaErrorType(statusCode int) string {

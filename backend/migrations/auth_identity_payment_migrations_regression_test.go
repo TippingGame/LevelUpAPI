@@ -178,3 +178,14 @@ func TestMigration209RetiresAccountShareModeWithSafetyChecks(t *testing.T) {
 	require.NotContains(t, sql, "DROP TABLE account_share_settlement_entries")
 	require.NotContains(t, sql, "DROP TABLE user_balance_ledger")
 }
+
+func TestMigration217BackfillsGrokMediaGenerationGroups(t *testing.T) {
+	content, err := FS.ReadFile("217_enable_grok_media_generation_groups.sql")
+	require.NoError(t, err)
+
+	sql := string(content)
+	require.Contains(t, sql, "UPDATE groups")
+	require.Contains(t, sql, "SET allow_image_generation = true")
+	require.Contains(t, sql, "WHERE platform = 'grok'")
+	require.Contains(t, sql, "AND allow_image_generation = false")
+}

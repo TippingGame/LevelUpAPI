@@ -4,9 +4,18 @@ import (
 	"bytes"
 	"encoding/json"
 	"strings"
+	"unsafe"
 
 	"github.com/tidwall/gjson"
 )
+
+func parseRawJSONView(raw []byte) gjson.Result {
+	if len(raw) == 0 {
+		return gjson.Result{}
+	}
+	// Synchronous read-only parsing avoids copying large message histories.
+	return gjson.Parse(*(*string)(unsafe.Pointer(&raw)))
+}
 
 // contentSessionSeedPrefix prevents collisions between content-derived seeds
 // and explicit session IDs (e.g. "sess-xxx" or "compat_cc_xxx").
