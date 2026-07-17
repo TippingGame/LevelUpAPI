@@ -688,7 +688,8 @@
           v-if="
             createForm.platform === 'antigravity' ||
             createForm.platform === 'gemini' ||
-            createForm.platform === 'openai'
+            createForm.platform === 'openai' ||
+            createForm.platform === 'grok'
           "
           class="border-t pt-4"
         >
@@ -700,6 +701,35 @@
           <p class="text-xs text-gray-500 dark:text-gray-400 mb-3">
             {{ t("admin.groups.imagePricing.description") }}
           </p>
+          <div class="mb-4 space-y-3">
+            <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+              <input
+                v-model="createForm.allow_image_generation"
+                type="checkbox"
+                class="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+              />
+              {{ t("admin.groups.imagePricing.allowGeneration") }}
+            </label>
+            <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+              <input
+                v-model="createForm.image_rate_independent"
+                type="checkbox"
+                class="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+              />
+              {{ t("admin.groups.imagePricing.independentMultiplier") }}
+            </label>
+            <div v-if="createForm.image_rate_independent">
+              <label class="input-label">{{ t("admin.groups.imagePricing.imageMultiplier") }}</label>
+              <input
+                v-model.number="createForm.image_rate_multiplier"
+                type="number"
+                step="0.0001"
+                min="0"
+                class="input"
+                placeholder="1"
+              />
+            </div>
+          </div>
           <div class="grid grid-cols-3 gap-3">
             <div>
               <label class="input-label">1K ({{ GAME_CURRENCY_UNIT }})</label>
@@ -709,7 +739,7 @@
                 step="0.001"
                 min="0"
                 class="input"
-                placeholder="0.134"
+                :placeholder="createForm.platform === 'grok' ? '0.02' : '0.134'"
               />
             </div>
             <div>
@@ -720,7 +750,7 @@
                 step="0.001"
                 min="0"
                 class="input"
-                placeholder="0.201"
+                :placeholder="createForm.platform === 'grok' ? '0.02' : '0.201'"
               />
             </div>
             <div>
@@ -731,8 +761,53 @@
                 step="0.001"
                 min="0"
                 class="input"
-                placeholder="0.268"
+                :placeholder="createForm.platform === 'grok' ? '0.02' : '0.268'"
               />
+            </div>
+          </div>
+        </div>
+
+        <!-- Grok 视频生成按秒计费 -->
+        <div v-if="createForm.platform === 'grok'" class="border-t pt-4">
+          <label class="block mb-2 font-medium text-gray-700 dark:text-gray-300">
+            {{ t("admin.groups.videoPricing.title") }}
+          </label>
+          <p class="text-xs text-gray-500 dark:text-gray-400 mb-3">
+            {{ t("admin.groups.videoPricing.description") }}
+          </p>
+          <div class="mb-4 space-y-3">
+            <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+              <input
+                v-model="createForm.video_rate_independent"
+                type="checkbox"
+                class="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+              />
+              {{ t("admin.groups.videoPricing.independentMultiplier") }}
+            </label>
+            <div v-if="createForm.video_rate_independent">
+              <label class="input-label">{{ t("admin.groups.videoPricing.videoMultiplier") }}</label>
+              <input
+                v-model.number="createForm.video_rate_multiplier"
+                type="number"
+                step="0.0001"
+                min="0"
+                class="input"
+                placeholder="1"
+              />
+            </div>
+          </div>
+          <div class="grid grid-cols-3 gap-3">
+            <div>
+              <label class="input-label">480p (USD/s)</label>
+              <input v-model.number="createForm.video_price_480p" type="number" step="0.001" min="0" class="input" placeholder="0.05" />
+            </div>
+            <div>
+              <label class="input-label">720p (USD/s)</label>
+              <input v-model.number="createForm.video_price_720p" type="number" step="0.001" min="0" class="input" placeholder="0.07" />
+            </div>
+            <div>
+              <label class="input-label">1080p (USD/s)</label>
+              <input v-model.number="createForm.video_price_1080p" type="number" step="0.001" min="0" class="input" placeholder="0.25" />
             </div>
           </div>
         </div>
@@ -1865,7 +1940,8 @@
           v-if="
             editForm.platform === 'antigravity' ||
             editForm.platform === 'gemini' ||
-            editForm.platform === 'openai'
+            editForm.platform === 'openai' ||
+            editForm.platform === 'grok'
           "
           class="border-t pt-4"
         >
@@ -1877,6 +1953,35 @@
           <p class="text-xs text-gray-500 dark:text-gray-400 mb-3">
             {{ t("admin.groups.imagePricing.description") }}
           </p>
+          <div class="mb-4 space-y-3">
+            <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+              <input
+                v-model="editForm.allow_image_generation"
+                type="checkbox"
+                class="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+              />
+              {{ t("admin.groups.imagePricing.allowGeneration") }}
+            </label>
+            <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+              <input
+                v-model="editForm.image_rate_independent"
+                type="checkbox"
+                class="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+              />
+              {{ t("admin.groups.imagePricing.independentMultiplier") }}
+            </label>
+            <div v-if="editForm.image_rate_independent">
+              <label class="input-label">{{ t("admin.groups.imagePricing.imageMultiplier") }}</label>
+              <input
+                v-model.number="editForm.image_rate_multiplier"
+                type="number"
+                step="0.0001"
+                min="0"
+                class="input"
+                placeholder="1"
+              />
+            </div>
+          </div>
           <div class="grid grid-cols-3 gap-3">
             <div>
               <label class="input-label">1K ({{ GAME_CURRENCY_UNIT }})</label>
@@ -1886,7 +1991,7 @@
                 step="0.001"
                 min="0"
                 class="input"
-                placeholder="0.134"
+                :placeholder="editForm.platform === 'grok' ? '0.02' : '0.134'"
               />
             </div>
             <div>
@@ -1897,7 +2002,7 @@
                 step="0.001"
                 min="0"
                 class="input"
-                placeholder="0.201"
+                :placeholder="editForm.platform === 'grok' ? '0.02' : '0.201'"
               />
             </div>
             <div>
@@ -1908,8 +2013,53 @@
                 step="0.001"
                 min="0"
                 class="input"
-                placeholder="0.268"
+                :placeholder="editForm.platform === 'grok' ? '0.02' : '0.268'"
               />
+            </div>
+          </div>
+        </div>
+
+        <!-- Grok 视频生成按秒计费 -->
+        <div v-if="editForm.platform === 'grok'" class="border-t pt-4">
+          <label class="block mb-2 font-medium text-gray-700 dark:text-gray-300">
+            {{ t("admin.groups.videoPricing.title") }}
+          </label>
+          <p class="text-xs text-gray-500 dark:text-gray-400 mb-3">
+            {{ t("admin.groups.videoPricing.description") }}
+          </p>
+          <div class="mb-4 space-y-3">
+            <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+              <input
+                v-model="editForm.video_rate_independent"
+                type="checkbox"
+                class="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+              />
+              {{ t("admin.groups.videoPricing.independentMultiplier") }}
+            </label>
+            <div v-if="editForm.video_rate_independent">
+              <label class="input-label">{{ t("admin.groups.videoPricing.videoMultiplier") }}</label>
+              <input
+                v-model.number="editForm.video_rate_multiplier"
+                type="number"
+                step="0.0001"
+                min="0"
+                class="input"
+                placeholder="1"
+              />
+            </div>
+          </div>
+          <div class="grid grid-cols-3 gap-3">
+            <div>
+              <label class="input-label">480p (USD/s)</label>
+              <input v-model.number="editForm.video_price_480p" type="number" step="0.001" min="0" class="input" placeholder="0.05" />
+            </div>
+            <div>
+              <label class="input-label">720p (USD/s)</label>
+              <input v-model.number="editForm.video_price_720p" type="number" step="0.001" min="0" class="input" placeholder="0.07" />
+            </div>
+            <div>
+              <label class="input-label">1080p (USD/s)</label>
+              <input v-model.number="editForm.video_price_1080p" type="number" step="0.001" min="0" class="input" placeholder="0.25" />
             </div>
           </div>
         </div>
@@ -3149,10 +3299,18 @@ const createForm = reactive({
   daily_limit_usd: null as number | null,
   weekly_limit_usd: null as number | null,
   monthly_limit_usd: null as number | null,
-  // 图片生成计费配置（仅 antigravity 平台使用）
+  // 图片/视频生成计费配置
+  allow_image_generation: false,
+  image_rate_independent: false,
+  image_rate_multiplier: 1,
   image_price_1k: null as number | null,
   image_price_2k: null as number | null,
   image_price_4k: null as number | null,
+  video_rate_independent: false,
+  video_rate_multiplier: 1,
+  video_price_480p: null as number | null,
+  video_price_720p: null as number | null,
+  video_price_1080p: null as number | null,
   // Codex 网页搜索按次计费（仅 openai 平台使用）；null = 默认 $0.01/次
   web_search_price_per_call: null as number | null,
   // Claude Code 客户端限制（仅 anthropic 平台使用）
@@ -3434,10 +3592,18 @@ const editForm = reactive({
   daily_limit_usd: null as number | null,
   weekly_limit_usd: null as number | null,
   monthly_limit_usd: null as number | null,
-  // 图片生成计费配置（仅 antigravity 平台使用）
+  // 图片/视频生成计费配置
+  allow_image_generation: false,
+  image_rate_independent: false,
+  image_rate_multiplier: 1,
   image_price_1k: null as number | null,
   image_price_2k: null as number | null,
   image_price_4k: null as number | null,
+  video_rate_independent: false,
+  video_rate_multiplier: 1,
+  video_price_480p: null as number | null,
+  video_price_720p: null as number | null,
+  video_price_1080p: null as number | null,
   // Codex 网页搜索按次计费（仅 openai 平台使用）；null = 默认 $0.01/次
   web_search_price_per_call: null as number | null,
   // Claude Code 客户端限制（仅 anthropic 平台使用）
@@ -3657,9 +3823,17 @@ const closeCreateModal = () => {
   createForm.daily_limit_usd = null;
   createForm.weekly_limit_usd = null;
   createForm.monthly_limit_usd = null;
+  createForm.allow_image_generation = false;
+  createForm.image_rate_independent = false;
+  createForm.image_rate_multiplier = 1;
   createForm.image_price_1k = null;
   createForm.image_price_2k = null;
   createForm.image_price_4k = null;
+  createForm.video_rate_independent = false;
+  createForm.video_rate_multiplier = 1;
+  createForm.video_price_480p = null;
+  createForm.video_price_720p = null;
+  createForm.video_price_1080p = null;
   createForm.web_search_price_per_call = null;
   createForm.claude_code_only = false;
   createForm.fallback_group_id = null;
@@ -3690,6 +3864,13 @@ const normalizeOptionalLimit = (
   }
 
   return Number.isFinite(value) && value > 0 ? value : null;
+};
+
+const normalizeNonNegativeMultiplier = (
+  value: number | string | null | undefined,
+): number => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : 1;
 };
 
 const handleCreateGroup = async () => {
@@ -3730,6 +3911,18 @@ const handleCreateGroup = async () => {
     requestData.daily_limit_usd = emptyToNull(requestData.daily_limit_usd);
     requestData.weekly_limit_usd = emptyToNull(requestData.weekly_limit_usd);
     requestData.monthly_limit_usd = emptyToNull(requestData.monthly_limit_usd);
+    requestData.image_rate_multiplier = normalizeNonNegativeMultiplier(
+      requestData.image_rate_multiplier,
+    );
+    requestData.video_rate_multiplier = normalizeNonNegativeMultiplier(
+      requestData.video_rate_multiplier,
+    );
+    requestData.image_price_1k = emptyToNull(requestData.image_price_1k);
+    requestData.image_price_2k = emptyToNull(requestData.image_price_2k);
+    requestData.image_price_4k = emptyToNull(requestData.image_price_4k);
+    requestData.video_price_480p = emptyToNull(requestData.video_price_480p);
+    requestData.video_price_720p = emptyToNull(requestData.video_price_720p);
+    requestData.video_price_1080p = emptyToNull(requestData.video_price_1080p);
     requestData.web_search_price_per_call = emptyToNull(
       requestData.web_search_price_per_call,
     );
@@ -3768,9 +3961,17 @@ const handleEdit = async (group: AdminGroup) => {
   editForm.daily_limit_usd = group.daily_limit_usd;
   editForm.weekly_limit_usd = group.weekly_limit_usd;
   editForm.monthly_limit_usd = group.monthly_limit_usd;
+  editForm.allow_image_generation = group.allow_image_generation ?? false;
+  editForm.image_rate_independent = group.image_rate_independent ?? false;
+  editForm.image_rate_multiplier = group.image_rate_multiplier ?? 1;
   editForm.image_price_1k = group.image_price_1k;
   editForm.image_price_2k = group.image_price_2k;
   editForm.image_price_4k = group.image_price_4k;
+  editForm.video_rate_independent = group.video_rate_independent ?? false;
+  editForm.video_rate_multiplier = group.video_rate_multiplier ?? 1;
+  editForm.video_price_480p = group.video_price_480p;
+  editForm.video_price_720p = group.video_price_720p;
+  editForm.video_price_1080p = group.video_price_1080p;
   editForm.web_search_price_per_call =
     group.web_search_price_per_call ?? null;
   editForm.claude_code_only = group.claude_code_only || false;
@@ -3815,6 +4016,11 @@ const closeEditModal = () => {
   editingGroup.value = null;
   editModelRoutingRules.value = [];
   editForm.copy_accounts_from_group_ids = [];
+  editForm.video_rate_independent = false;
+  editForm.video_rate_multiplier = 1;
+  editForm.video_price_480p = null;
+  editForm.video_price_720p = null;
+  editForm.video_price_1080p = null;
   editForm.web_search_price_per_call = null;
   resetMessagesDispatchFormState(editForm);
 };
@@ -3865,8 +4071,20 @@ const handleUpdateGroup = async () => {
     payload.daily_limit_usd = emptyToNull(payload.daily_limit_usd);
     payload.weekly_limit_usd = emptyToNull(payload.weekly_limit_usd);
     payload.monthly_limit_usd = emptyToNull(payload.monthly_limit_usd);
+    payload.image_rate_multiplier = normalizeNonNegativeMultiplier(
+      payload.image_rate_multiplier,
+    );
+    payload.video_rate_multiplier = normalizeNonNegativeMultiplier(
+      payload.video_rate_multiplier,
+    );
     const emptyPriceToClear = (v: any) =>
       v === "" || v === null || v === undefined ? -1 : v;
+    payload.image_price_1k = emptyPriceToClear(payload.image_price_1k);
+    payload.image_price_2k = emptyPriceToClear(payload.image_price_2k);
+    payload.image_price_4k = emptyPriceToClear(payload.image_price_4k);
+    payload.video_price_480p = emptyPriceToClear(payload.video_price_480p);
+    payload.video_price_720p = emptyPriceToClear(payload.video_price_720p);
+    payload.video_price_1080p = emptyPriceToClear(payload.video_price_1080p);
     payload.web_search_price_per_call = emptyPriceToClear(
       payload.web_search_price_per_call,
     );
@@ -3959,6 +4177,9 @@ watch(
 watch(
   () => createForm.platform,
   (newVal) => {
+    if (newVal === "grok") {
+      createForm.allow_image_generation = true;
+    }
     if (!["anthropic", "antigravity"].includes(newVal)) {
       createForm.fallback_group_id_on_invalid_request = null;
     }

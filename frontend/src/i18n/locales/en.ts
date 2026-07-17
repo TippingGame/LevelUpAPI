@@ -1338,6 +1338,7 @@ export default {
     exportExcelSuccess: 'Usage data exported successfully (Excel format)',
     exportExcelFailed: 'Failed to export usage data',
     imageUnit: ' images',
+    videoUnit: ' videos',
     userAgent: 'User-Agent'
   },
 
@@ -3056,7 +3057,16 @@ export default {
       },
       imagePricing: {
         title: 'Image Generation Pricing',
-        description: 'Configure pricing for image generation models. Leave empty to use default prices.'
+        description: 'Configure image generation prices. Leave empty to use model defaults.',
+        allowGeneration: 'Enable image and video generation for this group',
+        independentMultiplier: 'Use an independent image multiplier',
+        imageMultiplier: 'Image rate multiplier'
+      },
+      videoPricing: {
+        title: 'Grok Video Pricing',
+        description: 'Video prices are per generated second (USD/s). Leave empty to use xAI defaults.',
+        independentMultiplier: 'Use an independent video multiplier',
+        videoMultiplier: 'Video rate multiplier'
       },
       webSearchPricing: {
         title: 'Codex Web Search Pricing',
@@ -5604,6 +5614,7 @@ export default {
       billingModeToken: 'Token',
       billingModePerRequest: 'Per Request',
       billingModeImage: 'Image',
+      billingModeVideo: 'Video',
       allBillingModes: 'All Billing Modes',
       ipAddress: 'IP',
       clickToViewBalance: 'Click to view balance history',

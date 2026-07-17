@@ -53,7 +53,7 @@ func TestAPIKeyAuthSnapshotRoundTripsWebSearchPriceForPrimaryAndRouteGroups(t *t
 	service := &APIKeyService{}
 	snapshot := service.snapshotFromAPIKey(context.Background(), apiKey)
 	require.NotNil(t, snapshot)
-	require.Equal(t, 14, snapshot.Version)
+	require.Equal(t, apiKeyAuthSnapshotVersion, snapshot.Version)
 	require.NotNil(t, snapshot.Group)
 	require.NotNil(t, snapshot.Group.WebSearchPricePerCall)
 	require.Zero(t, *snapshot.Group.WebSearchPricePerCall)

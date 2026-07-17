@@ -1342,6 +1342,7 @@ export default {
     exportExcelSuccess: '使用数据导出成功（Excel格式）',
     exportExcelFailed: '使用数据导出失败',
     imageUnit: '张',
+    videoUnit: '个视频',
     userAgent: 'User-Agent'
   },
 
@@ -3138,7 +3139,16 @@ export default {
       },
       imagePricing: {
         title: '图片生成计费',
-        description: '配置图片生成模型的图片生成价格，留空则使用默认价格'
+        description: '配置图片生成价格，留空则使用模型默认价格',
+        allowGeneration: '允许该分组生成图片和视频',
+        independentMultiplier: '图片生成使用独立倍率',
+        imageMultiplier: '图片生成倍率'
+      },
+      videoPricing: {
+        title: 'Grok 视频生成计费',
+        description: '视频价格按生成秒数计费（USD/s），留空使用 xAI 默认价格',
+        independentMultiplier: '视频生成使用独立倍率',
+        videoMultiplier: '视频生成倍率'
       },
       webSearchPricing: {
         title: 'Codex 网页搜索计费',
@@ -5758,6 +5768,7 @@ export default {
       billingModeToken: '按量',
       billingModePerRequest: '按次',
       billingModeImage: '按次(图片)',
+      billingModeVideo: '按秒(视频)',
       allBillingModes: '全部计费模式',
       ipAddress: 'IP',
       clickToViewBalance: '点击查看充值记录',

@@ -20,6 +20,9 @@ type stubAdminService struct {
 	boundAuthIdentity    *service.AdminBindAuthIdentityInput
 	boundAuthIdentityFor int64
 	createdAccounts      []*service.CreateAccountInput
+	createdGroups        []*service.CreateGroupInput
+	updatedGroupIDs      []int64
+	updatedGroups        []*service.UpdateGroupInput
 	createdProxies       []*service.CreateProxyInput
 	updatedProxyIDs      []int64
 	updatedProxies       []*service.UpdateProxyInput
@@ -270,12 +273,37 @@ func (s *stubAdminService) GetGroup(ctx context.Context, id int64) (*service.Gro
 }
 
 func (s *stubAdminService) CreateGroup(ctx context.Context, input *service.CreateGroupInput) (*service.Group, error) {
-	group := service.Group{ID: 200, Name: input.Name, Status: service.StatusActive}
+	s.createdGroups = append(s.createdGroups, input)
+	videoRateMultiplier := 0.0
+	if input.VideoRateMultiplier != nil {
+		videoRateMultiplier = *input.VideoRateMultiplier
+	}
+	group := service.Group{
+		ID:                   200,
+		Name:                 input.Name,
+		Status:               service.StatusActive,
+		VideoRateIndependent: input.VideoRateIndependent,
+		VideoRateMultiplier:  videoRateMultiplier,
+		VideoPrice480P:       input.VideoPrice480P,
+		VideoPrice720P:       input.VideoPrice720P,
+		VideoPrice1080P:      input.VideoPrice1080P,
+	}
 	return &group, nil
 }
 
 func (s *stubAdminService) UpdateGroup(ctx context.Context, id int64, input *service.UpdateGroupInput) (*service.Group, error) {
+	s.updatedGroupIDs = append(s.updatedGroupIDs, id)
+	s.updatedGroups = append(s.updatedGroups, input)
 	group := service.Group{ID: id, Name: input.Name, Status: service.StatusActive}
+	if input.VideoRateIndependent != nil {
+		group.VideoRateIndependent = *input.VideoRateIndependent
+	}
+	if input.VideoRateMultiplier != nil {
+		group.VideoRateMultiplier = *input.VideoRateMultiplier
+	}
+	group.VideoPrice480P = input.VideoPrice480P
+	group.VideoPrice720P = input.VideoPrice720P
+	group.VideoPrice1080P = input.VideoPrice1080P
 	return &group, nil
 }
 

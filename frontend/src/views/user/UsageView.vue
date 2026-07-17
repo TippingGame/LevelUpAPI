@@ -387,8 +387,13 @@
           </template>
 
           <template #cell-tokens="{ row }">
+            <div v-if="row.video_count > 0 && row.billing_mode === 'video'" class="flex items-center gap-1.5">
+              <Icon name="play" size="sm" class="text-amber-500" />
+              <span class="font-medium text-gray-900 dark:text-white">{{ row.video_count }}{{ $t('usage.videoUnit') }}</span>
+              <span class="text-gray-400">({{ row.video_resolution || '480p' }} · {{ row.video_duration_seconds || 8 }}s)</span>
+            </div>
             <!-- 图片生成请求（仅按次计费时显示图片格式） -->
-            <div v-if="row.image_count > 0 && row.billing_mode === 'image'" class="flex items-center gap-1.5">
+            <div v-else-if="row.image_count > 0 && row.billing_mode === 'image'" class="flex items-center gap-1.5">
               <svg
                 class="h-4 w-4 text-indigo-500"
                 fill="none"
@@ -991,7 +996,8 @@ const billingModeOptions = computed(() => [
   { value: null, label: t('admin.usage.allBillingModes') },
   { value: 'token', label: t('admin.usage.billingModeToken') },
   { value: 'per_request', label: t('admin.usage.billingModePerRequest') },
-  { value: 'image', label: t('admin.usage.billingModeImage') }
+  { value: 'image', label: t('admin.usage.billingModeImage') },
+  { value: 'video', label: t('admin.usage.billingModeVideo') }
 ])
 
 const granularityOptions = computed(() => [

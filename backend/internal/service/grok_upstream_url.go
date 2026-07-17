@@ -98,3 +98,27 @@ func buildGrokBillingURL(account *Account, cfg *config.Config, weekly bool, sett
 	}
 	return xai.BuildBillingURLWithValidator(account.GetGrokBaseURL(), weekly, validator)
 }
+
+func buildGrokMediaURL(account *Account, cfg *config.Config, endpoint GrokMediaEndpoint, requestID string, settingServices ...*SettingService) (string, error) {
+	validator, err := grokBaseURLValidator(account, cfg, settingServices...)
+	if err != nil {
+		return "", err
+	}
+	baseURL := account.GetGrokMediaBaseURL()
+	switch endpoint {
+	case GrokMediaEndpointImagesGenerations:
+		return xai.BuildImagesGenerationsURLWithValidator(baseURL, validator)
+	case GrokMediaEndpointImagesEdits:
+		return xai.BuildImagesEditsURLWithValidator(baseURL, validator)
+	case GrokMediaEndpointVideosGenerations:
+		return xai.BuildVideosGenerationsURLWithValidator(baseURL, validator)
+	case GrokMediaEndpointVideosEdits:
+		return xai.BuildVideosEditsURLWithValidator(baseURL, validator)
+	case GrokMediaEndpointVideosExtensions:
+		return xai.BuildVideosExtensionsURLWithValidator(baseURL, validator)
+	case GrokMediaEndpointVideoStatus:
+		return xai.BuildVideoURLWithValidator(baseURL, requestID, validator)
+	default:
+		return "", fmt.Errorf("unsupported grok media endpoint: %s", endpoint)
+	}
+}

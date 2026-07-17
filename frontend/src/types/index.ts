@@ -791,10 +791,18 @@ export interface Group {
   daily_limit_usd: number | null
   weekly_limit_usd: number | null
   monthly_limit_usd: number | null
-  // 图片生成计费配置（仅 antigravity 平台使用）
+  // 图片/视频生成计费配置
+  allow_image_generation: boolean
+  image_rate_independent: boolean
+  image_rate_multiplier: number
   image_price_1k: number | null
   image_price_2k: number | null
   image_price_4k: number | null
+  video_rate_independent: boolean
+  video_rate_multiplier: number
+  video_price_480p: number | null
+  video_price_720p: number | null
+  video_price_1080p: number | null
   // Codex alpha/search price in USD per successful call; null uses the $0.01 default.
   web_search_price_per_call: number | null
   // Claude Code 客户端限制
@@ -918,9 +926,17 @@ export interface CreateGroupRequest {
   daily_limit_usd?: number | null
   weekly_limit_usd?: number | null
   monthly_limit_usd?: number | null
+  allow_image_generation?: boolean
+  image_rate_independent?: boolean
+  image_rate_multiplier?: number
   image_price_1k?: number | null
   image_price_2k?: number | null
   image_price_4k?: number | null
+  video_rate_independent?: boolean
+  video_rate_multiplier?: number
+  video_price_480p?: number | null
+  video_price_720p?: number | null
+  video_price_1080p?: number | null
   web_search_price_per_call?: number | null
   claude_code_only?: boolean
   fallback_group_id?: number | null
@@ -945,9 +961,17 @@ export interface UpdateGroupRequest {
   daily_limit_usd?: number | null
   weekly_limit_usd?: number | null
   monthly_limit_usd?: number | null
+  allow_image_generation?: boolean
+  image_rate_independent?: boolean
+  image_rate_multiplier?: number
   image_price_1k?: number | null
   image_price_2k?: number | null
   image_price_4k?: number | null
+  video_rate_independent?: boolean
+  video_rate_multiplier?: number
+  video_price_480p?: number | null
+  video_price_720p?: number | null
+  video_price_1080p?: number | null
   web_search_price_per_call?: number | null
   claude_code_only?: boolean
   fallback_group_id?: number | null
@@ -1610,6 +1634,9 @@ export interface UsageLog {
   // 图片生成字段
   image_count: number
   image_size: string | null
+  video_count: number
+  video_resolution: string | null
+  video_duration_seconds: number | null
 
   // User-Agent
   user_agent: string | null

@@ -143,6 +143,11 @@ type Group struct {
 	ImagePrice1K         *float64 `json:"image_price_1k"`
 	ImagePrice2K         *float64 `json:"image_price_2k"`
 	ImagePrice4K         *float64 `json:"image_price_4k"`
+	VideoRateIndependent bool     `json:"video_rate_independent"`
+	VideoRateMultiplier  float64  `json:"video_rate_multiplier"`
+	VideoPrice480P       *float64 `json:"video_price_480p"`
+	VideoPrice720P       *float64 `json:"video_price_720p"`
+	VideoPrice1080P      *float64 `json:"video_price_1080p"`
 	// Codex alpha/search 网页搜索单次价格（USD/次）；null 表示使用默认价 0.01。
 	WebSearchPricePerCall *float64 `json:"web_search_price_per_call"`
 
@@ -194,34 +199,34 @@ type AdminGroup struct {
 }
 
 type Account struct {
-	ID                        int64           `json:"id"`
-	Name                      string          `json:"name"`
-	Notes                     *string         `json:"notes"`
-	Platform                  string          `json:"platform"`
-	AccountLevel              string          `json:"account_level"`
-	Type                      string          `json:"type"`
-	Credentials               map[string]any  `json:"credentials"`
-	CredentialsStatus         map[string]bool `json:"credentials_status,omitempty"`
-	Extra                     map[string]any  `json:"extra"`
-	OwnerUserID               *int64          `json:"owner_user_id,omitempty"`
-	ShareMode                 string          `json:"share_mode"`
-	ShareStatus               string          `json:"share_status"`
-	SharePolicyID             *int64          `json:"share_policy_id,omitempty"`
-	ProxyID                   *int64          `json:"proxy_id"`
-	Concurrency               int             `json:"concurrency"`
-	LoadFactor                *int            `json:"load_factor,omitempty"`
-	LoadFactorPaidCeiling     int             `json:"load_factor_paid_ceiling"`
-	Priority                  int             `json:"priority"`
-	PrivatePriority           *int            `json:"private_priority,omitempty"`
-	RateMultiplier            float64         `json:"rate_multiplier"`
-	Status                    string          `json:"status"`
-	ErrorMessage              string          `json:"error_message"`
-	ErrorSince                *time.Time      `json:"error_since"`
-	LastUsedAt                *time.Time      `json:"last_used_at"`
-	ExpiresAt                 *int64          `json:"expires_at"`
-	AutoPauseOnExpired        bool            `json:"auto_pause_on_expired"`
-	CreatedAt                 time.Time       `json:"created_at"`
-	UpdatedAt                 time.Time       `json:"updated_at"`
+	ID                    int64           `json:"id"`
+	Name                  string          `json:"name"`
+	Notes                 *string         `json:"notes"`
+	Platform              string          `json:"platform"`
+	AccountLevel          string          `json:"account_level"`
+	Type                  string          `json:"type"`
+	Credentials           map[string]any  `json:"credentials"`
+	CredentialsStatus     map[string]bool `json:"credentials_status,omitempty"`
+	Extra                 map[string]any  `json:"extra"`
+	OwnerUserID           *int64          `json:"owner_user_id,omitempty"`
+	ShareMode             string          `json:"share_mode"`
+	ShareStatus           string          `json:"share_status"`
+	SharePolicyID         *int64          `json:"share_policy_id,omitempty"`
+	ProxyID               *int64          `json:"proxy_id"`
+	Concurrency           int             `json:"concurrency"`
+	LoadFactor            *int            `json:"load_factor,omitempty"`
+	LoadFactorPaidCeiling int             `json:"load_factor_paid_ceiling"`
+	Priority              int             `json:"priority"`
+	PrivatePriority       *int            `json:"private_priority,omitempty"`
+	RateMultiplier        float64         `json:"rate_multiplier"`
+	Status                string          `json:"status"`
+	ErrorMessage          string          `json:"error_message"`
+	ErrorSince            *time.Time      `json:"error_since"`
+	LastUsedAt            *time.Time      `json:"last_used_at"`
+	ExpiresAt             *int64          `json:"expires_at"`
+	AutoPauseOnExpired    bool            `json:"auto_pause_on_expired"`
+	CreatedAt             time.Time       `json:"created_at"`
+	UpdatedAt             time.Time       `json:"updated_at"`
 
 	Schedulable bool `json:"schedulable"`
 
@@ -467,9 +472,12 @@ type UsageLog struct {
 	FirstTokenMs *int   `json:"first_token_ms"`
 
 	// 图片生成字段
-	ImageCount int     `json:"image_count"`
-	ImageSize  *string `json:"image_size"`
-	MediaType  *string `json:"media_type"`
+	ImageCount           int     `json:"image_count"`
+	ImageSize            *string `json:"image_size"`
+	MediaType            *string `json:"media_type"`
+	VideoCount           int     `json:"video_count"`
+	VideoResolution      *string `json:"video_resolution"`
+	VideoDurationSeconds *int    `json:"video_duration_seconds"`
 
 	// User-Agent
 	UserAgent *string `json:"user_agent"`
@@ -477,7 +485,7 @@ type UsageLog struct {
 	// Cache TTL Override 标记
 	CacheTTLOverridden bool `json:"cache_ttl_overridden"`
 
-	// BillingMode 计费模式：token/image
+	// BillingMode 计费模式：token/per_request/image/video
 	BillingMode *string `json:"billing_mode,omitempty"`
 
 	CreatedAt time.Time `json:"created_at"`

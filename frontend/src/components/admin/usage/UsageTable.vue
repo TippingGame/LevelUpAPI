@@ -92,8 +92,13 @@
         </template>
 
         <template #cell-tokens="{ row }">
+          <div v-if="row.video_count > 0 && row.billing_mode === BILLING_MODE_VIDEO" class="flex items-center gap-1.5">
+            <Icon name="play" size="sm" class="text-amber-500" />
+            <span class="font-medium text-gray-900 dark:text-white">{{ row.video_count }}{{ t('usage.videoUnit') }}</span>
+            <span class="text-gray-400">({{ row.video_resolution || '480p' }} · {{ row.video_duration_seconds || 8 }}s)</span>
+          </div>
           <!-- 图片生成请求（仅按次计费时显示图片格式） -->
-          <div v-if="row.image_count > 0 && row.billing_mode === BILLING_MODE_IMAGE" class="flex items-center gap-1.5">
+          <div v-else-if="row.image_count > 0 && row.billing_mode === BILLING_MODE_IMAGE" class="flex items-center gap-1.5">
             <svg class="h-4 w-4 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
             </svg>
@@ -354,7 +359,7 @@ import { formatDateTime, formatReasoningEffort } from '@/utils/format'
 import { formatCacheHitRate, formatCacheTokens, formatMultiplier } from '@/utils/formatters'
 import { getUsageServiceTierLabel } from '@/utils/usageServiceTier'
 import { resolveUsageRequestType } from '@/utils/usageRequestType'
-import { getBillingModeLabel, getBillingModeBadgeClass, BILLING_MODE_TOKEN, BILLING_MODE_IMAGE } from '@/utils/billingMode'
+import { getBillingModeLabel, getBillingModeBadgeClass, BILLING_MODE_TOKEN, BILLING_MODE_IMAGE, BILLING_MODE_VIDEO } from '@/utils/billingMode'
 import { formatGameCoins } from '@/utils/gameCurrency'
 
 /** Compute the account-billed cost for display: (account_stats_cost ?? total_cost) * rate_multiplier */

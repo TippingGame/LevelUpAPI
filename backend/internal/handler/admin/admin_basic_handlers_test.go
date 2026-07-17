@@ -207,6 +207,61 @@ func TestGroupHandlerEndpoints(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec.Code)
 }
 
+func TestGroupHandlerVideoBillingContract(t *testing.T) {
+	router, adminSvc := setupAdminRouter()
+
+	createBody, err := json.Marshal(map[string]any{
+		"name":                   "grok-video",
+		"platform":               "grok",
+		"subscription_type":      "standard",
+		"video_rate_independent": true,
+		"video_rate_multiplier":  1.25,
+		"video_price_480p":       0.05,
+		"video_price_720p":       0.07,
+		"video_price_1080p":      0.25,
+	})
+	require.NoError(t, err)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/groups", bytes.NewReader(createBody))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Len(t, adminSvc.createdGroups, 1)
+	created := adminSvc.createdGroups[0]
+	require.True(t, created.VideoRateIndependent)
+	require.NotNil(t, created.VideoRateMultiplier)
+	require.InDelta(t, 1.25, *created.VideoRateMultiplier, 1e-12)
+	require.InDelta(t, 0.05, *created.VideoPrice480P, 1e-12)
+	require.InDelta(t, 0.07, *created.VideoPrice720P, 1e-12)
+	require.InDelta(t, 0.25, *created.VideoPrice1080P, 1e-12)
+	require.Contains(t, rec.Body.String(), `"video_rate_independent":true`)
+	require.Contains(t, rec.Body.String(), `"video_price_1080p":0.25`)
+
+	updateBody, err := json.Marshal(map[string]any{
+		"video_rate_independent": false,
+		"video_rate_multiplier":  0.8,
+		"video_price_720p":       0.09,
+	})
+	require.NoError(t, err)
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPut, "/api/v1/admin/groups/2", bytes.NewReader(updateBody))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, []int64{2}, adminSvc.updatedGroupIDs)
+	require.Len(t, adminSvc.updatedGroups, 1)
+	updated := adminSvc.updatedGroups[0]
+	require.NotNil(t, updated.VideoRateIndependent)
+	require.False(t, *updated.VideoRateIndependent)
+	require.NotNil(t, updated.VideoRateMultiplier)
+	require.InDelta(t, 0.8, *updated.VideoRateMultiplier, 1e-12)
+	require.Nil(t, updated.VideoPrice480P)
+	require.InDelta(t, 0.09, *updated.VideoPrice720P, 1e-12)
+	require.Nil(t, updated.VideoPrice1080P)
+}
+
 func TestProxyHandlerEndpoints(t *testing.T) {
 	router, _ := setupAdminRouter()
 

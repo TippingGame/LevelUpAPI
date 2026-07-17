@@ -189,3 +189,15 @@ func TestMigration217BackfillsGrokMediaGenerationGroups(t *testing.T) {
 	require.Contains(t, sql, "WHERE platform = 'grok'")
 	require.Contains(t, sql, "AND allow_image_generation = false")
 }
+
+func TestMigration218AddsGrokVideoPerSecondBilling(t *testing.T) {
+	content, err := FS.ReadFile("218_grok_video_per_second_billing.sql")
+	require.NoError(t, err)
+
+	sql := string(content)
+	require.Contains(t, sql, "video_rate_independent")
+	require.Contains(t, sql, "video_price_1080p")
+	require.Contains(t, sql, "video_duration_seconds")
+	require.Contains(t, sql, "COALESCE(video_count, 0) > 0")
+	require.Contains(t, sql, "每秒单价")
+}

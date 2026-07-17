@@ -112,6 +112,10 @@ func (h *UsageHandler) parseUserUsageFilters(c *gin.Context, subject middleware2
 
 	filters.Model = strings.TrimSpace(c.Query("model"))
 	filters.BillingMode = strings.TrimSpace(c.Query("billing_mode"))
+	if filters.BillingMode != "" && !service.BillingMode(filters.BillingMode).IsValidUsageFilter() {
+		response.BadRequest(c, "Invalid billing_mode")
+		return filters, false
+	}
 
 	if requestTypeStr := strings.TrimSpace(c.Query("request_type")); requestTypeStr != "" {
 		parsed, err := service.ParseUsageRequestType(requestTypeStr)

@@ -134,6 +134,16 @@ func (UsageLog) Fields() []ent.Field {
 			MaxLen(10).
 			Optional().
 			Nillable(),
+		// 视频生成字段（Grok 视频按秒计费）
+		field.Int("video_count").
+			Default(0),
+		field.String("video_resolution").
+			MaxLen(10).
+			Optional().
+			Nillable(),
+		field.Int("video_duration_seconds").
+			Optional().
+			Nillable(),
 		// Cache TTL Override 标记（管理员强制替换了缓存 TTL 计费）
 		field.Bool("cache_ttl_overridden").
 			Default(false),
