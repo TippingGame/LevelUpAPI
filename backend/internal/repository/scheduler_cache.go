@@ -1087,6 +1087,8 @@ func filterSchedulerExtra(extra map[string]any) map[string]any {
 		"codex_7d_reset_at",
 		"codex_7d_reset_after_seconds",
 		"codex_7d_limit_percent",
+		service.GrokMediaEligibleExtraKey,
+		"grok_billing_snapshot",
 	}
 	filtered := make(map[string]any)
 	for _, key := range keys {

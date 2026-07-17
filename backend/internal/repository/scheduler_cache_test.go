@@ -40,3 +40,26 @@ func TestBuildSchedulerMetadataAccountPreservesPublicShareVisibility(t *testing.
 	require.NotNil(t, metadata.Proxy)
 	require.Equal(t, service.StatusActive, metadata.Proxy.Status)
 }
+
+func TestBuildSchedulerMetadataAccountPreservesGrokMediaEligibility(t *testing.T) {
+	account := service.Account{
+		ID:       102,
+		Platform: service.PlatformGrok,
+		Type:     service.AccountTypeOAuth,
+		Extra: map[string]any{
+			service.GrokMediaEligibleExtraKey: false,
+			"grok_billing_snapshot": map[string]any{
+				"status_code":         403,
+				"weekly_status_code":  200,
+				"monthly_status_code": 403,
+			},
+			"unused_large_field": "drop-me",
+		},
+	}
+
+	metadata := buildSchedulerMetadataAccount(account)
+
+	require.Equal(t, false, metadata.Extra[service.GrokMediaEligibleExtraKey])
+	require.Equal(t, account.Extra["grok_billing_snapshot"], metadata.Extra["grok_billing_snapshot"])
+	require.NotContains(t, metadata.Extra, "unused_large_field")
+}

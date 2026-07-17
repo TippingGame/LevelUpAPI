@@ -516,6 +516,91 @@ func TestSelectGrokAccountRejectsUserOwnedAPIKey(t *testing.T) {
 	require.Nil(t, selection)
 }
 
+func TestSelectGrokAccountMediaCapabilityDoesNotBlockVideoStatus(t *testing.T) {
+	account := Account{
+		ID:          7451,
+		Platform:    PlatformGrok,
+		Type:        AccountTypeOAuth,
+		Status:      StatusActive,
+		Schedulable: true,
+		Concurrency: 1,
+		Extra: map[string]any{
+			grokBillingExtraKey: map[string]any{"status_code": 403},
+		},
+	}
+	svc := &OpenAIGatewayService{
+		accountRepo:        schedulerTestOpenAIAccountRepo{accounts: []Account{account}},
+		concurrencyService: NewConcurrencyService(schedulerTestConcurrencyCache{}),
+		cfg:                &config.Config{RunMode: "simple"},
+	}
+
+	generation, _, err := svc.selectGrokAccount(
+		context.Background(),
+		nil,
+		"",
+		nil,
+		OpenAIEndpointCapabilityGrokMediaGeneration,
+	)
+	require.ErrorIs(t, err, ErrNoAvailableAccounts)
+	require.Nil(t, generation)
+
+	status, _, err := svc.selectGrokAccount(context.Background(), nil, "", nil, "")
+	require.NoError(t, err)
+	require.NotNil(t, status)
+	require.Equal(t, account.ID, status.Account.ID)
+	if status.ReleaseFunc != nil {
+		status.ReleaseFunc()
+	}
+}
+
+func TestSelectGrokAccountWithSessionPrefersBoundVideoRequestAccount(t *testing.T) {
+	preferred := Account{
+		ID:          7461,
+		Platform:    PlatformGrok,
+		Type:        AccountTypeAPIKey,
+		Status:      StatusActive,
+		Schedulable: true,
+		Concurrency: 1,
+		Priority:    100,
+	}
+	loadBalancedWinner := Account{
+		ID:          7462,
+		Platform:    PlatformGrok,
+		Type:        AccountTypeAPIKey,
+		Status:      StatusActive,
+		Schedulable: true,
+		Concurrency: 1,
+		Priority:    0,
+	}
+	cache := &schedulerTestGatewayCache{}
+	svc := &OpenAIGatewayService{
+		accountRepo:        schedulerTestOpenAIAccountRepo{accounts: []Account{preferred, loadBalancedWinner}},
+		cache:              cache,
+		concurrencyService: NewConcurrencyService(schedulerTestConcurrencyCache{}),
+		cfg:                &config.Config{RunMode: "simple"},
+	}
+	const requestID = "video-request-7461"
+	require.NoError(t, svc.BindGrokMediaVideoRequestAccount(context.Background(), nil, requestID, preferred.ID))
+
+	selection, decision, err := svc.selectGrokAccountWithSession(
+		context.Background(),
+		nil,
+		GrokMediaVideoRequestSessionHash(requestID),
+		"",
+		nil,
+		"",
+	)
+
+	require.NoError(t, err)
+	require.NotNil(t, selection)
+	require.Equal(t, preferred.ID, selection.Account.ID)
+	require.Equal(t, openAIAccountScheduleLayerSessionSticky, decision.Layer)
+	require.True(t, decision.StickySessionHit)
+	if selection.ReleaseFunc != nil {
+		selection.ReleaseFunc()
+	}
+}
+
 func TestOpenAIGatewayService_SelectAccountWithScheduler_DefaultDisabledUsesLegacyLoadAwareness(t *testing.T) {
 	resetOpenAIAdvancedSchedulerSettingCacheForTest()
 

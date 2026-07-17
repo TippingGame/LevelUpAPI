@@ -1393,7 +1393,7 @@ func (s *OpenAIGatewayService) SelectAccountWithSchedulerForCapability(
 	platform ...string,
 ) (*AccountSelectionResult, OpenAIAccountScheduleDecision, error) {
 	if len(platform) > 0 && strings.EqualFold(strings.TrimSpace(platform[0]), PlatformGrok) {
-		return s.selectGrokAccount(ctx, groupID, requestedModel, excludedIDs, requiredCapability)
+		return s.selectGrokAccountWithSession(ctx, groupID, sessionHash, requestedModel, excludedIDs, requiredCapability)
 	}
 	return s.selectAccountWithScheduler(ctx, groupID, previousResponseID, sessionHash, requestedModel, excludedIDs, requiredTransport, requiredCapability, "", requireCompact)
 }
@@ -1401,6 +1401,17 @@ func (s *OpenAIGatewayService) SelectAccountWithSchedulerForCapability(
 func (s *OpenAIGatewayService) selectGrokAccount(
 	ctx context.Context,
 	groupID *int64,
+	requestedModel string,
+	excludedIDs map[int64]struct{},
+	requiredCapability OpenAIEndpointCapability,
+) (*AccountSelectionResult, OpenAIAccountScheduleDecision, error) {
+	return s.selectGrokAccountWithSession(ctx, groupID, "", requestedModel, excludedIDs, requiredCapability)
+}
+
+func (s *OpenAIGatewayService) selectGrokAccountWithSession(
+	ctx context.Context,
+	groupID *int64,
+	sessionHash string,
 	requestedModel string,
 	excludedIDs map[int64]struct{},
 	requiredCapability OpenAIEndpointCapability,
@@ -1423,6 +1434,12 @@ func (s *OpenAIGatewayService) selectGrokAccount(
 		return nil, decision, fmt.Errorf("query Grok accounts failed: %w", err)
 	}
 	accounts = FilterAccountsVisibleToRequestUser(ctx, accounts)
+	stickyAccountID := int64(0)
+	if strings.TrimSpace(sessionHash) != "" {
+		if accountID, stickyErr := s.getStickySessionAccountID(ctx, groupID, sessionHash); stickyErr == nil {
+			stickyAccountID = accountID
+		}
+	}
 	eligible := make([]Account, 0, len(accounts))
 	for i := range accounts {
 		account := &accounts[i]
@@ -1436,6 +1453,10 @@ func (s *OpenAIGatewayService) selectGrokAccount(
 			continue
 		}
 		if requiredCapability != "" && !account.SupportsOpenAIEndpointCapability(requiredCapability) {
+			if account.IsGrok() && requiredCapability == OpenAIEndpointCapabilityGrokMediaGeneration {
+				_, reason := account.GrokMediaGenerationEligibility()
+				slog.Debug("grok_media_account_ineligible", "account_id", account.ID, "reason", reason)
+			}
 			continue
 		}
 		if strings.TrimSpace(requestedModel) != "" && !account.IsModelSupported(requestedModel) {
@@ -1445,6 +1466,13 @@ func (s *OpenAIGatewayService) selectGrokAccount(
 	}
 	decision.CandidateCount = len(eligible)
 	sort.SliceStable(eligible, func(i, j int) bool {
+		if stickyAccountID > 0 {
+			iSticky := eligible[i].ID == stickyAccountID
+			jSticky := eligible[j].ID == stickyAccountID
+			if iSticky != jSticky {
+				return iSticky
+			}
+		}
 		return s.isBetterAccount(ctx, &eligible[i], &eligible[j])
 	})
 	for i := range eligible {
@@ -1462,6 +1490,10 @@ func (s *OpenAIGatewayService) selectGrokAccount(
 		}
 		decision.SelectedAccountID = account.ID
 		decision.SelectedAccountType = account.Type
+		if account.ID == stickyAccountID {
+			decision.Layer = openAIAccountScheduleLayerSessionSticky
+			decision.StickySessionHit = true
+		}
 		return &AccountSelectionResult{Account: hydrated, Acquired: true, ReleaseFunc: result.ReleaseFunc}, decision, nil
 	}
 	return nil, decision, ErrNoAvailableAccounts
