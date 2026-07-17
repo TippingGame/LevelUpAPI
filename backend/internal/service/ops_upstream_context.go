@@ -37,6 +37,13 @@ const (
 	// OpsSkipPassthroughKey 由 applyErrorPassthroughRule 在命中 skip_monitoring=true 的规则时设置。
 	// ops_error_logger 中间件检查此 key，为 true 时跳过错误记录。
 	OpsSkipPassthroughKey = "ops_skip_passthrough"
+
+	ResponseCommittedKey                                 = "response_committed"
+	OpsClientBusinessLimitedKey                          = "ops_client_business_limited"
+	OpsClientBusinessLimitedReasonKey                    = "ops_client_business_limited_reason"
+	OpsClientBusinessLimitedReasonLocalFeatureGate       = "local_feature_gate"
+	OpsClientBusinessLimitedReasonLocalPolicyDenied      = "local_policy_denied"
+	OpsClientBusinessLimitedReasonAPIKeyGroupUnavailable = "api_key_group_unavailable"
 )
 
 const opsUpstreamRequestBodyContextMaxBytes = opsMaxStoredRequestBodyBytes
@@ -57,6 +64,40 @@ func SetOpsLatencyMs(c *gin.Context, key string, value int64) {
 		return
 	}
 	c.Set(key, value)
+}
+
+func MarkResponseCommitted(c *gin.Context) {
+	if c != nil {
+		c.Set(ResponseCommittedKey, true)
+	}
+}
+
+func IsResponseCommitted(c *gin.Context) bool {
+	if c == nil {
+		return false
+	}
+	value, ok := c.Get(ResponseCommittedKey)
+	committed, _ := value.(bool)
+	return ok && committed
+}
+
+func MarkOpsClientBusinessLimited(c *gin.Context, reason string) {
+	if c == nil {
+		return
+	}
+	c.Set(OpsClientBusinessLimitedKey, true)
+	if reason = strings.TrimSpace(reason); reason != "" {
+		c.Set(OpsClientBusinessLimitedReasonKey, reason)
+	}
+}
+
+func HasOpsClientBusinessLimited(c *gin.Context) bool {
+	if c == nil {
+		return false
+	}
+	value, ok := c.Get(OpsClientBusinessLimitedKey)
+	limited, _ := value.(bool)
+	return ok && limited
 }
 
 // SetOpsUpstreamError is the exported wrapper for setOpsUpstreamError, used by

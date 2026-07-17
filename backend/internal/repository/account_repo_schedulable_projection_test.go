@@ -19,6 +19,10 @@ type captureEntQueryMatcher struct {
 	actual *string
 }
 
+func normalizeSQLWhitespace(value string) string {
+	return strings.Join(strings.Fields(value), " ")
+}
+
 func (m captureEntQueryMatcher) Match(_, actual string) error {
 	if m.actual == nil {
 		return fmt.Errorf("query capture target is nil")
