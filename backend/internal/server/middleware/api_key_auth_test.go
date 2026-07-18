@@ -768,9 +768,12 @@ func TestAPIKeyAuthTouchesLastUsedInStandardMode(t *testing.T) {
 func newAuthTestRouter(apiKeyService *service.APIKeyService, subscriptionService *service.SubscriptionService, cfg *config.Config) *gin.Engine {
 	router := gin.New()
 	router.Use(gin.HandlerFunc(NewAPIKeyAuthMiddleware(apiKeyService, subscriptionService, cfg)))
-	router.GET("/t", func(c *gin.Context) {
+	ok := func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"ok": true})
-	})
+	}
+	router.GET("/t", ok)
+	router.GET("/v1/usage", ok)
+	router.GET("/v1/sub2api/billing", ok)
 	return router
 }
 

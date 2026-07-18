@@ -65,6 +65,16 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 	}
 
 	if account.Platform == PlatformGrok {
+		if account.IsGrokOAuth() {
+			if eligible, reason := grokChatResponsesBridgeEligibility(body); eligible {
+				return s.forwardGrokChatCompletionsViaResponses(ctx, c, account, body, promptCacheKey, defaultMappedModel)
+			} else {
+				logger.L().Debug("grok chat_completions: using raw fallback",
+					zap.Int64("account_id", account.ID),
+					zap.String("reason", reason),
+				)
+			}
+		}
 		return s.forwardAsRawChatCompletions(ctx, c, account, body, defaultMappedModel)
 	}
 
@@ -257,9 +267,28 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
 		_ = resp.Body.Close()
 		resp.Body = io.NopCloser(bytes.NewReader(respBody))
+		if !agentIdentityTaskRecoveryWasTried(ctx) && s.isAgentIdentityAccount(ctx, account) && isAgentIdentityTaskInvalidHTTPResponse(resp.StatusCode, respBody) {
+			expectedTaskID := account.GetCredential("task_id")
+			if recoveryErr := s.recoverAgentIdentityTask(ctx, account, expectedTaskID); recoveryErr != nil {
+				return nil, fmt.Errorf("agent identity task recovery failed: %w", recoveryErr)
+			}
+			return s.ForwardAsChatCompletions(markAgentIdentityTaskRecoveryTried(ctx), c, account, body, promptCacheKey, defaultMappedModel)
+		}
+		respBody = s.redactAgentIdentitySensitiveBody(ctx, account, respBody)
+		resp.Body = io.NopCloser(bytes.NewReader(respBody))
 
 		upstreamMsg := strings.TrimSpace(extractUpstreamErrorMessage(respBody))
 		upstreamMsg = sanitizeUpstreamErrorMessage(upstreamMsg)
+		if account.Type == AccountTypeAPIKey &&
+			openai_compat.ResolveResponsesSupport(account.Extra) == openai_compat.ResponsesSupportUnknown &&
+			!isResponsesEndpointSupportedByStatus(resp.StatusCode) {
+			logger.L().Info("openai chat_completions: /responses unsupported, falling back to raw chat completions",
+				zap.Int64("account_id", account.ID),
+				zap.Int("upstream_status", resp.StatusCode),
+				zap.String("upstream_message", upstreamMsg),
+			)
+			return s.forwardAsRawChatCompletions(ctx, c, account, body, defaultMappedModel)
+		}
 		if s.shouldFailoverOpenAIUpstreamResponse(resp.StatusCode, upstreamMsg, respBody) {
 			upstreamDetail := ""
 			if s.cfg != nil && s.cfg.Gateway.LogUpstreamErrorBody {
@@ -369,6 +398,24 @@ func openAICompatFailedResponseMessage(resp *apicompat.ResponsesResponse) string
 	return strings.TrimSpace(resp.Error.Message)
 }
 
+// isOpenAIGenericContextWindowFailure preserves the legacy compatibility
+// behavior for upstreams that collapse a context-window rejection into the
+// generic "upstream_error" code. Explicit context_length_exceeded errors stay
+// on the normal 502/passthrough-rule path.
+func isOpenAIGenericContextWindowFailure(payload []byte, message string) bool {
+	if !isOpenAIContextWindowError(message, payload) {
+		return false
+	}
+	body := normalizeOpenAIResponsesStreamErrorBody(payload)
+	code, _, _ := parseOpenAIResponsesStreamErrorFields(body)
+	switch strings.ToLower(strings.TrimSpace(code)) {
+	case "", "upstream_error", "api_error":
+		return true
+	default:
+		return false
+	}
+}
+
 // handleChatCompletionsErrorResponse reads an upstream error and returns it in
 // OpenAI Chat Completions error format.
 func (s *OpenAIGatewayService) handleChatCompletionsErrorResponse(
@@ -377,7 +424,7 @@ func (s *OpenAIGatewayService) handleChatCompletionsErrorResponse(
 	account *Account,
 	requestedModel string,
 ) (*OpenAIForwardResult, error) {
-	return s.handleCompatErrorResponse(resp, c, account, requestedModel, writeChatCompletionsError)
+	return s.handleCompatErrorResponse(resp, c, account, writeChatCompletionsError, requestedModel)
 }
 
 // handleChatBufferedStreamingResponse reads all Responses SSE events from the
@@ -478,8 +525,7 @@ func (s *OpenAIGatewayService) handleChatBufferedStreamingResponse(
 			UpstreamOutTok: usage.OutputTokens,
 		})
 		writeChatCompletionsError(c, http.StatusBadRequest, "invalid_request_error", clientMsg)
-		return resultForOpenAICompatFailure(requestID, usage, originalModel, billingModel, upstreamModel, finalResponse.ServiceTier, false, startTime),
-			fmt.Errorf("openai cyber_policy: %s", clientMsg)
+		return nil, fmt.Errorf("openai cyber_policy: %s", clientMsg)
 	}
 	if strings.EqualFold(strings.TrimSpace(finalResponse.Status), "failed") {
 		payload, _ := json.Marshal(gin.H{"type": "response.failed", "response": finalResponse})
@@ -488,12 +534,36 @@ func (s *OpenAIGatewayService) handleChatBufferedStreamingResponse(
 			message = "Upstream response failed"
 		}
 		s.handleOpenAIResponsesStreamErrorSideEffect(c.Request.Context(), account, resp.Header, payload, message, false)
-		if !openAIStreamFailedEventShouldFailover(payload, message) {
-			writeChatCompletionsError(c, http.StatusBadRequest, "invalid_request_error", message)
-			return resultForOpenAICompatFailure(requestID, usage, originalModel, billingModel, upstreamModel, finalResponse.ServiceTier, false, startTime),
-				fmt.Errorf("openai request failed: %s", message)
+		if openAIStreamFailedEventShouldFailover(payload, message) {
+			return nil, s.newOpenAIStreamFailoverError(c, account, false, requestID, payload, message)
 		}
-		return nil, s.newOpenAIStreamFailoverError(c, account, false, requestID, payload, message)
+		message = s.recordOpenAIStreamUpstreamError(c, account, false, requestID, "http_error", payload, message)
+		status, errType, errMsg := http.StatusBadGateway, "upstream_error", message
+		matched := false
+		if passthroughStatus, passthroughType, passthroughMsg, ok := applyOpenAIStreamFailedErrorPassthroughRule(c, account.Platform, payload, message); ok {
+			status, errType, errMsg, matched = passthroughStatus, passthroughType, passthroughMsg, true
+			if status == 0 {
+				status = http.StatusBadGateway
+			}
+			if errMsg == "" {
+				errMsg = message
+			}
+		}
+		if matched {
+			MarkResponseCommitted(c)
+		}
+		if !matched && isOpenAIGenericContextWindowFailure(payload, message) {
+			status, errType, errMsg = http.StatusBadRequest, "invalid_request_error", message
+		}
+		writeChatCompletionsError(c, status, errType, errMsg)
+		result := resultForOpenAICompatFailure(requestID, usage, originalModel, billingModel, upstreamModel, finalResponse.ServiceTier, false, startTime)
+		if matched {
+			return result, fmt.Errorf("upstream response failed (passthrough): %s", errMsg)
+		}
+		if status == http.StatusBadRequest {
+			return result, fmt.Errorf("openai request failed: %s", errMsg)
+		}
+		return result, fmt.Errorf("upstream response failed: %s", errMsg)
 	}
 
 	// When the terminal event has an empty output array, reconstruct from
@@ -562,6 +632,7 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 	var responseServiceTier string
 	firstChunk := true
 	var terminalErr error
+	cyberPolicyHit := false
 	var streamFailoverErr *UpstreamFailoverError
 	clientDisconnected := false
 	clientOutputStarted := false
@@ -643,6 +714,7 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 					UpstreamInTok:  usage.InputTokens,
 					UpstreamOutTok: usage.OutputTokens,
 				})
+				cyberPolicyHit = true
 				terminalErr = fmt.Errorf("openai cyber_policy: %s", clientMsg)
 				if writeChatCompletionsStreamError(c, "invalid_request_error", clientMsg) {
 					return true
@@ -655,14 +727,48 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 				message = "Upstream response failed"
 			}
 			s.handleOpenAIResponsesStreamErrorSideEffect(c.Request.Context(), account, resp.Header, payloadBytes, message, false)
-			if !openAIStreamFailedEventShouldFailover(payloadBytes, message) {
-				terminalErr = fmt.Errorf("openai request failed: %s", message)
-				if writeChatCompletionsStreamError(c, "invalid_request_error", message) {
-					return true
-				}
+			if openAIStreamFailedEventShouldFailover(payloadBytes, message) {
+				streamFailoverErr = s.newOpenAIStreamFailoverError(c, account, false, requestID, payloadBytes, message)
 				return true
 			}
-			streamFailoverErr = s.newOpenAIStreamFailoverError(c, account, false, requestID, payloadBytes, message)
+			if isOpenAIGenericContextWindowFailure(payloadBytes, message) {
+				terminalErr = fmt.Errorf("openai request failed: %s", message)
+				if writeChatCompletionsStreamError(c, "invalid_request_error", message) {
+					clientDisconnected = true
+				}
+				clientOutputStarted = true
+				return true
+			}
+			message = s.recordOpenAIStreamUpstreamError(c, account, false, requestID, "http_error", payloadBytes, message)
+			errStatus, errType, errMsg := http.StatusBadGateway, "upstream_error", message
+			matched := false
+			if status, passthroughType, passthroughMsg, ok := applyOpenAIStreamFailedErrorPassthroughRule(c, account.Platform, payloadBytes, message); ok {
+				errStatus, errType, errMsg, matched = status, passthroughType, passthroughMsg, true
+				if errStatus == 0 {
+					errStatus = http.StatusBadGateway
+				}
+				if errMsg == "" {
+					errMsg = message
+				}
+				MarkResponseCommitted(c)
+			}
+			if c != nil && c.Writer != nil && !c.Writer.Written() {
+				writeChatCompletionsError(c, errStatus, errType, errMsg)
+				clientOutputStarted = true
+			} else if c != nil && c.Writer != nil && !clientDisconnected {
+				errorPayload, _ := json.Marshal(gin.H{"error": gin.H{"type": errType, "message": errMsg}})
+				if _, err := fmt.Fprintf(c.Writer, "data: %s\n\n", errorPayload); err != nil {
+					clientDisconnected = true
+				}
+			}
+			if !clientDisconnected {
+				c.Writer.Flush()
+			}
+			if matched {
+				terminalErr = fmt.Errorf("upstream response failed (passthrough): %s", errMsg)
+			} else {
+				terminalErr = fmt.Errorf("upstream response failed: %s", errMsg)
+			}
 			return true
 		}
 
@@ -845,6 +951,9 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 			}
 			if processFrame(frame) {
 				if terminalErr != nil {
+					if cyberPolicyHit {
+						return nil, terminalErr
+					}
 					return resultWithUsage(), terminalErr
 				}
 				return finalizeStream()
@@ -860,6 +969,9 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 			}
 			if processFrame(frame) {
 				if terminalErr != nil {
+					if cyberPolicyHit {
+						return nil, terminalErr
+					}
 					return resultWithUsage(), terminalErr
 				}
 				return finalizeStream()
@@ -921,6 +1033,9 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 					}
 					if processFrame(frame) {
 						if terminalErr != nil {
+							if cyberPolicyHit {
+								return nil, terminalErr
+							}
 							return resultWithUsage(), terminalErr
 						}
 						return finalizeStream()
@@ -946,6 +1061,9 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 			}
 			if processFrame(frame) {
 				if terminalErr != nil {
+					if cyberPolicyHit {
+						return nil, terminalErr
+					}
 					return resultWithUsage(), terminalErr
 				}
 				return finalizeStream()

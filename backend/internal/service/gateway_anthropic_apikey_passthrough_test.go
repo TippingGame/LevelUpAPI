@@ -203,11 +203,6 @@ func TestGatewayService_AnthropicAPIKeyPassthrough_ForwardStreamPreservesBodyAnd
 	require.NotContains(t, rec.Body.String(), `"cache_read_input_tokens":7`, "透传输出不应被网关改写")
 	require.Equal(t, 7, result.Usage.CacheReadInputTokens, "计费 usage 解析应保留 cached_tokens 兼容")
 	require.Empty(t, rec.Header().Get("Set-Cookie"), "响应头应经过安全过滤")
-	rawBody, ok := c.Get(OpsUpstreamRequestBodyKey)
-	require.True(t, ok)
-	bodyBytes, ok := rawBody.([]byte)
-	require.True(t, ok, "应以 []byte 形式缓存上游请求体，避免重复 string 拷贝")
-	require.Equal(t, "claude-3-haiku-20240307", gjson.GetBytes(bodyBytes, "model").String(), "缓存的上游请求体应包含映射后的模型")
 }
 
 func TestGatewayService_AnthropicForward_StreamIncompleteReturnsBillableUsage(t *testing.T) {
@@ -847,7 +842,7 @@ func TestGatewayService_BuildUpstreamRequest_StripsContextManagementWhenFinalBet
 	}
 
 	svc := &GatewayService{cfg: &config.Config{}}
-	req, err := svc.buildUpstreamRequest(
+	req, _, err := svc.buildUpstreamRequest(
 		context.Background(), c, account, body, "upstream-key", "api_key", "claude-haiku-4-5", false, false,
 	)
 	require.NoError(t, err)
@@ -875,7 +870,7 @@ func TestGatewayService_BuildUpstreamRequest_PreservesContextManagementWhenFinal
 		},
 	}
 	svc := &GatewayService{cfg: &config.Config{}}
-	req, err := svc.buildUpstreamRequest(
+	req, _, err := svc.buildUpstreamRequest(
 		context.Background(), c, account, body, "upstream-key", "api_key", "claude-sonnet-4-5", false, false,
 	)
 	require.NoError(t, err)
@@ -1061,7 +1056,7 @@ func TestGatewayService_AnthropicAPIKeyPassthrough_BuildRequestRejectsInvalidBas
 		},
 	}
 
-	_, err := svc.buildUpstreamRequestAnthropicAPIKeyPassthrough(context.Background(), c, account, []byte(`{}`), "k", false)
+	_, _, err := svc.buildUpstreamRequestAnthropicAPIKeyPassthrough(context.Background(), c, account, []byte(`{}`), "k", false)
 	require.Error(t, err)
 }
 
@@ -1088,7 +1083,7 @@ func TestGatewayService_AnthropicAPIKeyPassthrough_BridgesClaudeCodeContinuation
 	account.Credentials["base_url"] = "https://claude-max-subapi.example"
 
 	ctx := SetClaudeCodeClient(context.Background(), true)
-	req, err := svc.buildUpstreamRequestAnthropicAPIKeyPassthrough(ctx, c, account, body, "upstream-key", true)
+	req, _, err := svc.buildUpstreamRequestAnthropicAPIKeyPassthrough(ctx, c, account, body, "upstream-key", true)
 
 	require.NoError(t, err)
 	require.NotNil(t, req)
@@ -1127,7 +1122,7 @@ func TestGatewayService_AnthropicAPIKeyPassthrough_BridgesHeadersOnlyContinuatio
 	account := newAnthropicAPIKeyAccountForTest()
 	account.Credentials["base_url"] = "https://claude-max-subapi.example"
 
-	req, err := svc.buildUpstreamRequestAnthropicAPIKeyPassthrough(context.Background(), c, account, body, "upstream-key", true)
+	req, _, err := svc.buildUpstreamRequestAnthropicAPIKeyPassthrough(context.Background(), c, account, body, "upstream-key", true)
 
 	require.NoError(t, err)
 	require.NotNil(t, req)
@@ -1176,7 +1171,7 @@ func TestGatewayService_AnthropicAPIKeyPassthrough_DoesNotBridgeOfficialAnthropi
 	account := newAnthropicAPIKeyAccountForTest()
 
 	ctx := SetClaudeCodeClient(context.Background(), true)
-	req, err := svc.buildUpstreamRequestAnthropicAPIKeyPassthrough(ctx, c, account, body, "upstream-key", true)
+	req, _, err := svc.buildUpstreamRequestAnthropicAPIKeyPassthrough(ctx, c, account, body, "upstream-key", true)
 
 	require.NoError(t, err)
 	upstreamBody := reqBodyBytesForTest(t, req)
@@ -1207,26 +1202,40 @@ func TestGatewayService_AnthropicOAuth_NotAffectedByAPIKeyPassthroughToggle(t *t
 
 	require.False(t, account.IsAnthropicAPIKeyPassthroughEnabled())
 
-	req, err := svc.buildUpstreamRequest(context.Background(), c, account, []byte(`{"model":"claude-3-7-sonnet-20250219"}`), "oauth-token", "oauth", "claude-3-7-sonnet-20250219", true, false)
+	req, _, err := svc.buildUpstreamRequest(context.Background(), c, account, []byte(`{"model":"claude-3-7-sonnet-20250219"}`), "oauth-token", "oauth", "claude-3-7-sonnet-20250219", true, false)
 	require.NoError(t, err)
 	require.Equal(t, "Bearer oauth-token", getHeaderRaw(req.Header, "authorization"))
 	require.Contains(t, getHeaderRaw(req.Header, "anthropic-beta"), claude.BetaOAuth, "OAuth 链路仍应按原逻辑补齐 oauth beta")
 }
 
-func TestGatewayService_AnthropicOAuth_ForwardPreservesBillingHeaderSystemBlock(t *testing.T) {
+func TestGatewayService_AnthropicOAuthMimic_RewritesSystemWithBillingBlock(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	tests := []struct {
-		name string
-		body string
+		name               string
+		body               string
+		wantModel          string
+		wantOriginalSystem string
+		wantMetadataUserID string
 	}{
 		{
-			name: "system array",
-			body: `{"model":"claude-3-5-sonnet-latest","system":[{"type":"text","text":"x-anthropic-billing-header keep"}],"messages":[{"role":"user","content":[{"type":"text","text":"hello"}]}]}`,
+			name:               "sonnet system array",
+			body:               `{"model":"claude-3-5-sonnet-latest","system":[{"type":"text","text":"x-anthropic-billing-header keep"}],"messages":[{"role":"user","content":[{"type":"text","text":"hello"}]}]}`,
+			wantModel:          "claude-3-5-sonnet-latest",
+			wantOriginalSystem: "x-anthropic-billing-header keep",
 		},
 		{
-			name: "system string",
-			body: `{"model":"claude-3-5-sonnet-latest","system":"x-anthropic-billing-header keep","messages":[{"role":"user","content":[{"type":"text","text":"hello"}]}]}`,
+			name:               "sonnet system string",
+			body:               `{"model":"claude-3-5-sonnet-latest","system":"x-anthropic-billing-header keep","messages":[{"role":"user","content":[{"type":"text","text":"hello"}]}]}`,
+			wantModel:          "claude-3-5-sonnet-latest",
+			wantOriginalSystem: "x-anthropic-billing-header keep",
+		},
+		{
+			name:               "haiku full mimicry",
+			body:               `{"model":"claude-haiku-4-5","metadata":{"user_id":"pi-session-metadata"},"system":[{"type":"text","text":"Pi project instructions","cache_control":{"type":"ephemeral"}}],"thinking":{"type":"enabled","budget_tokens":1024},"messages":[{"role":"user","content":[{"type":"text","text":"hello"}]}]}`,
+			wantModel:          "claude-haiku-4-5-20251001",
+			wantOriginalSystem: "Pi project instructions",
+			wantMetadataUserID: "pi-session-metadata",
 		},
 	}
 
@@ -1235,6 +1244,8 @@ func TestGatewayService_AnthropicOAuth_ForwardPreservesBillingHeaderSystemBlock(
 			rec := httptest.NewRecorder()
 			c, _ := gin.CreateTestContext(rec)
 			c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+			c.Request.Header.Set("User-Agent", "pi/0.51.0")
+			c.Request.Header.Set("Anthropic-Beta", "client-only-beta")
 
 			parsed, err := ParseGatewayRequest([]byte(tt.body), PlatformAnthropic)
 			require.NoError(t, err)
@@ -1244,9 +1255,9 @@ func TestGatewayService_AnthropicOAuth_ForwardPreservesBillingHeaderSystemBlock(
 					StatusCode: http.StatusOK,
 					Header: http.Header{
 						"Content-Type": []string{"application/json"},
-						"x-request-id": []string{"rid-oauth-preserve"},
+						"x-request-id": []string{"rid-oauth-mimic"},
 					},
-					Body: io.NopCloser(strings.NewReader(`{"id":"msg_1","type":"message","role":"assistant","model":"claude-3-5-sonnet-20241022","content":[{"type":"text","text":"ok"}],"usage":{"input_tokens":12,"output_tokens":7}}`)),
+					Body: io.NopCloser(strings.NewReader(`{"id":"msg_1","type":"message","role":"assistant","model":"claude-haiku-4-5-20251001","content":[{"type":"text","text":"ok"}],"usage":{"input_tokens":12,"output_tokens":7}}`)),
 				},
 			}
 
@@ -1265,7 +1276,7 @@ func TestGatewayService_AnthropicOAuth_ForwardPreservesBillingHeaderSystemBlock(
 
 			account := &Account{
 				ID:          301,
-				Name:        "anthropic-oauth-preserve",
+				Name:        "anthropic-oauth-mimic",
 				Platform:    PlatformAnthropic,
 				Type:        AccountTypeOAuth,
 				Concurrency: 1,
@@ -1281,27 +1292,43 @@ func TestGatewayService_AnthropicOAuth_ForwardPreservesBillingHeaderSystemBlock(
 			require.NotNil(t, result)
 			require.NotNil(t, upstream.lastReq)
 			require.Equal(t, "Bearer oauth-token", getHeaderRaw(upstream.lastReq.Header, "authorization"))
-			require.Contains(t, getHeaderRaw(upstream.lastReq.Header, "anthropic-beta"), claude.BetaOAuth)
+			finalBeta := getHeaderRaw(upstream.lastReq.Header, "anthropic-beta")
+			for _, beta := range claude.FullClaudeCodeMimicryBetas() {
+				require.Truef(t, anthropicBetaTokensContains(finalBeta, beta), "missing mimic beta %s", beta)
+			}
+			require.False(t, anthropicBetaTokensContains(finalBeta, "client-only-beta"))
+			for key, value := range claude.DefaultHeaders {
+				require.Equal(t, value, getHeaderRaw(upstream.lastReq.Header, key), "mimic fingerprint header %s", key)
+			}
+			require.NotEmpty(t, getHeaderRaw(upstream.lastReq.Header, "x-client-request-id"))
 
+			require.Equal(t, tt.wantModel, gjson.GetBytes(upstream.lastBody, "model").String())
 			system := gjson.GetBytes(upstream.lastBody, "system")
 			require.True(t, system.Exists())
 			require.True(t, system.IsArray(), "system should be an array")
 			arr := system.Array()
 			require.Len(t, arr, 3, "system array should have billing block + cc prompt block + expansion prompt block")
 
-			require.Contains(t, arr[0].Get("text").String(), "x-anthropic-billing-header:")
-			require.Contains(t, arr[0].Get("text").String(), "cc_version=")
+			billingText := arr[0].Get("text").String()
+			require.Contains(t, billingText, "x-anthropic-billing-header:")
+			require.Contains(t, billingText, "cc_version="+claude.CLICurrentVersion+".")
+			require.Contains(t, billingText, "cc_entrypoint=cli;")
 
 			require.Equal(t, claudeCodeSystemPrompt, arr[1].Get("text").String())
 			require.Equal(t, claudeCodeSystemPromptExpansion, arr[2].Get("text").String())
 			require.Equal(t, "ephemeral", arr[2].Get("cache_control.type").String())
 
-			// 原始 system prompt 应迁移至 messages 中
+			// 原始 system prompt 应迁移至 messages 中。
 			messages := gjson.GetBytes(upstream.lastBody, "messages")
 			require.True(t, messages.IsArray())
 			firstMsg := messages.Array()[0]
 			require.Equal(t, "user", firstMsg.Get("role").String())
-			require.Contains(t, firstMsg.Get("content.0.text").String(), "x-anthropic-billing-header keep")
+			require.Contains(t, firstMsg.Get("content.0.text").String(), tt.wantOriginalSystem)
+
+			if tt.wantMetadataUserID != "" {
+				require.Equal(t, tt.wantMetadataUserID, gjson.GetBytes(upstream.lastBody, "metadata.user_id").String())
+				require.True(t, gjson.GetBytes(upstream.lastBody, "context_management").Exists())
+			}
 		})
 	}
 }
@@ -1686,10 +1713,6 @@ func TestGatewayService_AnthropicAPIKeyPassthrough_ForwardDirect_UpstreamRequest
 	require.ErrorAs(t, err, &failoverErr)
 	require.Equal(t, http.StatusBadGateway, failoverErr.StatusCode)
 	require.Equal(t, 0, rec.Body.Len())
-	rawBody, ok := c.Get(OpsUpstreamRequestBodyKey)
-	require.True(t, ok)
-	_, ok = rawBody.([]byte)
-	require.True(t, ok)
 }
 
 func TestGatewayService_AnthropicAPIKeyPassthrough_ForwardDirect_EmptyResponseBody(t *testing.T) {

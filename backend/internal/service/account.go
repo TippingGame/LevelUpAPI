@@ -17,26 +17,29 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/domain"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/openai_compat"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/xai"
 )
 
 type Account struct {
-	ID              int64
-	Name            string
-	Notes           *string
-	Platform        string
-	AccountLevel    string
-	Type            string
-	Credentials     map[string]any
-	Extra           map[string]any
-	OwnerUserID     *int64
-	ShareMode       string
-	ShareStatus     string
-	SharePolicyID   *int64
-	ProxyID         *int64
-	Concurrency     int
-	Priority        int
-	PrivatePriority *int
+	ID                      int64
+	Name                    string
+	Notes                   *string
+	Platform                string
+	AccountLevel            string
+	Type                    string
+	Credentials             map[string]any
+	Extra                   map[string]any
+	OwnerUserID             *int64
+	ShareMode               string
+	ShareStatus             string
+	SharePolicyID           *int64
+	ProxyID                 *int64
+	ProxyFallbackOriginID   *int64
+	ProxyFallbackOriginName *string
+	Concurrency             int
+	Priority                int
+	PrivatePriority         *int
 	// RateMultiplier 账号计费倍率（>=0，允许 0 表示该账号计费为 0）。
 	// 使用指针用于兼容旧版本调度缓存（Redis）中缺字段的情况：nil 表示按 1.0 处理。
 	RateMultiplier        *float64
@@ -64,6 +67,9 @@ type Account struct {
 	SessionWindowEnd    *time.Time
 	SessionWindowStatus string
 
+	ParentAccountID *int64
+	QuotaDimension  string
+
 	Proxy         *Proxy
 	AccountGroups []AccountGroup
 	GroupIDs      []int64
@@ -88,13 +94,32 @@ type Account struct {
 
 type OpenAIEndpointCapability string
 
+const openAILongContextBillingEnabledKey = "openai_long_context_billing_enabled"
+
 const (
 	OpenAIEndpointCapabilityChatCompletions     OpenAIEndpointCapability = "chat_completions"
 	OpenAIEndpointCapabilityEmbeddings          OpenAIEndpointCapability = "embeddings"
+	OpenAIEndpointCapabilityAlphaSearch         OpenAIEndpointCapability = "alpha_search"
 	OpenAIEndpointCapabilityGrokMediaGeneration OpenAIEndpointCapability = "grok_media_generation"
+	OpenAIEndpointCapabilityResponses           OpenAIEndpointCapability = "responses"
 )
 
 const openAIEndpointCapabilitiesCredentialKey = "openai_capabilities"
+
+const (
+	OpenAIAuthModePersonalAccessToken = "personalAccessToken"
+	openAIAuthModeCredentialKey       = "auth_mode"
+	openAIAuthModeLegacyCredentialKey = "openai_auth_mode"
+)
+
+func isOpenAIPersonalAccessTokenAuthMode(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "personalaccesstoken", "personal_access_token":
+		return true
+	default:
+		return false
+	}
+}
 
 // GrokMediaEligibleExtraKey 可由管理员显式覆盖媒体路由资格；缺失时使用探测结果。
 const GrokMediaEligibleExtraKey = "grok_media_eligible"
@@ -620,6 +645,24 @@ func (a *Account) isSchedulableAt(now time.Time, includeCodexQuotaProtection boo
 		}
 	}
 	if a.IsAPIKeyOrBedrock() && a.IsQuotaExceededAt(now) {
+		return false
+	}
+	return true
+}
+
+// IsCredentialUsableForShadow reports whether this account's shared OAuth
+// credential and transport state can safely back a Spark shadow account.
+// Parent-level quota windows and the parent's manual schedulable switch are
+// intentionally excluded because shadows own independent quota windows.
+func (a *Account) IsCredentialUsableForShadow() bool {
+	if a == nil || !a.IsActive() {
+		return false
+	}
+	now := time.Now()
+	if a.AutoPauseOnExpired && a.ExpiresAt != nil && !now.Before(*a.ExpiresAt) {
+		return false
+	}
+	if a.TempUnschedulableUntil != nil && now.Before(*a.TempUnschedulableUntil) {
 		return false
 	}
 	return true
@@ -1681,12 +1724,40 @@ func (a *Account) IsOpenAI() bool {
 	return a.Platform == PlatformOpenAI
 }
 
+func (a *Account) IsOpenAILongContextBillingEnabled() bool {
+	if a == nil || !a.IsOpenAI() || a.Extra == nil {
+		return false
+	}
+	enabled, ok := a.Extra[openAILongContextBillingEnabledKey].(bool)
+	return ok && enabled
+}
+
 func (a *Account) IsAnthropic() bool {
 	return a.Platform == PlatformAnthropic
 }
 
 func (a *Account) IsOpenAIOAuth() bool {
 	return a.IsOpenAI() && a.Type == AccountTypeOAuth
+}
+
+func (a *Account) IsOpenAIChatGPTSubscription() bool {
+	if !a.IsOpenAIOAuth() {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(a.GetCredential("plan_type"))) {
+	case "", "free", "abnormal":
+		return false
+	default:
+		return true
+	}
+}
+
+func (a *Account) IsOpenAIPersonalAccessToken() bool {
+	if !a.IsOpenAIOAuth() {
+		return false
+	}
+	return isOpenAIPersonalAccessTokenAuthMode(a.GetCredential(openAIAuthModeCredentialKey)) ||
+		isOpenAIPersonalAccessTokenAuthMode(a.GetCredential(openAIAuthModeLegacyCredentialKey))
 }
 
 func (a *Account) GetCodex5hLimitPercent() float64 {
@@ -1843,17 +1914,20 @@ func (a *Account) GetOpenAIRefreshToken() string {
 // GetGrokBaseURL selects the upstream used by Grok text and Responses traffic.
 // Grok media traffic has a different transport contract and must use
 // GetGrokMediaBaseURL instead.
+//
+// The stored base_url only rewrites forwarding endpoints. Credential lifecycle
+// traffic (OAuth authorization and token refresh) always uses the official
+// auth endpoints regardless of this value.
 func (a *Account) GetGrokBaseURL() string {
 	if !a.IsGrok() {
 		return ""
 	}
 	baseURL := strings.TrimSpace(a.GetCredential("base_url"))
-	// The stored base_url only controls forwarding/probing. OAuth authorization
-	// and refresh continue to use the official xAI issuer in GrokOAuthService.
-	// Empty and official-host values are the normal subscription default; a
-	// non-official host is an explicit, operator-controlled forwarding relay.
 	if a.IsGrokOAuth() {
-		if baseURL == "" || xai.IsOfficialBaseURL(baseURL) {
+		// Forwarding endpoints are operator-selectable independently from the
+		// OAuth issuer. Honor official API, CLI, regional, and relay URLs as
+		// stored; only empty or malformed values fall back to the CLI gateway.
+		if baseURL == "" || !xai.IsParseableBaseURL(baseURL) {
 			return xai.DefaultCLIBaseURL
 		}
 		return baseURL
@@ -1865,12 +1939,11 @@ func (a *Account) GetGrokBaseURL() string {
 }
 
 // GetGrokMediaBaseURL selects the upstream used by Grok Imagine APIs.
-//
-// OAuth text requests need the CLI subscription proxy, but that proxy has a
-// smaller request-body limit than the official Imagine API. Media requests can
-// contain large base64 inputs, so default OAuth accounts must use api.x.ai.
-// API-key accounts and explicit unsafe development overrides retain their
-// configured base URL.
+// The subscription CLI gateway enforces a small request-body limit that
+// rejects large Base64 media payloads, so OAuth media leaves for api.x.ai
+// whenever text traffic resolves to the CLI gateway. Every other manually
+// selected endpoint (official/regional API hosts or custom relays) serves
+// media as-is.
 func (a *Account) GetGrokMediaBaseURL() string {
 	if !a.IsGrok() {
 		return ""
@@ -1880,7 +1953,10 @@ func (a *Account) GetGrokMediaBaseURL() string {
 	}
 
 	baseURL := strings.TrimSpace(a.GetCredential("base_url"))
-	if strings.TrimSpace(baseURL) == "" || isOfficialGrokAPIBaseURL(baseURL) || isOfficialGrokCLIBaseURL(baseURL) {
+	parsed, parseErr := url.Parse(baseURL)
+	if baseURL == "" || parseErr != nil || parsed == nil || parsed.Scheme == "" || parsed.Host == "" || parsed.Opaque != "" ||
+		parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" ||
+		isOfficialGrokAPIBaseURL(baseURL) || isOfficialGrokCLIBaseURL(baseURL) {
 		return xai.DefaultBaseURL
 	}
 	// Preserve an operator-configured relay. ForwardGrokMedia applies the same
@@ -1967,6 +2043,34 @@ func (a *Account) GetChatGPTAccountID() string {
 	return a.GetCredential("chatgpt_account_id")
 }
 
+func (a *Account) IsChatGPTAccountFedRAMP() bool {
+	if !a.IsOpenAIOAuth() || a.Credentials == nil {
+		return false
+	}
+	value, ok := a.Credentials["chatgpt_account_is_fedramp"]
+	if !ok || value == nil {
+		return false
+	}
+	switch typed := value.(type) {
+	case bool:
+		return typed
+	case string:
+		parsed, err := strconv.ParseBool(strings.TrimSpace(typed))
+		return err == nil && parsed
+	case json.Number:
+		parsed, err := strconv.ParseBool(typed.String())
+		return err == nil && parsed
+	case float64:
+		return typed != 0
+	case int:
+		return typed != 0
+	case int64:
+		return typed != 0
+	default:
+		return false
+	}
+}
+
 func (a *Account) GetOpenAIDeviceID() string {
 	if !a.IsOpenAIOAuth() {
 		return ""
@@ -2004,6 +2108,25 @@ func (a *Account) SupportsOpenAIEndpointCapability(capability OpenAIEndpointCapa
 	}
 	switch capability {
 	case OpenAIEndpointCapabilityChatCompletions:
+	case OpenAIEndpointCapabilityResponses:
+		// Responses 支持状态由 accounts.extra 的自动探测标记决定，而非
+		// credentials 能力集。已探测确认不支持 /v1/responses 的 APIKey 上游
+		// 必须排除——否则会在 forward 阶段被静默降级为 Chat Completions，
+		// 无法完成生图（#4417）。未探测/OAuth 账号保留旧行为（不排除）。
+		if a.Type == AccountTypeAPIKey && !openai_compat.ShouldUseResponsesAPI(a.Extra) {
+			return false
+		}
+		// 支持 Responses 的上游同样需具备 chat 能力：复用下方 chat_completions
+		// 配置集校验。
+		capability = OpenAIEndpointCapabilityChatCompletions
+	case OpenAIEndpointCapabilityAlphaSearch:
+		// alpha/search 的转发按账号类型分流：OAuth/PAT 走
+		// chatgpt.com/backend-api/codex/alpha/search，API key 走
+		// {base_url}/v1/alpha/search（见 openAIAlphaSearchURL），两类账号
+		// 都可承接独立搜索请求。上游不支持该端点时由转发层 failover 兜底。
+		if a.Type != AccountTypeOAuth && a.Type != AccountTypeAPIKey {
+			return false
+		}
 	case OpenAIEndpointCapabilityEmbeddings:
 		if a.Type != AccountTypeAPIKey {
 			return false
@@ -2014,6 +2137,9 @@ func (a *Account) SupportsOpenAIEndpointCapability(capability OpenAIEndpointCapa
 
 	configured, found := a.openAIEndpointCapabilitySet()
 	if !found {
+		return true
+	}
+	if capability == OpenAIEndpointCapabilityAlphaSearch && configured[string(OpenAIEndpointCapabilityChatCompletions)] {
 		return true
 	}
 	return configured[string(capability)]
@@ -2238,6 +2364,7 @@ const (
 	OpenAIWSIngressModeDedicated   = "dedicated"
 	OpenAIWSIngressModeCtxPool     = "ctx_pool"
 	OpenAIWSIngressModePassthrough = "passthrough"
+	OpenAIWSIngressModeHTTPBridge  = "http_bridge"
 )
 
 func normalizeOpenAIWSIngressMode(mode string) string {
@@ -2248,6 +2375,8 @@ func normalizeOpenAIWSIngressMode(mode string) string {
 		return OpenAIWSIngressModeCtxPool
 	case OpenAIWSIngressModePassthrough:
 		return OpenAIWSIngressModePassthrough
+	case OpenAIWSIngressModeHTTPBridge:
+		return OpenAIWSIngressModeHTTPBridge
 	case OpenAIWSIngressModeShared:
 		return OpenAIWSIngressModeShared
 	case OpenAIWSIngressModeDedicated:
@@ -2422,6 +2551,14 @@ func (a *Account) IsCodexCLIOnlyEnabled() bool {
 	}
 	enabled, ok := a.Extra["codex_cli_only"].(bool)
 	return ok && enabled
+}
+
+func (a *Account) IsCodexCLIOnlyAppServerAllowed() bool {
+	if !a.IsCodexCLIOnlyEnabled() {
+		return false
+	}
+	allowed, ok := a.Extra["codex_cli_only_allow_app_server"].(bool)
+	return ok && allowed
 }
 
 // WindowCostSchedulability 窗口费用调度状态
@@ -2920,6 +3057,55 @@ func ComputeQuotaResetAt(extra map[string]any) {
 }
 
 // ValidateQuotaResetConfig 校验配额固定重置时间配置的合法性
+// NormalizeFixedQuotaWindows aligns preserved quota usage with the active fixed reset window.
+func NormalizeFixedQuotaWindows(extra map[string]any) {
+	if extra == nil {
+		return
+	}
+	now := time.Now()
+	tzName, _ := extra["quota_reset_timezone"].(string)
+	if tzName == "" {
+		tzName = "UTC"
+	}
+	tz, err := time.LoadLocation(tzName)
+	if err != nil {
+		tz = time.UTC
+	}
+
+	if mode, _ := extra["quota_daily_reset_mode"].(string); mode == "fixed" && parseExtraFloat64(extra["quota_daily_limit"]) > 0 {
+		hour := int(parseExtraFloat64(extra["quota_daily_reset_hour"]))
+		if hour < 0 || hour > 23 {
+			hour = 0
+		}
+		lastReset := lastFixedDailyReset(hour, tz, now)
+		start := parseExtraTime(extra["quota_daily_start"])
+		if start.IsZero() || start.Before(lastReset) {
+			extra["quota_daily_used"] = 0.0
+			extra["quota_daily_start"] = lastReset.UTC().Format(time.RFC3339)
+		}
+	}
+
+	if mode, _ := extra["quota_weekly_reset_mode"].(string); mode == "fixed" && parseExtraFloat64(extra["quota_weekly_limit"]) > 0 {
+		day := 1
+		if rawDay, ok := extra["quota_weekly_reset_day"]; ok {
+			day = int(parseExtraFloat64(rawDay))
+		}
+		if day < 0 || day > 6 {
+			day = 1
+		}
+		hour := int(parseExtraFloat64(extra["quota_weekly_reset_hour"]))
+		if hour < 0 || hour > 23 {
+			hour = 0
+		}
+		lastReset := lastFixedWeeklyReset(day, hour, tz, now)
+		start := parseExtraTime(extra["quota_weekly_start"])
+		if start.IsZero() || start.Before(lastReset) {
+			extra["quota_weekly_used"] = 0.0
+			extra["quota_weekly_start"] = lastReset.UTC().Format(time.RFC3339)
+		}
+	}
+}
+
 func ValidateQuotaResetConfig(extra map[string]any) error {
 	if extra == nil {
 		return nil
@@ -3419,6 +3605,18 @@ func parseExtraFloat64(value any) float64 {
 	return 0
 }
 
+func parseExtraTime(value any) time.Time {
+	if s, ok := value.(string); ok {
+		if t, err := time.Parse(time.RFC3339Nano, s); err == nil {
+			return t
+		}
+		if t, err := time.Parse(time.RFC3339, s); err == nil {
+			return t
+		}
+	}
+	return time.Time{}
+}
+
 // parseExtraInt 从 extra 字段解析 int 值
 // ParseExtraInt 从 extra 字段的 any 值解析为 int。
 // 支持 int, int64, float64, json.Number, string 类型，无法解析时返回 0。
@@ -3464,4 +3662,18 @@ func parseExtraIntOK(value any) (int, bool) {
 		}
 	}
 	return 0, false
+}
+
+// IsShadow 报告账号是否为影子账号（parent_account_id 非空；当前唯一预设是 spark 维度）。
+func (a *Account) IsShadow() bool { return a != nil && a.ParentAccountID != nil }
+
+// IsCredentialShadow 语义别名，供「凭据消费者跳过影子」处使用。
+func (a *Account) IsCredentialShadow() bool { return a.IsShadow() }
+
+// QuotaDimensionOrDefault 返回账号的用量维度，未设置时回退 global。
+func (a *Account) QuotaDimensionOrDefault() string {
+	if a == nil || strings.TrimSpace(a.QuotaDimension) == "" {
+		return QuotaDimensionGlobal
+	}
+	return a.QuotaDimension
 }

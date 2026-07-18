@@ -95,6 +95,7 @@
         :start-date="startDate"
         :end-date="endDate"
         :exporting="exporting"
+        :model-options="modelNameOptions"
         :initial-user-id="initialUserId"
         :initial-user-label="initialUserLabel"
         @change="applyFilters"
@@ -383,6 +384,9 @@ const balanceLedger = ref<UserBalanceLedgerEntry[]>([])
 const ledgerLoading = ref(false)
 const ledgerLoaded = ref(false)
 const trendData = ref<TrendDataPoint[]>([]); const requestedModelStats = ref<ModelStat[]>([]); const upstreamModelStats = ref<ModelStat[]>([]); const mappingModelStats = ref<ModelStat[]>([]); const groupStats = ref<GroupStat[]>([]); const chartsLoading = ref(false); const modelStatsLoading = ref(false); const granularity = ref<'day' | 'hour'>('hour')
+const modelNameOptions = computed(() =>
+  Array.from(new Set(requestedModelStats.value.map((item) => item.model).filter(Boolean))).sort()
+)
 const modelDistributionMetric = ref<DistributionMetric>('tokens')
 const modelDistributionSource = ref<ModelDistributionSource>('requested')
 const loadedModelSources = reactive<Record<ModelDistributionSource, boolean>>({
@@ -661,13 +665,17 @@ const loadBalanceLedger = async () => {
   }
 }
 
-const loadStats = async () => {
+const loadStats = async (force = false) => {
   const seq = ++statsReqSeq
   endpointStatsLoading.value = true
   try {
     const requestType = filters.value.request_type
     const legacyStream = requestType ? requestTypeToLegacyStream(requestType) : filters.value.stream
-    const s = await adminAPI.usage.getStats({ ...filters.value, stream: legacyStream === null ? undefined : legacyStream })
+    const s = await adminAPI.usage.getStats({
+      ...filters.value,
+      stream: legacyStream === null ? undefined : legacyStream,
+      ...(force ? { nocache: 1 } : {})
+    })
     if (seq !== statsReqSeq) return
     usageStats.value = s
     inboundEndpointStats.value = s.endpoints || []
@@ -789,7 +797,7 @@ const applyLedgerFilters = () => {
 const refreshData = () => {
   resetModelStatsCache()
   loadLogs()
-  loadStats()
+  loadStats(true)
   loadModelStats(modelDistributionSource.value, true)
   loadChartData()
 }

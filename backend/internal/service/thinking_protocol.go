@@ -46,6 +46,11 @@ func ResolveThinkingProtocol(modelID string) ThinkingProtocol {
 	}
 }
 
+// ShouldPreFilterThinkingBlocks limits destructive normalization to native Anthropic-style protocols.
+func ShouldPreFilterThinkingBlocks(modelID string) bool {
+	return ResolveThinkingProtocol(modelID) == ThinkingProtocolAnthropicStrict
+}
+
 func ShouldRectifyThinkingSignatureError(modelID string) bool {
 	return ResolveThinkingProtocol(modelID) == ThinkingProtocolAnthropicStrict
 }

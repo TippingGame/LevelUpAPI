@@ -5,6 +5,7 @@ package service
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -19,9 +20,33 @@ type grokTokenCacheForProviderTest struct {
 	setTTL       time.Duration
 	lockResult   bool
 	releaseCalls int
+	deletedKeys  []string
+	deleteErr    error
+	getCalls     int
+	mu           sync.Mutex
+}
+
+type grokCredentialRaceRepo struct {
+	*tokenRefreshAccountRepo
+	mu sync.RWMutex
+}
+
+func (r *grokCredentialRaceRepo) GetByID(ctx context.Context, id int64) (*Account, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.tokenRefreshAccountRepo.GetByID(ctx, id)
+}
+
+func (r *grokCredentialRaceRepo) setAccount(account *Account) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.accountsByID[account.ID] = account
 }
 
 func (c *grokTokenCacheForProviderTest) GetAccessToken(context.Context, string) (string, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.getCalls++
 	if c.token == "" {
 		return "", errors.New("not cached")
 	}
@@ -29,14 +54,19 @@ func (c *grokTokenCacheForProviderTest) GetAccessToken(context.Context, string) 
 }
 
 func (c *grokTokenCacheForProviderTest) SetAccessToken(_ context.Context, key string, token string, ttl time.Duration) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	c.setKey = key
 	c.setToken = token
 	c.setTTL = ttl
 	return nil
 }
 
-func (c *grokTokenCacheForProviderTest) DeleteAccessToken(context.Context, string) error {
-	return nil
+func (c *grokTokenCacheForProviderTest) DeleteAccessToken(_ context.Context, key string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.deletedKeys = append(c.deletedKeys, key)
+	return c.deleteErr
 }
 
 func (c *grokTokenCacheForProviderTest) AcquireRefreshLock(context.Context, string, time.Duration) (bool, error) {
@@ -53,9 +83,11 @@ func TestGrokTokenProviderRefreshesExpiredTokenOnRequestPath(t *testing.T) {
 
 	expiredAt := time.Now().Add(-time.Minute).UTC().Format(time.RFC3339)
 	account := &Account{
-		ID:       54,
-		Platform: PlatformGrok,
-		Type:     AccountTypeOAuth,
+		ID:          54,
+		Platform:    PlatformGrok,
+		Type:        AccountTypeOAuth,
+		Status:      StatusActive,
+		Schedulable: true,
 		Credentials: map[string]any{
 			"access_token":  "expired-access-token",
 			"refresh_token": "refresh-token",
@@ -92,12 +124,14 @@ func TestGrokTokenProviderRefreshesExpiredTokenOnRequestPath(t *testing.T) {
 	require.Equal(t, 1, cache.releaseCalls)
 }
 
-func TestGrokTokenProviderRefreshFailureUnschedulesWithRedactedReason(t *testing.T) {
+func TestGrokTokenProviderRefreshFailureDefersAccountQuarantine(t *testing.T) {
 	expiredAt := time.Now().Add(-time.Minute).UTC().Format(time.RFC3339)
 	account := &Account{
-		ID:       55,
-		Platform: PlatformGrok,
-		Type:     AccountTypeOAuth,
+		ID:          55,
+		Platform:    PlatformGrok,
+		Type:        AccountTypeOAuth,
+		Status:      StatusActive,
+		Schedulable: true,
 		Credentials: map[string]any{
 			"access_token":  "expired-access-token",
 			"refresh_token": "refresh-token",
@@ -108,24 +142,14 @@ func TestGrokTokenProviderRefreshFailureUnschedulesWithRedactedReason(t *testing
 	repo := &tokenRefreshAccountRepo{}
 	repo.accountsByID = map[int64]*Account{55: account}
 	cache := &grokTokenCacheForProviderTest{lockResult: true}
-	tempCache := &tempUnschedCacheStub{}
 	provider := NewGrokTokenProvider(repo, cache)
 	provider.SetRefreshAPI(NewOAuthRefreshAPI(repo, cache), &tokenRefresherStub{
 		err: errors.New("temporary refresh failure access_token=leaked-access refresh_token=leaked-refresh"),
 	})
-	provider.SetTempUnschedCache(tempCache)
 
 	token, err := provider.GetAccessToken(context.Background(), account)
 	require.Error(t, err)
 	require.Empty(t, token)
-	require.Equal(t, 1, repo.setTempUnschedCalls)
+	require.Equal(t, 0, repo.setTempUnschedCalls)
 	require.Equal(t, 0, repo.setErrorCalls)
-	require.Contains(t, repo.lastTempReason, "access_token=***")
-	require.Contains(t, repo.lastTempReason, "refresh_token=***")
-	require.NotContains(t, repo.lastTempReason, "leaked-access")
-	require.NotContains(t, repo.lastTempReason, "leaked-refresh")
-	require.Equal(t, 1, tempCache.setCalls)
-	require.NotNil(t, tempCache.state)
-	require.NotContains(t, tempCache.state.ErrorMessage, "leaked-access")
-	require.NotContains(t, tempCache.state.ErrorMessage, "leaked-refresh")
 }

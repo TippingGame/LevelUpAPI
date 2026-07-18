@@ -33,7 +33,7 @@ func (r *anthropicWindowLimitRepo) SetTempUnschedulable(_ context.Context, _ int
 	return nil
 }
 
-func (r *anthropicWindowLimitRepo) SetModelRateLimit(_ context.Context, _ int64, scope string, resetAt time.Time) error {
+func (r *anthropicWindowLimitRepo) SetModelRateLimit(_ context.Context, _ int64, scope string, resetAt time.Time, _ ...string) error {
 	r.modelRateLimitCalls++
 	r.lastModelRateLimitScope = scope
 	r.lastModelRateLimitReset = resetAt

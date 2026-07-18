@@ -1,6 +1,13 @@
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import CreateAccountModal from '../CreateAccountModal.vue'
+
+const source = readFileSync(
+  resolve(process.cwd(), 'src/components/account/CreateAccountModal.vue'),
+  'utf8'
+)
 
 const { showError, createAccount, adminCreateAccount } = vi.hoisted(() => ({
   showError: vi.fn(),
@@ -147,5 +154,17 @@ describe('CreateAccountModal Grok user accounts', () => {
       }
     })
     expect(createAccount).not.toHaveBeenCalled()
+  })
+
+  it('exposes custom upstream URL and header override for the admin OAuth create flow', () => {
+    expect(source).toContain('data-testid="grok-custom-base-url-toggle"')
+    expect(source).toContain('data-testid="grok-custom-base-url-input"')
+    expect(source).toContain("!isUserScope && form.platform === 'grok' && accountCategory === 'oauth-based'")
+  })
+
+  it('validates and applies upstream config on all three Grok OAuth create paths', () => {
+    // 授权码兑换 / RT 批量 / SSO 批量 3 处调用（定义为箭头函数，不计入）
+    expect(source.match(/validateGrokOAuthUpstreamConfig\(\)/g)?.length).toBe(3)
+    expect(source.match(/applyGrokOAuthUpstreamConfig\(credentials\)/g)?.length).toBe(3)
   })
 })

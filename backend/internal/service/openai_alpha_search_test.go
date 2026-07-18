@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -14,6 +15,27 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
 )
+
+type alphaSearchAccountStateRepo struct {
+	AccountRepository
+	setErrorCalls int
+	lastError     string
+}
+
+func (r *alphaSearchAccountStateRepo) SetError(_ context.Context, _ int64, errorMsg string) error {
+	r.setErrorCalls++
+	r.lastError = errorMsg
+	return nil
+}
+
+func alphaSearchResponsesSSE(output string) string {
+	return "event: response.output_text.delta\n" +
+		`data: {"type":"response.output_text.delta","delta":` + strconv.Quote(output) + `}` + "\n\n" +
+		"event: response.output_text.annotation.added\n" +
+		`data: {"type":"response.output_text.annotation.added","annotation":{"type":"url_citation","url":"https://example.com/news","title":"Example News"}}` + "\n\n" +
+		"event: response.completed\n" +
+		`data: {"type":"response.completed","response":{"output":[{"type":"message","content":[{"type":"output_text","text":` + strconv.Quote(output) + `}]}]}}` + "\n\n"
+}
 
 func TestForwardAlphaSearchOAuthPreservesWire(t *testing.T) {
 	gin.SetMode(gin.TestMode)

@@ -205,3 +205,8 @@ func StartOfDayInUserLocation(t time.Time, userTZ string) time.Time {
 	t = t.In(loc)
 	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, loc)
 }
+
+// UTCOffset returns the current UTC offset of the configured timezone.
+func UTCOffset() string {
+	return getUTCOffset(Location())
+}

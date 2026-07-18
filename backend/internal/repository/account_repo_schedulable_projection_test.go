@@ -19,7 +19,7 @@ type captureEntQueryMatcher struct {
 	actual *string
 }
 
-func normalizeSQLWhitespace(value string) string {
+func normalizeProjectionSQLWhitespace(value string) string {
 	return strings.Join(strings.Fields(value), " ")
 }
 
@@ -56,7 +56,7 @@ func TestListSchedulableAccountLoadsUsesSingleProjectionQuery(t *testing.T) {
 	require.Equal(t, 7, loads[1].MaxConcurrency)
 	require.NoError(t, mock.ExpectationsWereMet(), "projection path must execute exactly one query")
 
-	normalized := normalizeSQLWhitespace(capturedSQL)
+	normalized := normalizeProjectionSQLWhitespace(capturedSQL)
 	selectClause, _, found := strings.Cut(normalized, " FROM ")
 	require.True(t, found, "unexpected projection SQL: %s", normalized)
 	require.Equal(t, 2, strings.Count(selectClause, ","), "projection must select exactly three columns: %s", selectClause)

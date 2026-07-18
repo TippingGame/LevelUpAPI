@@ -107,17 +107,31 @@ export function serializeHeaderOverrideRows(rows: HeaderOverrideRow[]): string {
   return JSON.stringify(buildHeaderOverridesObject(rows), null, 2)
 }
 
-const GROK_OFFICIAL_BASE_URL_HOSTS = new Set(['api.x.ai', 'cli-chat-proxy.grok.com'])
+const GROK_DEFAULT_GATEWAY_HOST = 'cli-chat-proxy.grok.com'
 
 export function isCustomGrokBaseUrl(value: unknown): boolean {
   if (typeof value !== 'string' || !value.trim()) return false
   try {
     const parsed = new URL(value.trim())
-    return !GROK_OFFICIAL_BASE_URL_HOSTS.has(parsed.hostname.toLowerCase())
+    return parsed.hostname.toLowerCase() !== GROK_DEFAULT_GATEWAY_HOST
   } catch {
     return false
   }
 }
+
+export interface GrokBaseUrlPreset {
+  labelKey?: 'cli' | 'official'
+  label?: string
+  url: string
+}
+
+export const GROK_BASE_URL_PRESETS: GrokBaseUrlPreset[] = [
+  { labelKey: 'cli', url: 'https://cli-chat-proxy.grok.com/v1' },
+  { labelKey: 'official', url: 'https://api.x.ai/v1' },
+  { label: 'us-east-1', url: 'https://us-east-1.api.x.ai/v1' },
+  { label: 'us-west-2', url: 'https://us-west-2.api.x.ai/v1' },
+  { label: 'eu-west-1', url: 'https://eu-west-1.api.x.ai/v1' }
+]
 
 export function applyHeaderOverride(
   credentials: Record<string, unknown>,

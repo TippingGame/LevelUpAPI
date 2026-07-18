@@ -50,7 +50,7 @@ func TestPatchGrokResponsesBodyKeepsTextFeaturesAndDropsUnsupportedFields(t *tes
 	require.Equal(t, "lookup", gjson.GetBytes(patched, "tool_choice.name").String())
 }
 
-func TestPatchGrokResponsesBodySanitizesComposerReasoningParameters(t *testing.T) {
+func TestPatchGrokResponsesBodySanitizesComposerReasoningParameters_TextGateway(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -131,7 +131,7 @@ func TestPatchGrokResponsesBodySupportsAgentToolsAndDropsPrivateInputCarrier(t *
 
 func TestBuildGrokResponsesRequestUsesOfficialBearerEndpoint(t *testing.T) {
 	account := &Account{Platform: PlatformGrok, Type: AccountTypeOAuth}
-	req, err := buildGrokResponsesRequest(context.Background(), nil, account, []byte(`{"model":"grok-4.3"}`), "access-token")
+	req, err := buildGrokResponsesRequest(context.Background(), nil, account, []byte(`{"model":"grok-4.3"}`), "access-token", "", nil)
 	require.NoError(t, err)
 	require.Equal(t, http.MethodPost, req.Method)
 	require.Equal(t, xai.DefaultCLIBaseURL+"/responses", req.URL.String())
@@ -196,11 +196,14 @@ func grokTextTestAccount(id int64) (*Account, *grokQuotaAccountRepo) {
 		Name:        "grok",
 		Platform:    PlatformGrok,
 		Type:        AccountTypeOAuth,
+		Status:      StatusActive,
+		Schedulable: true,
 		Concurrency: 1,
 		Credentials: map[string]any{
-			"access_token": "access-token",
-			"expires_at":   time.Now().Add(time.Hour).UTC().Format(time.RFC3339),
-			"base_url":     xai.DefaultBaseURL,
+			"access_token":  "access-token",
+			"refresh_token": "refresh-token",
+			"expires_at":    time.Now().Add(2 * grokTokenRefreshSkew).UTC().Format(time.RFC3339),
+			"base_url":      xai.DefaultCLIBaseURL,
 		},
 	}
 	repo := &grokQuotaAccountRepo{mockAccountRepoForPlatform: &mockAccountRepoForPlatform{
@@ -499,7 +502,7 @@ func TestHandleGrokAccountUpstreamError429PersistsRetryAfterAndBlocksRuntime(t *
 	require.True(t, svc.isOpenAIAccountRuntimeBlocked(account))
 }
 
-func TestHandleGrokAccountUpstreamError429UsesLatestExhaustedWindowReset(t *testing.T) {
+func TestHandleGrokAccountUpstreamError429UsesLatestExhaustedWindowReset_TextGateway(t *testing.T) {
 	now := time.Now()
 	requestReset := now.Add(10 * time.Minute).UTC().Truncate(time.Second)
 	tokenReset := now.Add(20 * time.Minute).UTC().Truncate(time.Second)
@@ -535,7 +538,7 @@ func TestHandleGrokAccountUpstreamError429WithoutHeadersUsesFallback(t *testing.
 	require.Zero(t, repo.tempUnschedCalls)
 }
 
-func TestGrokRateLimitResetAtUsesFutureWindowAfterRetryAfterExpires(t *testing.T) {
+func TestGrokRateLimitResetAtUsesFutureWindowAfterRetryAfterExpires_TextGateway(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
 	observedAt := now.Add(-2 * time.Minute)
 	windowReset := now.Add(15 * time.Minute)

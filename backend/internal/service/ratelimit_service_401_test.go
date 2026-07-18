@@ -54,11 +54,11 @@ func (r *rateLimitAccountRepoStub) SetRateLimited(ctx context.Context, id int64,
 
 func (r *rateLimitAccountRepoStub) UpdateCredentials(ctx context.Context, id int64, credentials map[string]any) error {
 	r.updateCredentialsCalls++
-	r.lastCredentials = cloneCredentials(credentials)
+	r.lastCredentials = shallowCopyMap(credentials)
 	return nil
 }
 
-func (r *rateLimitAccountRepoStub) SetModelRateLimit(ctx context.Context, id int64, modelKey string, resetAt time.Time) error {
+func (r *rateLimitAccountRepoStub) SetModelRateLimit(ctx context.Context, id int64, modelKey string, resetAt time.Time, _ ...string) error {
 	r.modelRateLimitCalls = append(r.modelRateLimitCalls, modelRateLimitCall{accountID: id, modelKey: modelKey, resetAt: resetAt})
 	r.lastModelRateLimitErr = ctx.Err()
 	return r.setModelRateLimitErr

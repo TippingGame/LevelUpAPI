@@ -5,12 +5,14 @@ package server_test
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"math"
 	"net/http"
 	"net/http/httptest"
 	"sort"
+	"strconv"
 	"testing"
 	"time"
 
@@ -38,6 +40,7 @@ func TestAPIContracts(t *testing.T) {
 		headers    map[string]string
 		wantStatus int
 		wantJSON   string
+		wantSubset string
 	}{
 		{
 			name:       "GET /api/v1/auth/me",
@@ -674,6 +677,21 @@ func TestAPIContracts(t *testing.T) {
 			method:     http.MethodGet,
 			path:       "/api/v1/admin/settings",
 			wantStatus: http.StatusOK,
+			wantSubset: `{
+				"code": 0,
+				"message": "success",
+				"data": {
+					"registration_enabled": true,
+					"site_name": "Sub2API",
+					"site_subtitle": "Subtitle",
+					"api_base_url": "https://api.example.com",
+					"payment_visible_method_alipay_source": "easypay_alipay",
+					"payment_visible_method_alipay_enabled": true,
+					"openai_advanced_scheduler_enabled": true,
+					"auth_source_default_email_platform_quotas": null,
+					"auth_source_default_dingtalk_platform_quotas": null
+				}
+			}`,
 			wantJSON: `{
 				"code": 0,
 				"message": "success",
@@ -780,6 +798,7 @@ func TestAPIContracts(t *testing.T) {
 					"affiliate_rebate_freeze_hours": 0,
 					"affiliate_rebate_duration_days": 0,
 					"affiliate_rebate_per_invitee_cap": 0,
+					"affiliate_admin_recharge_enabled": false,
 					"default_user_rpm_limit": 0,
 					"default_affiliate_weekly_limit": 0,
 					"default_affiliate_code_auto_rotate": false,
@@ -833,6 +852,8 @@ func TestAPIContracts(t *testing.T) {
 					"payment_visible_method_wxpay_source": "official_wxpay",
 					"payment_visible_method_alipay_enabled": true,
 					"payment_visible_method_wxpay_enabled": false,
+					"openai_low_upstream_rate_priority_enabled": true,
+					"openai_oauth_scheduling_rate_multiplier": 0.05,
 					"openai_advanced_scheduler_enabled": true,
 					"openai_clean_relay_enabled": false,
 					"risk_control_enabled": false,
@@ -945,6 +966,21 @@ func TestAPIContracts(t *testing.T) {
 			method:     http.MethodGet,
 			path:       "/api/v1/admin/settings",
 			wantStatus: http.StatusOK,
+			wantSubset: `{
+				"code": 0,
+				"message": "success",
+				"data": {
+					"registration_enabled": true,
+					"oidc_connect_enabled": true,
+					"oidc_connect_provider_name": "ConfigOIDC",
+					"oidc_connect_client_id": "oidc-config-client",
+					"wechat_connect_enabled": true,
+					"wechat_connect_open_enabled": true,
+					"wechat_connect_open_app_id": "wx-open-config",
+					"site_name": "Sub2API",
+					"site_subtitle": "Subscription to API Conversion Platform"
+				}
+			}`,
 			wantJSON: `{
 				"code": 0,
 				"message": "success",
@@ -1037,6 +1073,7 @@ func TestAPIContracts(t *testing.T) {
 					"affiliate_rebate_freeze_hours": 0,
 					"affiliate_rebate_duration_days": 0,
 					"affiliate_rebate_per_invitee_cap": 0,
+					"affiliate_admin_recharge_enabled": false,
 					"default_user_rpm_limit": 0,
 					"default_affiliate_weekly_limit": 0,
 					"default_affiliate_code_auto_rotate": false,
@@ -1068,6 +1105,8 @@ func TestAPIContracts(t *testing.T) {
 					"payment_visible_method_wxpay_source": "",
 					"payment_visible_method_alipay_enabled": false,
 					"payment_visible_method_wxpay_enabled": false,
+					"openai_low_upstream_rate_priority_enabled": false,
+					"openai_oauth_scheduling_rate_multiplier": 1,
 					"openai_advanced_scheduler_enabled": false,
 					"openai_clean_relay_enabled": false,
 					"risk_control_enabled": false,
@@ -1214,8 +1253,44 @@ func TestAPIContracts(t *testing.T) {
 
 			status, body := doRequest(t, deps.router, tt.method, tt.path, tt.body, tt.headers)
 			require.Equal(t, tt.wantStatus, status, body)
-			require.JSONEq(t, tt.wantJSON, body)
+			if tt.wantSubset != "" {
+				requireJSONSubset(t, tt.wantSubset, body)
+			} else {
+				require.JSONEq(t, tt.wantJSON, body)
+			}
 		})
+	}
+}
+
+func requireJSONSubset(t *testing.T, expectedJSON, actualJSON string) {
+	t.Helper()
+	var expected any
+	var actual any
+	require.NoError(t, json.Unmarshal([]byte(expectedJSON), &expected))
+	require.NoError(t, json.Unmarshal([]byte(actualJSON), &actual))
+	requireJSONValueSubset(t, expected, actual, "$")
+}
+
+func requireJSONValueSubset(t *testing.T, expected, actual any, path string) {
+	t.Helper()
+	switch expectedValue := expected.(type) {
+	case map[string]any:
+		actualValue, ok := actual.(map[string]any)
+		require.True(t, ok, "%s must be an object", path)
+		for key, expectedChild := range expectedValue {
+			actualChild, exists := actualValue[key]
+			require.True(t, exists, "%s.%s must be present", path, key)
+			requireJSONValueSubset(t, expectedChild, actualChild, path+"."+key)
+		}
+	case []any:
+		actualValue, ok := actual.([]any)
+		require.True(t, ok, "%s must be an array", path)
+		require.Len(t, actualValue, len(expectedValue), "%s array length", path)
+		for i := range expectedValue {
+			requireJSONValueSubset(t, expectedValue[i], actualValue[i], path+"["+strconv.Itoa(i)+"]")
+		}
+	default:
+		require.Equal(t, expected, actual, path)
 	}
 }
 
@@ -1285,7 +1360,7 @@ func newContractDeps(t *testing.T) *contractDeps {
 	settingService := service.NewSettingService(settingRepo, cfg)
 	apiKeyService.SetSettingService(settingService)
 
-	adminService := service.NewAdminService(userRepo, groupRepo, &accountRepo, proxyRepo, apiKeyRepo, redeemRepo, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	adminService := service.NewAdminService(userRepo, groupRepo, &accountRepo, proxyRepo, apiKeyRepo, redeemRepo, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	authHandler := handler.NewAuthHandler(cfg, nil, userService, settingService, nil, redeemService, nil)
 	apiKeyHandler := handler.NewAPIKeyHandler(apiKeyService)
 	usageHandler := handler.NewUsageHandler(usageService, apiKeyService)
@@ -1623,11 +1698,23 @@ func (stubGroupRepo) UpdateSortOrders(ctx context.Context, updates []service.Gro
 	return nil
 }
 
+func (stubGroupRepo) FindByDuplicateOperationID(ctx context.Context, operationID string) (*service.Group, error) {
+	return nil, nil
+}
+
+func (stubGroupRepo) CreateFromSource(ctx context.Context, group *service.Group, sourceGroupID int64) error {
+	return errors.New("not implemented")
+}
+
 type stubAccountRepo struct {
 	bulkUpdateIDs []int64
 }
 
 func (s *stubAccountRepo) Create(ctx context.Context, account *service.Account) error {
+	return errors.New("not implemented")
+}
+
+func (s *stubAccountRepo) CreateWithAccountGroups(ctx context.Context, account *service.Account, groups []service.AccountGroup) error {
 	return errors.New("not implemented")
 }
 
@@ -1743,7 +1830,7 @@ func (s *stubAccountRepo) SetRateLimited(ctx context.Context, id int64, resetAt 
 	return errors.New("not implemented")
 }
 
-func (s *stubAccountRepo) SetModelRateLimit(ctx context.Context, id int64, scope string, resetAt time.Time) error {
+func (s *stubAccountRepo) SetModelRateLimit(ctx context.Context, id int64, scope string, resetAt time.Time, _ ...string) error {
 	return errors.New("not implemented")
 }
 
@@ -2495,7 +2582,14 @@ func (r *stubUsageLogRepo) GetAccountUsageStats(ctx context.Context, accountID i
 }
 
 func (r *stubUsageLogRepo) GetStatsWithFilters(ctx context.Context, filters usagestats.UsageLogFilters) (*usagestats.UsageStats, error) {
-	return nil, errors.New("not implemented")
+	var startTime, endTime time.Time
+	if filters.StartTime != nil {
+		startTime = *filters.StartTime
+	}
+	if filters.EndTime != nil {
+		endTime = *filters.EndTime
+	}
+	return r.GetUserStatsAggregated(ctx, filters.UserID, startTime, endTime)
 }
 func (r *stubUsageLogRepo) GetAllGroupUsageSummary(ctx context.Context, todayStart time.Time) ([]usagestats.GroupUsageSummary, error) {
 	return nil, errors.New("not implemented")

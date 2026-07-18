@@ -48,6 +48,9 @@ func TestCalculateOpenAIRecordUsageCostPrioritizesWebSearchPerCallBilling(t *tes
 		&APIKey{Group: &Group{WebSearchPricePerCall: &price}},
 		"unpriced-search-model",
 		1.5,
+		1.5,
+		1.5,
+		1.5,
 		UsageTokens{InputTokens: 999, OutputTokens: 999},
 		"",
 	)

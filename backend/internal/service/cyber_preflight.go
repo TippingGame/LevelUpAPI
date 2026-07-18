@@ -91,7 +91,7 @@ func (s *ContentModerationService) CheckCyberPreflight(ctx context.Context, inpu
 		"reason", result.Reason,
 		"input_hash", hashText)
 
-	log := s.buildLog(input, cfg, scopeCtx, ContentModerationActionCyberBlock, true, category, result.Score, scores, content.ExcerptText(), nil, nil, "")
+	log := s.buildScopedLog(input, cfg, scopeCtx, ContentModerationActionCyberBlock, true, category, result.Score, scores, content.ExcerptText(), nil, nil, "")
 	if s.hashCache != nil {
 		if err := s.hashCache.RecordFlaggedInputHash(ctx, hashText); err != nil {
 			slog.Warn("content_moderation.cyber_preflight_record_hash_failed", "user_id", input.UserID, "endpoint", input.Endpoint, "error", err)

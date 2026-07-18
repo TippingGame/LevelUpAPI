@@ -153,6 +153,7 @@ func (r *usageBillingRepository) applyUsageBillingEffects(ctx context.Context, t
 		if balanceDeducted > 0 {
 			result.NewBalance = &newBalance
 			result.BalanceDeducted = balanceDeducted
+			result.BalanceOverdrafted = newBalance < 0
 			if err := insertUserBalanceLedger(ctx, tx, userBalanceLedgerInput{
 				UserID:       cmd.UserID,
 				Direction:    "debit",
@@ -174,11 +175,12 @@ func (r *usageBillingRepository) applyUsageBillingEffects(ctx context.Context, t
 		}
 	}
 	if cmd.PrivateGroupCommissionCost > 0 {
-		newBalance, err := deductUsageBillingBalance(ctx, tx, cmd.UserID, cmd.PrivateGroupCommissionCost)
+		newBalance, sufficient, err := deductUsageBillingBalance(ctx, tx, cmd.UserID, cmd.PrivateGroupCommissionCost)
 		if err != nil {
 			return err
 		}
 		result.NewBalance = &newBalance
+		result.BalanceOverdrafted = result.BalanceOverdrafted || !sufficient
 		result.CommissionDeducted = cmd.PrivateGroupCommissionCost
 		if err := insertUserBalanceLedger(ctx, tx, userBalanceLedgerInput{
 			UserID:       cmd.UserID,
@@ -257,9 +259,23 @@ func incrementUsageBillingSubscription(ctx context.Context, tx *sql.Tx, subscrip
 	return service.ErrSubscriptionNotFound
 }
 
-func deductUsageBillingBalance(ctx context.Context, tx *sql.Tx, userID int64, amount float64) (float64, error) {
+func deductUsageBillingBalance(ctx context.Context, tx *sql.Tx, userID int64, amount float64) (float64, bool, error) {
 	var newBalance float64
 	err := tx.QueryRowContext(ctx, `
+		UPDATE users
+		SET balance = balance - $1,
+			updated_at = NOW()
+		WHERE id = $2 AND deleted_at IS NULL AND balance >= $1
+		RETURNING balance
+	`, amount, userID).Scan(&newBalance)
+	if err == nil {
+		return newBalance, true, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return 0, false, err
+	}
+
+	err = tx.QueryRowContext(ctx, `
 		UPDATE users
 		SET balance = balance - $1,
 			updated_at = NOW()
@@ -267,12 +283,12 @@ func deductUsageBillingBalance(ctx context.Context, tx *sql.Tx, userID int64, am
 		RETURNING balance
 	`, amount, userID).Scan(&newBalance)
 	if errors.Is(err, sql.ErrNoRows) {
-		return 0, service.ErrUserNotFound
+		return 0, false, service.ErrUserNotFound
 	}
 	if err != nil {
-		return 0, err
+		return 0, false, err
 	}
-	return newBalance, nil
+	return newBalance, false, nil
 }
 
 func deductUsageBillingWallet(ctx context.Context, tx *sql.Tx, userID int64, amount float64, preferPoints bool) (newPointsBalance float64, newBalance float64, pointsDeducted float64, balanceDeducted float64, err error) {
@@ -280,7 +296,7 @@ func deductUsageBillingWallet(ctx context.Context, tx *sql.Tx, userID int64, amo
 		return 0, 0, 0, 0, nil
 	}
 	if !preferPoints {
-		newBalance, err = deductUsageBillingBalance(ctx, tx, userID, amount)
+		newBalance, _, err = deductUsageBillingBalance(ctx, tx, userID, amount)
 		return 0, newBalance, 0, amount, err
 	}
 

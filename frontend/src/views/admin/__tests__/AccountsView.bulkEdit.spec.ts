@@ -8,13 +8,15 @@ const {
   listWithEtag,
   getBatchTodayStats,
   getAllProxies,
-  getAllGroups
+  getAllGroups,
+  probeUpstreamBillingBatch
 } = vi.hoisted(() => ({
   listAccounts: vi.fn(),
   listWithEtag: vi.fn(),
   getBatchTodayStats: vi.fn(),
   getAllProxies: vi.fn(),
-  getAllGroups: vi.fn()
+  getAllGroups: vi.fn(),
+  probeUpstreamBillingBatch: vi.fn()
 }))
 
 vi.mock('@/api/admin', () => ({
@@ -23,9 +25,11 @@ vi.mock('@/api/admin', () => ({
       list: listAccounts,
       listWithEtag,
       getBatchTodayStats,
+      getUpstreamBillingProbeSettings: vi.fn().mockResolvedValue({ enabled: true, interval_minutes: 30 }),
       delete: vi.fn(),
       batchClearError: vi.fn(),
       batchRefresh: vi.fn(),
+      probeUpstreamBillingBatch,
       toggleSchedulable: vi.fn()
     },
     proxies: {
@@ -68,8 +72,18 @@ const DataTableStub = {
 
 const AccountBulkActionsBarStub = {
   props: ['selectedIds'],
-  emits: ['edit-filtered'],
-  template: '<button data-test="edit-filtered" @click="$emit(\'edit-filtered\')">edit filtered</button>'
+  emits: ['edit-filtered', 'probe-upstream-billing'],
+  template: `
+    <div>
+      <button data-test="edit-filtered" @click="$emit('edit-filtered')">edit filtered</button>
+      <button data-test="probe-upstream-billing" @click="$emit('probe-upstream-billing')">probe</button>
+    </div>
+  `
+}
+
+const PaginationStub = {
+  emits: ['update:page'],
+  template: '<button data-test="next-page" @click="$emit(\'update:page\', 2)">next</button>'
 }
 
 const BulkEditAccountModalStub = {
@@ -86,6 +100,7 @@ describe('admin AccountsView bulk edit scope', () => {
     getBatchTodayStats.mockReset()
     getAllProxies.mockReset()
     getAllGroups.mockReset()
+    probeUpstreamBillingBatch.mockReset()
 
     listAccounts.mockResolvedValue({
       items: [],
@@ -102,6 +117,7 @@ describe('admin AccountsView bulk edit scope', () => {
     getBatchTodayStats.mockResolvedValue({ stats: {} })
     getAllProxies.mockResolvedValue([])
     getAllGroups.mockResolvedValue([])
+    probeUpstreamBillingBatch.mockResolvedValue([])
   })
 
   it('opens bulk edit in filtered-results mode from the bulk actions dropdown', async () => {

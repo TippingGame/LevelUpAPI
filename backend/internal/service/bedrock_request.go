@@ -185,9 +185,10 @@ func PrepareBedrockRequestBody(body []byte, modelID string, betaHeader string) (
 }
 
 // PrepareBedrockRequestBodyWithTokens prepares a Bedrock request using pre-resolved beta tokens.
-func PrepareBedrockRequestBodyWithTokens(body []byte, modelID string, betaTokens []string) ([]byte, error) {
+func PrepareBedrockRequestBodyWithTokens(body []byte, modelID string, betaTokens []string, ccCompat ...bool) ([]byte, error) {
 	var err error
 
+	betaTokens = filterBedrockBetaTokens(betaTokens)
 	body = sanitizeBedrockFieldsForBetaTokens(body, betaTokens)
 
 	// 注入 anthropic_version（Bedrock 要求）
@@ -241,6 +242,11 @@ func PrepareBedrockRequestBodyWithTokens(body []byte, modelID string, betaTokens
 
 	// 清理 cache_control 中 Bedrock 不支持的字段
 	body = sanitizeBedrockCacheControl(body, modelID)
+
+	if len(ccCompat) > 0 && ccCompat[0] {
+		body = sanitizeBedrockThinking(body, modelID)
+		body = sanitizeBedrockToolUseIDs(body)
+	}
 
 	return body, nil
 }

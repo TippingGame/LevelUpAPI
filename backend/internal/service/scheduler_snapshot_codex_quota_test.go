@@ -260,8 +260,28 @@ func (c *schedulerSnapshotQuotaCache) GetSnapshot(context.Context, SchedulerBuck
 	return nil, false, nil
 }
 
-func (c *schedulerSnapshotQuotaCache) SetSnapshot(_ context.Context, _ SchedulerBucket, accounts []Account) error {
+func (c *schedulerSnapshotQuotaCache) CaptureBucketWriteToken(_ context.Context, bucket SchedulerBucket) (SchedulerBucketWriteToken, error) {
+	return SchedulerBucketWriteToken{Bucket: bucket, Epoch: 1}, nil
+}
+
+func (c *schedulerSnapshotQuotaCache) SetSnapshot(_ context.Context, _ SchedulerBucket, _ SchedulerBucketWriteToken, accounts []Account) error {
 	c.cachedAccounts = append([]Account(nil), accounts...)
+	return nil
+}
+
+func (c *schedulerSnapshotQuotaCache) RetireBucket(context.Context, SchedulerBucket) error {
+	return nil
+}
+
+func (c *schedulerSnapshotQuotaCache) ReopenBucket(_ context.Context, bucket SchedulerBucket) (SchedulerBucketWriteToken, error) {
+	return SchedulerBucketWriteToken{Bucket: bucket, Epoch: 1}, nil
+}
+
+func (c *schedulerSnapshotQuotaCache) TryAcquireGroupLifecycleLease(_ context.Context, groupID int64, _ time.Duration) (SchedulerGroupLifecycleLease, bool, error) {
+	return SchedulerGroupLifecycleLease{GroupID: groupID, OwnerToken: "test"}, true, nil
+}
+
+func (c *schedulerSnapshotQuotaCache) ReleaseGroupLifecycleLease(context.Context, SchedulerGroupLifecycleLease) error {
 	return nil
 }
 

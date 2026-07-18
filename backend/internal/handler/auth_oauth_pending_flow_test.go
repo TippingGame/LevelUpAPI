@@ -2107,6 +2107,7 @@ type oauthPendingFlowTestHandlerOptions struct {
 	emailCache         service.EmailCache
 	settingValues      map[string]string
 	defaultSubAssigner service.DefaultSubscriptionAssigner
+	affiliateFactory   func(*dbent.Client, *service.SettingService) *service.AffiliateService
 	totpCache          service.TotpCache
 	totpEncryptor      service.SecretEncryptor
 	userRepoOptions    oauthPendingFlowUserRepoOptions
@@ -2171,6 +2172,10 @@ CREATE TABLE IF NOT EXISTS user_avatars (
 		settingValues[key] = value
 	}
 	settingSvc := service.NewSettingService(&oauthPendingFlowSettingRepoStub{values: settingValues}, cfg)
+	var affiliateService *service.AffiliateService
+	if options.affiliateFactory != nil {
+		affiliateService = options.affiliateFactory(client, settingSvc)
+	}
 	userRepo := &oauthPendingFlowUserRepo{
 		client:  client,
 		options: options.userRepoOptions,
@@ -2196,7 +2201,7 @@ CREATE TABLE IF NOT EXISTS user_avatars (
 		nil,
 		nil,
 		options.defaultSubAssigner,
-		nil,
+		affiliateService,
 	)
 	userSvc := service.NewUserService(userRepo, nil, nil, nil)
 	var totpSvc *service.TotpService
@@ -2969,6 +2974,14 @@ func (s *oauthPendingFlowTotpCacheStub) GetVerifyAttempts(_ context.Context, use
 func (s *oauthPendingFlowTotpCacheStub) ClearVerifyAttempts(_ context.Context, userID int64) error {
 	delete(s.verifyAttempts, userID)
 	return nil
+}
+
+func (s *oauthPendingFlowTotpCacheStub) SetStepUpGrant(_ context.Context, _ int64, _ string, _ time.Duration) error {
+	return nil
+}
+
+func (s *oauthPendingFlowTotpCacheStub) HasStepUpGrant(_ context.Context, _ int64, _ string) (bool, error) {
+	return false, nil
 }
 
 type oauthPendingFlowTotpEncryptorStub struct{}

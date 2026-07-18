@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"math"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -34,8 +35,14 @@ type RateLimitService struct {
 	openAI403CounterCache OpenAI403CounterCache
 	settingService        *SettingService
 	tokenCacheInvalidator TokenCacheInvalidator
+	runtimeBlocker        AccountRuntimeBlocker
 	usageCacheMu          sync.RWMutex
 	usageCache            map[int64]*geminiUsageCacheEntry
+}
+
+type AccountRuntimeBlocker interface {
+	BlockAccountScheduling(account *Account, until time.Time, reason string)
+	ClearAccountSchedulingBlock(accountID int64)
 }
 
 // SuccessfulTestRecoveryResult 表示测试成功后恢复了哪些运行时状态。
@@ -79,6 +86,7 @@ const (
 	anthropicOAuth403EscalationThreshold = 3
 	openAIModelCapacityCooldown          = time.Minute
 	upstreamModelNotFoundCooldown        = 30 * time.Minute
+	upstreamCodexPlanGatedModelCooldown  = 30 * time.Minute
 	oAuth401CooldownMinutesDefault       = 10
 	generic403CooldownMinutesDefault     = 10
 	generic403LongCooldownThreshold      = 3
@@ -87,8 +95,14 @@ const (
 	customErrorCodeCooldown              = 24 * time.Hour
 	billingQuotaCooldown                 = 24 * time.Hour
 	upstreamRelayPoolUnavailableCooldown = time.Minute
+	openAIImageRateLimitDefaultCooldown  = time.Minute
+	openAIImageRateLimitReason           = "openai_image_rate_limited"
+	upstreamModelNotFoundReason          = "upstream_404_model_not_found"
+	upstreamCodexPlanGatedModelReason    = "upstream_400_codex_plan_gated_model"
 	rateLimitStateUpdateTimeout          = 3 * time.Second
 )
+
+var openAIImageTryAgainPattern = regexp.MustCompile(`(?i)try again in\s+([0-9]+(?:\.[0-9]+)?)\s*(ms|s|sec|secs|second|seconds|m|min|mins|minute|minutes)`)
 
 var cloudflareChallengeCooldownSteps = []time.Duration{
 	30 * time.Second,
@@ -155,6 +169,24 @@ func (s *RateLimitService) SetSettingService(settingService *SettingService) {
 // SetTokenCacheInvalidator 设置 token 缓存清理器（可选依赖）
 func (s *RateLimitService) SetTokenCacheInvalidator(invalidator TokenCacheInvalidator) {
 	s.tokenCacheInvalidator = invalidator
+}
+
+func (s *RateLimitService) SetAccountRuntimeBlocker(blocker AccountRuntimeBlocker) {
+	s.runtimeBlocker = blocker
+}
+
+func (s *RateLimitService) notifyAccountSchedulingBlocked(account *Account, until time.Time, reason string) {
+	if s == nil || s.runtimeBlocker == nil || account == nil {
+		return
+	}
+	s.runtimeBlocker.BlockAccountScheduling(account, until, reason)
+}
+
+func (s *RateLimitService) notifyAccountSchedulingBlockCleared(accountID int64) {
+	if s == nil || s.runtimeBlocker == nil || accountID <= 0 {
+		return
+	}
+	s.runtimeBlocker.ClearAccountSchedulingBlock(accountID)
 }
 
 // ErrorPolicyResult 表示错误策略检查的结果
@@ -299,7 +331,7 @@ func (s *RateLimitService) persistOverloadedState(ctx context.Context, account *
 	return nil
 }
 
-func (s *RateLimitService) persistModelRateLimitedState(ctx context.Context, account *Account, modelKey string, resetAt time.Time) error {
+func (s *RateLimitService) persistModelRateLimitedState(ctx context.Context, account *Account, modelKey string, resetAt time.Time, reasons ...string) error {
 	modelKey = strings.TrimSpace(modelKey)
 	if account == nil || modelKey == "" {
 		return nil
@@ -313,14 +345,14 @@ func (s *RateLimitService) persistModelRateLimitedState(ctx context.Context, acc
 	}
 	writeCtx, cancel := rateLimitStateContext(ctx)
 	defer cancel()
-	if err := s.accountRepo.SetModelRateLimit(writeCtx, account.ID, modelKey, resetAt); err != nil {
+	if err := s.accountRepo.SetModelRateLimit(writeCtx, account.ID, modelKey, resetAt, reasons...); err != nil {
 		return err
 	}
-	markModelRateLimitRuntimeState(account, modelKey, resetAt)
+	markModelRateLimitRuntimeState(account, modelKey, resetAt, reasons...)
 	return nil
 }
 
-func markModelRateLimitRuntimeState(account *Account, modelKey string, resetAt time.Time) {
+func markModelRateLimitRuntimeState(account *Account, modelKey string, resetAt time.Time, reasons ...string) {
 	modelKey = strings.TrimSpace(modelKey)
 	if account == nil || modelKey == "" {
 		return
@@ -333,10 +365,16 @@ func markModelRateLimitRuntimeState(account *Account, modelKey string, resetAt t
 		limits = make(map[string]any)
 		account.Extra[modelRateLimitsKey] = limits
 	}
-	limits[modelKey] = map[string]any{
+	state := map[string]any{
 		"rate_limited_at":     time.Now().UTC().Format(time.RFC3339),
 		"rate_limit_reset_at": resetAt.UTC().Format(time.RFC3339),
 	}
+	if len(reasons) > 0 {
+		if reason := strings.TrimSpace(reasons[0]); reason != "" {
+			state["reason"] = reason
+		}
+	}
+	limits[modelKey] = state
 }
 
 func (s *RateLimitService) persistAccountExtraState(ctx context.Context, accountID int64, updates map[string]any) error {
@@ -406,10 +444,13 @@ func (s *RateLimitService) HandlePermanentAccountError(ctx context.Context, acco
 
 // HandleUpstreamError 处理上游错误响应，标记账号状态
 // 返回是否应该停止该账号的调度
-func (s *RateLimitService) HandleUpstreamError(ctx context.Context, account *Account, statusCode int, headers http.Header, responseBody []byte) (shouldDisable bool) {
+func (s *RateLimitService) HandleUpstreamError(ctx context.Context, account *Account, statusCode int, headers http.Header, responseBody []byte, requestedModel ...string) (shouldDisable bool) {
 	if account == nil {
 		slog.Warn("upstream_error_without_account", "status_code", statusCode)
 		return false
+	}
+	if len(requestedModel) > 0 && s.handleUpstreamModelNotFound(ctx, account, requestedModel[0], statusCode, responseBody) {
+		return true
 	}
 
 	// 池模式默认不标记本地账号状态；仅当用户显式配置自定义错误码时按本地策略处理。
@@ -628,10 +669,7 @@ func (s *RateLimitService) HandleUpstreamError(ctx context.Context, account *Acc
 }
 
 func (s *RateLimitService) HandleUpstreamErrorForModel(ctx context.Context, account *Account, requestedModel string, statusCode int, headers http.Header, responseBody []byte) (shouldDisable bool) {
-	if s.handleUpstreamModelNotFound(ctx, account, requestedModel, statusCode, responseBody) {
-		return true
-	}
-	return s.HandleUpstreamError(ctx, account, statusCode, headers, responseBody)
+	return s.HandleUpstreamError(ctx, account, statusCode, headers, responseBody, requestedModel)
 }
 
 func (s *RateLimitService) handleUpstreamModelNotFound(ctx context.Context, account *Account, requestedModel string, statusCode int, responseBody []byte) bool {
@@ -650,13 +688,19 @@ func (s *RateLimitService) handleUpstreamModelNotFound(ctx context.Context, acco
 	if !shouldCooldown || modelKey == "" {
 		return false
 	}
-	resetAt := time.Now().Add(upstreamModelNotFoundCooldown)
-	if err := s.persistModelRateLimitedState(ctx, account, modelKey, resetAt); err != nil {
-		slog.Warn("upstream_model_not_found_set_model_rate_limit_failed", "account_id", account.ID, "model", modelKey, "error", err)
-		markModelRateLimitRuntimeState(account, modelKey, resetAt)
+	cooldown := upstreamModelNotFoundCooldown
+	reason := upstreamModelNotFoundReason
+	if planGated {
+		cooldown = upstreamCodexPlanGatedModelCooldown
+		reason = upstreamCodexPlanGatedModelReason
+	}
+	resetAt := time.Now().Add(cooldown)
+	if err := s.persistModelRateLimitedState(ctx, account, modelKey, resetAt, reason); err != nil {
+		slog.Warn("upstream_model_not_found_set_model_rate_limit_failed", "account_id", account.ID, "model", modelKey, "reason", reason, "error", err)
+		markModelRateLimitRuntimeState(account, modelKey, resetAt, reason)
 		return true
 	}
-	slog.Info("upstream_model_not_found_model_rate_limited", "account_id", account.ID, "model", modelKey, "reset_at", resetAt)
+	slog.Info("upstream_model_not_found_model_rate_limited", "account_id", account.ID, "model", modelKey, "reason", reason, "reset_at", resetAt)
 	return true
 }
 
@@ -2598,7 +2642,7 @@ func parseOpenAIRateLimitPlanType(body []byte) string {
 }
 
 func persistOpenAI429PlanType(ctx context.Context, repo AccountRepository, account *Account, body []byte) {
-	if repo == nil || account == nil || account.Platform != PlatformOpenAI {
+	if repo == nil || account == nil || account.Platform != PlatformOpenAI || account.IsCredentialShadow() {
 		return
 	}
 	planType := parseOpenAIRateLimitPlanType(body)
@@ -2932,7 +2976,7 @@ func isAnthropicWindowExceeded(headers http.Header, window string) bool {
 }
 
 func (s *RateLimitService) persistOpenAICodexSnapshot(ctx context.Context, account *Account, headers http.Header) {
-	if s == nil || s.accountRepo == nil || account == nil || headers == nil {
+	if s == nil || s.accountRepo == nil || account == nil || account.IsCredentialShadow() || headers == nil {
 		return
 	}
 	snapshot := ParseCodexRateLimitHeaders(headers)
@@ -3500,6 +3544,80 @@ func (s *RateLimitService) HandleTempUnschedulable(ctx context.Context, account 
 		return false
 	}
 	return s.tryTempUnschedulable(ctx, account, statusCode, responseBody)
+}
+
+func (s *RateLimitService) HandleOpenAIImageRateLimit(ctx context.Context, account *Account, statusCode int, headers http.Header, responseBody []byte) bool {
+	if s == nil || account == nil || s.accountRepo == nil || account.Platform != PlatformOpenAI {
+		return false
+	}
+	if !account.ShouldHandleErrorCode(statusCode) || !isOpenAIImageRateLimitError(statusCode, responseBody) {
+		return false
+	}
+	resetAt := openAIImageRateLimitResetAt(headers, responseBody)
+	if err := s.persistModelRateLimitedState(ctx, account, openAIImageGenerationRateLimitKey, resetAt, openAIImageRateLimitReason); err != nil {
+		slog.Warn("openai_image_rate_limit_set_model_rate_limit_failed", "account_id", account.ID, "scope", openAIImageGenerationRateLimitKey, "error", err)
+		markModelRateLimitRuntimeState(account, openAIImageGenerationRateLimitKey, resetAt, openAIImageRateLimitReason)
+		return true
+	}
+	slog.Info("openai_image_rate_limited", "account_id", account.ID, "scope", openAIImageGenerationRateLimitKey, "reset_at", resetAt)
+	return true
+}
+
+func isOpenAIImageRateLimitError(statusCode int, body []byte) bool {
+	if statusCode != http.StatusTooManyRequests || len(body) == 0 {
+		return false
+	}
+	lower := strings.ToLower(string(body))
+	for _, marker := range []string{"for limit gpt-image", "input-images per min", "gpt-image-2-codex", "gpt-image"} {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func openAIImageRateLimitResetAt(headers http.Header, body []byte) time.Time {
+	now := time.Now()
+	if resetAt := parseRetryAfterResetTime(headers, now, time.Duration(maxRateLimit429CooldownSeconds)*time.Second); resetAt != nil && resetAt.After(now) {
+		return *resetAt
+	}
+	if resetAt := calculateOpenAI429ResetTime(headers); resetAt != nil && resetAt.After(now) {
+		return *resetAt
+	}
+	if resetUnix := parseOpenAIRateLimitResetTime(body); resetUnix != nil {
+		if resetAt := time.Unix(*resetUnix, 0); resetAt.After(now) {
+			return resetAt
+		}
+	}
+	if cooldown := parseOpenAIImageTryAgainCooldown(body); cooldown > 0 {
+		return now.Add(cooldown)
+	}
+	return now.Add(openAIImageRateLimitDefaultCooldown)
+}
+
+func parseOpenAIImageTryAgainCooldown(body []byte) time.Duration {
+	match := openAIImageTryAgainPattern.FindSubmatch(body)
+	if len(match) != 3 {
+		return 0
+	}
+	value, err := strconv.ParseFloat(string(match[1]), 64)
+	if err != nil || value <= 0 {
+		return 0
+	}
+	switch strings.ToLower(string(match[2])) {
+	case "ms":
+		return time.Duration(value * float64(time.Millisecond))
+	case "s", "sec", "secs", "second", "seconds":
+		return time.Duration(value * float64(time.Second))
+	case "m", "min", "mins", "minute", "minutes":
+		return time.Duration(value * float64(time.Minute))
+	default:
+		return 0
+	}
+}
+
+func (s *RateLimitService) HandleUpstreamModelNotFound(ctx context.Context, account *Account, requestedModel string, statusCode int, responseBody []byte) bool {
+	return s.handleUpstreamModelNotFound(ctx, account, requestedModel, statusCode, responseBody)
 }
 
 const tempUnschedBodyMaxBytes = 64 << 10

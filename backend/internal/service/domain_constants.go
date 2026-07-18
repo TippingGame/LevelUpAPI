@@ -1,6 +1,10 @@
 package service
 
-import "github.com/Wei-Shaw/sub2api/internal/domain"
+import (
+	"fmt"
+
+	"github.com/Wei-Shaw/sub2api/internal/domain"
+)
 
 // Status constants
 const (
@@ -34,6 +38,7 @@ const (
 	AffiliateRebateDurationDaysDefault  = 0    // 0 = 永久有效
 	AffiliateRebateDurationDaysMax      = 3650 // ~10 年
 	AffiliateRebatePerInviteeCapDefault = 0.0  // 0 = 无上限
+	AdminRechargeRebateEnabledDefault   = false
 )
 
 // Platform constants
@@ -44,6 +49,23 @@ const (
 	PlatformAntigravity = domain.PlatformAntigravity
 	PlatformGrok        = domain.PlatformGrok
 )
+
+var AllowedQuotaPlatforms = []string{
+	PlatformAnthropic,
+	PlatformOpenAI,
+	PlatformGemini,
+	PlatformAntigravity,
+	PlatformGrok,
+}
+
+func IsAllowedQuotaPlatform(platform string) bool {
+	for _, allowed := range AllowedQuotaPlatforms {
+		if platform == allowed {
+			return true
+		}
+	}
+	return false
+}
 
 // Account type constants
 const (
@@ -57,11 +79,12 @@ const (
 
 // Redeem type constants
 const (
-	RedeemTypeBalance      = domain.RedeemTypeBalance
-	RedeemTypePoints       = domain.RedeemTypePoints
-	RedeemTypeConcurrency  = domain.RedeemTypeConcurrency
-	RedeemTypeSubscription = domain.RedeemTypeSubscription
-	RedeemTypeInvitation   = domain.RedeemTypeInvitation
+	RedeemTypeBalance          = domain.RedeemTypeBalance
+	RedeemTypePoints           = domain.RedeemTypePoints
+	RedeemTypeConcurrency      = domain.RedeemTypeConcurrency
+	RedeemTypeSubscription     = domain.RedeemTypeSubscription
+	RedeemTypeInvitation       = domain.RedeemTypeInvitation
+	RedeemTypeAffiliateBalance = "affiliate_balance"
 )
 
 // PromoCode status constants
@@ -106,6 +129,9 @@ const OIDCConnectSyntheticEmailDomain = "@oidc-connect.invalid"
 // WeChatConnectSyntheticEmailDomain 是 WeChat Connect 用户的合成邮箱后缀（RFC 保留域名）。
 const WeChatConnectSyntheticEmailDomain = "@wechat-connect.invalid"
 
+// DingTalkConnectSyntheticEmailDomain is the reserved synthetic-email suffix for DingTalk users.
+const DingTalkConnectSyntheticEmailDomain = "@dingtalk-connect.invalid"
+
 // Setting keys
 const (
 	// 注册设置
@@ -121,6 +147,7 @@ const (
 	SettingKeyAffiliateRebateFreezeHours       = "affiliate_rebate_freeze_hours"       // 返利冻结期（小时，0=不冻结）
 	SettingKeyAffiliateRebateDurationDays      = "affiliate_rebate_duration_days"      // 返利有效期（天，0=永久）
 	SettingKeyAffiliateRebatePerInviteeCap     = "affiliate_rebate_per_invitee_cap"    // 单人返利上限（0=无上限）
+	SettingKeyAffiliateAdminRechargeEnabled    = "affiliate_admin_recharge_enabled"    // 管理员充值是否产生返利
 
 	// 邮件服务设置
 	SettingKeySMTPHost     = "smtp_host"      // SMTP服务器地址
@@ -138,6 +165,13 @@ const (
 
 	// TOTP 双因素认证设置
 	SettingKeyTotpEnabled = "totp_enabled" // 是否启用 TOTP 2FA 功能
+
+	// 会话安全设置
+	SettingKeySessionBindingEnabled = "session_binding_enabled" // 会话 IP/UA 绑定（变更即失效），默认开启
+
+	// 操作审计日志设置
+	SettingKeyAuditLogRetentionDays = "audit_log_retention_days" // 审计日志保留天数（<=0 永久保留），默认 180
+	SettingKeyOpenAICodexUserAgent  = "openai_codex_user_agent"
 
 	// LinuxDo Connect OAuth 登录设置
 	SettingKeyLinuxDoConnectEnabled      = "linuxdo_connect_enabled"
@@ -232,37 +266,42 @@ const (
 	SettingKeyDefaultAffiliateCodeAutoRotate = "default_affiliate_code_auto_rotate" // 新用户邀请返利码是否每周自动换码
 
 	// 第三方认证来源默认授予配置
-	SettingKeyAuthSourceDefaultEmailBalance            = "auth_source_default_email_balance"
-	SettingKeyAuthSourceDefaultEmailConcurrency        = "auth_source_default_email_concurrency"
-	SettingKeyAuthSourceDefaultEmailSubscriptions      = "auth_source_default_email_subscriptions"
-	SettingKeyAuthSourceDefaultEmailGrantOnSignup      = "auth_source_default_email_grant_on_signup"
-	SettingKeyAuthSourceDefaultEmailGrantOnFirstBind   = "auth_source_default_email_grant_on_first_bind"
-	SettingKeyAuthSourceDefaultLinuxDoBalance          = "auth_source_default_linuxdo_balance"
-	SettingKeyAuthSourceDefaultLinuxDoConcurrency      = "auth_source_default_linuxdo_concurrency"
-	SettingKeyAuthSourceDefaultLinuxDoSubscriptions    = "auth_source_default_linuxdo_subscriptions"
-	SettingKeyAuthSourceDefaultLinuxDoGrantOnSignup    = "auth_source_default_linuxdo_grant_on_signup"
-	SettingKeyAuthSourceDefaultLinuxDoGrantOnFirstBind = "auth_source_default_linuxdo_grant_on_first_bind"
-	SettingKeyAuthSourceDefaultOIDCBalance             = "auth_source_default_oidc_balance"
-	SettingKeyAuthSourceDefaultOIDCConcurrency         = "auth_source_default_oidc_concurrency"
-	SettingKeyAuthSourceDefaultOIDCSubscriptions       = "auth_source_default_oidc_subscriptions"
-	SettingKeyAuthSourceDefaultOIDCGrantOnSignup       = "auth_source_default_oidc_grant_on_signup"
-	SettingKeyAuthSourceDefaultOIDCGrantOnFirstBind    = "auth_source_default_oidc_grant_on_first_bind"
-	SettingKeyAuthSourceDefaultWeChatBalance           = "auth_source_default_wechat_balance"
-	SettingKeyAuthSourceDefaultWeChatConcurrency       = "auth_source_default_wechat_concurrency"
-	SettingKeyAuthSourceDefaultWeChatSubscriptions     = "auth_source_default_wechat_subscriptions"
-	SettingKeyAuthSourceDefaultWeChatGrantOnSignup     = "auth_source_default_wechat_grant_on_signup"
-	SettingKeyAuthSourceDefaultWeChatGrantOnFirstBind  = "auth_source_default_wechat_grant_on_first_bind"
-	SettingKeyAuthSourceDefaultGitHubBalance           = "auth_source_default_github_balance"
-	SettingKeyAuthSourceDefaultGitHubConcurrency       = "auth_source_default_github_concurrency"
-	SettingKeyAuthSourceDefaultGitHubSubscriptions     = "auth_source_default_github_subscriptions"
-	SettingKeyAuthSourceDefaultGitHubGrantOnSignup     = "auth_source_default_github_grant_on_signup"
-	SettingKeyAuthSourceDefaultGitHubGrantOnFirstBind  = "auth_source_default_github_grant_on_first_bind"
-	SettingKeyAuthSourceDefaultGoogleBalance           = "auth_source_default_google_balance"
-	SettingKeyAuthSourceDefaultGoogleConcurrency       = "auth_source_default_google_concurrency"
-	SettingKeyAuthSourceDefaultGoogleSubscriptions     = "auth_source_default_google_subscriptions"
-	SettingKeyAuthSourceDefaultGoogleGrantOnSignup     = "auth_source_default_google_grant_on_signup"
-	SettingKeyAuthSourceDefaultGoogleGrantOnFirstBind  = "auth_source_default_google_grant_on_first_bind"
-	SettingKeyForceEmailOnThirdPartySignup             = "force_email_on_third_party_signup"
+	SettingKeyAuthSourceDefaultEmailBalance             = "auth_source_default_email_balance"
+	SettingKeyAuthSourceDefaultEmailConcurrency         = "auth_source_default_email_concurrency"
+	SettingKeyAuthSourceDefaultEmailSubscriptions       = "auth_source_default_email_subscriptions"
+	SettingKeyAuthSourceDefaultEmailGrantOnSignup       = "auth_source_default_email_grant_on_signup"
+	SettingKeyAuthSourceDefaultEmailGrantOnFirstBind    = "auth_source_default_email_grant_on_first_bind"
+	SettingKeyAuthSourceDefaultLinuxDoBalance           = "auth_source_default_linuxdo_balance"
+	SettingKeyAuthSourceDefaultLinuxDoConcurrency       = "auth_source_default_linuxdo_concurrency"
+	SettingKeyAuthSourceDefaultLinuxDoSubscriptions     = "auth_source_default_linuxdo_subscriptions"
+	SettingKeyAuthSourceDefaultLinuxDoGrantOnSignup     = "auth_source_default_linuxdo_grant_on_signup"
+	SettingKeyAuthSourceDefaultLinuxDoGrantOnFirstBind  = "auth_source_default_linuxdo_grant_on_first_bind"
+	SettingKeyAuthSourceDefaultOIDCBalance              = "auth_source_default_oidc_balance"
+	SettingKeyAuthSourceDefaultOIDCConcurrency          = "auth_source_default_oidc_concurrency"
+	SettingKeyAuthSourceDefaultOIDCSubscriptions        = "auth_source_default_oidc_subscriptions"
+	SettingKeyAuthSourceDefaultOIDCGrantOnSignup        = "auth_source_default_oidc_grant_on_signup"
+	SettingKeyAuthSourceDefaultOIDCGrantOnFirstBind     = "auth_source_default_oidc_grant_on_first_bind"
+	SettingKeyAuthSourceDefaultWeChatBalance            = "auth_source_default_wechat_balance"
+	SettingKeyAuthSourceDefaultWeChatConcurrency        = "auth_source_default_wechat_concurrency"
+	SettingKeyAuthSourceDefaultWeChatSubscriptions      = "auth_source_default_wechat_subscriptions"
+	SettingKeyAuthSourceDefaultWeChatGrantOnSignup      = "auth_source_default_wechat_grant_on_signup"
+	SettingKeyAuthSourceDefaultWeChatGrantOnFirstBind   = "auth_source_default_wechat_grant_on_first_bind"
+	SettingKeyAuthSourceDefaultGitHubBalance            = "auth_source_default_github_balance"
+	SettingKeyAuthSourceDefaultGitHubConcurrency        = "auth_source_default_github_concurrency"
+	SettingKeyAuthSourceDefaultGitHubSubscriptions      = "auth_source_default_github_subscriptions"
+	SettingKeyAuthSourceDefaultGitHubGrantOnSignup      = "auth_source_default_github_grant_on_signup"
+	SettingKeyAuthSourceDefaultGitHubGrantOnFirstBind   = "auth_source_default_github_grant_on_first_bind"
+	SettingKeyAuthSourceDefaultGoogleBalance            = "auth_source_default_google_balance"
+	SettingKeyAuthSourceDefaultGoogleConcurrency        = "auth_source_default_google_concurrency"
+	SettingKeyAuthSourceDefaultGoogleSubscriptions      = "auth_source_default_google_subscriptions"
+	SettingKeyAuthSourceDefaultGoogleGrantOnSignup      = "auth_source_default_google_grant_on_signup"
+	SettingKeyAuthSourceDefaultGoogleGrantOnFirstBind   = "auth_source_default_google_grant_on_first_bind"
+	SettingKeyAuthSourceDefaultDingTalkBalance          = "auth_source_default_dingtalk_balance"
+	SettingKeyAuthSourceDefaultDingTalkConcurrency      = "auth_source_default_dingtalk_concurrency"
+	SettingKeyAuthSourceDefaultDingTalkSubscriptions    = "auth_source_default_dingtalk_subscriptions"
+	SettingKeyAuthSourceDefaultDingTalkGrantOnSignup    = "auth_source_default_dingtalk_grant_on_signup"
+	SettingKeyAuthSourceDefaultDingTalkGrantOnFirstBind = "auth_source_default_dingtalk_grant_on_first_bind"
+	SettingKeyForceEmailOnThirdPartySignup              = "force_email_on_third_party_signup"
 
 	// 管理员 API Key
 	SettingKeyAdminAPIKey = "admin_api_key" // 全局管理员 API Key（用于外部系统集成）
@@ -329,6 +368,10 @@ const (
 	// SettingKeyUserAccountImportLimit controls the per-request import limit for user-owned accounts.
 	SettingKeyUserAccountImportLimit = "user_account_import_limit"
 
+	// SettingKeyUpstreamBillingProbeSettings stores the global enable switch
+	// and interval for probing remote Sub2API API-key billing metadata.
+	SettingKeyUpstreamBillingProbeSettings = "upstream_billing_probe_settings"
+
 	// =========================
 	// Overload Cooldown (529)
 	// =========================
@@ -377,13 +420,32 @@ const (
 	SettingKeyMaxClaudeCodeVersion = "max_claude_code_version"
 
 	// SettingKeyAllowUngroupedKeyScheduling 允许未分组 API Key 调度（默认 false：未分组 Key 返回 403）
-	SettingKeyAllowUngroupedKeyScheduling     = "allow_ungrouped_key_scheduling"
-	SettingKeyUserPrivateGroupDailyLimitUSD   = "user_private_group_daily_limit_usd"
-	SettingKeyUserPrivateGroupWeeklyLimitUSD  = "user_private_group_weekly_limit_usd"
-	SettingKeyUserPrivateGroupMonthlyLimitUSD = "user_private_group_monthly_limit_usd"
-	SettingKeyUserPrivateGroupRateMultiplier  = "user_private_group_rate_multiplier"
-	SettingKeyUserPrivateGroupRPMLimit        = "user_private_group_rpm_limit"
-	SettingKeyUserPrivateGroupCommissionRate  = "user_private_group_commission_rate"
+	SettingKeyAllowUngroupedKeyScheduling = "allow_ungrouped_key_scheduling"
+	// SettingKeyOpenAILowUpstreamRatePriorityEnabled 旧调度是否按上游 token 倍率优先。
+	SettingKeyOpenAILowUpstreamRatePriorityEnabled = "openai_low_upstream_rate_priority_enabled"
+	// SettingKeyOpenAIOAuthSchedulingRateMultiplier OAuth 账号参与成本调度时使用的参考倍率。
+	SettingKeyOpenAIOAuthSchedulingRateMultiplier = "openai_oauth_scheduling_rate_multiplier"
+	// SettingKeyOpenAIAdvancedSchedulerStickyWeightedEnabled OpenAI 高级调度下是否启用粘性加权。
+	SettingKeyOpenAIAdvancedSchedulerStickyWeightedEnabled = "openai_advanced_scheduler_sticky_weighted_enabled"
+	// SettingKeyOpenAIAdvancedSchedulerSubscriptionPriorityEnabled OpenAI 高级调度下是否优先使用订阅账号池。
+	SettingKeyOpenAIAdvancedSchedulerSubscriptionPriorityEnabled = "openai_advanced_scheduler_subscription_priority_enabled"
+	SettingKeyOpenAIAdvancedSchedulerLBTopK                      = "openai_advanced_scheduler_lb_top_k"
+	SettingKeyOpenAIAdvancedSchedulerWeightPriority              = "openai_advanced_scheduler_weight_priority"
+	SettingKeyOpenAIAdvancedSchedulerWeightLoad                  = "openai_advanced_scheduler_weight_load"
+	SettingKeyOpenAIAdvancedSchedulerWeightQueue                 = "openai_advanced_scheduler_weight_queue"
+	SettingKeyOpenAIAdvancedSchedulerWeightErrorRate             = "openai_advanced_scheduler_weight_error_rate"
+	SettingKeyOpenAIAdvancedSchedulerWeightTTFT                  = "openai_advanced_scheduler_weight_ttft"
+	SettingKeyOpenAIAdvancedSchedulerWeightReset                 = "openai_advanced_scheduler_weight_reset"
+	SettingKeyOpenAIAdvancedSchedulerWeightQuotaHeadroom         = "openai_advanced_scheduler_weight_quota_headroom"
+	SettingKeyOpenAIAdvancedSchedulerWeightUpstreamCost          = "openai_advanced_scheduler_weight_upstream_cost"
+	SettingKeyOpenAIAdvancedSchedulerWeightPreviousResponse      = "openai_advanced_scheduler_weight_previous_response"
+	SettingKeyOpenAIAdvancedSchedulerWeightSessionSticky         = "openai_advanced_scheduler_weight_session_sticky"
+	SettingKeyUserPrivateGroupDailyLimitUSD                      = "user_private_group_daily_limit_usd"
+	SettingKeyUserPrivateGroupWeeklyLimitUSD                     = "user_private_group_weekly_limit_usd"
+	SettingKeyUserPrivateGroupMonthlyLimitUSD                    = "user_private_group_monthly_limit_usd"
+	SettingKeyUserPrivateGroupRateMultiplier                     = "user_private_group_rate_multiplier"
+	SettingKeyUserPrivateGroupRPMLimit                           = "user_private_group_rpm_limit"
+	SettingKeyUserPrivateGroupCommissionRate                     = "user_private_group_commission_rate"
 
 	// SettingKeyBackendModeEnabled Backend 模式：禁用用户注册和自助服务，仅管理员可登录
 	SettingKeyBackendModeEnabled = "backend_mode_enabled"
@@ -420,6 +482,9 @@ const (
 	SettingKeyBalanceLowNotifyThreshold   = "balance_low_notify_threshold"    // 默认阈值（USD）
 	SettingKeyBalanceLowNotifyRechargeURL = "balance_low_notify_recharge_url" // 充值页面 URL
 
+	// 订阅到期提醒
+	SettingKeySubscriptionExpiryNotifyEnabled = "subscription_expiry_notify_enabled"
+
 	// Account Quota Notification
 	SettingKeyAccountQuotaNotifyEnabled = "account_quota_notify_enabled" // 全局开关
 	SettingKeyAccountQuotaNotifyEmails  = "account_quota_notify_emails"  // 管理员通知邮箱列表（JSON 数组）
@@ -433,6 +498,49 @@ const (
 
 	// URL allowlist append-only settings. The config file still owns the security switch.
 	SettingKeyUpstreamURLAllowlistExtraHosts = "upstream_url_allowlist_extra_hosts" // JSON array
+
+	SettingKeyAPIKeyACLTrustForwardedIP = "api_key_acl_trust_forwarded_ip"
+
+	SettingKeyDingTalkConnectEnabled                 = "dingtalk_connect_enabled"
+	SettingKeyDingTalkConnectClientID                = "dingtalk_connect_client_id"
+	SettingKeyDingTalkConnectClientSecret            = "dingtalk_connect_client_secret"
+	SettingKeyDingTalkConnectRedirectURL             = "dingtalk_connect_redirect_url"
+	SettingKeyDingTalkConnectCorpRestrictionPolicy   = "dingtalk_connect_corp_restriction_policy"
+	SettingKeyDingTalkConnectInternalCorpID          = "dingtalk_connect_internal_corp_id"
+	SettingKeyDingTalkConnectBypassRegistration      = "dingtalk_connect_bypass_registration"
+	SettingKeyDingTalkConnectSyncCorpEmail           = "dingtalk_connect_sync_corp_email"
+	SettingKeyDingTalkConnectSyncDisplayName         = "dingtalk_connect_sync_display_name"
+	SettingKeyDingTalkConnectSyncDept                = "dingtalk_connect_sync_dept"
+	SettingKeyDingTalkConnectSyncCorpEmailAttrKey    = "dingtalk_connect_sync_corp_email_attr_key"
+	SettingKeyDingTalkConnectSyncDisplayNameAttrKey  = "dingtalk_connect_sync_display_name_attr_key"
+	SettingKeyDingTalkConnectSyncDeptAttrKey         = "dingtalk_connect_sync_dept_attr_key"
+	SettingKeyDingTalkConnectSyncCorpEmailAttrName   = "dingtalk_connect_sync_corp_email_attr_name"
+	SettingKeyDingTalkConnectSyncDisplayNameAttrName = "dingtalk_connect_sync_display_name_attr_name"
+	SettingKeyDingTalkConnectSyncDeptAttrName        = "dingtalk_connect_sync_dept_attr_name"
+
+	SettingKeyMinCodexVersion                        = "min_codex_version"
+	SettingKeyMaxCodexVersion                        = "max_codex_version"
+	SettingKeyCodexCLIOnlyBlacklist                  = "codex_cli_only_blacklist"
+	SettingKeyCodexCLIOnlyWhitelist                  = "codex_cli_only_whitelist"
+	SettingKeyCodexCLIOnlyAllowAppServerClients      = "codex_cli_only_allow_app_server_clients"
+	SettingKeyCodexCLIOnlyAllowBodyEngineFingerprint = "codex_cli_only_allow_body_engine_fingerprint"
+	SettingKeyCodexCLIOnlyEngineFingerprintSignals   = "codex_cli_only_engine_fingerprint_signals"
+	SettingKeyAntigravityUserAgentVersion            = "antigravity_user_agent_version"
+	SettingKeyOpenAIAllowClaudeCodeCodexPlugin       = "openai_allow_claude_code_codex_plugin"
+	SettingKeyAllowUserViewErrorRequests             = "allow_user_view_error_requests"
+)
+
+// SettingKeyDefaultPlatformQuotas stores the global per-user, per-platform
+// daily/weekly/monthly USD quotas as JSON.
+const SettingKeyDefaultPlatformQuotas = "default_platform_quotas"
+
+func SettingKeyAuthSourcePlatformQuotas(source string) string {
+	return fmt.Sprintf("auth_source_default_%s_platform_quotas", source)
+}
+
+const (
+	QuotaDimensionGlobal = "global"
+	QuotaDimensionSpark  = "spark"
 )
 
 // AdminAPIKeyPrefix is the prefix for admin API keys (distinct from user "sk-" keys).

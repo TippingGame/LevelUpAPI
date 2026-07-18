@@ -147,7 +147,7 @@ func (m *sessionWindowMockRepo) SetRateLimited(ctx context.Context, id int64, re
 	m.rateLimitCalls = append(m.rateLimitCalls, rlCall{ID: id, ResetAt: resetAt, ContextErr: ctx.Err()})
 	return nil
 }
-func (m *sessionWindowMockRepo) SetModelRateLimit(context.Context, int64, string, time.Time) error {
+func (m *sessionWindowMockRepo) SetModelRateLimit(context.Context, int64, string, time.Time, ...string) error {
 	panic("unexpected")
 }
 func (m *sessionWindowMockRepo) SetOverloaded(context.Context, int64, time.Time) error {

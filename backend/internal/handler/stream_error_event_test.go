@@ -67,7 +67,7 @@ func TestOpenAIHandleStreamingAwareError_ResponsesStreamingEmitsResponseFailed(t
 
 func TestOpenAIHandleStreamingAwareError_ResponsesStreamingIncludesModel(t *testing.T) {
 	c, w := newGinContextForEndpoint(t, EndpointResponses)
-	setOpsRequestContext(c, "gpt-5.5", true, nil)
+	setOpsRequestContext(c, "gpt-5.5", true)
 
 	h := &OpenAIGatewayHandler{}
 	h.handleStreamingAwareError(c, http.StatusBadGateway, "upstream_error", "boom", true)

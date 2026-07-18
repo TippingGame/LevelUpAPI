@@ -20,6 +20,9 @@ const (
 	ContextKeyUserRole ContextKey = "user_role"
 	// ContextKeyAPIKey API密钥上下文键
 	ContextKeyAPIKey ContextKey = "api_key"
+	// ContextKeyOpsFallbackAPIKey 运维错误日志专用回退键。
+	// 它仅表示中间件已经成功加载该 Key，不表示鉴权已通过，不能用于授权判断。
+	ContextKeyOpsFallbackAPIKey ContextKey = "ops_fallback_api_key"
 	// ContextKeySubscription 订阅上下文键
 	ContextKeySubscription ContextKey = "subscription"
 	// ContextKeyForcePlatform 强制平台（用于 /antigravity 路由）

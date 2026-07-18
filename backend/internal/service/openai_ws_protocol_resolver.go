@@ -10,6 +10,10 @@ const (
 	OpenAIUpstreamTransportHTTPSSE              OpenAIUpstreamTransport = "http_sse"
 	OpenAIUpstreamTransportResponsesWebsocket   OpenAIUpstreamTransport = "responses_websockets"
 	OpenAIUpstreamTransportResponsesWebsocketV2 OpenAIUpstreamTransport = "responses_websockets_v2"
+	// OpenAIUpstreamTransportResponsesWebsocketV2Ingress is used while selecting
+	// an account for client WS ingress. It includes ctx_pool, passthrough, and
+	// HTTP bridge modes while still excluding accounts whose ingress mode is off.
+	OpenAIUpstreamTransportResponsesWebsocketV2Ingress OpenAIUpstreamTransport = "responses_websockets_v2_ingress"
 )
 
 // OpenAIWSProtocolDecision 表示协议决策结果。
@@ -71,6 +75,8 @@ func (r *defaultOpenAIWSProtocolResolver) Resolve(account *Account) OpenAIWSProt
 			return openAIWSHTTPDecision("account_mode_off")
 		case OpenAIWSIngressModeCtxPool, OpenAIWSIngressModePassthrough:
 			// continue
+		case OpenAIWSIngressModeHTTPBridge:
+			return openAIWSHTTPDecision("ws_v2_mode_http_bridge")
 		case OpenAIWSIngressModeShared, OpenAIWSIngressModeDedicated:
 			// 历史值兼容：按 ctx_pool 处理。
 			mode = OpenAIWSIngressModeCtxPool

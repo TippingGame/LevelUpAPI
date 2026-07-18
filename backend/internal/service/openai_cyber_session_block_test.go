@@ -127,7 +127,7 @@ func (c *cyberSessionBlockCacheStub) IsCyberSessionBlocked(ctx context.Context, 
 	return ok, nil
 }
 
-func resetCyberSessionBlockRuntimeCacheForTest(t *testing.T) {
+func resetCyberSessionBlockRuntimeCacheForTest(t *testing.T, services ...*SettingService) {
 	t.Helper()
 	cyberSessionBlockRuntimeSF.Forget("cyber_session_block_runtime")
 	cyberSessionBlockRuntimeCache.Store(&cachedCyberSessionBlockRuntime{
@@ -135,6 +135,17 @@ func resetCyberSessionBlockRuntimeCacheForTest(t *testing.T) {
 		ttl:       time.Hour,
 		expiresAt: 0,
 	})
+	for _, service := range services {
+		if service == nil {
+			continue
+		}
+		service.cyberSessionBlockRuntimeSF.Forget("cyber_session_block_runtime")
+		service.cyberSessionBlockRuntimeCache.Store(&cachedCyberSessionBlockRuntime{
+			enabled:   false,
+			ttl:       time.Hour,
+			expiresAt: 0,
+		})
+	}
 	t.Cleanup(func() {
 		cyberSessionBlockRuntimeSF.Forget("cyber_session_block_runtime")
 		cyberSessionBlockRuntimeCache.Store(&cachedCyberSessionBlockRuntime{
@@ -142,6 +153,17 @@ func resetCyberSessionBlockRuntimeCacheForTest(t *testing.T) {
 			ttl:       time.Hour,
 			expiresAt: 0,
 		})
+		for _, service := range services {
+			if service == nil {
+				continue
+			}
+			service.cyberSessionBlockRuntimeSF.Forget("cyber_session_block_runtime")
+			service.cyberSessionBlockRuntimeCache.Store(&cachedCyberSessionBlockRuntime{
+				enabled:   false,
+				ttl:       time.Hour,
+				expiresAt: 0,
+			})
+		}
 	})
 }
 
@@ -188,7 +210,7 @@ func TestOpenAIGatewayServiceCyberSessionBlockHonorsRuntimeSwitch(t *testing.T) 
 	require.False(t, svc.IsCyberSessionBlocked(context.Background(), "session-a"))
 
 	repo.values[SettingKeyCyberSessionBlockEnabled] = "true"
-	resetCyberSessionBlockRuntimeCacheForTest(t)
+	resetCyberSessionBlockRuntimeCacheForTest(t, svc.settingService)
 
 	svc.MarkCyberSessionBlocked(context.Background(), "session-a")
 	require.True(t, svc.IsCyberSessionBlocked(context.Background(), "session-a"))

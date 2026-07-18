@@ -1,3 +1,5 @@
+import promptAuditLocale from './zh/admin/promptAudit'
+
 export default {
   // Home Page
   home: {
@@ -418,6 +420,7 @@ export default {
     proxies: 'IP管理',
     redeemCodes: '兑换码',
     ops: '运维监控',
+    securityAudit: '安全审计',
     promoCodes: '优惠码',
     settings: '系统设置',
     myAccount: '我的账户',
@@ -801,7 +804,6 @@ export default {
     apiKey: 'API Key',
     baseUrl: 'Base URL',
     credentialsJson: '凭证 JSON',
-    credentialsJsonPlaceholder: '{\n  "access_token": "...",\n  "refresh_token": "...",\n  "expires_at": "..."\n}',
     accountDetails: '账号信息',
     oauthAuthorization: 'OAuth 授权',
     completeAuthorization: '完成授权',
@@ -1343,7 +1345,22 @@ export default {
     exportExcelFailed: '使用数据导出失败',
     imageUnit: '张',
     videoUnit: '个视频',
-    userAgent: 'User-Agent'
+    userAgent: 'User-Agent',
+    ipGeo: {
+      fetch: '获取地区',
+      fetching: '获取中...',
+      failed: '获取失败',
+      private: '内网地址',
+      refreshTitle: '刷新地区信息',
+      batchFetch: '批量获取地区',
+      batchFetching: '获取中...',
+      pending: '{count} 个 IP 待获取地区',
+      batchFailed: '批量获取地区信息失败',
+      detailOrg: '运营商',
+      detailTimezone: '时区',
+      detailAccuracy: '定位精度',
+      detailCoordinates: '坐标'
+    }
   },
 
   // Shared keys for channel monitor (admin + user views)
@@ -1873,6 +1890,7 @@ export default {
 
   // Admin
   admin: {
+    ...promptAuditLocale,
     store: {
       categoriesTitle: '商城分类',
       categoriesDescription: '管理自助发卡商城的商品分类',
@@ -3747,6 +3765,11 @@ export default {
         name: '名称',
         namePlaceholder: '输入监控名称',
         provider: '平台',
+        apiMode: 'OpenAI 协议',
+        apiModeChatCompletions: 'OpenAI Compatible',
+        apiModeChatCompletionsHint: '使用 /v1/chat/completions，发送 messages；适合大多数兼容站。',
+        apiModeResponses: 'Responses API',
+        apiModeResponsesHint: '使用 /v1/responses，默认带 instructions + input；适合本站自检/Codex。',
         endpoint: '上游地址',
         endpointPlaceholder: 'https://api.example.com',
         useCurrentDomain: '使用当前服务',
@@ -3801,7 +3824,7 @@ export default {
       templateField: {
         label: '请求模板',
         none: '不使用模板',
-        placeholder: '选择一个模板（按当前平台过滤）',
+        placeholder: '选择一个模板（按当前平台与协议过滤）',
         applyHint: '选中模板后，会把模板的请求头和请求体拷贝到此监控（快照）。后续模板变动不自动同步。'
       },
       template: {
@@ -5836,6 +5859,11 @@ export default {
       noData: '暂无数据',
       loadingText: '加载中...',
       ready: '就绪',
+      systemLogs: {
+        host: 'Host',
+        search: '搜索',
+        cleanCurrentFilters: '清理当前筛选结果'
+      },
       requestsTotal: '请求（总计）',
       slaScope: 'SLA 范围：',
       tokens: 'Token数',
@@ -6010,6 +6038,8 @@ export default {
         group: '分组',
         user: '用户',
         userId: '用户 ID',
+        apiKey: 'API Key',
+        keyDeletedBadge: 'Key 已删除',
         account: '账号',
         accountId: '账号 ID',
         status: '状态码',
@@ -7514,6 +7544,13 @@ export default {
         scopeOAuth: '仅 OAuth 账号',
         scopeAPIKey: '仅 API Key 账号',
         scopeBedrock: '仅 Bedrock 账号',
+        userIds: '指定用户',
+        userIdsHint: '输入任意邮箱关键词进行模糊搜索。留空表示对全部 Sub2API 用户生效；选中用户的 API Key 请求优先匹配用户规则。',
+        userSearchPlaceholder: '输入用户邮箱搜索',
+        userSearchEmpty: '未找到匹配用户',
+        userDeleted: '（已删除）',
+        userIdFallback: '用户 #{id}',
+        removeUser: '移除用户',
         errorMessage: '错误消息',
         errorMessagePlaceholder: '拦截时返回的自定义错误消息',
         errorMessageHint: '留空则使用默认错误消息。',
@@ -7597,7 +7634,30 @@ export default {
       },
       openaiExperimentalScheduler: {
         title: 'OpenAI 实验调度策略',
-        description: '默认关闭。开启后仅影响本网关在 OpenAI 账号间的实验性调度选择逻辑，不代表上游 OpenAI 官方能力。'
+        description: '默认关闭。开启后仅影响本网关在 OpenAI 账号间的实验性调度选择逻辑，不代表上游 OpenAI 官方能力。',
+        lowRatePriorityTitle: '低倍率优先',
+        lowRatePriorityDescription: '开启后优先选择计费倍率较低的账号；倍率相同时，再比较账号优先级和当前负载等。启用实验调度策略后，此开关不生效。',
+        oauthRateTitle: 'OAuth 调度参考倍率',
+        oauthRatePriorityDescription: '同一分组同时包含 API Key 和 OAuth 账号时，OAuth 账号按此倍率与已探测的 API Key 计费倍率一起排序。',
+        oauthRateWeightedDescription: '同一分组同时包含 API Key 和 OAuth 账号时，计算“计费倍率”得分时，OAuth 账号按此倍率参与计算。',
+        stickyWeightedTitle: '粘性加权',
+        stickyWeightedDescription: '开启后 previous_response_id 和 session_hash 粘性进入高级调度打分；关闭时仍按旧逻辑硬命中粘性账号。',
+        subscriptionPriorityTitle: '订阅优先',
+        subscriptionPriorityDescription: '开启后先在 ChatGPT 订阅账号池中按权值选取；订阅池拿不到席位时再回退到非订阅账号池。',
+        weightsTitle: '调度权值覆盖',
+        weightsDescription: '留空时使用配置/环境变量值；配置未设置时使用内置默认值。页面非空设置优先。',
+        defaultPlaceholder: '配置/默认：{value}',
+        topKLabel: 'TopK',
+        priorityWeight: '优先级',
+        loadWeight: '负载',
+        queueWeight: '排队',
+        errorRateWeight: '错误率',
+        ttftWeight: '首包延迟',
+        resetWeight: '重置窗口',
+        quotaHeadroomWeight: '额度余量',
+        upstreamCostWeight: '计费倍率',
+        previousResponseWeight: 'previous_response 粘性',
+        sessionStickyWeight: 'session_hash 粘性'
       },
       openaiFreeAccountRepair: {
         title: 'OpenAI Free 账号自动修复',

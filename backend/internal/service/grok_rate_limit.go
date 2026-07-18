@@ -10,18 +10,25 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/xai"
 )
 
-const grokRateLimitFallbackCooldown = 2 * time.Minute
+const (
+	grokRateLimitFallbackCooldown    = 2 * time.Minute
+	grokRateLimitRepeatCooldown      = 10 * time.Minute
+	grokRateLimitSustainedCooldown   = 30 * time.Minute
+	grokRateLimitMaxAdaptiveCooldown = time.Hour
+	grokRateLimitBackoffQuietPeriod  = time.Hour
+)
 
 func (s *OpenAIGatewayService) updateGrokUsageSnapshot(ctx context.Context, account *Account, snapshot *xai.QuotaSnapshot) {
 	if s == nil || account == nil || account.ID <= 0 || snapshot == nil {
 		return
 	}
 	now := time.Now()
-	resetAt, limited := grokRateLimitResetAt(snapshot, now)
-	if limited {
+	resetAt, hasActiveLimit := grokRateLimitResetAtForAccount(account, snapshot, now)
+	if hasActiveLimit {
 		normalizeGrokExhaustedWindowResets(snapshot, resetAt, now)
 	}
-	critical := snapshot.StatusCode == http.StatusTooManyRequests || limited
+	recovery := isSuccessfulGrokRateLimitRecovery(account, snapshot)
+	critical := snapshot.StatusCode == http.StatusTooManyRequests || hasActiveLimit || recovery
 	if s.codexSnapshotThrottle != nil {
 		allowed := s.codexSnapshotThrottle.Allow(account.ID, now)
 		if !critical && !allowed {
@@ -30,7 +37,7 @@ func (s *OpenAIGatewayService) updateGrokUsageSnapshot(ctx context.Context, acco
 	}
 
 	stateCtx := ctx
-	if limited {
+	if hasActiveLimit {
 		var cancel context.CancelFunc
 		stateCtx, cancel = openAIAccountStateContext(ctx)
 		defer cancel()
@@ -42,8 +49,22 @@ func (s *OpenAIGatewayService) updateGrokUsageSnapshot(ctx context.Context, acco
 	}
 	// A successful request can consume the final request/token. Persist that
 	// observation as a real rate limit, not only as passive quota metadata.
-	if limited {
+	if hasActiveLimit {
 		s.rateLimitGrok(stateCtx, account, resetAt)
+	} else if recovery {
+		clearGrokRateLimitAfterRecovery(stateCtx, s.accountRepo, account)
+	}
+}
+
+func (s *OpenAIGatewayService) updateGrokUsageFromResponse(ctx context.Context, account *Account, headers http.Header, statusCode int) {
+	snapshot := parseGrokQuotaSnapshot(headers, statusCode, time.Now())
+	if snapshot != nil {
+		s.updateGrokUsageSnapshot(ctx, account, snapshot)
+		return
+	}
+	recoverySnapshot := &xai.QuotaSnapshot{StatusCode: statusCode}
+	if isSuccessfulGrokRateLimitRecovery(account, recoverySnapshot) {
+		clearGrokRateLimitAfterRecovery(ctx, s.accountRepo, account)
 	}
 }
 
@@ -131,6 +152,37 @@ func grokRateLimitResetAt(snapshot *xai.QuotaSnapshot, now time.Time) (time.Time
 	return time.Time{}, false
 }
 
+func grokRateLimitResetAtForAccount(account *Account, snapshot *xai.QuotaSnapshot, now time.Time) (time.Time, bool) {
+	resetAt, limited := grokRateLimitResetAt(snapshot, now)
+	if !limited || !isGrokOAuthAccount(account) || snapshot == nil || snapshot.StatusCode != http.StatusTooManyRequests {
+		return resetAt, limited
+	}
+	if account.RateLimitedAt == nil || account.RateLimitResetAt == nil {
+		return resetAt, true
+	}
+	previousResetAt := *account.RateLimitResetAt
+	if previousResetAt.After(now) || now.Sub(previousResetAt) > grokRateLimitBackoffQuietPeriod {
+		return resetAt, true
+	}
+	previousCooldown := previousResetAt.Sub(*account.RateLimitedAt)
+	if previousCooldown <= 0 {
+		return resetAt, true
+	}
+
+	adaptiveCooldown := grokRateLimitRepeatCooldown
+	switch {
+	case previousCooldown >= grokRateLimitSustainedCooldown:
+		adaptiveCooldown = grokRateLimitMaxAdaptiveCooldown
+	case previousCooldown >= grokRateLimitRepeatCooldown:
+		adaptiveCooldown = grokRateLimitSustainedCooldown
+	}
+	adaptiveResetAt := now.Add(adaptiveCooldown)
+	if adaptiveResetAt.After(resetAt) {
+		resetAt = adaptiveResetAt
+	}
+	return resetAt, true
+}
+
 func normalizeGrokRateLimitResetAt(account *Account, resetAt, now time.Time) time.Time {
 	if !resetAt.After(now) {
 		resetAt = now.Add(grokRateLimitFallbackCooldown)
@@ -143,6 +195,33 @@ func normalizeGrokRateLimitResetAt(account *Account, resetAt, now time.Time) tim
 
 type grokRateLimitExtendingRepository interface {
 	SetRateLimitedIfLater(ctx context.Context, id int64, resetAt time.Time) error
+}
+
+type grokRateLimitRecoveryRepository interface {
+	ClearRateLimitIfObserved(ctx context.Context, id int64, observedLimitedAt, observedResetAt time.Time) (bool, error)
+}
+
+func isSuccessfulGrokRateLimitRecovery(account *Account, snapshot *xai.QuotaSnapshot) bool {
+	return isGrokOAuthAccount(account) &&
+		account.RateLimitedAt != nil &&
+		account.RateLimitResetAt != nil &&
+		snapshot != nil &&
+		snapshot.StatusCode >= http.StatusOK &&
+		snapshot.StatusCode < http.StatusMultipleChoices
+}
+
+func clearGrokRateLimitAfterRecovery(ctx context.Context, repo AccountRepository, account *Account) {
+	if repo == nil || account == nil || account.RateLimitedAt == nil || account.RateLimitResetAt == nil || ctx.Err() != nil {
+		return
+	}
+	recoveryRepo, ok := repo.(grokRateLimitRecoveryRepository)
+	if !ok {
+		return
+	}
+	_, err := recoveryRepo.ClearRateLimitIfObserved(ctx, account.ID, *account.RateLimitedAt, *account.RateLimitResetAt)
+	if err != nil {
+		slog.Warn("grok_rate_limit_recovery_clear_failed", "account_id", account.ID, "error", err)
+	}
 }
 
 func persistGrokRateLimit(ctx context.Context, repo AccountRepository, account *Account, resetAt time.Time) {

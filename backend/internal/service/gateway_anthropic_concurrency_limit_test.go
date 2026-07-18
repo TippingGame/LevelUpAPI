@@ -79,6 +79,10 @@ func (c *gatewayAnthropicConcurrencyCache) CleanupExpiredAccountSlots(context.Co
 	return nil
 }
 
+func (c *gatewayAnthropicConcurrencyCache) CleanupExpiredAccountSlotKeys(context.Context) error {
+	return nil
+}
+
 func (c *gatewayAnthropicConcurrencyCache) CleanupStaleProcessSlots(context.Context, string) error {
 	return nil
 }

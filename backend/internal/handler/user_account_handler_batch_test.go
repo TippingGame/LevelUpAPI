@@ -17,9 +17,9 @@ import (
 )
 
 type userAccountBatchRepoStub struct {
-	accounts                   map[int64]*service.Account
-	createdTask                service.CreateAccountBatchTaskInput
-	createTaskCalled           int
+	accounts         map[int64]*service.Account
+	createdTask      service.CreateAccountBatchTaskInput
+	createTaskCalled int
 }
 
 func (s *userAccountBatchRepoStub) Create(_ context.Context, account *service.Account) error {
@@ -144,7 +144,7 @@ func (s *userAccountBatchRepoStub) ListSchedulableUngroupedByPlatforms(context.C
 func (s *userAccountBatchRepoStub) SetRateLimited(context.Context, int64, time.Time) error {
 	panic("unexpected SetRateLimited call")
 }
-func (s *userAccountBatchRepoStub) SetModelRateLimit(context.Context, int64, string, time.Time) error {
+func (s *userAccountBatchRepoStub) SetModelRateLimit(context.Context, int64, string, time.Time, ...string) error {
 	panic("unexpected SetModelRateLimit call")
 }
 func (s *userAccountBatchRepoStub) SetOverloaded(context.Context, int64, time.Time) error {

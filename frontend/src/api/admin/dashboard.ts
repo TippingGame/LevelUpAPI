@@ -167,6 +167,7 @@ export interface UserBreakdownParams {
   endpoint?: string
   endpoint_type?: 'inbound' | 'upstream' | 'path'
   limit?: number
+  sort_by?: 'requests' | 'input_tokens' | 'output_tokens' | 'cache_tokens' | 'total_tokens' | 'actual_cost'
   // Additional filter conditions
   user_id?: number
   api_key_id?: number
@@ -174,6 +175,12 @@ export interface UserBreakdownParams {
   request_type?: number
   stream?: boolean
   billing_type?: number | null
+}
+
+export interface PlatformUsage {
+  platform: string
+  today_actual_cost: number
+  total_actual_cost: number
 }
 
 export interface UserBreakdownResponse {
@@ -270,6 +277,7 @@ export interface BatchUserUsageStats {
   user_id: number
   today_actual_cost: number
   total_actual_cost: number
+  by_platform?: PlatformUsage[]
 }
 
 export interface BatchUsersUsageResponse {

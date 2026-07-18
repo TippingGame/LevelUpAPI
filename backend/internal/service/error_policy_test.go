@@ -722,7 +722,7 @@ func (r *errorPolicyRepoStub) SetOverloaded(ctx context.Context, id int64, until
 	return nil
 }
 
-func (r *errorPolicyRepoStub) SetModelRateLimit(ctx context.Context, id int64, modelKey string, resetAt time.Time) error {
+func (r *errorPolicyRepoStub) SetModelRateLimit(ctx context.Context, id int64, modelKey string, resetAt time.Time, _ ...string) error {
 	r.modelRateLimitedCalls++
 	return nil
 }

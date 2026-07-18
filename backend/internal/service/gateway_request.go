@@ -3,6 +3,7 @@ package service
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"regexp"
@@ -43,6 +44,19 @@ var (
 	sessionUserAgentVersionPattern = regexp.MustCompile(`\bv?\d+(?:\.\d+){1,3}\b`)
 )
 
+// DescribeInvalidJSON returns a body-safe diagnostic with only length and syntax offset.
+func DescribeInvalidJSON(body []byte) error {
+	var raw json.RawMessage
+	if err := json.Unmarshal(body, &raw); err != nil {
+		var syntaxErr *json.SyntaxError
+		if errors.As(err, &syntaxErr) {
+			return fmt.Errorf("invalid json (len=%d, offset=%d): %s", len(body), syntaxErr.Offset, syntaxErr.Error())
+		}
+		return fmt.Errorf("invalid json (len=%d): %w", len(body), err)
+	}
+	return fmt.Errorf("invalid json (len=%d)", len(body))
+}
+
 // SessionContext 粘性会话上下文，用于区分不同来源的请求。
 // 仅在 GenerateSessionHash 第 3 级 fallback（消息内容 hash）时混入，
 // 避免不同用户发送相同消息产生相同 hash 导致账号集中。
@@ -50,6 +64,36 @@ type SessionContext struct {
 	ClientIP  string
 	UserAgent string
 	APIKeyID  int64
+}
+
+// RequestBodyRef is accepted by newer gateway call sites while ParsedRequest keeps
+// LevelUp's byte-slice representation for compatibility with existing handlers.
+type RequestBodyRef struct {
+	data []byte
+}
+
+func NewRequestBodyRef(data []byte) *RequestBodyRef {
+	return &RequestBodyRef{data: data}
+}
+
+func (b *RequestBodyRef) Bytes() []byte {
+	if b == nil {
+		return nil
+	}
+	return b.data
+}
+
+func (b *RequestBodyRef) Len() int {
+	if b == nil {
+		return 0
+	}
+	return len(b.data)
+}
+
+func (b *RequestBodyRef) Replace(data []byte) {
+	if b != nil {
+		b.data = data
+	}
 }
 
 // ParsedRequest 保存网关请求的预解析结果
@@ -84,6 +128,42 @@ type ParsedRequest struct {
 	// OnUpstreamAccepted 上游接受请求后立即调用（用于提前释放串行锁）
 	// 流式请求在收到 2xx 响应头后调用，避免持锁等流完成
 	OnUpstreamAccepted func()
+
+	protocol string
+}
+
+func (p *ParsedRequest) SystemValue() (any, bool) {
+	if p == nil || (!p.HasSystem && p.System == nil) {
+		return nil, false
+	}
+	return p.System, true
+}
+
+func (p *ParsedRequest) ReplaceBody(data []byte) error {
+	if p == nil {
+		return fmt.Errorf("parse request: empty request")
+	}
+	next, err := ParseGatewayRequest(data, p.protocol)
+	if err != nil {
+		return err
+	}
+	next.GroupID = p.GroupID
+	next.SessionContext = p.SessionContext
+	next.OnUpstreamAccepted = p.OnUpstreamAccepted
+	*p = *next
+	return nil
+}
+
+func (p *ParsedRequest) CloneForBody(data []byte) (*ParsedRequest, error) {
+	if p == nil {
+		return nil, fmt.Errorf("parse request: empty request")
+	}
+	clone := *p
+	if err := clone.ReplaceBody(data); err != nil {
+		return nil, err
+	}
+	clone.OnUpstreamAccepted = nil
+	return &clone, nil
 }
 
 // NormalizeSessionUserAgent reduces UA noise for sticky-session and digest hashing.
@@ -132,11 +212,20 @@ func normalizeSessionUserAgentFallback(raw string) string {
 // ParseGatewayRequest 解析网关请求体并返回结构化结果。
 // protocol 指定请求协议格式（domain.PlatformAnthropic / domain.PlatformGemini），
 // 不同协议使用不同的 system/messages 字段名。
-func ParseGatewayRequest(body []byte, protocol string) (*ParsedRequest, error) {
+func ParseGatewayRequest(bodyInput any, protocol string) (*ParsedRequest, error) {
+	var body []byte
+	switch value := bodyInput.(type) {
+	case []byte:
+		body = value
+	case *RequestBodyRef:
+		body = value.Bytes()
+	default:
+		return nil, fmt.Errorf("invalid request body type")
+	}
 	// 保持与旧实现一致：请求体必须是合法 JSON。
 	// 注意：gjson.GetBytes 对非法 JSON 不会报错，因此需要显式校验。
 	if !gjson.ValidBytes(body) {
-		return nil, fmt.Errorf("invalid json")
+		return nil, DescribeInvalidJSON(body)
 	}
 
 	// 性能：
@@ -145,7 +234,8 @@ func ParseGatewayRequest(body []byte, protocol string) (*ParsedRequest, error) {
 	jsonStr := *(*string)(unsafe.Pointer(&body))
 
 	parsed := &ParsedRequest{
-		Body: body,
+		Body:     body,
+		protocol: protocol,
 	}
 
 	// --- gjson 提取简单字段（避免完整 Unmarshal） ---
@@ -394,7 +484,10 @@ func StripEmptyTextBlocks(body []byte) []byte {
 //   - 当 thinking.type 不是 "enabled"/"adaptive"：移除所有 thinking 相关块
 //   - 当 thinking.type 是 "enabled"/"adaptive"：仅移除缺失/无效 signature 的 thinking 块（避免 400）
 //     (blocks with missing/empty/dummy signatures that would cause 400 errors)
-func FilterThinkingBlocks(body []byte) []byte {
+func FilterThinkingBlocks(body []byte, mappedModel ...string) []byte {
+	if len(mappedModel) > 0 && !ShouldPreFilterThinkingBlocks(mappedModel[0]) {
+		return body
+	}
 	return filterThinkingBlocksInternal(body, false)
 }
 
@@ -412,7 +505,10 @@ func FilterThinkingBlocks(body []byte) []byte {
 //   - Convert `thinking` blocks to `text` blocks (preserve the thinking content).
 //   - Remove `redacted_thinking` blocks (cannot be converted to text).
 //   - Ensure no message ends up with empty content.
-func FilterThinkingBlocksForRetry(body []byte) []byte {
+func FilterThinkingBlocksForRetry(body []byte, mappedModel ...string) []byte {
+	if len(mappedModel) > 0 && !ShouldApplyRetryFilters(mappedModel[0]) {
+		return body
+	}
 	hasThinkingContent := bytes.Contains(body, patternTypeThinking) ||
 		bytes.Contains(body, patternTypeThinkingSpaced) ||
 		bytes.Contains(body, patternTypeRedactedThinking) ||
@@ -722,7 +818,10 @@ func anthropicBetaTokensContains(header, token string) bool {
 //
 // Use this only when needed: converting tool blocks to text changes model behaviour and can increase the
 // risk of prompt injection (tool output becomes plain conversation text).
-func FilterSignatureSensitiveBlocksForRetry(body []byte) []byte {
+func FilterSignatureSensitiveBlocksForRetry(body []byte, mappedModel ...string) []byte {
+	if len(mappedModel) > 0 && !ShouldApplyRetryFilters(mappedModel[0]) {
+		return body
+	}
 	// Fast path: only run when we see likely relevant constructs.
 	if !bytes.Contains(body, []byte(`"type":"thinking"`)) &&
 		!bytes.Contains(body, []byte(`"type": "thinking"`)) &&

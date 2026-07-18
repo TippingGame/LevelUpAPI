@@ -18,10 +18,20 @@ func normalizeOAuthSignupSource(signupSource string) string {
 	switch signupSource {
 	case "", "email":
 		return "email"
-	case "linuxdo", "wechat", "oidc":
+	case "linuxdo", "wechat", "oidc", "dingtalk":
 		return signupSource
 	default:
 		return "email"
+	}
+}
+
+func normalizeEmailOAuthProviderType(providerType string) string {
+	providerType = strings.TrimSpace(strings.ToLower(providerType))
+	switch providerType {
+	case "github", "google", "oidc":
+		return providerType
+	default:
+		return ""
 	}
 }
 
@@ -283,6 +293,7 @@ func (s *AuthService) FinalizeOAuthEmailAccount(
 	s.updateOAuthSignupSource(ctx, user.ID, signupSource)
 	grantPlan := s.resolveSignupGrantPlan(ctx, signupSource)
 	s.assignSubscriptions(ctx, user.ID, grantPlan.Subscriptions, "auto assigned by signup defaults")
+	_ = s.snapshotPlatformQuotaDefaults(ctx, user.ID, &grantPlan)
 	return nil
 }
 

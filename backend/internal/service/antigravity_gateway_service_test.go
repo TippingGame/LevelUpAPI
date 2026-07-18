@@ -257,6 +257,7 @@ func TestAntigravityGatewayService_Forward_PromptTooLong(t *testing.T) {
 		Concurrency: 1,
 		Credentials: map[string]any{
 			"access_token": "token",
+			"project_id":   "proj",
 		},
 	}
 
@@ -315,6 +316,7 @@ func TestAntigravityGatewayService_Forward_ModelRateLimitTriggersFailover(t *tes
 		Concurrency: 1,
 		Credentials: map[string]any{
 			"access_token": "token",
+			"project_id":   "proj",
 		},
 		Extra: map[string]any{
 			modelRateLimitsKey: map[string]any{
@@ -371,6 +373,7 @@ func TestAntigravityGatewayService_ForwardGemini_ModelRateLimitTriggersFailover(
 		Concurrency: 1,
 		Credentials: map[string]any{
 			"access_token": "token",
+			"project_id":   "proj",
 		},
 		Extra: map[string]any{
 			modelRateLimitsKey: map[string]any{
@@ -425,6 +428,7 @@ func TestAntigravityGatewayService_Forward_StickySessionForceCacheBilling(t *tes
 		Concurrency: 1,
 		Credentials: map[string]any{
 			"access_token": "token",
+			"project_id":   "proj",
 		},
 		Extra: map[string]any{
 			modelRateLimitsKey: map[string]any{
@@ -480,6 +484,7 @@ func TestAntigravityGatewayService_ForwardGemini_StickySessionForceCacheBilling(
 		Concurrency: 1,
 		Credentials: map[string]any{
 			"access_token": "token",
+			"project_id":   "proj",
 		},
 		Extra: map[string]any{
 			modelRateLimitsKey: map[string]any{
@@ -545,6 +550,7 @@ func TestAntigravityGatewayService_Forward_BillsWithMappedModel(t *testing.T) {
 		Concurrency: 1,
 		Credentials: map[string]any{
 			"access_token": "token",
+			"project_id":   "proj",
 			"model_mapping": map[string]any{
 				"claude-sonnet-4-5": mappedModel,
 			},
@@ -598,6 +604,7 @@ func TestAntigravityGatewayService_ForwardGemini_BillsWithMappedModel(t *testing
 		Concurrency: 1,
 		Credentials: map[string]any{
 			"access_token": "token",
+			"project_id":   "proj",
 			"model_mapping": map[string]any{
 				"gemini-2.5-flash": mappedModel,
 			},
@@ -669,6 +676,7 @@ func TestAntigravityGatewayService_ForwardGemini_RetriesCorruptedThoughtSignatur
 		Concurrency: 1,
 		Credentials: map[string]any{
 			"access_token": "token",
+			"project_id":   "proj",
 			"model_mapping": map[string]any{
 				originalModel: mappedModel,
 			},
@@ -727,6 +735,7 @@ func TestAntigravityGatewayService_ForwardGemini_SignatureRetryPropagatesFailove
 		Concurrency: 1,
 		Credentials: map[string]any{
 			"access_token": "token",
+			"project_id":   "proj",
 			"model_mapping": map[string]any{
 				originalModel: mappedModel,
 			},

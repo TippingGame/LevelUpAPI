@@ -306,6 +306,31 @@ func TestExtractOpenAIResponseIDFromJSONBytes(t *testing.T) {
 	require.Empty(t, extractOpenAIResponseIDFromJSONBytes([]byte(`not-json`)))
 }
 
+// 复现 #4386：gpt-image-2 /v1/images/edits 的 usage 携带 input_tokens_details.image_tokens，
+// 提取器须将图片输入 token 单独填入 ImageInputTokens（此前被丢弃并入 InputTokens 按文本价计费）。
+func TestExtractOpenAIUsage_CapturesImageInputTokens(t *testing.T) {
+	body := []byte(`{"usage":{"input_tokens":371,"input_tokens_details":{"image_tokens":352,"text_tokens":19},"output_tokens":439,"output_tokens_details":{"image_tokens":439,"text_tokens":0},"total_tokens":810}}`)
+	usage, ok := extractOpenAIUsageFromJSONBytes(body)
+	require.True(t, ok)
+	require.Equal(t, 371, usage.InputTokens)
+	require.Equal(t, 352, usage.ImageInputTokens)
+	require.Equal(t, 439, usage.OutputTokens)
+	require.Equal(t, 439, usage.ImageOutputTokens)
+
+	// prompt_tokens_details 回退路径（部分上游用 prompt_tokens 口径）。
+	promptStyle := []byte(`{"usage":{"prompt_tokens":100,"prompt_tokens_details":{"image_tokens":80}}}`)
+	pu, ok := extractOpenAIUsageFromJSONBytes(promptStyle)
+	require.True(t, ok)
+	require.Equal(t, 100, pu.InputTokens)
+	require.Equal(t, 80, pu.ImageInputTokens)
+
+	// 纯文本请求：无 image_tokens 时 ImageInputTokens 为 0，行为不变。
+	textOnly := []byte(`{"usage":{"input_tokens":50,"output_tokens":10}}`)
+	tu, ok := extractOpenAIUsageFromJSONBytes(textOnly)
+	require.True(t, ok)
+	require.Zero(t, tu.ImageInputTokens)
+}
+
 func TestOpenAIGatewayService_BindHTTPResponseAccount(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
@@ -2956,48 +2981,6 @@ func TestHandleSSEToJSON_ReconstructsImageGenerationOutputItemDone(t *testing.T)
 	require.Equal(t, "completed", gjson.Get(rec.Body.String(), "output.0.status").String())
 	require.Equal(t, "aGVsbG8=", gjson.Get(rec.Body.String(), "output.0.result").String())
 	require.Equal(t, "draw a cat", gjson.Get(rec.Body.String(), "output.0.revised_prompt").String())
-}
-
-func TestNormalizeCompletedImageGenerationStatus(t *testing.T) {
-	tests := []struct {
-		name        string
-		input       string
-		want        string
-		wantChanged bool
-	}{
-		{
-			name:        "output item done with result",
-			input:       `{"type":"response.output_item.done","item":{"type":"image_generation_call","status":"generating","result":"image-data"}}`,
-			want:        `{"type":"response.output_item.done","item":{"type":"image_generation_call","status":"completed","result":"image-data"}}`,
-			wantChanged: true,
-		},
-		{
-			name:        "terminal response only changes completed image result",
-			input:       `{"type":"response.completed","response":{"output":[{"type":"image_generation_call","status":"in_progress","result":"image-data"},{"type":"image_generation_call","status":"failed","result":"partial-data"}]}}`,
-			want:        `{"type":"response.completed","response":{"output":[{"type":"image_generation_call","status":"completed","result":"image-data"},{"type":"image_generation_call","status":"failed","result":"partial-data"}]}}`,
-			wantChanged: true,
-		},
-		{
-			name:        "done item without result",
-			input:       `{"type":"response.output_item.done","item":{"type":"image_generation_call","status":"generating"}}`,
-			want:        `{"type":"response.output_item.done","item":{"type":"image_generation_call","status":"generating"}}`,
-			wantChanged: false,
-		},
-		{
-			name:        "non-final image event",
-			input:       `{"type":"response.output_item.added","item":{"type":"image_generation_call","status":"generating","result":"image-data"}}`,
-			want:        `{"type":"response.output_item.added","item":{"type":"image_generation_call","status":"generating","result":"image-data"}}`,
-			wantChanged: false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got, changed := normalizeCompletedImageGenerationStatus([]byte(tt.input))
-			require.Equal(t, tt.wantChanged, changed)
-			require.JSONEq(t, tt.want, string(got))
-		})
-	}
 }
 
 func TestHandleSSEToJSON_NoFinalResponseKeepsSSEBody(t *testing.T) {

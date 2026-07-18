@@ -10,6 +10,7 @@ const (
 )
 
 type httpUpstreamProfileContextKey struct{}
+type httpUpstreamDisableRedirectsContextKey struct{}
 
 func WithHTTPUpstreamProfile(ctx context.Context, profile HTTPUpstreamProfile) context.Context {
 	if ctx == nil {
@@ -35,4 +36,17 @@ func HTTPUpstreamProfileFromContext(ctx context.Context) HTTPUpstreamProfile {
 	default:
 		return HTTPUpstreamProfileDefault
 	}
+}
+
+// WithHTTPUpstreamRedirectsDisabled prevents credential-bearing probes from
+// following redirects through the shared upstream client.
+func WithHTTPUpstreamRedirectsDisabled(ctx context.Context) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithValue(ctx, httpUpstreamDisableRedirectsContextKey{}, true)
+}
+
+func HTTPUpstreamRedirectsDisabled(ctx context.Context) bool {
+	return ctx != nil && ctx.Value(httpUpstreamDisableRedirectsContextKey{}) == true
 }

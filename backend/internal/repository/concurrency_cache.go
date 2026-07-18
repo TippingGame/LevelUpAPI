@@ -515,6 +515,34 @@ func (c *concurrencyCache) CleanupExpiredAccountSlots(ctx context.Context, accou
 	return err
 }
 
+// CleanupExpiredAccountSlotKeys reclaims expired account and user slots without
+// requiring a database-side account listing.
+func (c *concurrencyCache) CleanupExpiredAccountSlotKeys(ctx context.Context) error {
+	now, err := c.redisUnixTime(ctx)
+	if err != nil {
+		return err
+	}
+	for _, pattern := range []string{accountSlotKeyPrefix + "*", userSlotKeyPrefix + "*"} {
+		var cursor uint64
+		for {
+			keys, nextCursor, err := c.rdb.Scan(ctx, cursor, pattern, 200).Result()
+			if err != nil {
+				return fmt.Errorf("scan expired slots %s: %w", pattern, err)
+			}
+			for _, key := range keys {
+				if _, err := cleanupExpiredSlotsScript.Run(ctx, c.rdb, []string{key}, c.slotTTLSeconds, now).Result(); err != nil {
+					return fmt.Errorf("cleanup expired slots %s: %w", key, err)
+				}
+			}
+			cursor = nextCursor
+			if cursor == 0 {
+				break
+			}
+		}
+	}
+	return nil
+}
+
 func (c *concurrencyCache) CleanupStaleProcessSlots(ctx context.Context, activeRequestPrefix string) error {
 	if activeRequestPrefix == "" {
 		return nil

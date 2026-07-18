@@ -13,6 +13,7 @@ func RegisterUserRoutes(
 	v1 *gin.RouterGroup,
 	h *handler.Handlers,
 	jwtAuth middleware.JWTAuthMiddleware,
+	auditLog middleware.AuditLogMiddleware,
 	settingService *service.SettingService,
 ) {
 	public := v1.Group("/public")
@@ -46,6 +47,7 @@ func RegisterUserRoutes(
 		user := authenticated.Group("/user")
 		{
 			user.GET("/profile", h.User.GetProfile)
+			user.GET("/platform-quotas", h.User.GetMyPlatformQuotas)
 			user.PUT("/password", h.User.ChangePassword)
 			user.PUT("", h.User.UpdateProfile)
 			payout := user.Group("")
@@ -94,6 +96,8 @@ func RegisterUserRoutes(
 				totp.POST("/setup", h.Totp.InitiateSetup)
 				totp.POST("/enable", h.Totp.Enable)
 				totp.POST("/disable", h.Totp.Disable)
+				// 敏感操作二次验证：授予当前会话一段时间的 step-up 权限
+				totp.POST("/step-up", h.Totp.StepUp)
 			}
 		}
 

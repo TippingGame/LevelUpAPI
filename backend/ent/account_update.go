@@ -241,6 +241,33 @@ func (_u *AccountUpdate) ClearProxyID() *AccountUpdate {
 	return _u
 }
 
+// SetProxyFallbackOriginID sets the "proxy_fallback_origin_id" field.
+func (_u *AccountUpdate) SetProxyFallbackOriginID(v int64) *AccountUpdate {
+	_u.mutation.ResetProxyFallbackOriginID()
+	_u.mutation.SetProxyFallbackOriginID(v)
+	return _u
+}
+
+// SetNillableProxyFallbackOriginID sets the "proxy_fallback_origin_id" field if the given value is not nil.
+func (_u *AccountUpdate) SetNillableProxyFallbackOriginID(v *int64) *AccountUpdate {
+	if v != nil {
+		_u.SetProxyFallbackOriginID(*v)
+	}
+	return _u
+}
+
+// AddProxyFallbackOriginID adds value to the "proxy_fallback_origin_id" field.
+func (_u *AccountUpdate) AddProxyFallbackOriginID(v int64) *AccountUpdate {
+	_u.mutation.AddProxyFallbackOriginID(v)
+	return _u
+}
+
+// ClearProxyFallbackOriginID clears the value of the "proxy_fallback_origin_id" field.
+func (_u *AccountUpdate) ClearProxyFallbackOriginID() *AccountUpdate {
+	_u.mutation.ClearProxyFallbackOriginID()
+	return _u
+}
+
 // SetConcurrency sets the "concurrency" field.
 func (_u *AccountUpdate) SetConcurrency(v int) *AccountUpdate {
 	_u.mutation.ResetConcurrency()
@@ -641,6 +668,40 @@ func (_u *AccountUpdate) ClearSessionWindowStatus() *AccountUpdate {
 	return _u
 }
 
+// SetParentAccountID sets the "parent_account_id" field.
+func (_u *AccountUpdate) SetParentAccountID(v int64) *AccountUpdate {
+	_u.mutation.SetParentAccountID(v)
+	return _u
+}
+
+// SetNillableParentAccountID sets the "parent_account_id" field if the given value is not nil.
+func (_u *AccountUpdate) SetNillableParentAccountID(v *int64) *AccountUpdate {
+	if v != nil {
+		_u.SetParentAccountID(*v)
+	}
+	return _u
+}
+
+// ClearParentAccountID clears the value of the "parent_account_id" field.
+func (_u *AccountUpdate) ClearParentAccountID() *AccountUpdate {
+	_u.mutation.ClearParentAccountID()
+	return _u
+}
+
+// SetQuotaDimension sets the "quota_dimension" field.
+func (_u *AccountUpdate) SetQuotaDimension(v account.QuotaDimension) *AccountUpdate {
+	_u.mutation.SetQuotaDimension(v)
+	return _u
+}
+
+// SetNillableQuotaDimension sets the "quota_dimension" field if the given value is not nil.
+func (_u *AccountUpdate) SetNillableQuotaDimension(v *account.QuotaDimension) *AccountUpdate {
+	if v != nil {
+		_u.SetQuotaDimension(*v)
+	}
+	return _u
+}
+
 // AddGroupIDs adds the "groups" edge to the Group entity by IDs.
 func (_u *AccountUpdate) AddGroupIDs(ids ...int64) *AccountUpdate {
 	_u.mutation.AddGroupIDs(ids...)
@@ -678,6 +739,40 @@ func (_u *AccountUpdate) SetNillableOwnerID(id *int64) *AccountUpdate {
 // SetOwner sets the "owner" edge to the User entity.
 func (_u *AccountUpdate) SetOwner(v *User) *AccountUpdate {
 	return _u.SetOwnerID(v.ID)
+}
+
+// SetParentID sets the "parent" edge to the Account entity by ID.
+func (_u *AccountUpdate) SetParentID(id int64) *AccountUpdate {
+	_u.mutation.SetParentID(id)
+	return _u
+}
+
+// SetNillableParentID sets the "parent" edge to the Account entity by ID if the given value is not nil.
+func (_u *AccountUpdate) SetNillableParentID(id *int64) *AccountUpdate {
+	if id != nil {
+		_u = _u.SetParentID(*id)
+	}
+	return _u
+}
+
+// SetParent sets the "parent" edge to the Account entity.
+func (_u *AccountUpdate) SetParent(v *Account) *AccountUpdate {
+	return _u.SetParentID(v.ID)
+}
+
+// AddChildIDs adds the "children" edge to the Account entity by IDs.
+func (_u *AccountUpdate) AddChildIDs(ids ...int64) *AccountUpdate {
+	_u.mutation.AddChildIDs(ids...)
+	return _u
+}
+
+// AddChildren adds the "children" edges to the Account entity.
+func (_u *AccountUpdate) AddChildren(v ...*Account) *AccountUpdate {
+	ids := make([]int64, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.AddChildIDs(ids...)
 }
 
 // AddUsageLogIDs adds the "usage_logs" edge to the UsageLog entity by IDs.
@@ -731,6 +826,33 @@ func (_u *AccountUpdate) ClearProxy() *AccountUpdate {
 func (_u *AccountUpdate) ClearOwner() *AccountUpdate {
 	_u.mutation.ClearOwner()
 	return _u
+}
+
+// ClearParent clears the "parent" edge to the Account entity.
+func (_u *AccountUpdate) ClearParent() *AccountUpdate {
+	_u.mutation.ClearParent()
+	return _u
+}
+
+// ClearChildren clears all "children" edges to the Account entity.
+func (_u *AccountUpdate) ClearChildren() *AccountUpdate {
+	_u.mutation.ClearChildren()
+	return _u
+}
+
+// RemoveChildIDs removes the "children" edge to Account entities by IDs.
+func (_u *AccountUpdate) RemoveChildIDs(ids ...int64) *AccountUpdate {
+	_u.mutation.RemoveChildIDs(ids...)
+	return _u
+}
+
+// RemoveChildren removes "children" edges to Account entities.
+func (_u *AccountUpdate) RemoveChildren(v ...*Account) *AccountUpdate {
+	ids := make([]int64, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.RemoveChildIDs(ids...)
 }
 
 // ClearUsageLogs clears all "usage_logs" edges to the UsageLog entity.
@@ -838,6 +960,11 @@ func (_u *AccountUpdate) check() error {
 			return &ValidationError{Name: "session_window_status", err: fmt.Errorf(`ent: validator failed for field "Account.session_window_status": %w`, err)}
 		}
 	}
+	if v, ok := _u.mutation.QuotaDimension(); ok {
+		if err := account.QuotaDimensionValidator(v); err != nil {
+			return &ValidationError{Name: "quota_dimension", err: fmt.Errorf(`ent: validator failed for field "Account.quota_dimension": %w`, err)}
+		}
+	}
 	return nil
 }
 
@@ -900,6 +1027,15 @@ func (_u *AccountUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if _u.mutation.SharePolicyIDCleared() {
 		_spec.ClearField(account.FieldSharePolicyID, field.TypeInt64)
+	}
+	if value, ok := _u.mutation.ProxyFallbackOriginID(); ok {
+		_spec.SetField(account.FieldProxyFallbackOriginID, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.AddedProxyFallbackOriginID(); ok {
+		_spec.AddField(account.FieldProxyFallbackOriginID, field.TypeInt64, value)
+	}
+	if _u.mutation.ProxyFallbackOriginIDCleared() {
+		_spec.ClearField(account.FieldProxyFallbackOriginID, field.TypeInt64)
 	}
 	if value, ok := _u.mutation.Concurrency(); ok {
 		_spec.SetField(account.FieldConcurrency, field.TypeInt, value)
@@ -1018,6 +1154,9 @@ func (_u *AccountUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	if _u.mutation.SessionWindowStatusCleared() {
 		_spec.ClearField(account.FieldSessionWindowStatus, field.TypeString)
 	}
+	if value, ok := _u.mutation.QuotaDimension(); ok {
+		_spec.SetField(account.FieldQuotaDimension, field.TypeEnum, value)
+	}
 	if _u.mutation.GroupsCleared() {
 		edge := &sqlgraph.EdgeSpec{
 			Rel:     sqlgraph.M2M,
@@ -1126,6 +1265,80 @@ func (_u *AccountUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 			Bidi:    false,
 			Target: &sqlgraph.EdgeTarget{
 				IDSpec: sqlgraph.NewFieldSpec(user.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Add = append(_spec.Edges.Add, edge)
+	}
+	if _u.mutation.ParentCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.M2O,
+			Inverse: true,
+			Table:   account.ParentTable,
+			Columns: []string{account.ParentColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(account.FieldID, field.TypeInt64),
+			},
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.ParentIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.M2O,
+			Inverse: true,
+			Table:   account.ParentTable,
+			Columns: []string{account.ParentColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(account.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Add = append(_spec.Edges.Add, edge)
+	}
+	if _u.mutation.ChildrenCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   account.ChildrenTable,
+			Columns: []string{account.ChildrenColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(account.FieldID, field.TypeInt64),
+			},
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.RemovedChildrenIDs(); len(nodes) > 0 && !_u.mutation.ChildrenCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   account.ChildrenTable,
+			Columns: []string{account.ChildrenColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(account.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.ChildrenIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   account.ChildrenTable,
+			Columns: []string{account.ChildrenColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(account.FieldID, field.TypeInt64),
 			},
 		}
 		for _, k := range nodes {
@@ -1404,6 +1617,33 @@ func (_u *AccountUpdateOne) SetNillableProxyID(v *int64) *AccountUpdateOne {
 // ClearProxyID clears the value of the "proxy_id" field.
 func (_u *AccountUpdateOne) ClearProxyID() *AccountUpdateOne {
 	_u.mutation.ClearProxyID()
+	return _u
+}
+
+// SetProxyFallbackOriginID sets the "proxy_fallback_origin_id" field.
+func (_u *AccountUpdateOne) SetProxyFallbackOriginID(v int64) *AccountUpdateOne {
+	_u.mutation.ResetProxyFallbackOriginID()
+	_u.mutation.SetProxyFallbackOriginID(v)
+	return _u
+}
+
+// SetNillableProxyFallbackOriginID sets the "proxy_fallback_origin_id" field if the given value is not nil.
+func (_u *AccountUpdateOne) SetNillableProxyFallbackOriginID(v *int64) *AccountUpdateOne {
+	if v != nil {
+		_u.SetProxyFallbackOriginID(*v)
+	}
+	return _u
+}
+
+// AddProxyFallbackOriginID adds value to the "proxy_fallback_origin_id" field.
+func (_u *AccountUpdateOne) AddProxyFallbackOriginID(v int64) *AccountUpdateOne {
+	_u.mutation.AddProxyFallbackOriginID(v)
+	return _u
+}
+
+// ClearProxyFallbackOriginID clears the value of the "proxy_fallback_origin_id" field.
+func (_u *AccountUpdateOne) ClearProxyFallbackOriginID() *AccountUpdateOne {
+	_u.mutation.ClearProxyFallbackOriginID()
 	return _u
 }
 
@@ -1807,6 +2047,40 @@ func (_u *AccountUpdateOne) ClearSessionWindowStatus() *AccountUpdateOne {
 	return _u
 }
 
+// SetParentAccountID sets the "parent_account_id" field.
+func (_u *AccountUpdateOne) SetParentAccountID(v int64) *AccountUpdateOne {
+	_u.mutation.SetParentAccountID(v)
+	return _u
+}
+
+// SetNillableParentAccountID sets the "parent_account_id" field if the given value is not nil.
+func (_u *AccountUpdateOne) SetNillableParentAccountID(v *int64) *AccountUpdateOne {
+	if v != nil {
+		_u.SetParentAccountID(*v)
+	}
+	return _u
+}
+
+// ClearParentAccountID clears the value of the "parent_account_id" field.
+func (_u *AccountUpdateOne) ClearParentAccountID() *AccountUpdateOne {
+	_u.mutation.ClearParentAccountID()
+	return _u
+}
+
+// SetQuotaDimension sets the "quota_dimension" field.
+func (_u *AccountUpdateOne) SetQuotaDimension(v account.QuotaDimension) *AccountUpdateOne {
+	_u.mutation.SetQuotaDimension(v)
+	return _u
+}
+
+// SetNillableQuotaDimension sets the "quota_dimension" field if the given value is not nil.
+func (_u *AccountUpdateOne) SetNillableQuotaDimension(v *account.QuotaDimension) *AccountUpdateOne {
+	if v != nil {
+		_u.SetQuotaDimension(*v)
+	}
+	return _u
+}
+
 // AddGroupIDs adds the "groups" edge to the Group entity by IDs.
 func (_u *AccountUpdateOne) AddGroupIDs(ids ...int64) *AccountUpdateOne {
 	_u.mutation.AddGroupIDs(ids...)
@@ -1844,6 +2118,40 @@ func (_u *AccountUpdateOne) SetNillableOwnerID(id *int64) *AccountUpdateOne {
 // SetOwner sets the "owner" edge to the User entity.
 func (_u *AccountUpdateOne) SetOwner(v *User) *AccountUpdateOne {
 	return _u.SetOwnerID(v.ID)
+}
+
+// SetParentID sets the "parent" edge to the Account entity by ID.
+func (_u *AccountUpdateOne) SetParentID(id int64) *AccountUpdateOne {
+	_u.mutation.SetParentID(id)
+	return _u
+}
+
+// SetNillableParentID sets the "parent" edge to the Account entity by ID if the given value is not nil.
+func (_u *AccountUpdateOne) SetNillableParentID(id *int64) *AccountUpdateOne {
+	if id != nil {
+		_u = _u.SetParentID(*id)
+	}
+	return _u
+}
+
+// SetParent sets the "parent" edge to the Account entity.
+func (_u *AccountUpdateOne) SetParent(v *Account) *AccountUpdateOne {
+	return _u.SetParentID(v.ID)
+}
+
+// AddChildIDs adds the "children" edge to the Account entity by IDs.
+func (_u *AccountUpdateOne) AddChildIDs(ids ...int64) *AccountUpdateOne {
+	_u.mutation.AddChildIDs(ids...)
+	return _u
+}
+
+// AddChildren adds the "children" edges to the Account entity.
+func (_u *AccountUpdateOne) AddChildren(v ...*Account) *AccountUpdateOne {
+	ids := make([]int64, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.AddChildIDs(ids...)
 }
 
 // AddUsageLogIDs adds the "usage_logs" edge to the UsageLog entity by IDs.
@@ -1897,6 +2205,33 @@ func (_u *AccountUpdateOne) ClearProxy() *AccountUpdateOne {
 func (_u *AccountUpdateOne) ClearOwner() *AccountUpdateOne {
 	_u.mutation.ClearOwner()
 	return _u
+}
+
+// ClearParent clears the "parent" edge to the Account entity.
+func (_u *AccountUpdateOne) ClearParent() *AccountUpdateOne {
+	_u.mutation.ClearParent()
+	return _u
+}
+
+// ClearChildren clears all "children" edges to the Account entity.
+func (_u *AccountUpdateOne) ClearChildren() *AccountUpdateOne {
+	_u.mutation.ClearChildren()
+	return _u
+}
+
+// RemoveChildIDs removes the "children" edge to Account entities by IDs.
+func (_u *AccountUpdateOne) RemoveChildIDs(ids ...int64) *AccountUpdateOne {
+	_u.mutation.RemoveChildIDs(ids...)
+	return _u
+}
+
+// RemoveChildren removes "children" edges to Account entities.
+func (_u *AccountUpdateOne) RemoveChildren(v ...*Account) *AccountUpdateOne {
+	ids := make([]int64, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.RemoveChildIDs(ids...)
 }
 
 // ClearUsageLogs clears all "usage_logs" edges to the UsageLog entity.
@@ -2017,6 +2352,11 @@ func (_u *AccountUpdateOne) check() error {
 			return &ValidationError{Name: "session_window_status", err: fmt.Errorf(`ent: validator failed for field "Account.session_window_status": %w`, err)}
 		}
 	}
+	if v, ok := _u.mutation.QuotaDimension(); ok {
+		if err := account.QuotaDimensionValidator(v); err != nil {
+			return &ValidationError{Name: "quota_dimension", err: fmt.Errorf(`ent: validator failed for field "Account.quota_dimension": %w`, err)}
+		}
+	}
 	return nil
 }
 
@@ -2096,6 +2436,15 @@ func (_u *AccountUpdateOne) sqlSave(ctx context.Context) (_node *Account, err er
 	}
 	if _u.mutation.SharePolicyIDCleared() {
 		_spec.ClearField(account.FieldSharePolicyID, field.TypeInt64)
+	}
+	if value, ok := _u.mutation.ProxyFallbackOriginID(); ok {
+		_spec.SetField(account.FieldProxyFallbackOriginID, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.AddedProxyFallbackOriginID(); ok {
+		_spec.AddField(account.FieldProxyFallbackOriginID, field.TypeInt64, value)
+	}
+	if _u.mutation.ProxyFallbackOriginIDCleared() {
+		_spec.ClearField(account.FieldProxyFallbackOriginID, field.TypeInt64)
 	}
 	if value, ok := _u.mutation.Concurrency(); ok {
 		_spec.SetField(account.FieldConcurrency, field.TypeInt, value)
@@ -2214,6 +2563,9 @@ func (_u *AccountUpdateOne) sqlSave(ctx context.Context) (_node *Account, err er
 	if _u.mutation.SessionWindowStatusCleared() {
 		_spec.ClearField(account.FieldSessionWindowStatus, field.TypeString)
 	}
+	if value, ok := _u.mutation.QuotaDimension(); ok {
+		_spec.SetField(account.FieldQuotaDimension, field.TypeEnum, value)
+	}
 	if _u.mutation.GroupsCleared() {
 		edge := &sqlgraph.EdgeSpec{
 			Rel:     sqlgraph.M2M,
@@ -2322,6 +2674,80 @@ func (_u *AccountUpdateOne) sqlSave(ctx context.Context) (_node *Account, err er
 			Bidi:    false,
 			Target: &sqlgraph.EdgeTarget{
 				IDSpec: sqlgraph.NewFieldSpec(user.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Add = append(_spec.Edges.Add, edge)
+	}
+	if _u.mutation.ParentCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.M2O,
+			Inverse: true,
+			Table:   account.ParentTable,
+			Columns: []string{account.ParentColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(account.FieldID, field.TypeInt64),
+			},
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.ParentIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.M2O,
+			Inverse: true,
+			Table:   account.ParentTable,
+			Columns: []string{account.ParentColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(account.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Add = append(_spec.Edges.Add, edge)
+	}
+	if _u.mutation.ChildrenCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   account.ChildrenTable,
+			Columns: []string{account.ChildrenColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(account.FieldID, field.TypeInt64),
+			},
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.RemovedChildrenIDs(); len(nodes) > 0 && !_u.mutation.ChildrenCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   account.ChildrenTable,
+			Columns: []string{account.ChildrenColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(account.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.ChildrenIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   account.ChildrenTable,
+			Columns: []string{account.ChildrenColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(account.FieldID, field.TypeInt64),
 			},
 		}
 		for _, k := range nodes {

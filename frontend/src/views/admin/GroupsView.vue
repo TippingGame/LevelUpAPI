@@ -67,6 +67,32 @@
                 :class="loading ? 'animate-spin' : ''"
               />
             </button>
+            <div ref="columnDropdownRef" class="relative">
+              <button
+                @click="showColumnDropdown = !showColumnDropdown"
+                class="btn btn-secondary"
+                :title="t('admin.groups.columnSettings')"
+              >
+                <Icon name="eye" size="md" />
+              </button>
+              <div
+                v-if="showColumnDropdown"
+                class="absolute right-0 z-50 mt-2 w-52 origin-top-right rounded-lg border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-800"
+              >
+                <div class="max-h-80 overflow-y-auto p-2">
+                  <button
+                    v-for="column in toggleableColumns"
+                    :key="column.key"
+                    type="button"
+                    class="flex w-full items-center justify-between rounded-md px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-700"
+                    @click="toggleColumn(column.key)"
+                  >
+                    <span>{{ column.label }}</span>
+                    <Icon v-if="isColumnVisible(column.key)" name="check" size="sm" class="text-primary-500" />
+                  </button>
+                </div>
+              </div>
+            </div>
             <button
               @click="openSortModal"
               class="btn btn-secondary"
@@ -76,7 +102,7 @@
               {{ t("admin.groups.sortOrder") }}
             </button>
             <button
-              @click="showCreateModal = true"
+              @click="openCreateModal"
               class="btn btn-primary"
               data-tour="groups-create-btn"
             >
@@ -109,6 +135,10 @@
                 {{ t("admin.groups.scope.private") }}
               </span>
             </div>
+          </template>
+
+          <template #cell-id="{ value }">
+            <span class="font-mono text-xs text-gray-500 dark:text-gray-400">#{{ value }}</span>
           </template>
 
           <template #cell-platform="{ value, row }">
@@ -317,6 +347,26 @@
                 <span class="text-xs">{{ t("common.edit") }}</span>
               </button>
               <button
+                data-testid="group-duplicate"
+                :title="
+                  duplicatingGroupIds.has(row.id)
+                    ? t('admin.groups.duplicating')
+                    : t('admin.groups.duplicate')
+                "
+                :disabled="duplicatingGroupIds.has(row.id)"
+                @click="handleDuplicate(row)"
+                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-primary-600 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-dark-700 dark:hover:text-primary-400"
+              >
+                <Icon name="copy" size="sm" />
+                <span class="text-xs">
+                  {{
+                    duplicatingGroupIds.has(row.id)
+                      ? t("admin.groups.duplicating")
+                      : t("admin.groups.duplicate")
+                  }}
+                </span>
+              </button>
+              <button
                 @click="handleRateMultipliers(row)"
                 class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-purple-600 dark:hover:bg-dark-700 dark:hover:text-purple-400"
               >
@@ -358,7 +408,7 @@
               :title="t('admin.groups.noGroupsYet')"
               :description="t('admin.groups.createFirstGroup')"
               :action-text="t('admin.groups.createGroup')"
-              @action="showCreateModal = true"
+              @action="openCreateModal"
             />
           </template>
         </DataTable>
@@ -679,6 +729,73 @@
                 class="input"
                 :placeholder="t('admin.groups.subscription.noLimit')"
               />
+            </div>
+          </div>
+        </div>
+
+        <div class="border-t pt-4">
+          <div class="mb-3 flex items-center justify-between gap-3">
+            <div>
+              <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
+                {{ t("admin.groups.modelsList.title") }}
+              </label>
+              <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                {{ t("admin.groups.modelsList.hint") }}
+              </p>
+            </div>
+            <button
+              type="button"
+              :class="[
+                'relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors',
+                createModelsListState.enabled ? 'bg-primary-500' : 'bg-gray-300 dark:bg-dark-600',
+              ]"
+              @click="createModelsListState.enabled = !createModelsListState.enabled"
+            >
+              <span
+                :class="[
+                  'inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform',
+                  createModelsListState.enabled ? 'translate-x-6' : 'translate-x-1',
+                ]"
+              />
+            </button>
+          </div>
+          <div
+            v-if="createModelsListState.enabled"
+            class="overflow-hidden rounded-lg border border-gray-200 bg-gray-50/50 dark:border-dark-600 dark:bg-dark-800/40"
+          >
+            <div
+              v-if="!createModelsListLoading && createModelsListState.items.length > 0"
+              class="flex items-center justify-between gap-2 border-b border-gray-200 bg-gray-50 px-3 py-2 text-xs dark:border-dark-600 dark:bg-dark-800"
+            >
+              <span class="text-gray-500 dark:text-gray-400">
+                {{ t("admin.groups.modelsList.selectedSummary", { selected: createModelsListSelectedCount, total: createModelsListState.items.length }) }}
+              </span>
+              <div class="flex items-center gap-1.5">
+                <button type="button" class="rounded px-2 py-1 font-medium text-primary-600 transition-colors hover:bg-primary-50 dark:text-primary-400 dark:hover:bg-primary-900/20" @click="selectAllModelsListItems(createModelsListState)">
+                  {{ t("admin.groups.modelsList.selectAll") }}
+                </button>
+                <button type="button" class="rounded px-2 py-1 font-medium text-gray-600 transition-colors hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-dark-700" @click="invertModelsListSelection(createModelsListState)">
+                  {{ t("admin.groups.modelsList.invertSelection") }}
+                </button>
+              </div>
+            </div>
+            <div class="max-h-64 space-y-2 overflow-y-auto p-2">
+              <p v-if="createModelsListLoading" class="text-xs text-gray-500 dark:text-gray-400">
+                {{ t("admin.groups.modelsList.loading") }}
+              </p>
+              <p v-else-if="createModelsListState.items.length === 0" class="text-xs text-gray-500 dark:text-gray-400">
+                {{ t("admin.groups.modelsList.empty") }}
+              </p>
+              <div v-for="(item, index) in createModelsListState.items" :key="item.id" class="flex items-center gap-2 rounded border border-gray-200 bg-white px-3 py-2 dark:border-dark-600 dark:bg-dark-800">
+                <input v-model="item.selected" type="checkbox" class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500" />
+                <span class="min-w-0 flex-1 break-all text-sm text-gray-700 dark:text-gray-300">{{ item.id }}</span>
+                <button type="button" :disabled="index === 0" class="rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700 disabled:opacity-40 dark:hover:bg-dark-600 dark:hover:text-gray-200" @click="moveCreateModelsListItem(index, index - 1)">
+                  <Icon name="arrowUp" size="sm" />
+                </button>
+                <button type="button" :disabled="index === createModelsListState.items.length - 1" class="rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700 disabled:opacity-40 dark:hover:bg-dark-600 dark:hover:text-gray-200" @click="moveCreateModelsListItem(index, index + 1)">
+                  <Icon name="arrowDown" size="sm" />
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -1935,6 +2052,73 @@
           </div>
         </div>
 
+        <div class="border-t pt-4">
+          <div class="mb-3 flex items-center justify-between gap-3">
+            <div>
+              <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
+                {{ t("admin.groups.modelsList.title") }}
+              </label>
+              <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                {{ t("admin.groups.modelsList.hint") }}
+              </p>
+            </div>
+            <button
+              type="button"
+              :class="[
+                'relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors',
+                editModelsListState.enabled ? 'bg-primary-500' : 'bg-gray-300 dark:bg-dark-600',
+              ]"
+              @click="editModelsListState.enabled = !editModelsListState.enabled"
+            >
+              <span
+                :class="[
+                  'inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform',
+                  editModelsListState.enabled ? 'translate-x-6' : 'translate-x-1',
+                ]"
+              />
+            </button>
+          </div>
+          <div
+            v-if="editModelsListState.enabled"
+            class="overflow-hidden rounded-lg border border-gray-200 bg-gray-50/50 dark:border-dark-600 dark:bg-dark-800/40"
+          >
+            <div
+              v-if="!editModelsListLoading && editModelsListState.items.length > 0"
+              class="flex items-center justify-between gap-2 border-b border-gray-200 bg-gray-50 px-3 py-2 text-xs dark:border-dark-600 dark:bg-dark-800"
+            >
+              <span class="text-gray-500 dark:text-gray-400">
+                {{ t("admin.groups.modelsList.selectedSummary", { selected: editModelsListSelectedCount, total: editModelsListState.items.length }) }}
+              </span>
+              <div class="flex items-center gap-1.5">
+                <button type="button" class="rounded px-2 py-1 font-medium text-primary-600 transition-colors hover:bg-primary-50 dark:text-primary-400 dark:hover:bg-primary-900/20" @click="selectAllModelsListItems(editModelsListState)">
+                  {{ t("admin.groups.modelsList.selectAll") }}
+                </button>
+                <button type="button" class="rounded px-2 py-1 font-medium text-gray-600 transition-colors hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-dark-700" @click="invertModelsListSelection(editModelsListState)">
+                  {{ t("admin.groups.modelsList.invertSelection") }}
+                </button>
+              </div>
+            </div>
+            <div class="max-h-64 space-y-2 overflow-y-auto p-2">
+              <p v-if="editModelsListLoading" class="text-xs text-gray-500 dark:text-gray-400">
+                {{ t("admin.groups.modelsList.loading") }}
+              </p>
+              <p v-else-if="editModelsListState.items.length === 0" class="text-xs text-gray-500 dark:text-gray-400">
+                {{ t("admin.groups.modelsList.empty") }}
+              </p>
+              <div v-for="(item, index) in editModelsListState.items" :key="item.id" class="flex items-center gap-2 rounded border border-gray-200 bg-white px-3 py-2 dark:border-dark-600 dark:bg-dark-800">
+                <input v-model="item.selected" type="checkbox" class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500" />
+                <span class="min-w-0 flex-1 break-all text-sm text-gray-700 dark:text-gray-300">{{ item.id }}</span>
+                <button type="button" :disabled="index === 0" class="rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700 disabled:opacity-40 dark:hover:bg-dark-600 dark:hover:text-gray-200" @click="moveEditModelsListItem(index, index - 1)">
+                  <Icon name="arrowUp" size="sm" />
+                </button>
+                <button type="button" :disabled="index === editModelsListState.items.length - 1" class="rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700 disabled:opacity-40 dark:hover:bg-dark-600 dark:hover:text-gray-200" @click="moveEditModelsListItem(index, index + 1)">
+                  <Icon name="arrowDown" size="sm" />
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <!-- 图片生成计费配置 -->
         <div
           v-if="
@@ -3019,6 +3203,7 @@ import GroupRPMOverridesModal from "@/components/admin/group/GroupRPMOverridesMo
 import GroupCapacityBadge from "@/components/common/GroupCapacityBadge.vue";
 import { VueDraggable } from "vue-draggable-plus";
 import { createStableObjectKeyResolver } from "@/utils/stableObjectKey";
+import { extractApiErrorMessage } from "@/utils/apiError";
 import { useKeyedDebouncedSearch } from "@/composables/useKeyedDebouncedSearch";
 import { getPersistedPageSize } from "@/composables/usePersistedPageSize";
 import { GAME_CURRENCY_UNIT, formatGameCoins } from "@/utils/gameCurrency";
@@ -3030,13 +3215,33 @@ import {
   resetMessagesDispatchFormState,
   type MessagesDispatchMappingRow,
 } from "./groupsMessagesDispatch";
+import {
+  buildModelsListConfig,
+  createModelsListState as createInitialModelsListState,
+  invertModelsListSelection,
+  moveModelsListItem,
+  selectAllModelsListItems,
+  setModelsListCandidates,
+  type ModelsListState,
+} from "./groupsModelsList";
+import { createModelsListCandidatesTracker } from "./groupsModelsListCandidates";
 
 const { t } = useI18n();
 const appStore = useAppStore();
 const onboardingStore = useOnboardingStore();
 
-const columns = computed<Column[]>(() => [
+const ALWAYS_VISIBLE_COLUMNS = new Set(["name", "actions"]);
+const DEFAULT_HIDDEN_COLUMNS = ["id"];
+const HIDDEN_COLUMNS_KEY = "group-hidden-columns";
+const COLUMN_SETTINGS_VERSION_KEY = "group-column-settings-version";
+const COLUMN_SETTINGS_VERSION = 2;
+const VERSION_NEW_HIDDEN_COLUMNS: Record<number, string[]> = {
+  2: ["id"],
+};
+
+const allColumns = computed<Column[]>(() => [
   { key: "name", label: t("admin.groups.columns.name"), sortable: true },
+  { key: "id", label: t("admin.groups.columns.id"), sortable: true },
   {
     key: "platform",
     label: t("admin.groups.columns.platform"),
@@ -3071,6 +3276,86 @@ const columns = computed<Column[]>(() => [
   { key: "status", label: t("admin.groups.columns.status"), sortable: true },
   { key: "actions", label: t("admin.groups.columns.actions"), sortable: false },
 ]);
+
+const toggleableColumns = computed(() =>
+  allColumns.value.filter((column) => !ALWAYS_VISIBLE_COLUMNS.has(column.key)),
+);
+const hiddenColumns = reactive<Set<string>>(new Set());
+const showColumnDropdown = ref(false);
+const columnDropdownRef = ref<HTMLElement | null>(null);
+
+const getValidHiddenColumnKeys = () =>
+  new Set(toggleableColumns.value.map((column) => column.key));
+
+const saveColumnsToStorage = () => {
+  try {
+    const validKeys = getValidHiddenColumnKeys();
+    const keys = [...hiddenColumns].filter((key) => validKeys.has(key));
+    localStorage.setItem(HIDDEN_COLUMNS_KEY, JSON.stringify(keys));
+    localStorage.setItem(COLUMN_SETTINGS_VERSION_KEY, String(COLUMN_SETTINGS_VERSION));
+  } catch (error) {
+    console.error("Failed to save group column settings:", error);
+  }
+};
+
+const loadSavedColumns = () => {
+  hiddenColumns.clear();
+  try {
+    const saved = localStorage.getItem(HIDDEN_COLUMNS_KEY);
+    const validKeys = getValidHiddenColumnKeys();
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      if (Array.isArray(parsed)) {
+        parsed
+          .filter((key): key is string => typeof key === "string" && validKeys.has(key))
+          .forEach((key) => hiddenColumns.add(key));
+      }
+
+      const storedVersion = Number(localStorage.getItem(COLUMN_SETTINGS_VERSION_KEY) ?? "1");
+      if (storedVersion < COLUMN_SETTINGS_VERSION) {
+        for (let version = storedVersion + 1; version <= COLUMN_SETTINGS_VERSION; version += 1) {
+          for (const key of VERSION_NEW_HIDDEN_COLUMNS[version] ?? []) {
+            if (validKeys.has(key)) hiddenColumns.add(key);
+          }
+        }
+        saveColumnsToStorage();
+      }
+    } else {
+      DEFAULT_HIDDEN_COLUMNS.forEach((key) => {
+        if (validKeys.has(key)) hiddenColumns.add(key);
+      });
+      saveColumnsToStorage();
+    }
+  } catch (error) {
+    console.error("Failed to load group column settings:", error);
+    DEFAULT_HIDDEN_COLUMNS.forEach((key) => hiddenColumns.add(key));
+  }
+};
+
+const isColumnVisible = (key: string) => !hiddenColumns.has(key);
+const hasVisibleUsageSummaryConsumer = computed(
+  () => isColumnVisible("usage") || isColumnVisible("billing_type"),
+);
+const hasVisibleCapacityColumn = computed(() => isColumnVisible("capacity"));
+
+const toggleColumn = (key: string) => {
+  if (!getValidHiddenColumnKeys().has(key)) return;
+  const wasHidden = hiddenColumns.has(key);
+  if (wasHidden) hiddenColumns.delete(key);
+  else hiddenColumns.add(key);
+  saveColumnsToStorage();
+
+  if (wasHidden && (key === "usage" || key === "billing_type")) loadUsageSummary();
+  if (wasHidden && key === "capacity") loadCapacitySummary();
+};
+
+const columns = computed<Column[]>(() =>
+  allColumns.value.filter(
+    (column) => ALWAYS_VISIBLE_COLUMNS.has(column.key) || !hiddenColumns.has(column.key),
+  ),
+);
+
+if (typeof window !== "undefined") loadSavedColumns();
 
 // Filter options
 const statusOptions = computed(() => [
@@ -3278,6 +3563,7 @@ const submitting = ref(false);
 const sortSubmitting = ref(false);
 const editingGroup = ref<AdminGroup | null>(null);
 const deletingGroup = ref<AdminGroup | null>(null);
+const duplicatingGroupIds = reactive(new Set<number>());
 const showRateMultipliersModal = ref(false);
 const rateMultipliersGroup = ref<AdminGroup | null>(null);
 const showRateSchedulesModal = ref(false);
@@ -3287,6 +3573,61 @@ const rpmOverridesGroup = ref<AdminGroup | null>(null);
 const sortableGroups = ref<AdminGroup[]>([]);
 const createMessagesDispatchDefaults = createDefaultMessagesDispatchFormState();
 const editMessagesDispatchDefaults = createDefaultMessagesDispatchFormState();
+const createModelsListState = reactive(createInitialModelsListState());
+const editModelsListState = reactive(createInitialModelsListState());
+const createModelsListLoading = ref(false);
+const editModelsListLoading = ref(false);
+const modelsListCandidatesTracker = createModelsListCandidatesTracker();
+const createModelsListSelectedCount = computed(
+  () => createModelsListState.items.filter((item) => item.selected).length,
+);
+const editModelsListSelectedCount = computed(
+  () => editModelsListState.items.filter((item) => item.selected).length,
+);
+
+const resetModelsListState = (
+  state: ModelsListState,
+  config?: Parameters<typeof createInitialModelsListState>[0],
+) => {
+  const fresh = createInitialModelsListState(config);
+  state.enabled = fresh.enabled;
+  state.savedModels = fresh.savedModels;
+  state.items = fresh.items;
+};
+
+const loadModelsListCandidates = async (
+  mode: "create" | "edit",
+  groupID: number,
+  platform: GroupPlatform,
+) => {
+  const request = { mode, groupID, platform };
+  const requestID = modelsListCandidatesTracker.next(request);
+  const state = mode === "create" ? createModelsListState : editModelsListState;
+  const loadingState = mode === "create" ? createModelsListLoading : editModelsListLoading;
+  loadingState.value = true;
+  try {
+    const models = await adminAPI.groups.getModelsListCandidates(groupID, platform);
+    if (modelsListCandidatesTracker.isCurrent(requestID, request)) {
+      setModelsListCandidates(state, models);
+    }
+  } catch (error) {
+    if (modelsListCandidatesTracker.isCurrent(requestID, request)) {
+      console.error("Error loading group models list candidates:", error);
+    }
+  } finally {
+    if (modelsListCandidatesTracker.isCurrent(requestID, request)) {
+      loadingState.value = false;
+    }
+  }
+};
+
+const moveCreateModelsListItem = (fromIndex: number, toIndex: number) => {
+  moveModelsListItem(createModelsListState, fromIndex, toIndex);
+};
+
+const moveEditModelsListItem = (fromIndex: number, toIndex: number) => {
+  moveModelsListItem(editModelsListState, fromIndex, toIndex);
+};
 
 const createForm = reactive({
   name: "",
@@ -3707,8 +4048,9 @@ const loadGroups = async () => {
     groups.value = response.items;
     pagination.total = response.total;
     pagination.pages = response.pages;
-    loadUsageSummary();
-    loadCapacitySummary();
+    if (hasVisibleUsageSummaryConsumer.value) loadUsageSummary();
+    else usageLoading.value = false;
+    if (hasVisibleCapacityColumn.value) loadCapacitySummary();
   } catch (error: any) {
     if (
       signal.aborted ||
@@ -3731,6 +4073,10 @@ const formatCost = (cost: number): string => {
 };
 
 const loadUsageSummary = async () => {
+  if (!hasVisibleUsageSummaryConsumer.value) {
+    usageLoading.value = false;
+    return;
+  }
   usageLoading.value = true;
   try {
     const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -3751,6 +4097,7 @@ const loadUsageSummary = async () => {
 };
 
 const loadCapacitySummary = async () => {
+  if (!hasVisibleCapacityColumn.value) return;
   try {
     const data = await adminAPI.groups.getCapacitySummary();
     const map = new Map<
@@ -3807,6 +4154,11 @@ const handleSort = (key: string, order: 'asc' | 'desc') => {
   loadGroups();
 };
 
+const openCreateModal = () => {
+  showCreateModal.value = true;
+  loadModelsListCandidates("create", 0, createForm.platform);
+};
+
 const closeCreateModal = () => {
   showCreateModal.value = false;
   createModelRoutingRules.value.forEach((rule) => {
@@ -3844,6 +4196,8 @@ const closeCreateModal = () => {
   createForm.supported_model_scopes = ["claude", "gemini_text", "gemini_image"];
   createForm.mcp_xml_inject = true;
   createForm.copy_accounts_from_group_ids = [];
+  createForm.rpm_limit = 0;
+  resetModelsListState(createModelsListState);
   createModelRoutingRules.value = [];
 };
 
@@ -3895,6 +4249,7 @@ const handleCreateGroup = async () => {
       model_routing: convertRoutingRulesToApiFormat(
         createModelRoutingRules.value,
       ),
+      models_list_config: buildModelsListConfig(createModelsListState),
       messages_dispatch_model_config:
         createForm.platform === "openai" || createForm.platform === "grok"
           ? messagesDispatchFormStateToConfig({
@@ -4000,10 +4355,12 @@ const handleEdit = async (group: AdminGroup) => {
   editForm.mcp_xml_inject = group.mcp_xml_inject ?? true;
   editForm.copy_accounts_from_group_ids = []; // 复制账号字段每次编辑时重置为空
   editForm.rpm_limit = group.rpm_limit ?? 0;
+  resetModelsListState(editModelsListState, group.models_list_config);
   // 加载模型路由规则（异步加载账号名称）
   editModelRoutingRules.value = await convertApiFormatToRoutingRules(
     group.model_routing,
   );
+  loadModelsListCandidates("edit", group.id, group.platform);
   showEditModal.value = true;
 };
 
@@ -4023,6 +4380,7 @@ const closeEditModal = () => {
   editForm.video_price_1080p = null;
   editForm.web_search_price_per_call = null;
   resetMessagesDispatchFormState(editForm);
+  resetModelsListState(editModelsListState);
 };
 
 const handleUpdateGroup = async () => {
@@ -4055,6 +4413,7 @@ const handleUpdateGroup = async () => {
       model_routing: convertRoutingRulesToApiFormat(
         editModelRoutingRules.value,
       ),
+      models_list_config: buildModelsListConfig(editModelsListState),
       messages_dispatch_model_config:
         editForm.platform === "openai" || editForm.platform === "grok"
           ? messagesDispatchFormStateToConfig({
@@ -4141,6 +4500,25 @@ const handleRPMOverrides = (group: AdminGroup) => {
   showRPMOverridesModal.value = true;
 };
 
+const handleDuplicate = async (group: AdminGroup) => {
+  if (duplicatingGroupIds.has(group.id)) return;
+
+  duplicatingGroupIds.add(group.id);
+  try {
+    const duplicate = await adminAPI.groups.duplicate(group.id);
+    appStore.showSuccess(
+      t("admin.groups.duplicateSuccess", { name: duplicate.name }),
+    );
+    await loadGroups();
+  } catch (error: unknown) {
+    appStore.showError(
+      extractApiErrorMessage(error, t("admin.groups.duplicateFailed")),
+    );
+  } finally {
+    duplicatingGroupIds.delete(group.id);
+  }
+};
+
 const handleDelete = (group: AdminGroup) => {
   deletingGroup.value = group;
   showDeleteDialog.value = true;
@@ -4191,6 +4569,10 @@ watch(
       createForm.require_oauth_only = false;
       createForm.require_privacy_set = false;
     }
+    if (showCreateModal.value) {
+      resetModelsListState(createModelsListState);
+      loadModelsListCandidates("create", 0, newVal);
+    }
   },
 );
 
@@ -4208,26 +4590,22 @@ watch(
       editForm.require_oauth_only = false;
       editForm.require_privacy_set = false;
     }
+    if (editingGroup.value) {
+      resetModelsListState(
+        editModelsListState,
+        newVal === editingGroup.value.platform ? editingGroup.value.models_list_config : undefined,
+      );
+      loadModelsListCandidates("edit", editingGroup.value.id, newVal);
+    }
   },
 );
-
-watch(
-  () => editForm.platform,
-  (newVal) => {
-    if (!['anthropic', 'antigravity'].includes(newVal)) {
-      editForm.fallback_group_id_on_invalid_request = null
-    }
-    if (newVal !== 'openai' && newVal !== 'grok') {
-      editForm.required_account_level = ''
-      editForm.allow_messages_dispatch = false
-      editForm.default_mapped_model = ''
-    }
-  }
-)
 
 // 点击外部关闭账号搜索下拉框
 const handleClickOutside = (event: MouseEvent) => {
   const target = event.target as HTMLElement;
+  if (columnDropdownRef.value && !columnDropdownRef.value.contains(target)) {
+    showColumnDropdown.value = false;
+  }
   // 检查是否点击在下拉框或输入框内
   if (!target.closest(".account-search-container")) {
     Object.keys(showAccountDropdown.value).forEach((key) => {

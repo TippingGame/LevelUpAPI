@@ -57,6 +57,21 @@ func (Proxy) Fields() []ent.Field {
 			Default("active"),
 		field.Int("max_accounts").
 			Default(0),
+		field.Time("expires_at").
+			Optional().
+			Nillable().
+			Comment("Proxy expiration time (NULL means never expires)."),
+		field.String("fallback_mode").
+			MaxLen(20).
+			Default("none").
+			Comment("Fallback target on expiry: none | proxy | direct."),
+		field.Int64("backup_proxy_id").
+			Optional().
+			Nillable().
+			Comment("Backup proxy id when fallback_mode=proxy (self-reference)."),
+		field.Int("expiry_warn_days").
+			Default(7).
+			Comment("Days before expiry to flag as expiring-soon (per proxy)."),
 	}
 }
 
@@ -70,6 +85,9 @@ func (Proxy) Edges() []ent.Edge {
 			Ref("owned_proxies").
 			Field("owner_user_id").
 			Unique(),
+		edge.To("backup_proxy", Proxy.Type).
+			Field("backup_proxy_id").
+			Unique(),
 	}
 }
 
@@ -78,5 +96,7 @@ func (Proxy) Indexes() []ent.Index {
 		index.Fields("status"),
 		index.Fields("owner_user_id"),
 		index.Fields("deleted_at"),
+		index.Fields("expires_at"),
+		index.Fields("backup_proxy_id"),
 	}
 }

@@ -16,12 +16,13 @@ import (
 
 // UserHandler handles user-related requests
 type UserHandler struct {
-	userService      *service.UserService
-	authService      *service.AuthService
-	emailService     *service.EmailService
-	emailCache       service.EmailCache
-	affiliateService *service.AffiliateService
-	attrService      *service.UserAttributeService
+	userService           *service.UserService
+	authService           *service.AuthService
+	emailService          *service.EmailService
+	emailCache            service.EmailCache
+	affiliateService      *service.AffiliateService
+	attrService           *service.UserAttributeService
+	userPlatformQuotaRepo service.UserPlatformQuotaRepository
 }
 
 // NewUserHandler creates a new UserHandler
@@ -31,19 +32,26 @@ func NewUserHandler(
 	emailService *service.EmailService,
 	emailCache service.EmailCache,
 	affiliateService *service.AffiliateService,
-	attrServices ...*service.UserAttributeService,
+	dependencies ...any,
 ) *UserHandler {
 	var attrService *service.UserAttributeService
-	if len(attrServices) > 0 {
-		attrService = attrServices[0]
+	var userPlatformQuotaRepo service.UserPlatformQuotaRepository
+	for _, dependency := range dependencies {
+		switch value := dependency.(type) {
+		case *service.UserAttributeService:
+			attrService = value
+		case service.UserPlatformQuotaRepository:
+			userPlatformQuotaRepo = value
+		}
 	}
 	return &UserHandler{
-		userService:      userService,
-		authService:      authService,
-		emailService:     emailService,
-		emailCache:       emailCache,
-		affiliateService: affiliateService,
-		attrService:      attrService,
+		userService:           userService,
+		authService:           authService,
+		emailService:          emailService,
+		emailCache:            emailCache,
+		affiliateService:      affiliateService,
+		attrService:           attrService,
+		userPlatformQuotaRepo: userPlatformQuotaRepo,
 	}
 }
 

@@ -35,7 +35,7 @@ func TestGatewayService_BuildAnthropicVertexServiceAccountRequest(t *testing.T) 
 	body := []byte(`{"model":"claude-sonnet-4-5","stream":false,"max_tokens":32,"messages":[{"role":"user","content":"hello"}]}`)
 
 	svc := &GatewayService{}
-	req, err := svc.buildUpstreamRequest(
+	req, _, err := svc.buildUpstreamRequest(
 		context.Background(),
 		c,
 		account,
@@ -79,7 +79,7 @@ func TestGatewayService_BuildAnthropicVertexFiltersUnsupportedBetas(t *testing.T
 	body := []byte(`{"model":"claude-opus-4-7","context_management":{"edits":[{"type":"clear_thinking_20251015"}]},"messages":[{"role":"user","content":"hi"}]}`)
 
 	svc := &GatewayService{}
-	req, err := svc.buildUpstreamRequest(
+	req, _, err := svc.buildUpstreamRequest(
 		context.Background(),
 		c,
 		account,
@@ -123,7 +123,7 @@ func TestGatewayService_BuildAnthropicVertexDropsHeaderWhenAllBetasUnsupported(t
 	body := []byte(`{"model":"claude-opus-4-7","context_management":{"edits":[{"type":"clear_thinking_20251015"}]},"messages":[{"role":"user","content":"hi"}]}`)
 
 	svc := &GatewayService{}
-	req, err := svc.buildUpstreamRequest(
+	req, _, err := svc.buildUpstreamRequest(
 		context.Background(),
 		c,
 		account,

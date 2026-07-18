@@ -2,6 +2,13 @@ import { apiClient } from '../client'
 
 export type ModerationMode = 'off' | 'observe' | 'pre_block'
 export type ContentModerationProvider = 'openai' | 'zhipu'
+export type KeywordBlockingMode = 'keyword_only' | 'keyword_and_api' | 'api_only'
+export type ContentModerationModelFilterType = 'all' | 'include' | 'exclude'
+
+export interface ContentModerationModelFilter {
+  type: ContentModerationModelFilterType
+  models: string[]
+}
 
 export interface ContentModerationCyberPreflightRules {
   standalone_block_markers: string[]
@@ -33,6 +40,7 @@ export interface ContentModerationConfig {
   all_groups: boolean
   group_ids: number[]
   record_non_hits: boolean
+  thresholds: Record<string, number>
   worker_count: number
   queue_size: number
   block_status: number
@@ -45,6 +53,10 @@ export interface ContentModerationConfig {
   hit_retention_days: number
   non_hit_retention_days: number
   pre_hash_check_enabled: boolean
+  blocked_keywords?: string[]
+  keyword_blocking_mode?: KeywordBlockingMode
+  model_filter: ContentModerationModelFilter
+  cyber_policy_exclude_from_ban_count?: boolean
 }
 
 export type ContentModerationAPIKeyStatusValue = 'unknown' | 'ok' | 'error' | 'frozen'
@@ -109,6 +121,7 @@ export interface UpdateContentModerationConfig {
   all_groups?: boolean
   group_ids?: number[]
   record_non_hits?: boolean
+  thresholds?: Record<string, number>
   worker_count?: number
   queue_size?: number
   block_status?: number
@@ -121,6 +134,10 @@ export interface UpdateContentModerationConfig {
   hit_retention_days?: number
   non_hit_retention_days?: number
   pre_hash_check_enabled?: boolean
+  blocked_keywords?: string[]
+  keyword_blocking_mode?: KeywordBlockingMode
+  model_filter?: ContentModerationModelFilter
+  cyber_policy_exclude_from_ban_count?: boolean
 }
 
 export interface ContentModerationRuntimeStatus {
@@ -139,11 +156,35 @@ export interface ContentModerationRuntimeStatus {
   dropped: number
   processed: number
   errors: number
+  pre_block_active: number
+  pre_block_checked: number
+  pre_block_allowed: number
+  pre_block_blocked: number
+  pre_block_errors: number
+  pre_block_avg_latency_ms: number
+  pre_block_api_key_active: number
+  pre_block_api_key_available_count: number
+  pre_block_api_key_total_calls: number
+  pre_block_api_key_loads: ContentModerationAPIKeyLoad[]
   api_key_statuses: ContentModerationAPIKeyStatus[]
   flagged_hash_count: number
   last_cleanup_at?: string
   last_cleanup_deleted_hit: number
   last_cleanup_deleted_non_hit: number
+}
+
+export interface ContentModerationAPIKeyLoad {
+  index: number
+  key_hash: string
+  masked: string
+  status: ContentModerationAPIKeyStatusValue
+  active: number
+  total: number
+  success: number
+  errors: number
+  avg_latency_ms: number
+  last_latency_ms: number
+  last_http_status: number
 }
 
 export interface ContentModerationLog {
@@ -167,6 +208,7 @@ export interface ContentModerationLog {
   flagged: boolean
   highest_category: string
   highest_score: number
+  matched_keyword?: string
   category_scores: Record<string, number>
   threshold_snapshot: Record<string, number>
   input_excerpt: string

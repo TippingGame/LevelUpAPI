@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
-	"github.com/Wei-Shaw/sub2api/internal/pkg/xai"
 	"github.com/Wei-Shaw/sub2api/internal/util/responseheaders"
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
@@ -20,10 +19,14 @@ import (
 	"go.uber.org/zap"
 )
 
-var openaiChatRawAllowedHeaders = map[string]bool{
+var openaiCCRawAllowedHeaders = map[string]bool{
 	"accept-language": true,
 	"user-agent":      true,
 }
+
+// Compatibility alias for older call sites that have not yet moved to the
+// shared CC pipeline name.
+var openaiChatRawAllowedHeaders = openaiCCRawAllowedHeaders
 
 func (s *OpenAIGatewayService) forwardAsRawChatCompletions(
 	ctx context.Context,
@@ -40,10 +43,16 @@ func (s *OpenAIGatewayService) forwardAsRawChatCompletions(
 		return nil, errors.New("missing model in request")
 	}
 	clientStream := gjson.GetBytes(body, "stream").Bool()
-	reasoningEffort := extractOpenAIReasoningEffortFromBody(body, originalModel)
+	serviceTier := extractOpenAIServiceTierFromBody(body)
 
 	billingModel := resolveOpenAIForwardModel(account, originalModel, defaultMappedModel)
 	upstreamModel := normalizeOpenAIModelForUpstream(account, billingModel)
+	grokCacheIdentity := ""
+	if account.Platform == PlatformGrok {
+		grokCacheIdentity = resolveGrokCacheIdentity(c, body, "", upstreamModel)
+	}
+	reasoningEffort := extractOpenAIReasoningEffortFromBody(body, upstreamModel, billingModel, originalModel)
+	reasoningEffort = ApplyThinkingEnabledFallback(reasoningEffort, body, billingModel)
 
 	upstreamBody := body
 	if upstreamModel != originalModel {
@@ -62,25 +71,48 @@ func (s *OpenAIGatewayService) forwardAsRawChatCompletions(
 		}
 		return nil, err
 	}
-	serviceTier := extractOpenAIServiceTierFromBody(upstreamBody)
-	if clientStream {
-		upstreamBody, err = ensureOpenAIChatStreamUsage(upstreamBody)
-		if err != nil {
-			return nil, fmt.Errorf("enable stream usage: %w", err)
-		}
-	}
-
-	token, tokenKind, err := s.GetAccessToken(ctx, account)
+	token, tokenKind, err := s.getRequestCredential(ctx, c, account)
 	if err != nil {
 		return nil, err
 	}
 	if strings.TrimSpace(token) == "" {
 		return nil, fmt.Errorf("account %d missing %s credential", account.ID, tokenKind)
 	}
+
+	var bridgeUsage OpenAIUsage
+	if account.Platform == PlatformGrok {
+		bridgedBody, usage, bridged, bridgeErr := s.bridgeGrokComposerImageInputs(ctx, c, account, upstreamBody, token)
+		if bridgeErr != nil {
+			var failoverErr *UpstreamFailoverError
+			if !errors.As(bridgeErr, &failoverErr) && c != nil && c.Writer != nil && !c.Writer.Written() {
+				writeChatCompletionsError(c, http.StatusBadGateway, "upstream_error", bridgeErr.Error())
+			}
+			return nil, bridgeErr
+		}
+		if bridged {
+			upstreamBody = bridgedBody
+			addOpenAIUsage(&bridgeUsage, usage)
+		}
+	}
+
+	if clientStream {
+		upstreamBody, err = ensureOpenAIChatStreamUsage(upstreamBody)
+		if err != nil {
+			return nil, fmt.Errorf("enable stream usage: %w", err)
+		}
+	}
+	if account.Platform == PlatformGrok {
+		upstreamBody, err = stripGrokChatPromptCacheKey(upstreamBody)
+		if err != nil {
+			return nil, fmt.Errorf("remove Responses-only Grok prompt cache key: %w", err)
+		}
+	}
+
 	targetURL, err := s.rawChatCompletionsURL(account)
 	if err != nil {
 		return nil, err
 	}
+	SetActualOpenAIUpstreamEndpoint(c, grokChatRawEndpoint)
 
 	upstreamCtx, releaseUpstreamCtx := detachStreamUpstreamContext(ctx, clientStream)
 	defer releaseUpstreamCtx()
@@ -98,7 +130,7 @@ func (s *OpenAIGatewayService) forwardAsRawChatCompletions(
 	}
 	if c != nil && c.Request != nil {
 		for key, values := range c.Request.Header {
-			if !openaiChatRawAllowedHeaders[strings.ToLower(key)] {
+			if !openaiCCRawAllowedHeaders[strings.ToLower(key)] {
 				continue
 			}
 			for _, value := range values {
@@ -108,11 +140,12 @@ func (s *OpenAIGatewayService) forwardAsRawChatCompletions(
 	}
 	if userAgent := strings.TrimSpace(account.GetOpenAIUserAgent()); userAgent != "" {
 		upstreamReq.Header.Set("user-agent", userAgent)
-	} else if account.Platform == PlatformGrok {
-		upstreamReq.Header.Set("user-agent", grokUpstreamUserAgent)
+	}
+	if account.Platform == PlatformGrok {
 		if account.IsGrokOAuth() {
 			applyGrokCLIHeaders(upstreamReq.Header)
 		}
+		applyGrokCacheHeaders(upstreamReq.Header, grokCacheIdentity)
 	}
 	account.ApplyHeaderOverrides(upstreamReq.Header)
 
@@ -133,11 +166,25 @@ func (s *OpenAIGatewayService) forwardAsRawChatCompletions(
 
 		upstreamMsg := sanitizeUpstreamErrorMessage(strings.TrimSpace(extractUpstreamErrorMessage(respBody)))
 		if account.Platform == PlatformGrok {
+			appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
+				Platform:           account.Platform,
+				AccountID:          account.ID,
+				AccountName:        account.Name,
+				UpstreamStatusCode: resp.StatusCode,
+				UpstreamRequestID:  firstNonEmpty(resp.Header.Get("x-request-id"), resp.Header.Get("xai-request-id")),
+				Kind:               "failover",
+				Message:            upstreamMsg,
+			})
 			s.handleGrokAccountUpstreamError(ctx, account, resp.StatusCode, resp.Header, respBody)
 			if s.shouldFailoverUpstreamError(resp.StatusCode) {
-				return nil, &UpstreamFailoverError{StatusCode: resp.StatusCode, ResponseBody: respBody}
+				return nil, &UpstreamFailoverError{
+					StatusCode:             resp.StatusCode,
+					ResponseBody:           respBody,
+					ResponseHeaders:        resp.Header.Clone(),
+					RetryableOnSameAccount: account.IsPoolMode() && account.IsPoolModeRetryableStatus(resp.StatusCode),
+				}
 			}
-			return s.handleChatCompletionsErrorResponse(resp, c, account, originalModel)
+			return s.handleChatCompletionsErrorResponse(resp, c, account, billingModel)
 		}
 		if s.shouldFailoverOpenAIUpstreamResponse(resp.StatusCode, upstreamMsg, respBody) {
 			appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
@@ -161,13 +208,21 @@ func (s *OpenAIGatewayService) forwardAsRawChatCompletions(
 		return s.handleChatCompletionsErrorResponse(resp, c, account, originalModel)
 	}
 	if account.Platform == PlatformGrok {
-		s.updateGrokUsageSnapshot(ctx, account, xai.ParseQuotaHeaders(resp.Header, resp.StatusCode))
+		s.updateGrokUsageFromResponse(ctx, account, resp.Header, resp.StatusCode)
 	}
 
+	var result *OpenAIForwardResult
+	var forwardErr error
 	if clientStream {
-		return s.streamRawChatCompletions(c, resp, account, originalModel, billingModel, upstreamModel, reasoningEffort, serviceTier, startTime, len(body))
+		result, forwardErr = s.streamRawChatCompletions(c, resp, account, originalModel, billingModel, upstreamModel, reasoningEffort, serviceTier, startTime, len(body))
+	} else {
+		result, forwardErr = s.bufferRawChatCompletions(c, resp, originalModel, billingModel, upstreamModel, reasoningEffort, serviceTier, startTime)
 	}
-	return s.bufferRawChatCompletions(c, resp, originalModel, billingModel, upstreamModel, reasoningEffort, serviceTier, startTime)
+	if result != nil {
+		addOpenAIUsage(&result.Usage, bridgeUsage)
+		result.UpstreamEndpoint = grokChatRawEndpoint
+	}
+	return result, forwardErr
 }
 
 func (s *OpenAIGatewayService) rawChatCompletionsURL(account *Account) (string, error) {
@@ -342,6 +397,12 @@ func extractOpenAIChatStreamUsage(payload string) *OpenAIUsage {
 		return nil
 	}
 	return openAIUsageFromChatCompletionsUsage(payload)
+}
+
+// extractCCStreamUsage 从单个 CC 流式 chunk 的 payload 中提取 usage 字段。
+// 上游可能重复发送 usage，调用方应保留最后一次出现的值。
+func extractCCStreamUsage(payload string) *OpenAIUsage {
+	return extractOpenAIChatStreamUsage(payload)
 }
 
 func (s *OpenAIGatewayService) bufferRawChatCompletions(

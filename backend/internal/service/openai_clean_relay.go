@@ -108,6 +108,41 @@ func (s *OpenAIGatewayService) SelectAccountWithCleanRelayScheduler(
 	bodyForSession []byte,
 	platform ...string,
 ) (*AccountSelectionResult, OpenAIAccountScheduleDecision, error) {
+	return s.SelectAccountWithCleanRelaySchedulerForCapability(
+		ctx,
+		c,
+		groupID,
+		previousResponseID,
+		sessionHash,
+		requestedModel,
+		routingModel,
+		excludedIDs,
+		requiredTransport,
+		OpenAIEndpointCapabilityChatCompletions,
+		requireCompact,
+		bodyForSession,
+		platform...,
+	)
+}
+
+func (s *OpenAIGatewayService) SelectAccountWithCleanRelaySchedulerForCapability(
+	ctx context.Context,
+	c *gin.Context,
+	groupID *int64,
+	previousResponseID string,
+	sessionHash string,
+	requestedModel string,
+	routingModel string,
+	excludedIDs map[int64]struct{},
+	requiredTransport OpenAIUpstreamTransport,
+	requiredCapability OpenAIEndpointCapability,
+	requireCompact bool,
+	bodyForSession []byte,
+	platform ...string,
+) (*AccountSelectionResult, OpenAIAccountScheduleDecision, error) {
+	if requiredCapability == "" {
+		requiredCapability = OpenAIEndpointCapabilityChatCompletions
+	}
 	requestPlatform := PlatformOpenAI
 	if len(platform) > 0 && strings.EqualFold(strings.TrimSpace(platform[0]), PlatformGrok) {
 		requestPlatform = PlatformGrok
@@ -129,6 +164,7 @@ func (s *OpenAIGatewayService) SelectAccountWithCleanRelayScheduler(
 			effectiveModel,
 			excludedIDs,
 			requiredTransport,
+			requiredCapability,
 			requireCompact,
 			bodyForSession,
 		)
@@ -147,7 +183,7 @@ func (s *OpenAIGatewayService) SelectAccountWithCleanRelayScheduler(
 		effectiveModel,
 		excludedIDs,
 		requiredTransport,
-		OpenAIEndpointCapabilityChatCompletions,
+		requiredCapability,
 		requireCompact,
 		requestPlatform,
 	)
@@ -160,6 +196,7 @@ func (s *OpenAIGatewayService) selectOpenAICleanRelayMappedAccount(
 	requestedModel string,
 	excludedIDs map[int64]struct{},
 	requiredTransport OpenAIUpstreamTransport,
+	requiredCapability OpenAIEndpointCapability,
 	requireCompact bool,
 	bodyForSession []byte,
 ) (*AccountSelectionResult, OpenAIAccountScheduleDecision, bool, error) {
@@ -182,6 +219,7 @@ func (s *OpenAIGatewayService) selectOpenAICleanRelayMappedAccount(
 		mapping.AccountID,
 		requestedModel,
 		requiredTransport,
+		requiredCapability,
 		requireCompact,
 	)
 	if err != nil {
@@ -289,6 +327,7 @@ func (s *OpenAIGatewayService) selectOpenAICleanRelayAccountByID(
 	accountID int64,
 	requestedModel string,
 	requiredTransport OpenAIUpstreamTransport,
+	requiredCapability OpenAIEndpointCapability,
 	requireCompact bool,
 ) (*AccountSelectionResult, error) {
 	account, err := s.getSchedulableAccount(ctx, accountID)
@@ -301,7 +340,7 @@ func (s *OpenAIGatewayService) selectOpenAICleanRelayAccountByID(
 	if !s.isOpenAIAccountTransportCompatible(account, requiredTransport) {
 		return nil, nil
 	}
-	account = s.recheckSelectedOpenAIAccountFromDB(ctx, groupID, account, requestedModel, requireCompact, OpenAIEndpointCapabilityChatCompletions)
+	account = s.recheckSelectedOpenAIAccountFromDB(ctx, account, groupID, PlatformOpenAI, requestedModel, requireCompact, requiredCapability)
 	if account == nil || !s.isOpenAICleanRelayAccountCandidate(ctx, account) {
 		return nil, nil
 	}

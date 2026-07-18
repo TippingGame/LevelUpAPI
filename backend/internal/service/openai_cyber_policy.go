@@ -1,6 +1,7 @@
 package service
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 
@@ -10,6 +11,8 @@ import (
 
 const opsCyberPolicyKey = "ops_cyber_policy"
 const openAICyberPolicyDefaultMessage = "Request blocked by upstream cyber-security policy"
+
+var errOpenAICyberPolicyForwarded = errors.New("openai cyber_policy forwarded to client")
 
 type CyberPolicyMark struct {
 	Code           string
@@ -43,6 +46,13 @@ func GetOpsCyberPolicy(c *gin.Context) *CyberPolicyMark {
 		}
 	}
 	return nil
+}
+
+func ClearOpsCyberPolicy(c *gin.Context) {
+	if c == nil {
+		return
+	}
+	c.Set(opsCyberPolicyKey, (*CyberPolicyMark)(nil))
 }
 
 func openAICyberPolicyClientMessage(msg string) string {

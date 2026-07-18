@@ -32,7 +32,7 @@ describe('useModelWhitelist', () => {
     ]))
   })
 
-  it('Grok 模型列表包含最新文本模型及别名，不暴露图片模型', () => {
+  it('Grok 模型列表包含文本、图片和视频模型', () => {
     const models = getModelsByPlatform('grok')
 
     expect(models).toEqual(expect.arrayContaining([
@@ -44,11 +44,27 @@ describe('useModelWhitelist', () => {
       'grok-4.20-0309-non-reasoning',
       'grok-4.20-multi-agent-0309',
       'grok-latest',
-      'grok-4.5-latest'
+      'grok-4.5-latest',
+      'grok-imagine',
+      'grok-imagine-image-quality',
+      'grok-imagine-image',
+      'grok-imagine-edit',
+      'grok-imagine-video',
+      'grok-imagine-video-1.5'
     ]))
     expect(getModelsByPlatform('xai')).toEqual(models)
-    expect(models.some((model) => model.startsWith('grok-imagine'))).toBe(false)
     expect(models).not.toContain('grok-2-image')
+  })
+
+  it('Grok 预设包含图片、编辑和视频映射', () => {
+    const presets = getPresetMappingsByPlatform('grok')
+
+    expect(getPresetMappingsByPlatform('xai')).toEqual(presets)
+    expect(presets).toEqual(expect.arrayContaining([
+      expect.objectContaining({ from: 'grok-imagine', to: 'grok-imagine-image-quality' }),
+      expect.objectContaining({ from: 'grok-imagine-edit', to: 'grok-imagine-edit' }),
+      expect.objectContaining({ from: 'grok-imagine-video-1.5', to: 'grok-imagine-video-1.5' })
+    ]))
   })
 
   it('openai 模型列表不再暴露已下线的 ChatGPT 登录 Codex 模型', () => {

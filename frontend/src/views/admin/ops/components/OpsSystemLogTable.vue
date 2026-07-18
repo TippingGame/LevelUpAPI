@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { opsAPI, type OpsRuntimeLogConfig, type OpsSystemLog, type OpsSystemLogSinkHealth } from '@/api/admin/ops'
 import Pagination from '@/components/common/Pagination.vue'
 import Select from '@/components/common/Select.vue'
 import { useAppStore } from '@/stores'
 
 const appStore = useAppStore()
+const { t } = useI18n()
 
 const props = withDefaults(defineProps<{
   platformFilter?: string
@@ -449,7 +451,7 @@ onMounted(async () => {
         <input v-model="filters.component" type="text" class="input mt-1" placeholder="如 http.access" />
       </label>
       <label class="text-xs text-gray-600 dark:text-gray-300">
-        主机
+        {{ t('admin.ops.systemLogs.host') }}
         <input v-model="filters.host" type="text" class="input mt-1" placeholder="如 api-node-1" />
       </label>
       <label class="text-xs text-gray-600 dark:text-gray-300">
@@ -483,9 +485,9 @@ onMounted(async () => {
     </div>
 
     <div class="mb-3 flex flex-wrap gap-2">
-      <button type="button" class="btn btn-primary btn-sm" @click="applyFilters">查询</button>
+      <button type="button" class="btn btn-primary btn-sm" @click="applyFilters">{{ t('admin.ops.systemLogs.search') }}</button>
       <button type="button" class="btn btn-secondary btn-sm" @click="resetFilters">重置</button>
-      <button type="button" class="btn btn-danger btn-sm" @click="cleanupCurrentFilter">按当前筛选清理</button>
+      <button type="button" class="btn btn-danger btn-sm" @click="cleanupCurrentFilter">{{ t('admin.ops.systemLogs.cleanCurrentFilters') }}</button>
       <button type="button" class="btn btn-secondary btn-sm" @click="fetchHealth">刷新健康指标</button>
     </div>
 

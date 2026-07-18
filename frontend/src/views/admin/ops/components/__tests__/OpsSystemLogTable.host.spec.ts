@@ -17,6 +17,11 @@ vi.mock('@/stores', () => ({
   useAppStore: () => ({ showError: vi.fn(), showSuccess: vi.fn() })
 }))
 
+vi.mock('vue-i18n', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('vue-i18n')>()
+  return { ...actual, useI18n: () => ({ t: (key: string) => key }) }
+})
+
 import OpsSystemLogTable from '../OpsSystemLogTable.vue'
 
 const SelectStub = defineComponent({
@@ -69,14 +74,14 @@ describe('OpsSystemLogTable host filtering', () => {
     await flushPromises()
     expect(wrapper.text()).toContain('api-node-1')
 
-    const hostLabel = wrapper.findAll('label').find(label => label.text().includes('主机'))
+    const hostLabel = wrapper.findAll('label').find(label => label.text().includes('admin.ops.systemLogs.host'))
     expect(hostLabel).toBeDefined()
     await hostLabel!.find('input').setValue(' api-node-2 ')
-    await wrapper.findAll('button').find(button => button.text() === '查询')!.trigger('click')
+    await wrapper.findAll('button').find(button => button.text() === 'admin.ops.systemLogs.search')!.trigger('click')
     await flushPromises()
     expect(listSystemLogs).toHaveBeenLastCalledWith(expect.objectContaining({ host: 'api-node-2' }))
 
-    await wrapper.findAll('button').find(button => button.text() === '按当前筛选清理')!.trigger('click')
+    await wrapper.findAll('button').find(button => button.text() === 'admin.ops.systemLogs.cleanCurrentFilters')!.trigger('click')
     await flushPromises()
     expect(cleanupSystemLogs).toHaveBeenCalledWith(expect.objectContaining({ host: 'api-node-2' }))
   })

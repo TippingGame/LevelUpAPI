@@ -58,6 +58,35 @@ type GeminiMessagesCompatService struct {
 	responseHeaderFilter      *responseheaders.CompiledHeaderFilter
 }
 
+func (s *GeminiMessagesCompatService) readUpstreamErrorBody(resp *http.Response) []byte {
+	if resp == nil || resp.Body == nil {
+		return nil
+	}
+	limit := gatewayUpstreamErrorBodyReadLimit
+	if s != nil && s.cfg != nil && s.cfg.Gateway.LogUpstreamErrorBody && s.cfg.Gateway.LogUpstreamErrorBodyMaxBytes > int(limit) {
+		limit = int64(s.cfg.Gateway.LogUpstreamErrorBodyMaxBytes)
+	}
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, limit))
+	return body
+}
+
+func (s *GeminiMessagesCompatService) extractImageInputSize(body []byte) string {
+	var req struct {
+		GenerationConfig *struct {
+			ImageConfig *struct {
+				ImageSize string `json:"imageSize"`
+			} `json:"imageConfig"`
+		} `json:"generationConfig"`
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		return ""
+	}
+	if req.GenerationConfig != nil && req.GenerationConfig.ImageConfig != nil {
+		return strings.TrimSpace(req.GenerationConfig.ImageConfig.ImageSize)
+	}
+	return ""
+}
+
 func NewGeminiMessagesCompatService(
 	accountRepo AccountRepository,
 	groupRepo GroupRepository,
@@ -853,9 +882,6 @@ func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Contex
 		}
 		requestIDHeader = idHeader
 
-		// Capture upstream request body for ops retry of this attempt.
-		setOpsUpstreamRequestBody(c, body)
-
 		resp, err = s.httpUpstream.Do(upstreamReq, proxyURL, account.ID, account.Concurrency)
 		if err != nil {
 			safeErr := sanitizeUpstreamErrorMessage(err.Error())
@@ -1384,9 +1410,6 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 			return nil, s.writeGoogleError(c, http.StatusBadGateway, err.Error())
 		}
 		requestIDHeader = idHeader
-
-		// Capture upstream request body for ops retry of this attempt.
-		setOpsUpstreamRequestBody(c, body)
 
 		resp, err = s.httpUpstream.Do(upstreamReq, proxyURL, account.ID, account.Concurrency)
 		if err != nil {

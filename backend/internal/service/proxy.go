@@ -10,6 +10,12 @@ import (
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 )
 
+const (
+	FallbackModeNone   = "none"
+	FallbackModeProxy  = "proxy"
+	FallbackModeDirect = "direct"
+)
+
 type Proxy struct {
 	ID       int64
 	Name     string
@@ -23,9 +29,13 @@ type Proxy struct {
 	Status      string
 	// MaxAccounts controls how many accounts may bind to this proxy. 0 means unlimited
 	// for platform-managed proxies; legacy user-owned proxies default to one account.
-	MaxAccounts int
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
+	MaxAccounts    int
+	ExpiresAt      *time.Time
+	FallbackMode   string
+	BackupProxyID  *int64
+	ExpiryWarnDays int
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
 }
 
 const userOwnedProxyDefaultMaxAccounts = 1
@@ -45,6 +55,10 @@ func effectiveProxyMaxAccounts(proxy *Proxy) int {
 
 func (p *Proxy) IsActive() bool {
 	return p.Status == StatusActive
+}
+
+func (p *Proxy) IsExpired(now time.Time) bool {
+	return p.ExpiresAt != nil && !p.ExpiresAt.After(now)
 }
 
 func (p *Proxy) URL() string {

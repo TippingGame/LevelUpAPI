@@ -63,6 +63,7 @@ type AccountHandler struct {
 	openaiOAuthService        *service.OpenAIOAuthService
 	geminiOAuthService        *service.GeminiOAuthService
 	antigravityOAuthService   *service.AntigravityOAuthService
+	grokOAuthService          service.GrokOAuthTokenService
 	rateLimitService          *service.RateLimitService
 	accountUsageService       *service.AccountUsageService
 	accountTestService        *service.AccountTestService
@@ -76,47 +77,53 @@ type AccountHandler struct {
 	publicShareValidationOnce sync.Once
 	grokImportProber          grokUsageProber
 	grokCredentialImporter    grokCredentialImportService
+	upstreamBillingProbe      *service.UpstreamBillingProbeService
+}
+
+// SetUpstreamBillingProbeService attaches the optional remote billing probe service.
+func (h *AccountHandler) SetUpstreamBillingProbeService(probe *service.UpstreamBillingProbeService) {
+	h.upstreamBillingProbe = probe
 }
 
 // NewAccountHandler creates a new admin account handler
-func NewAccountHandler(
-	adminService service.AdminService,
-	accountService *service.AccountService,
-	oauthService *service.OAuthService,
-	openaiOAuthService *service.OpenAIOAuthService,
-	geminiOAuthService *service.GeminiOAuthService,
-	antigravityOAuthService *service.AntigravityOAuthService,
-	rateLimitService *service.RateLimitService,
-	accountUsageService *service.AccountUsageService,
-	accountTestService *service.AccountTestService,
-	concurrencyService *service.ConcurrencyService,
-	crsSyncService *service.CRSSyncService,
-	sessionLimitCache service.SessionLimitCache,
-	rpmCache service.RPMCache,
-	tokenCacheInvalidator service.TokenCacheInvalidator,
-	accountBatchTaskServices ...*service.AccountBatchTaskService,
-) *AccountHandler {
-	var accountBatchTaskService *service.AccountBatchTaskService
-	if len(accountBatchTaskServices) > 0 {
-		accountBatchTaskService = accountBatchTaskServices[0]
-	}
+func NewAccountHandler(adminService service.AdminService, dependencies ...any) *AccountHandler {
 	h := &AccountHandler{
-		adminService:            adminService,
-		accountService:          accountService,
-		oauthService:            oauthService,
-		openaiOAuthService:      openaiOAuthService,
-		geminiOAuthService:      geminiOAuthService,
-		antigravityOAuthService: antigravityOAuthService,
-		rateLimitService:        rateLimitService,
-		accountUsageService:     accountUsageService,
-		accountTestService:      accountTestService,
-		concurrencyService:      concurrencyService,
-		crsSyncService:          crsSyncService,
-		sessionLimitCache:       sessionLimitCache,
-		rpmCache:                rpmCache,
-		tokenCacheInvalidator:   tokenCacheInvalidator,
-		accountBatchTaskService: accountBatchTaskService,
-		publicShareValidation:   make(chan ownedPublicShareValidationJob, adminOwnedPublicShareValidationQueueSize),
+		adminService:          adminService,
+		publicShareValidation: make(chan ownedPublicShareValidationJob, adminOwnedPublicShareValidationQueueSize),
+	}
+	for _, dependency := range dependencies {
+		switch value := dependency.(type) {
+		case *service.AccountService:
+			h.accountService = value
+		case *service.OAuthService:
+			h.oauthService = value
+		case *service.OpenAIOAuthService:
+			h.openaiOAuthService = value
+		case *service.GeminiOAuthService:
+			h.geminiOAuthService = value
+		case *service.AntigravityOAuthService:
+			h.antigravityOAuthService = value
+		case service.GrokOAuthTokenService:
+			h.grokOAuthService = value
+		case *service.RateLimitService:
+			h.rateLimitService = value
+		case *service.AccountUsageService:
+			h.accountUsageService = value
+		case *service.AccountTestService:
+			h.accountTestService = value
+		case *service.ConcurrencyService:
+			h.concurrencyService = value
+		case *service.CRSSyncService:
+			h.crsSyncService = value
+		case service.SessionLimitCache:
+			h.sessionLimitCache = value
+		case service.RPMCache:
+			h.rpmCache = value
+		case service.TokenCacheInvalidator:
+			h.tokenCacheInvalidator = value
+		case *service.AccountBatchTaskService:
+			h.accountBatchTaskService = value
+		}
 	}
 	h.registerAccountBatchExecutors()
 	return h
@@ -235,7 +242,9 @@ type CheckMixedChannelRequest struct {
 // AccountWithConcurrency extends Account with real-time concurrency info
 type AccountWithConcurrency struct {
 	*dto.Account
-	CurrentConcurrency int `json:"current_concurrency"`
+	CurrentConcurrency int                          `json:"current_concurrency"`
+	SchedulerScore     *AccountSchedulerScore       `json:"scheduler_score,omitempty"`
+	SchedulerScores    []AccountSchedulerGroupScore `json:"scheduler_scores,omitempty"`
 	// 以下字段仅对 Anthropic OAuth/SetupToken 账号有效，且仅在启用相应功能时返回
 	CurrentWindowCost *float64 `json:"current_window_cost,omitempty"` // 当前窗口费用
 	ActiveSessions    *int     `json:"active_sessions,omitempty"`     // 当前活跃会话数
@@ -439,6 +448,8 @@ func (h *AccountHandler) buildAccountResponseWithRuntime(ctx context.Context, ac
 		}
 	}
 
+	h.enrichShadowParents(ctx, []AccountWithConcurrency{item})
+
 	return item
 }
 
@@ -457,6 +468,7 @@ func (h *AccountHandler) List(c *gin.Context) {
 	search = normalizeAccountTextFilter(search)
 	ownerSearch = normalizeAccountTextFilter(ownerSearch)
 	lite := parseBoolQueryWithDefault(c.Query("lite"), false)
+	includeSchedulerScore := parseBoolQueryWithDefault(c.Query("include_scheduler_score"), false)
 
 	var groupID int64
 	if groupIDStr := c.Query("group"); groupIDStr != "" {
@@ -498,6 +510,19 @@ func (h *AccountHandler) List(c *gin.Context) {
 	var windowCosts map[int64]float64
 	var activeSessions map[int64]int
 	var rpmCounts map[int64]int
+	var schedulerScores map[int64]*AccountSchedulerScore
+	var schedulerGroupScores map[int64][]AccountSchedulerGroupScore
+	pageHasOpenAIAccounts := false
+	for i := range accounts {
+		if accounts[i].Platform == service.PlatformOpenAI {
+			pageHasOpenAIAccounts = true
+			break
+		}
+	}
+	if includeSchedulerScore && pageHasOpenAIAccounts {
+		schedulerFilterPool := h.listAccountSchedulerScoreFilterPool(c.Request.Context(), platform, accountType, status, search, groupID, privacyMode)
+		schedulerScores, schedulerGroupScores = h.buildOpenAIAccountSchedulerScores(c.Request.Context(), accounts, schedulerFilterPool)
+	}
 
 	// 始终获取并发数（Redis ZCARD，极低开销）
 	if h.concurrencyService != nil {
@@ -578,6 +603,8 @@ func (h *AccountHandler) List(c *gin.Context) {
 		item := AccountWithConcurrency{
 			Account:            dto.AccountFromService(acc),
 			CurrentConcurrency: concurrencyCounts[acc.ID],
+			SchedulerScore:     schedulerScores[acc.ID],
+			SchedulerScores:    schedulerGroupScores[acc.ID],
 		}
 
 		// 添加窗口费用（仅当启用时）
@@ -603,6 +630,8 @@ func (h *AccountHandler) List(c *gin.Context) {
 
 		result[i] = item
 	}
+
+	h.enrichShadowParents(c.Request.Context(), result)
 
 	etag := buildAccountsListETag(result, total, page, pageSize, platform, accountType, status, search, lite)
 	if etag != "" {
@@ -754,6 +783,10 @@ func (h *AccountHandler) Create(c *gin.Context) {
 		response.BadRequest(c, "Invalid request: "+err.Error())
 		return
 	}
+	if err := service.ValidateOpenAILongContextBillingExtra(req.Platform, req.Extra); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
 	if req.RateMultiplier != nil && *req.RateMultiplier < 0 {
 		response.BadRequest(c, "rate_multiplier must be >= 0")
 		return
@@ -823,6 +856,53 @@ func (h *AccountHandler) Create(c *gin.Context) {
 	}
 	h.scheduleOpenAIResponsesProbe(createdAccount)
 	h.scheduleGrokImportProbe(createdAccount)
+	response.Success(c, result.Data)
+}
+
+// Duplicate handles creating an independent account from an existing account's configuration.
+// POST /api/v1/admin/accounts/:id/duplicate
+func (h *AccountHandler) Duplicate(c *gin.Context) {
+	accountID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "Invalid account ID")
+		return
+	}
+	actorScope := adminActorScope(c)
+
+	result, err := executeAdminIdempotent(
+		c,
+		"admin.accounts.duplicate",
+		struct {
+			AccountID int64 `json:"account_id"`
+		}{AccountID: accountID},
+		service.DefaultWriteIdempotencyTTL(),
+		func(ctx context.Context) (any, error) {
+			account, execErr := h.adminService.DuplicateAccount(ctx, accountID, actorScope, c.GetHeader("Idempotency-Key"))
+			if execErr != nil {
+				return nil, execErr
+			}
+			return h.buildAccountResponseWithRuntime(ctx, account), nil
+		},
+	)
+	if err != nil {
+		reason := infraerrors.Reason(err)
+		if reason == infraerrors.Reason(service.ErrIdempotencyInProgress) || reason == infraerrors.Reason(service.ErrIdempotencyStoreUnavail) {
+			recovered, recoverErr := h.adminService.RecoverDuplicateAccount(c.Request.Context(), accountID, actorScope, c.GetHeader("Idempotency-Key"))
+			if recoverErr != nil {
+				slog.Warn("account_duplicate_recovery_failed", "account_id", accountID, "actor_scope", actorScope, "reason", reason, "error", recoverErr)
+			} else if recovered != nil {
+				c.Header("X-Idempotency-Recovered", "true")
+				response.Success(c, h.buildAccountResponseWithRuntime(c.Request.Context(), recovered))
+				return
+			}
+		}
+		response.ErrorFrom(c, err)
+		return
+	}
+
+	if result != nil && result.Replayed {
+		c.Header("X-Idempotency-Replayed", "true")
+	}
 	response.Success(c, result.Data)
 }
 
@@ -1066,6 +1146,10 @@ func (h *AccountHandler) refreshSingleAccount(ctx context.Context, account *serv
 	if !account.IsOAuth() {
 		return nil, "", infraerrors.BadRequest("NOT_OAUTH", "cannot refresh non-OAuth account")
 	}
+	if account.IsCredentialShadow() {
+		return nil, "", infraerrors.BadRequest("SPARK_SHADOW_NO_REFRESH",
+			"cannot refresh spark shadow account; its credentials are managed by the parent account")
+	}
 
 	var newCredentials map[string]any
 
@@ -1135,15 +1219,14 @@ func (h *AccountHandler) refreshSingleAccount(ctx context.Context, account *serv
 			}
 		}
 	} else if account.Platform == service.PlatformGrok {
-		refresher, ok := h.grokCredentialImporter.(grokAccountRefreshService)
-		if !ok || refresher == nil {
+		if h.grokOAuthService == nil {
 			return nil, "", infraerrors.New(http.StatusServiceUnavailable, "GROK_OAUTH_NOT_CONFIGURED", "grok oauth service is not configured")
 		}
-		tokenInfo, err := refresher.RefreshAccountToken(ctx, account)
+		tokenInfo, err := h.grokOAuthService.RefreshAccountToken(ctx, account)
 		if err != nil {
 			return nil, "", fmt.Errorf("failed to refresh Grok credentials: %w", err)
 		}
-		newCredentials = service.MergeCredentials(account.Credentials, h.grokCredentialImporter.BuildAccountCredentials(tokenInfo))
+		newCredentials = service.MergeCredentials(account.Credentials, h.grokOAuthService.BuildAccountCredentials(tokenInfo))
 		// Keep an administrator's explicit forwarding address and any header
 		// override settings while replacing only refreshed token fields.
 		if baseURL := strings.TrimSpace(account.GetCredential("base_url")); baseURL != "" {
@@ -1193,6 +1276,12 @@ func (h *AccountHandler) refreshSingleAccount(ctx context.Context, account *serv
 	h.adminService.EnsureOpenAIPrivacy(ctx, updatedAccount)
 	// Antigravity OAuth: 刷新成功后检查并设置 privacy_mode
 	h.adminService.EnsureAntigravityPrivacy(ctx, updatedAccount)
+
+	// The recovery service is always wired in production, but credential refresh
+	// itself remains usable in minimal/test compositions that omit it.
+	if h.rateLimitService == nil {
+		return updatedAccount, "", nil
+	}
 
 	recoveredAccount, err := h.recoverAccountStateAfterRefresh(ctx, updatedAccount.ID)
 	if err != nil {
@@ -1280,6 +1369,82 @@ func (h *AccountHandler) Refresh(c *gin.Context) {
 	}
 
 	response.Success(c, h.buildAccountResponseWithRuntime(c.Request.Context(), updatedAccount))
+}
+
+// ApplyOAuthCredentialsRequest is the payload for persisting re-authorized OAuth credentials.
+type ApplyOAuthCredentialsRequest struct {
+	Type        string         `json:"type" binding:"required,oneof=oauth setup-token"`
+	Credentials map[string]any `json:"credentials" binding:"required"`
+	Extra       map[string]any `json:"extra"`
+}
+
+// ApplyOAuthCredentials persists credentials from a completed interactive OAuth flow while
+// merging extra metadata key-by-key so account-level runtime and quota settings are preserved.
+// POST /api/v1/admin/accounts/:id/apply-oauth-credentials
+func (h *AccountHandler) ApplyOAuthCredentials(c *gin.Context) {
+	accountID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "Invalid account ID")
+		return
+	}
+
+	var req ApplyOAuthCredentialsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+
+	ctx := c.Request.Context()
+	existing, err := h.adminService.GetAccount(ctx, accountID)
+	if err != nil {
+		response.NotFound(c, "Account not found")
+		return
+	}
+	if !existing.IsOAuth() {
+		response.ErrorFrom(c, infraerrors.BadRequest("NOT_OAUTH", "cannot apply oauth credentials to non-OAuth account"))
+		return
+	}
+	if err := service.ValidateOpenAILongContextBillingExtra(existing.Platform, req.Extra); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+
+	updatedAccount, err := h.adminService.UpdateAccount(ctx, accountID, &service.UpdateAccountInput{
+		Type:        req.Type,
+		Credentials: req.Credentials,
+	})
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+
+	if len(req.Extra) > 0 {
+		if extraErr := h.adminService.UpdateAccountExtra(ctx, accountID, req.Extra); extraErr != nil {
+			extraKeys := make([]string, 0, len(req.Extra))
+			for key := range req.Extra {
+				extraKeys = append(extraKeys, key)
+			}
+			slog.Error("apply_oauth_credentials.update_extra_failed",
+				"account_id", accountID,
+				"extra_keys", extraKeys,
+				"err", extraErr,
+			)
+		}
+	}
+
+	if cleared, clearErr := h.adminService.ClearAccountError(ctx, accountID); clearErr != nil {
+		slog.Warn("apply_oauth_credentials.clear_error_failed", "account_id", accountID, "err", clearErr)
+	} else if cleared != nil {
+		updatedAccount = cleared
+	}
+
+	if h.tokenCacheInvalidator != nil && updatedAccount.IsOAuth() {
+		if invalidateErr := h.tokenCacheInvalidator.InvalidateToken(ctx, updatedAccount); invalidateErr != nil {
+			slog.Warn("apply_oauth_credentials.invalidate_token_failed", "account_id", accountID, "err", invalidateErr)
+		}
+	}
+
+	response.Success(c, h.buildAccountResponseWithRuntime(ctx, updatedAccount))
 }
 
 // GetStats handles getting account statistics
@@ -1617,6 +1782,12 @@ func (h *AccountHandler) BatchCreate(c *gin.Context) {
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.BadRequest(c, "Invalid request: "+err.Error())
 		return
+	}
+	for _, item := range req.Accounts {
+		if err := service.ValidateOpenAILongContextBillingExtra(item.Platform, item.Extra); err != nil {
+			response.ErrorFrom(c, err)
+			return
+		}
 	}
 
 	executeAdminIdempotentJSON(c, "admin.accounts.batch_create", req, service.DefaultWriteIdempotencyTTL(), func(ctx context.Context) (any, error) {

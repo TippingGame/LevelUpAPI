@@ -17,7 +17,7 @@
         <div v-if="order" class="card overflow-hidden">
           <div class="bg-gradient-to-br from-[#635bff] to-[#4f46e5] px-6 py-6 text-center">
             <p class="text-sm font-medium text-indigo-200">{{ t('payment.actualPay') }}</p>
-            <p class="mt-1 text-3xl font-bold text-white">&#165;{{ order.pay_amount.toFixed(2) }}</p>
+            <p class="mt-1 text-3xl font-bold text-white">{{ formatGatewayAmount(order.pay_amount) }}</p>
           </div>
         </div>
 
@@ -101,12 +101,13 @@ import { usePaymentStore } from '@/stores/payment'
 import { paymentAPI } from '@/api/payment'
 import { extractI18nErrorMessage } from '@/utils/apiError'
 import { isMobileDevice } from '@/utils/device'
+import { formatPaymentAmount, normalizePaymentCurrency } from '@/components/payment/currency'
 import type { PaymentOrder } from '@/types/payment'
 import type { Stripe, StripeElements } from '@stripe/stripe-js'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import Icon from '@/components/icons/Icon.vue'
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
 const route = useRoute()
 const router = useRouter()
 const paymentStore = usePaymentStore()
@@ -121,6 +122,7 @@ const stripeSubmitting = ref(false)
 const stripeSuccess = ref(false)
 const stripeReady = ref(false)
 const order = ref<PaymentOrder | null>(null)
+const currency = ref('CNY')
 const wechatQrUrl = ref('')
 const redirecting = ref(false)
 const showPaymentElement = ref(false)
@@ -143,12 +145,13 @@ onMounted(async () => {
   try {
     const res = await paymentAPI.getOrder(orderId)
     order.value = res.data
+    currency.value = normalizePaymentCurrency(res.data.currency)
 
     await paymentStore.fetchConfig()
     const publishableKey = paymentStore.config?.stripe_publishable_key
     if (!publishableKey) { initError.value = t('payment.stripeNotConfigured'); return }
 
-    const { loadStripe } = await import('@stripe/stripe-js')
+    const { loadStripe } = await import('@stripe/stripe-js/pure')
     const stripe = await loadStripe(publishableKey)
     if (!stripe) { initError.value = t('payment.stripeLoadFailed'); return }
 
@@ -176,6 +179,10 @@ onMounted(async () => {
 onUnmounted(() => {
   if (redirectTimer) clearTimeout(redirectTimer)
 })
+
+function formatGatewayAmount(value: number): string {
+  return formatPaymentAmount(value, currency.value, locale.value)
+}
 
 async function confirmAlipay(stripe: Stripe, clientSecret: string, orderId: number) {
   redirecting.value = true

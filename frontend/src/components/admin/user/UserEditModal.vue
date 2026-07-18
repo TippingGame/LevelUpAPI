@@ -200,6 +200,9 @@
       </div>
     </template>
   </BaseDialog>
+
+  <!-- 角色提升为管理员时后端要求 step-up 2FA，弹出 TOTP 验证后自动重试 -->
+  <TotpStepUpDialog :controller="stepUp" />
 </template>
 
 <script setup lang="ts">
@@ -216,6 +219,8 @@ import Toggle from '@/components/common/Toggle.vue'
 import { formatDateTime } from '@/utils/format'
 import { formatGameCoins } from '@/utils/gameCurrency'
 import type { SharedAccountOwnerOverrideMode } from '@/api/admin/users'
+import { useStepUp, isStepUpBlocked, isStepUpCancelled, stepUpBlockReason } from '@/composables/useStepUp'
+import TotpStepUpDialog from '@/components/auth/TotpStepUpDialog.vue'
 
 const props = defineProps<{ show: boolean, user: AdminUser | null }>()
 const emit = defineEmits(['close', 'success'])
@@ -403,6 +408,8 @@ const copyPassword = async () => {
     passwordCopied.value = true; setTimeout(() => passwordCopied.value = false, 2000)
   }
 }
+const stepUp = useStepUp()
+
 const handleUpdateUser = async () => {
   if (!props.user) return
   if (!form.email.trim()) {
@@ -420,26 +427,37 @@ const handleUpdateUser = async () => {
     appStore.showError(t('admin.users.invitePolicy.codeRequired'))
     return
   }
+  const userId = props.user.id
   submitting.value = true
   try {
     const data: any = { email: form.email, username: form.username, notes: form.notes, concurrency: form.concurrency, rpm_limit: form.rpm_limit }
     if (form.password.trim()) data.password = form.password.trim()
-    await adminAPI.users.update(props.user.id, data)
+    await stepUp.run(() => adminAPI.users.update(userId, data))
     if (affiliatePolicyDirty.value) {
       const payload: Parameters<typeof adminAPI.affiliates.updateUserSettings>[1] = {}
       if (affiliatePolicy.code !== affiliatePolicy.initialCode) payload.aff_code = affiliatePolicy.code
       if (affiliatePolicy.weeklyLimit !== affiliatePolicy.initialWeeklyLimit) payload.aff_weekly_limit = affiliatePolicy.weeklyLimit
       if (affiliatePolicy.autoRotate !== affiliatePolicy.initialAutoRotate) payload.aff_code_auto_rotate = affiliatePolicy.autoRotate
-      await adminAPI.affiliates.updateUserSettings(props.user.id, payload)
+      await adminAPI.affiliates.updateUserSettings(userId, payload)
     }
     if (sharedOwnerMode.value !== initialSharedOwnerMode.value) {
-      await adminAPI.users.updateSharedAccountOwner(props.user.id, sharedOwnerMode.value)
+      await adminAPI.users.updateSharedAccountOwner(userId, sharedOwnerMode.value)
     }
-    if (Object.keys(form.customAttributes).length > 0) await adminAPI.userAttributes.updateUserAttributeValues(props.user.id, form.customAttributes)
+    if (Object.keys(form.customAttributes).length > 0) await adminAPI.userAttributes.updateUserAttributeValues(userId, form.customAttributes)
     appStore.showSuccess(t('admin.users.userUpdated'))
     emit('success'); emit('close')
   } catch (e: any) {
-    appStore.showError(e.response?.data?.detail || t('admin.users.failedToUpdate'))
+    if (isStepUpCancelled(e)) {
+      // 用户主动取消二次验证：静默返回，表单保持打开。
+    } else if (isStepUpBlocked(e)) {
+      appStore.showError(
+        stepUpBlockReason(e) === 'STEP_UP_ADMIN_API_KEY_FORBIDDEN'
+          ? t('stepUp.adminApiKeyForbidden')
+          : t('stepUp.notEnabled')
+      )
+    } else {
+      appStore.showError(e?.message || t('admin.users.failedToUpdate'))
+    }
   } finally { submitting.value = false }
 }
 </script>

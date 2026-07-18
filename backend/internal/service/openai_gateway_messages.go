@@ -16,6 +16,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/apicompat"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/openai_compat"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/xai"
 	"github.com/Wei-Shaw/sub2api/internal/util/responseheaders"
 	"github.com/gin-gonic/gin"
@@ -34,6 +35,10 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 	promptCacheKey string,
 	defaultMappedModel string,
 ) (*OpenAIForwardResult, error) {
+	if account.Type == AccountTypeAPIKey && !openai_compat.ShouldUseResponsesAPI(account.Extra) {
+		return s.forwardAnthropicViaRawChatCompletions(ctx, c, account, body, defaultMappedModel)
+	}
+
 	startTime := time.Now()
 
 	// 1. Parse Anthropic request
@@ -226,16 +231,27 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 		return nil, policyErr
 	}
 	responsesBody = updatedBody
+	grokCacheIdentity := ""
 	if account.Platform == PlatformGrok {
-		responsesBody, err = patchGrokResponsesBody(responsesBody, upstreamModel)
-		if err != nil {
-			return nil, err
+		grokIntentBody := responsesBody
+		grokCacheIdentity = resolveGrokCacheIdentity(c, grokIntentBody, promptCacheKey, upstreamModel)
+		patchedBody, patchErr := patchGrokResponsesBody(grokIntentBody, upstreamModel)
+		if patchErr != nil {
+			return nil, patchErr
+		}
+		responsesBody, patchErr = applyGrokResponsesCacheIdentity(patchedBody, grokIntentBody, grokCacheIdentity, account.IsGrokOAuth())
+		if patchErr != nil {
+			return nil, fmt.Errorf("apply grok prompt cache identity: %w", patchErr)
+		}
+		responsesBody, patchErr = applyGrokFreeMessagesFunctionToolCacheRoute(responsesBody, grokIntentBody, account, grokCacheIdentity)
+		if patchErr != nil {
+			return nil, fmt.Errorf("apply grok Free function-tool cache route: %w", patchErr)
 		}
 	}
 	forwardedServiceTier := extractOpenAIServiceTierFromBody(responsesBody)
 
 	// 5. Get access token
-	token, _, err := s.GetAccessToken(ctx, account)
+	token, _, err := s.getRequestCredential(ctx, c, account)
 	if err != nil {
 		return nil, fmt.Errorf("get access token: %w", err)
 	}
@@ -244,7 +260,7 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 	upstreamCtx, releaseUpstreamCtx := detachStreamUpstreamContext(ctx, true)
 	var upstreamReq *http.Request
 	if account.Platform == PlatformGrok {
-		upstreamReq, err = buildGrokResponsesRequestWithPolicy(upstreamCtx, c, account, responsesBody, token, s.settingService, s.cfg)
+		upstreamReq, err = buildGrokResponsesRequestWithPolicy(upstreamCtx, c, account, responsesBody, token, s.settingService, s.cfg, grokCacheIdentity)
 	} else {
 		upstreamReq, err = s.buildUpstreamRequest(upstreamCtx, c, account, responsesBody, token, isStream, promptCacheKey, false)
 	}
@@ -255,7 +271,7 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 
 	// Override session_id with a deterministic UUID derived from the isolated
 	// session key, ensuring different API keys produce different upstream sessions.
-	if promptCacheKey != "" {
+	if account.Platform != PlatformGrok && promptCacheKey != "" {
 		apiKeyID := getAPIKeyIDFromContext(c)
 		upstreamReq.Header.Set("session_id", generateSessionUUID(isolateOpenAISessionID(apiKeyID, promptCacheKey)))
 	}
@@ -267,18 +283,7 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 	}
 	resp, err := s.httpUpstream.Do(upstreamReq, proxyURL, account.ID, account.Concurrency)
 	if err != nil {
-		safeErr := sanitizeUpstreamErrorMessage(err.Error())
-		setOpsUpstreamError(c, 0, safeErr, "")
-		appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
-			Platform:           account.Platform,
-			AccountID:          account.ID,
-			AccountName:        account.Name,
-			UpstreamStatusCode: 0,
-			Kind:               "request_error",
-			Message:            safeErr,
-		})
-		writeAnthropicError(c, http.StatusBadGateway, "api_error", "Upstream request failed")
-		return nil, fmt.Errorf("upstream request failed: %s", safeErr)
+		return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, err, false)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
@@ -286,6 +291,15 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 	if resp.StatusCode >= 400 {
 		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
 		_ = resp.Body.Close()
+		resp.Body = io.NopCloser(bytes.NewReader(respBody))
+		if !agentIdentityTaskRecoveryWasTried(ctx) && s.isAgentIdentityAccount(ctx, account) && isAgentIdentityTaskInvalidHTTPResponse(resp.StatusCode, respBody) {
+			expectedTaskID := account.GetCredential("task_id")
+			if recoveryErr := s.recoverAgentIdentityTask(ctx, account, expectedTaskID); recoveryErr != nil {
+				return nil, fmt.Errorf("agent identity task recovery failed: %w", recoveryErr)
+			}
+			return s.ForwardAsAnthropic(markAgentIdentityTaskRecoveryTried(ctx), c, account, body, promptCacheKey, defaultMappedModel)
+		}
+		respBody = s.redactAgentIdentitySensitiveBody(ctx, account, respBody)
 		resp.Body = io.NopCloser(bytes.NewReader(respBody))
 		if account.Platform == PlatformGrok {
 			s.handleGrokAccountUpstreamError(ctx, account, resp.StatusCode, resp.Header, respBody)
@@ -389,7 +403,7 @@ func (s *OpenAIGatewayService) handleAnthropicErrorResponse(
 	account *Account,
 	requestedModel string,
 ) (*OpenAIForwardResult, error) {
-	return s.handleCompatErrorResponse(resp, c, account, requestedModel, writeAnthropicError)
+	return s.handleCompatErrorResponse(resp, c, account, writeAnthropicError, requestedModel)
 }
 
 // handleAnthropicBufferedStreamingResponse reads all Responses SSE events from
@@ -497,32 +511,48 @@ func (s *OpenAIGatewayService) handleAnthropicBufferedStreamingResponse(
 		writeAnthropicError(c, http.StatusBadGateway, "api_error", "Upstream stream ended without a terminal response event")
 		return nil, fmt.Errorf("upstream stream ended without terminal event")
 	}
-	if strings.EqualFold(strings.TrimSpace(finalResponse.Status), "failed") && finalResponse.Error != nil &&
-		strings.EqualFold(strings.TrimSpace(finalResponse.Error.Code), "cyber_policy") {
-		clientMsg := openAICyberPolicyClientMessage(finalResponse.Error.Message)
-		MarkOpsCyberPolicy(c, CyberPolicyMark{
-			Message:        clientMsg,
-			UpstreamStatus: http.StatusOK,
-			UpstreamInTok:  usage.InputTokens,
-			UpstreamOutTok: usage.OutputTokens,
-		})
-		writeAnthropicError(c, http.StatusBadRequest, "invalid_request_error", clientMsg)
-		return resultForOpenAICompatFailure(requestID, usage, originalModel, billingModel, upstreamModel, finalResponse.ServiceTier, false, startTime),
-			fmt.Errorf("openai cyber_policy: %s", clientMsg)
-	}
 	if strings.EqualFold(strings.TrimSpace(finalResponse.Status), "failed") {
 		payload, _ := json.Marshal(gin.H{"type": "response.failed", "response": finalResponse})
+		if hit, code, msg := detectOpenAICyberPolicy(payload); hit {
+			MarkOpsCyberPolicy(c, CyberPolicyMark{
+				Code:           code,
+				Message:        msg,
+				Body:           truncateString(string(payload), 4096),
+				UpstreamStatus: http.StatusOK,
+				UpstreamInTok:  usage.InputTokens,
+				UpstreamOutTok: usage.OutputTokens,
+			})
+			clientMsg := msg
+			if clientMsg == "" {
+				clientMsg = "Request blocked by upstream cyber-security policy"
+			}
+			writeAnthropicError(c, http.StatusBadRequest, "invalid_request_error", clientMsg)
+			return nil, fmt.Errorf("openai cyber_policy: %s", clientMsg)
+		}
 		message := openAICompatFailedResponseMessage(finalResponse)
 		if message == "" {
 			message = "Upstream response failed"
 		}
 		s.handleOpenAIResponsesStreamErrorSideEffect(ctx, account, resp.Header, payload, message, false)
-		if !openAIStreamFailedEventShouldFailover(payload, message) {
+		if openAIStreamFailedEventShouldFailover(payload, message) {
+			return nil, s.newOpenAIStreamFailoverError(c, account, false, requestID, payload, message)
+		}
+		message = s.recordOpenAIStreamUpstreamError(c, account, false, requestID, "http_error", payload, message)
+		if status, errType, errMsg, matched := applyOpenAIStreamFailedErrorPassthroughRule(c, account.Platform, payload, message); matched {
+			if errMsg == "" {
+				errMsg = message
+			}
+			MarkResponseCommitted(c)
+			writeAnthropicError(c, status, errType, errMsg)
+			return nil, fmt.Errorf("upstream response failed (passthrough): %s", errMsg)
+		}
+		if isOpenAIContextWindowError(message, payload) {
 			writeAnthropicError(c, http.StatusBadRequest, "invalid_request_error", message)
 			return resultForOpenAICompatFailure(requestID, usage, originalModel, billingModel, upstreamModel, finalResponse.ServiceTier, false, startTime),
 				fmt.Errorf("openai request failed: %s", message)
 		}
-		return nil, s.newOpenAIStreamFailoverError(c, account, false, requestID, payload, message)
+		writeAnthropicError(c, http.StatusBadGateway, "api_error", message)
+		return nil, fmt.Errorf("upstream response failed: %s", message)
 	}
 
 	// When the terminal event has an empty output array, reconstruct from
@@ -640,6 +670,7 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 	var responseServiceTier string
 	firstChunk := true
 	var terminalErr error
+	cyberPolicyHit := false
 	var streamFailoverErr *UpstreamFailoverError
 	clientDisconnected := false
 	clientOutputStarted := false
@@ -717,7 +748,9 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 			return false
 		}
 
-		isTerminalEvent := isOpenAICompatResponsesTerminalEvent(event.Type)
+		eventType := strings.TrimSpace(event.Type)
+		isBareErrorEvent := eventType == "error"
+		isTerminalEvent := isOpenAICompatResponsesTerminalEvent(eventType) || isBareErrorEvent
 		if isTerminalEvent {
 			if event.Response != nil {
 				if id := strings.TrimSpace(event.Response.ID); id != "" {
@@ -734,7 +767,7 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 				usage = copyOpenAIUsageFromResponsesUsage(event.Usage)
 			}
 		}
-		if event.Type == "response.failed" {
+		if eventType == "response.failed" || isBareErrorEvent {
 			if hit, _, msg := detectOpenAICyberPolicy([]byte(payload)); hit {
 				clientMsg := openAICyberPolicyClientMessage(msg)
 				MarkOpsCyberPolicy(c, CyberPolicyMark{
@@ -744,6 +777,7 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 					UpstreamInTok:  usage.InputTokens,
 					UpstreamOutTok: usage.OutputTokens,
 				})
+				cyberPolicyHit = true
 				terminalErr = fmt.Errorf("openai cyber_policy: %s", clientMsg)
 				writeStreamHeaders()
 				if writeAnthropicStreamError(c, "invalid_request_error", clientMsg) {
@@ -759,14 +793,25 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 				message = "Upstream response failed"
 			}
 			s.handleOpenAIResponsesStreamErrorSideEffect(ctx, account, resp.Header, payloadBytes, message, true)
-			shouldFailover := openAIStreamFailedEventShouldFailover(payloadBytes, message)
-			if !clientOutputStarted && shouldFailover {
+			if !clientOutputStarted && openAIStreamFailedEventShouldFailover(payloadBytes, message) {
 				streamFailoverErr = s.newOpenAIStreamFailoverError(c, account, false, requestID, payloadBytes, message)
 				return true
 			}
-			if !shouldFailover {
+			message = s.recordOpenAIStreamUpstreamError(c, account, false, requestID, "http_error", payloadBytes, message)
+			errStatus, errType, errMsg := http.StatusBadGateway, "api_error", message
+			if status, et, em, matched := applyOpenAIStreamFailedErrorPassthroughRule(c, account.Platform, payloadBytes, message); matched {
+				if em == "" {
+					em = errMsg
+				}
+				errStatus, errType, errMsg = status, et, em
+				MarkResponseCommitted(c)
+			}
+			if isOpenAIContextWindowError(message, payloadBytes) {
 				terminalErr = fmt.Errorf("openai request failed: %s", message)
 				writeStreamHeaders()
+				if !clientOutputStarted {
+					_ = flushPendingSSE()
+				}
 				if writeAnthropicStreamError(c, "invalid_request_error", message) {
 					clientDisconnected = true
 					return true
@@ -774,6 +819,19 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 				clientOutputStarted = true
 				return true
 			}
+			if !clientDisconnected {
+				if !clientOutputStarted {
+					writeAnthropicError(c, errStatus, errType, errMsg)
+					clientOutputStarted = true
+				} else {
+					writeStreamHeaders()
+					if writeAnthropicStreamError(c, errType, errMsg) {
+						clientDisconnected = true
+					}
+				}
+			}
+			terminalErr = fmt.Errorf("upstream response failed: %s", errMsg)
+			return true
 		}
 
 		// Convert to Anthropic events
@@ -895,6 +953,9 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 			}
 			if processFrame(frame) {
 				if terminalErr != nil {
+					if cyberPolicyHit {
+						return nil, terminalErr
+					}
 					return resultWithUsage(), terminalErr
 				}
 				return finalizeStream()
@@ -910,6 +971,9 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 			}
 			if processFrame(frame) {
 				if terminalErr != nil {
+					if cyberPolicyHit {
+						return nil, terminalErr
+					}
 					return resultWithUsage(), terminalErr
 				}
 				return finalizeStream()
@@ -971,6 +1035,9 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 					}
 					if processFrame(frame) {
 						if terminalErr != nil {
+							if cyberPolicyHit {
+								return nil, terminalErr
+							}
 							return resultWithUsage(), terminalErr
 						}
 						return finalizeStream()
@@ -996,6 +1063,9 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 			}
 			if processFrame(frame) {
 				if terminalErr != nil {
+					if cyberPolicyHit {
+						return nil, terminalErr
+					}
 					return resultWithUsage(), terminalErr
 				}
 				return finalizeStream()

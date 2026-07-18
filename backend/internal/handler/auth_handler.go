@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"strings"
+	"sync"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/handler/dto"
@@ -19,14 +20,18 @@ import (
 
 // AuthHandler handles authentication-related requests
 type AuthHandler struct {
-	cfg           *config.Config
-	authService   *service.AuthService
-	userService   *service.UserService
-	settingSvc    *service.SettingService
-	attrService   *service.UserAttributeService
-	promoService  *service.PromoService
-	redeemService *service.RedeemService
-	totpService   *service.TotpService
+	cfg                  *config.Config
+	authService          *service.AuthService
+	userService          *service.UserService
+	settingSvc           *service.SettingService
+	attrService          *service.UserAttributeService
+	userAttributeService *service.UserAttributeService
+	promoService         *service.PromoService
+	redeemService        *service.RedeemService
+	totpService          *service.TotpService
+
+	dingTalkClientInstance *DingTalkClient
+	dingTalkClientMu       sync.Mutex
 }
 
 // NewAuthHandler creates a new AuthHandler
@@ -36,14 +41,15 @@ func NewAuthHandler(cfg *config.Config, authService *service.AuthService, userSe
 		attrService = attrServices[0]
 	}
 	return &AuthHandler{
-		cfg:           cfg,
-		authService:   authService,
-		userService:   userService,
-		settingSvc:    settingService,
-		attrService:   attrService,
-		promoService:  promoService,
-		redeemService: redeemService,
-		totpService:   totpService,
+		cfg:                  cfg,
+		authService:          authService,
+		userService:          userService,
+		settingSvc:           settingService,
+		attrService:          attrService,
+		userAttributeService: attrService,
+		promoService:         promoService,
+		redeemService:        redeemService,
+		totpService:          totpService,
 	}
 }
 
@@ -118,7 +124,7 @@ func (h *AuthHandler) respondWithTokenPair(c *gin.Context, user *service.User) {
 	if err != nil {
 		slog.Error("failed to generate token pair", "error", err, "user_id", user.ID)
 		// 回退到只返回Access Token
-		token, tokenErr := h.authService.GenerateToken(user)
+		token, tokenErr := h.authService.GenerateToken(c.Request.Context(), user)
 		if tokenErr != nil {
 			response.InternalError(c, "Failed to generate token")
 			return

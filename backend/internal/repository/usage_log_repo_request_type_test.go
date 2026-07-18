@@ -58,6 +58,8 @@ func TestUsageLogRepositoryCreateSyncRequestTypeAndLegacyFields(t *testing.T) {
 			log.CacheCreation1hTokens,
 			log.ImageOutputTokens,
 			log.ImageOutputCost,
+			log.ImageInputTokens,
+			log.ImageInputCost,
 			log.InputCost,
 			log.OutputCost,
 			log.CacheCreationCost,
@@ -76,6 +78,10 @@ func TestUsageLogRepositoryCreateSyncRequestTypeAndLegacyFields(t *testing.T) {
 			sqlmock.AnyArg(), // ip_address
 			log.ImageCount,
 			sqlmock.AnyArg(), // image_size
+			sqlmock.AnyArg(), // image_input_size
+			sqlmock.AnyArg(), // image_output_size
+			sqlmock.AnyArg(), // image_size_source
+			sqlmock.AnyArg(), // image_size_breakdown
 			log.VideoCount,
 			sqlmock.AnyArg(), // video_resolution
 			sqlmock.AnyArg(), // video_duration_seconds
@@ -84,6 +90,7 @@ func TestUsageLogRepositoryCreateSyncRequestTypeAndLegacyFields(t *testing.T) {
 			sqlmock.AnyArg(), // inbound_endpoint
 			sqlmock.AnyArg(), // upstream_endpoint
 			log.CacheTTLOverridden,
+			log.LongContextBillingApplied,
 			sqlmock.AnyArg(), // channel_id
 			sqlmock.AnyArg(), // model_mapping_chain
 			sqlmock.AnyArg(), // billing_tier
@@ -140,6 +147,8 @@ func TestUsageLogRepositoryCreate_PersistsServiceTier(t *testing.T) {
 			log.CacheCreation1hTokens,
 			log.ImageOutputTokens,
 			log.ImageOutputCost,
+			log.ImageInputTokens,
+			log.ImageInputCost,
 			log.InputCost,
 			log.OutputCost,
 			log.CacheCreationCost,
@@ -158,6 +167,10 @@ func TestUsageLogRepositoryCreate_PersistsServiceTier(t *testing.T) {
 			sqlmock.AnyArg(),
 			log.ImageCount,
 			sqlmock.AnyArg(),
+			sqlmock.AnyArg(), // image_input_size
+			sqlmock.AnyArg(), // image_output_size
+			sqlmock.AnyArg(), // image_size_source
+			sqlmock.AnyArg(), // image_size_breakdown
 			log.VideoCount,
 			sqlmock.AnyArg(),
 			sqlmock.AnyArg(),
@@ -166,6 +179,7 @@ func TestUsageLogRepositoryCreate_PersistsServiceTier(t *testing.T) {
 			sqlmock.AnyArg(),
 			sqlmock.AnyArg(),
 			log.CacheTTLOverridden,
+			log.LongContextBillingApplied,
 			sqlmock.AnyArg(), // channel_id
 			sqlmock.AnyArg(), // model_mapping_chain
 			sqlmock.AnyArg(), // billing_tier
@@ -250,9 +264,9 @@ func TestPrepareUsageLogInsert_PersistsVideoBillingMetadata(t *testing.T) {
 		VideoDurationSeconds: &durationSeconds,
 	})
 
-	require.Equal(t, 1, prepared.args[35])
-	require.Equal(t, sql.NullString{String: resolution, Valid: true}, prepared.args[36])
-	require.Equal(t, sql.NullInt64{Int64: int64(durationSeconds), Valid: true}, prepared.args[37])
+	require.Equal(t, 1, prepared.args[41])
+	require.Equal(t, sql.NullString{String: resolution, Valid: true}, prepared.args[42])
+	require.Equal(t, sql.NullInt64{Int64: int64(durationSeconds), Valid: true}, prepared.args[43])
 }
 
 func TestCoalesceTrimmedString(t *testing.T) {
@@ -626,6 +640,8 @@ func TestScanUsageLogRequestTypeAndLegacyFallback(t *testing.T) {
 			6,                 // cache_creation_1h_tokens
 			0,                 // image_output_tokens
 			0.0,               // image_output_cost
+			0,                 // image_input_tokens
+			0.0,               // image_input_cost
 			0.1,               // input_cost
 			0.2,               // output_cost
 			0.3,               // cache_creation_cost
@@ -644,6 +660,10 @@ func TestScanUsageLogRequestTypeAndLegacyFallback(t *testing.T) {
 			sql.NullString{},
 			0,
 			sql.NullString{},
+			sql.NullString{}, // image_input_size
+			sql.NullString{}, // image_output_size
+			sql.NullString{}, // image_size_source
+			sql.NullString{}, // image_size_breakdown
 			0,
 			sql.NullString{},
 			sql.NullInt64{},
@@ -652,6 +672,7 @@ func TestScanUsageLogRequestTypeAndLegacyFallback(t *testing.T) {
 			sql.NullString{},
 			sql.NullString{},
 			false,
+			false,             // long_context_billing_applied
 			sql.NullInt64{},   // channel_id
 			sql.NullString{},  // model_mapping_chain
 			sql.NullString{},  // billing_tier
@@ -682,6 +703,7 @@ func TestScanUsageLogRequestTypeAndLegacyFallback(t *testing.T) {
 			sql.NullInt64{},
 			1, 2, 3, 4, 5, 6,
 			0, 0.0, // image_output_tokens, image_output_cost
+			0, 0.0, // image_input_tokens, image_input_cost
 			0.1, 0.2, 0.3, 0.4, 1.0, 0.9,
 			1.0,
 			sql.NullFloat64{},
@@ -695,6 +717,10 @@ func TestScanUsageLogRequestTypeAndLegacyFallback(t *testing.T) {
 			sql.NullString{},
 			0,
 			sql.NullString{},
+			sql.NullString{}, // image_input_size
+			sql.NullString{}, // image_output_size
+			sql.NullString{}, // image_size_source
+			sql.NullString{}, // image_size_breakdown
 			0,
 			sql.NullString{},
 			sql.NullInt64{},
@@ -703,6 +729,7 @@ func TestScanUsageLogRequestTypeAndLegacyFallback(t *testing.T) {
 			sql.NullString{},
 			sql.NullString{},
 			false,
+			false,             // long_context_billing_applied
 			sql.NullInt64{},   // channel_id
 			sql.NullString{},  // model_mapping_chain
 			sql.NullString{},  // billing_tier
@@ -733,6 +760,7 @@ func TestScanUsageLogRequestTypeAndLegacyFallback(t *testing.T) {
 			sql.NullInt64{},
 			1, 2, 3, 4, 5, 6,
 			0, 0.0, // image_output_tokens, image_output_cost
+			0, 0.0, // image_input_tokens, image_input_cost
 			0.1, 0.2, 0.3, 0.4, 1.0, 0.9,
 			1.0,
 			sql.NullFloat64{},
@@ -746,6 +774,10 @@ func TestScanUsageLogRequestTypeAndLegacyFallback(t *testing.T) {
 			sql.NullString{},
 			0,
 			sql.NullString{},
+			sql.NullString{}, // image_input_size
+			sql.NullString{}, // image_output_size
+			sql.NullString{}, // image_size_source
+			sql.NullString{}, // image_size_breakdown
 			0,
 			sql.NullString{},
 			sql.NullInt64{},
@@ -754,6 +786,7 @@ func TestScanUsageLogRequestTypeAndLegacyFallback(t *testing.T) {
 			sql.NullString{},
 			sql.NullString{},
 			false,
+			false,             // long_context_billing_applied
 			sql.NullInt64{},   // channel_id
 			sql.NullString{},  // model_mapping_chain
 			sql.NullString{},  // billing_tier

@@ -98,6 +98,11 @@
             "
           />
           <p v-if="baseUrlHint" class="input-hint">{{ baseUrlHint }}</p>
+          <GrokBaseUrlPresets
+            v-if="account.platform === 'grok'"
+            class="mt-2"
+            @select="editBaseUrl = $event"
+          />
         </div>
         <div>
           <label class="input-label">{{ t('admin.accounts.apiKey') }}</label>
@@ -493,7 +498,10 @@
             <span class="pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow transition" :class="grokOAuthCustomBaseUrlEnabled ? 'translate-x-5' : 'translate-x-0'" />
           </button>
         </div>
-        <input v-if="grokOAuthCustomBaseUrlEnabled" v-model="grokOAuthBaseUrl" type="text" class="input mb-4" data-testid="grok-custom-base-url-input" :placeholder="t('admin.accounts.grokCustomBaseUrl.placeholder')" />
+        <div v-if="grokOAuthCustomBaseUrlEnabled" class="mb-4 space-y-2">
+          <input v-model="grokOAuthBaseUrl" type="text" class="input" data-testid="grok-custom-base-url-input" :placeholder="t('admin.accounts.grokCustomBaseUrl.placeholder')" />
+          <GrokBaseUrlPresets @select="grokOAuthBaseUrl = $event" />
+        </div>
 
         <div class="mb-3 flex items-center justify-between">
           <div>
@@ -2281,6 +2289,7 @@ import GroupSelector from '@/components/common/GroupSelector.vue'
 import ModelWhitelistSelector from '@/components/account/ModelWhitelistSelector.vue'
 import QuotaLimitCard from '@/components/account/QuotaLimitCard.vue'
 import HeaderOverrideEditor from '@/components/account/HeaderOverrideEditor.vue'
+import GrokBaseUrlPresets from '@/components/account/GrokBaseUrlPresets.vue'
 import {
   applyHeaderOverride,
   applyInterceptWarmup,

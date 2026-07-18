@@ -59,8 +59,8 @@ func (s *AuthService) loginOrRegisterVerifiedEmailOAuth(
 		return nil, nil, ErrServiceUnavailable
 	}
 
-	providerType := normalizeOAuthSignupSource(input.ProviderType)
-	if providerType != "github" && providerType != "google" {
+	providerType := normalizeEmailOAuthProviderType(input.ProviderType)
+	if providerType != "github" && providerType != "google" && providerType != "oidc" {
 		return nil, nil, infraerrors.BadRequest("OAUTH_PROVIDER_INVALID", "oauth provider is invalid")
 	}
 	providerKey := strings.TrimSpace(input.ProviderKey)
@@ -206,6 +206,7 @@ func (s *AuthService) createEmailOAuthUser(ctx context.Context, email, username,
 	}
 	s.postAuthUserBootstrap(ctx, user, providerType, false)
 	s.assignSubscriptions(ctx, user.ID, grantPlan.Subscriptions, "auto assigned by signup defaults")
+	_ = s.snapshotPlatformQuotaDefaults(ctx, user.ID, &grantPlan)
 	return user, nil
 }
 
@@ -251,7 +252,7 @@ func (s *AuthService) ensureEmailOAuthIdentity(ctx context.Context, userID int64
 		metadata["avatar_url"] = strings.TrimSpace(input.AvatarURL)
 	}
 
-	providerType := normalizeOAuthSignupSource(input.ProviderType)
+	providerType := normalizeEmailOAuthProviderType(input.ProviderType)
 	providerKey := strings.TrimSpace(input.ProviderKey)
 	providerSubject := strings.TrimSpace(input.ProviderSubject)
 	identity, err := s.entClient.AuthIdentity.Query().

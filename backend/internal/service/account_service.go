@@ -21,6 +21,7 @@ import (
 )
 
 var (
+	ErrAccountNotInFallback                      = infraerrors.BadRequest("ACCOUNT_NOT_IN_FALLBACK", "account is not in proxy fallback state")
 	ErrAccountNotFound                           = infraerrors.NotFound("ACCOUNT_NOT_FOUND", "account not found")
 	ErrAccountNilInput                           = infraerrors.BadRequest("ACCOUNT_NIL_INPUT", "account input cannot be nil")
 	ErrCodexQuotaLimitPercentInvalid             = infraerrors.BadRequest("CODEX_QUOTA_LIMIT_PERCENT_INVALID", "Codex quota limit percent must be between 1 and 100")
@@ -76,6 +77,35 @@ const (
 	AccountLevelTeam    = domain.AccountLevelTeam
 )
 
+// OAuthRefreshPageOptions describes one bounded, cursor-stable scan of OAuth
+// accounts. Candidate platforms are supplied by TokenRefreshService's refresher
+// registry so repository eligibility cannot drift from registered providers.
+type OAuthRefreshPageOptions struct {
+	Platforms            []string
+	AfterID              int64
+	Limit                int
+	ActiveOnly           bool
+	IncludeSetupToken    bool
+	RequireRefreshToken  bool
+	ExcludeRetryCooldown bool
+}
+
+// OAuthRefreshCandidatePage keeps cursor metadata from the raw SQL ID page.
+// Hydration may legitimately lose a concurrently deleted row, but callers can
+// still advance past the raw page without truncating or duplicating the scan.
+type OAuthRefreshCandidatePage struct {
+	Accounts    []Account
+	NextAfterID int64
+	HasMore     bool
+}
+
+// OAuthRefreshCandidatePager is intentionally narrower than AccountRepository.
+// Production refresh cycles fail closed when the repository does not implement
+// this bounded contract instead of silently falling back to an unpaged scan.
+type OAuthRefreshCandidatePager interface {
+	ListOAuthRefreshCandidatePage(ctx context.Context, options OAuthRefreshPageOptions) (*OAuthRefreshCandidatePage, error)
+}
+
 type AccountRepository interface {
 	Create(ctx context.Context, account *Account) error
 	GetByID(ctx context.Context, id int64) (*Account, error)
@@ -119,7 +149,7 @@ type AccountRepository interface {
 	ListSchedulableUngroupedByPlatforms(ctx context.Context, platforms []string) ([]Account, error)
 
 	SetRateLimited(ctx context.Context, id int64, resetAt time.Time) error
-	SetModelRateLimit(ctx context.Context, id int64, scope string, resetAt time.Time) error
+	SetModelRateLimit(ctx context.Context, id int64, scope string, resetAt time.Time, reason ...string) error
 	SetOverloaded(ctx context.Context, id int64, until time.Time) error
 	SetTempUnschedulable(ctx context.Context, id int64, until time.Time, reason string) error
 	ClearTempUnschedulable(ctx context.Context, id int64) error
@@ -133,6 +163,19 @@ type AccountRepository interface {
 	IncrementQuotaUsed(ctx context.Context, id int64, amount float64) error
 	// ResetQuotaUsed 重置 API Key 账号所有维度的配额用量为 0
 	ResetQuotaUsed(ctx context.Context, id int64) error
+}
+
+type AccountDuplicateRepository interface {
+	// CreateWithAccountGroups atomically persists an account, its exact group priorities,
+	// and the scheduler outbox event for the new routing snapshot.
+	CreateWithAccountGroups(ctx context.Context, account *Account, groups []AccountGroup) error
+}
+
+// AdminAccountRepository makes the account-duplication write capability an explicit
+// construction dependency without forcing read-only gateway test doubles to implement it.
+type AdminAccountRepository interface {
+	AccountRepository
+	AccountDuplicateRepository
 }
 
 // AccountBulkUpdate describes the fields that can be updated in a bulk operation.

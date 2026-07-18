@@ -19,7 +19,8 @@ import type {
   ReceiptCode,
   ReceiptCodePaymentMethod,
   WithdrawalRequest,
-  BasePaginationResponse
+  BasePaginationResponse,
+  PlatformQuotasResponse
 } from '@/types'
 
 /**
@@ -193,6 +194,11 @@ export async function transferAffiliateQuota(): Promise<AffiliateTransferRespons
   return data
 }
 
+export async function getMyPlatformQuotas(): Promise<PlatformQuotasResponse> {
+  const { data } = await apiClient.get<PlatformQuotasResponse>('/user/platform-quotas')
+  return data
+}
+
 export async function getReceiptCode(paymentMethod: ReceiptCodePaymentMethod): Promise<ReceiptCode | null> {
   const { data } = await apiClient.get<ReceiptCode | null>('/user/receipt-code', {
     params: { payment_method: paymentMethod }
@@ -256,6 +262,7 @@ export const userAPI = {
   startOAuthBinding,
   getAffiliateDetail,
   transferAffiliateQuota,
+  getMyPlatformQuotas,
   getReceiptCode,
   uploadReceiptCode,
   deleteReceiptCode,

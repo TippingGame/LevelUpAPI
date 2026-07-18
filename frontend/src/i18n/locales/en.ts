@@ -1,3 +1,5 @@
+import promptAuditLocale from './en/admin/promptAudit'
+
 export default {
   // Home Page
   home: {
@@ -418,6 +420,7 @@ export default {
     proxies: 'Proxies',
     redeemCodes: 'Redeem Codes',
     ops: 'Ops',
+    securityAudit: 'Security Audit',
     promoCodes: 'Promo Codes',
     settings: 'Settings',
     myAccount: 'My Account',
@@ -802,7 +805,6 @@ export default {
     apiKey: 'API Key',
     baseUrl: 'Base URL',
     credentialsJson: 'Credentials JSON',
-    credentialsJsonPlaceholder: '{\n  "access_token": "...",\n  "refresh_token": "...",\n  "expires_at": "..."\n}',
     accountDetails: 'Account Details',
     oauthAuthorization: 'OAuth Authorization',
     completeAuthorization: 'Complete Authorization',
@@ -1339,7 +1341,22 @@ export default {
     exportExcelFailed: 'Failed to export usage data',
     imageUnit: ' images',
     videoUnit: ' videos',
-    userAgent: 'User-Agent'
+    userAgent: 'User-Agent',
+    ipGeo: {
+      fetch: 'Fetch region',
+      fetching: 'Fetching...',
+      failed: 'Failed',
+      private: 'Private address',
+      refreshTitle: 'Refresh region info',
+      batchFetch: 'Batch fetch regions',
+      batchFetching: 'Fetching...',
+      pending: '{count} IPs pending',
+      batchFailed: 'Failed to batch fetch IP regions',
+      detailOrg: 'ISP',
+      detailTimezone: 'Timezone',
+      detailAccuracy: 'Accuracy',
+      detailCoordinates: 'Coordinates'
+    }
   },
 
   // Shared keys for channel monitor (admin + user views)
@@ -1869,6 +1886,7 @@ export default {
 
   // Admin
   admin: {
+    ...promptAuditLocale,
     store: {
       categoriesTitle: 'Store Categories',
       categoriesDescription: 'Manage product categories for the self-service store',
@@ -3671,6 +3689,11 @@ export default {
         name: 'Name',
         namePlaceholder: 'Enter monitor name',
         provider: 'Platform',
+        apiMode: 'OpenAI protocol',
+        apiModeChatCompletions: 'OpenAI Compatible',
+        apiModeChatCompletionsHint: 'Use /v1/chat/completions with messages; works for most compatible providers.',
+        apiModeResponses: 'Responses API',
+        apiModeResponsesHint: 'Use /v1/responses with default instructions + input; best for self-check/Codex paths.',
         endpoint: 'Endpoint',
         endpointPlaceholder: 'https://api.example.com',
         useCurrentDomain: 'Use current service',
@@ -3725,7 +3748,7 @@ export default {
       templateField: {
         label: 'Request template',
         none: 'No template',
-        placeholder: 'Pick a template (filtered by current provider)',
+        placeholder: 'Pick a template (filtered by current provider and protocol)',
         applyHint: 'Picking a template copies its headers and body to this monitor (snapshot). Later template edits are not auto-synced.'
       },
       template: {
@@ -5682,6 +5705,11 @@ export default {
       noData: 'No data.',
       loadingText: 'loading',
       ready: 'ready',
+      systemLogs: {
+        host: 'Host',
+        search: 'Search',
+        cleanCurrentFilters: 'Clean current filters'
+      },
       requestsTotal: 'Requests (total)',
       slaScope: 'SLA scope:',
       tokens: 'Tokens',
@@ -5856,6 +5884,8 @@ export default {
         group: 'Group',
         user: 'User',
         userId: 'User ID',
+        apiKey: 'API Key',
+        keyDeletedBadge: 'Key Deleted',
         account: 'Account',
         accountId: 'Account ID',
         status: 'Status',
@@ -7362,6 +7392,13 @@ export default {
         scopeOAuth: 'OAuth only',
         scopeAPIKey: 'API Key only',
         scopeBedrock: 'Bedrock only',
+        userIds: 'Specific users',
+        userIdsHint: 'Type any part of a user email to search. Leave empty to apply to all Sub2API users. Selected users match requests from their API keys and take precedence over global rules.',
+        userSearchPlaceholder: 'Search by user email',
+        userSearchEmpty: 'No matching users found',
+        userDeleted: '(deleted)',
+        userIdFallback: 'User #{id}',
+        removeUser: 'Remove user',
         errorMessage: 'Error message',
         errorMessagePlaceholder: 'Custom error message when blocked',
         errorMessageHint: 'Leave empty for the default message.',
@@ -7445,7 +7482,30 @@ export default {
       },
       openaiExperimentalScheduler: {
         title: 'OpenAI experimental scheduler policy',
-        description: "Disabled by default. When enabled, this only changes the gateway's experimental account-selection policy for OpenAI traffic; it does not indicate an upstream OpenAI capability."
+        description: "Disabled by default. When enabled, this only changes the gateway's experimental account-selection policy for OpenAI traffic; it does not indicate an upstream OpenAI capability.",
+        lowRatePriorityTitle: 'Prefer lower rates',
+        lowRatePriorityDescription: 'When enabled, accounts with lower billing rates are preferred. If rates are equal, account priority, current load, and other scheduling factors are considered. This switch is ignored when the experimental scheduler is enabled.',
+        oauthRateTitle: 'OAuth scheduling reference rate',
+        oauthRatePriorityDescription: 'When a group contains both API Key and OAuth accounts, this rate is used to order OAuth accounts alongside probed API Key billing rates.',
+        oauthRateWeightedDescription: 'When a group contains both API Key and OAuth accounts, this rate is used for OAuth accounts when calculating the billing-rate score.',
+        stickyWeightedTitle: 'Sticky weighting',
+        stickyWeightedDescription: 'When enabled, previous_response_id and session_hash affinity are scored by the advanced scheduler. When disabled, sticky accounts keep the legacy hard-hit behavior.',
+        subscriptionPriorityTitle: 'Subscription priority',
+        subscriptionPriorityDescription: 'When enabled, the scheduler scores ChatGPT subscription accounts first and falls back to non-subscription accounts only if no subscription slot can be acquired.',
+        weightsTitle: 'Scheduler weight overrides',
+        weightsDescription: 'Blank values use config/environment values; when config is not set, built-in defaults apply. Non-blank page settings take priority.',
+        defaultPlaceholder: 'config/default: {value}',
+        topKLabel: 'TopK',
+        priorityWeight: 'Priority',
+        loadWeight: 'Load',
+        queueWeight: 'Queue',
+        errorRateWeight: 'Error rate',
+        ttftWeight: 'TTFT',
+        resetWeight: 'Reset window',
+        quotaHeadroomWeight: 'Quota headroom',
+        upstreamCostWeight: 'Billing rate',
+        previousResponseWeight: 'previous_response sticky',
+        sessionStickyWeight: 'session_hash sticky'
       },
       openaiFreeAccountRepair: {
         title: 'OpenAI Free account auto repair',

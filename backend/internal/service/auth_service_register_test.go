@@ -87,6 +87,41 @@ func (s *authPrivateGroupProvisionerStub) GetActiveUserPrivateGroup(context.Cont
 
 type refreshTokenCacheStub struct{}
 
+type userPlatformQuotaRepoStub struct {
+	bulkInsertCalls [][]UserPlatformQuotaRecord
+	bulkInsertErr   error
+}
+
+func (s *userPlatformQuotaRepoStub) BulkInsertInitial(_ context.Context, records []UserPlatformQuotaRecord) error {
+	cloned := append([]UserPlatformQuotaRecord(nil), records...)
+	s.bulkInsertCalls = append(s.bulkInsertCalls, cloned)
+	return s.bulkInsertErr
+}
+
+func (s *userPlatformQuotaRepoStub) GetByUserPlatform(context.Context, int64, string) (*UserPlatformQuotaRecord, error) {
+	panic("unexpected GetByUserPlatform call")
+}
+
+func (s *userPlatformQuotaRepoStub) ListByUser(context.Context, int64) ([]UserPlatformQuotaRecord, error) {
+	panic("unexpected ListByUser call")
+}
+
+func (s *userPlatformQuotaRepoStub) IncrementUsageWithReset(context.Context, int64, string, float64, time.Time) error {
+	panic("unexpected IncrementUsageWithReset call")
+}
+
+func (s *userPlatformQuotaRepoStub) UpsertForUser(context.Context, int64, []UserPlatformQuotaRecord) error {
+	panic("unexpected UpsertForUser call")
+}
+
+func (s *userPlatformQuotaRepoStub) ResetExpiredWindow(context.Context, int64, string, string, time.Time) error {
+	panic("unexpected ResetExpiredWindow call")
+}
+
+func (s *userPlatformQuotaRepoStub) BatchSnapshotUsage(context.Context, []UserPlatformQuotaSnapshot, time.Time) error {
+	panic("unexpected BatchSnapshotUsage call")
+}
+
 func (s *defaultSubscriptionAssignerStub) AssignOrExtendSubscription(_ context.Context, input *AssignSubscriptionInput) (*UserSubscription, bool, error) {
 	if input != nil {
 		s.calls = append(s.calls, *input)
@@ -192,7 +227,7 @@ func (s *emailCacheStub) IncrNotifyCodeUserRate(ctx context.Context, userID int6
 	return 0, nil
 }
 
-func newAuthService(repo *userRepoStub, settings map[string]string, emailCache EmailCache) *AuthService {
+func newAuthService(repo *userRepoStub, settings map[string]string, emailCache EmailCache, quotaRepos ...UserPlatformQuotaRepository) *AuthService {
 	cfg := &config.Config{
 		JWT: config.JWTConfig{
 			Secret:     "test-secret",
@@ -213,6 +248,10 @@ func newAuthService(repo *userRepoStub, settings map[string]string, emailCache E
 	if emailCache != nil {
 		emailService = NewEmailService(&settingRepoStub{values: settings}, emailCache)
 	}
+	var quotaRepo UserPlatformQuotaRepository
+	if len(quotaRepos) > 0 {
+		quotaRepo = quotaRepos[0]
+	}
 
 	return NewAuthService(
 		nil, // entClient
@@ -227,6 +266,7 @@ func newAuthService(repo *userRepoStub, settings map[string]string, emailCache E
 		nil, // promoService
 		nil, // defaultSubAssigner
 		nil, // affiliateService
+		quotaRepo,
 	)
 }
 
@@ -442,7 +482,7 @@ func TestAuthService_ValidateToken_ExpiredReturnsClaimsWithError(t *testing.T) {
 		Status:       StatusActive,
 		TokenVersion: 1,
 	}
-	token, err := service.GenerateToken(user)
+	token, err := service.GenerateToken(context.Background(), user)
 	require.NoError(t, err)
 
 	// 验证有效 token
@@ -453,7 +493,7 @@ func TestAuthService_ValidateToken_ExpiredReturnsClaimsWithError(t *testing.T) {
 
 	// 模拟过期 token（通过创建一个过期很久的 token）
 	service.cfg.JWT.ExpireHour = -1 // 设置为负数使 token 立即过期
-	expiredToken, err := service.GenerateToken(user)
+	expiredToken, err := service.GenerateToken(context.Background(), user)
 	require.NoError(t, err)
 	service.cfg.JWT.ExpireHour = 1 // 恢复
 
@@ -478,7 +518,7 @@ func TestAuthService_RefreshToken_ExpiredTokenNoPanic(t *testing.T) {
 
 	// 创建过期 token
 	service.cfg.JWT.ExpireHour = -1
-	expiredToken, err := service.GenerateToken(user)
+	expiredToken, err := service.GenerateToken(context.Background(), user)
 	require.NoError(t, err)
 	service.cfg.JWT.ExpireHour = 1
 
@@ -519,7 +559,7 @@ func TestAuthService_GenerateToken_UsesExpireHourWhenMinutesZero(t *testing.T) {
 		TokenVersion: 1,
 	}
 
-	token, err := service.GenerateToken(user)
+	token, err := service.GenerateToken(context.Background(), user)
 	require.NoError(t, err)
 
 	claims, err := service.ValidateToken(token)
@@ -544,7 +584,7 @@ func TestAuthService_GenerateToken_UsesMinutesWhenConfigured(t *testing.T) {
 		TokenVersion: 1,
 	}
 
-	token, err := service.GenerateToken(user)
+	token, err := service.GenerateToken(context.Background(), user)
 	require.NoError(t, err)
 
 	claims, err := service.ValidateToken(token)
@@ -640,7 +680,7 @@ func TestAuthService_Register_GrantOnSignupMergesSourceOverridesWithGlobalDefaul
 	require.NoError(t, err)
 	require.NotNil(t, user)
 	require.Equal(t, 9.5, user.Balance)
-	require.Equal(t, 2, user.Concurrency)
+	require.Equal(t, 5, user.Concurrency)
 	require.Len(t, assigner.calls, 1)
 	require.Equal(t, int64(31), assigner.calls[0].GroupID)
 	require.Equal(t, 5, assigner.calls[0].ValidityDays)

@@ -39,7 +39,7 @@
         </div>
         <div class="mt-1 flex justify-between text-sm">
           <span class="text-gray-500 dark:text-gray-400">{{ t('payment.orders.payAmount') }}</span>
-          <span class="font-medium text-gray-900 dark:text-white">¥{{ order?.pay_amount?.toFixed(2) }}</span>
+          <span class="font-medium text-gray-900 dark:text-white">{{ paymentAmountSymbol }}{{ order?.pay_amount?.toFixed(2) }}</span>
         </div>
         <div v-if="actuallyRefunded > 0" class="mt-1 flex justify-between text-sm">
           <span class="text-gray-500 dark:text-gray-400">{{ t('payment.admin.alreadyRefunded') }}</span>
@@ -95,14 +95,14 @@
       <div>
         <label class="input-label">{{ t('payment.admin.refundAmount') }}</label>
         <div class="relative">
-          <span :class="['absolute top-1/2 -translate-y-1/2 text-gray-500', order?.order_type === 'balance' ? 'right-3' : 'left-3']">{{ refundInputPrefix }}</span>
+          <span class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500">{{ refundInputPrefix }}</span>
           <input
             v-model.number="form.amount"
             type="number"
             step="0.01"
             min="0.01"
             :max="maxRefundable"
-            :class="['input', order?.order_type === 'balance' ? 'pr-16' : 'pl-7']"
+            class="input pr-16"
             required
           />
         </div>
@@ -170,6 +170,7 @@ import BaseDialog from '@/components/common/BaseDialog.vue'
 import type { PaymentOrder } from '@/types/payment'
 import { formatOrderDateTime } from '@/components/payment/orderUtils'
 import { GAME_CURRENCY_UNIT, formatGameCoins } from '@/utils/gameCurrency'
+import { currencySymbol } from '@/components/payment/currency'
 
 const { t } = useI18n()
 
@@ -186,6 +187,8 @@ const emit = defineEmits<{
   (e: 'confirm', data: { amount: number; reason: string; deduct_balance: boolean; force: boolean }): void
   (e: 'cancel'): void
 }>()
+
+const paymentAmountSymbol = computed(() => currencySymbol(props.order?.currency))
 
 const form = reactive({
   amount: 0,
@@ -208,7 +211,7 @@ const maxRefundable = computed(() => {
   return props.order.amount - actuallyRefunded.value
 })
 
-const refundInputPrefix = computed(() => props.order?.order_type === 'balance' ? GAME_CURRENCY_UNIT : '¥')
+const refundInputPrefix = computed(() => GAME_CURRENCY_UNIT)
 
 const balanceInsufficient = computed(() => {
   if (props.userBalance == null || !props.order) return false
@@ -234,8 +237,7 @@ function formatDateTime(dateStr: string): string {
 }
 
 function formatOrderDisplayAmount(value: number | null | undefined): string {
-  if (props.order?.order_type === 'balance') return formatGameCoins(value)
-  return `¥${Number(value || 0).toFixed(2)}`
+  return formatGameCoins(value)
 }
 
 function handleSubmit() {

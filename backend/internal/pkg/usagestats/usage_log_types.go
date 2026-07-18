@@ -77,6 +77,18 @@ type DashboardStats struct {
 	// 性能指标
 	Rpm int64 `json:"rpm"` // 近5分钟平均每分钟请求数
 	Tpm int64 `json:"tpm"` // 近5分钟平均每分钟Token数
+
+	ByPlatform []PlatformDashboardStats `json:"by_platform,omitempty"`
+}
+
+type PlatformDashboardStats struct {
+	Platform        string  `json:"platform"`
+	TotalRequests   int64   `json:"total_requests"`
+	TotalTokens     int64   `json:"total_tokens"`
+	TotalActualCost float64 `json:"total_actual_cost"`
+	TodayRequests   int64   `json:"today_requests"`
+	TodayTokens     int64   `json:"today_tokens"`
+	TodayActualCost float64 `json:"today_actual_cost"`
 }
 
 // TrendDataPoint represents a single point in trend data
@@ -164,13 +176,16 @@ type UserSpendingRankingResponse struct {
 
 // UserBreakdownItem represents per-user usage breakdown within a dimension (group, model, endpoint).
 type UserBreakdownItem struct {
-	UserID      int64   `json:"user_id"`
-	Email       string  `json:"email"`
-	Requests    int64   `json:"requests"`
-	TotalTokens int64   `json:"total_tokens"`
-	Cost        float64 `json:"cost"`         // 标准计费
-	ActualCost  float64 `json:"actual_cost"`  // 实际扣除
-	AccountCost float64 `json:"account_cost"` // 账号成本
+	UserID       int64   `json:"user_id"`
+	Email        string  `json:"email"`
+	Requests     int64   `json:"requests"`
+	InputTokens  int64   `json:"input_tokens"`
+	OutputTokens int64   `json:"output_tokens"`
+	CacheTokens  int64   `json:"cache_tokens"`
+	TotalTokens  int64   `json:"total_tokens"`
+	Cost         float64 `json:"cost"`         // 标准计费
+	ActualCost   float64 `json:"actual_cost"`  // 实际扣除
+	AccountCost  float64 `json:"account_cost"` // 账号成本
 }
 
 // UserBreakdownDimension specifies the dimension to filter for user breakdown.
@@ -187,6 +202,7 @@ type UserBreakdownDimension struct {
 	RequestType *int16 // filter by request_type (non-nil to enable)
 	Stream      *bool  // filter by stream flag (non-nil to enable)
 	BillingType *int8  // filter by billing_type (non-nil to enable)
+	SortBy      string // allowlisted aggregate sort column; empty defaults to actual_cost
 }
 
 // APIKeyUsageTrendPoint represents API key usage trend data point
@@ -243,23 +259,33 @@ type UserDashboardStats struct {
 	// 性能指标
 	Rpm int64 `json:"rpm"` // 近5分钟平均每分钟请求数
 	Tpm int64 `json:"tpm"` // 近5分钟平均每分钟Token数
+
+	// 按有效平台维度拆分：group.platform 优先，否则 account.platform。
+	ByPlatform []PlatformDashboardStats `json:"by_platform,omitempty"`
 }
 
 // UsageLogFilters represents filters for usage log queries
 type UsageLogFilters struct {
-	UserID      int64
-	APIKeyID    int64
-	AccountID   int64
-	GroupID     int64
-	Model       string
-	RequestType *int16
-	Stream      *bool
-	BillingType *int8
-	BillingMode string
-	StartTime   *time.Time
-	EndTime     *time.Time
+	UserID            int64
+	APIKeyID          int64
+	AccountID         int64
+	GroupID           int64
+	Model             string
+	ModelFilterSource string
+	RequestType       *int16
+	Stream            *bool
+	BillingType       *int8
+	BillingMode       string
+	StartTime         *time.Time
+	EndTime           *time.Time
 	// ExactTotal requests exact COUNT(*) for pagination. Default false for fast large-table paging.
 	ExactTotal bool
+}
+
+type PlatformUsage struct {
+	Platform        string  `json:"platform"`
+	TodayActualCost float64 `json:"today_actual_cost"`
+	TotalActualCost float64 `json:"total_actual_cost"`
 }
 
 // UsageStats represents usage statistics
@@ -282,9 +308,10 @@ type UsageStats struct {
 
 // BatchUserUsageStats represents usage stats for a single user
 type BatchUserUsageStats struct {
-	UserID          int64   `json:"user_id"`
-	TodayActualCost float64 `json:"today_actual_cost"`
-	TotalActualCost float64 `json:"total_actual_cost"`
+	UserID          int64           `json:"user_id"`
+	TodayActualCost float64         `json:"today_actual_cost"`
+	TotalActualCost float64         `json:"total_actual_cost"`
+	ByPlatform      []PlatformUsage `json:"by_platform,omitempty"`
 }
 
 // BatchAPIKeyUsageStats represents usage stats for a single API key

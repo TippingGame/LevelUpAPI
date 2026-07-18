@@ -10,28 +10,37 @@ import (
 )
 
 type stubAdminService struct {
-	users                []service.User
-	apiKeys              []service.APIKey
-	groups               []service.Group
-	accounts             []service.Account
-	proxies              []service.Proxy
-	proxyCounts          []service.ProxyWithAccountCount
-	redeems              []service.RedeemCode
-	boundAuthIdentity    *service.AdminBindAuthIdentityInput
-	boundAuthIdentityFor int64
-	createdAccounts      []*service.CreateAccountInput
-	createdGroups        []*service.CreateGroupInput
-	updatedGroupIDs      []int64
-	updatedGroups        []*service.UpdateGroupInput
-	createdProxies       []*service.CreateProxyInput
-	updatedProxyIDs      []int64
-	updatedProxies       []*service.UpdateProxyInput
-	testedProxyIDs       []int64
-	createAccountErr     error
-	updateAccountErr     error
-	bulkUpdateAccountErr error
-	checkMixedErr        error
-	lastMixedCheck       struct {
+	users                               []service.User
+	apiKeys                             []service.APIKey
+	groups                              []service.Group
+	accounts                            []service.Account
+	accountSchedulerScoreFilterAccounts []service.Account
+	openAISchedulerScorePoolAccounts    []service.Account
+	schedulerScoreFilterCalls           int
+	openAISchedulerScorePoolCalls       int
+	proxies                             []service.Proxy
+	proxyCounts                         []service.ProxyWithAccountCount
+	redeems                             []service.RedeemCode
+	boundAuthIdentity                   *service.AdminBindAuthIdentityInput
+	boundAuthIdentityFor                int64
+	createdAccounts                     []*service.CreateAccountInput
+	createdGroups                       []*service.CreateGroupInput
+	updatedGroupIDs                     []int64
+	updatedGroups                       []*service.UpdateGroupInput
+	createdProxies                      []*service.CreateProxyInput
+	updatedProxyIDs                     []int64
+	updatedProxies                      []*service.UpdateProxyInput
+	testedProxyIDs                      []int64
+	getUserErr                          error
+	createAccountErr                    error
+	createSparkShadowErr                error
+	updateAccountErr                    error
+	bulkUpdateAccountErr                error
+	getAccountResult                    *service.Account
+	updateAccountCalls                  int
+	updateAccountExtraCalls             int
+	checkMixedErr                       error
+	lastMixedCheck                      struct {
 		accountID int64
 		platform  string
 		groupIDs  []int64
@@ -152,6 +161,9 @@ func (s *stubAdminService) ListUsers(ctx context.Context, page, pageSize int, fi
 }
 
 func (s *stubAdminService) GetUser(ctx context.Context, id int64) (*service.User, error) {
+	if s.getUserErr != nil {
+		return nil, s.getUserErr
+	}
 	for i := range s.users {
 		if s.users[i].ID == id {
 			return &s.users[i], nil
@@ -159,6 +171,10 @@ func (s *stubAdminService) GetUser(ctx context.Context, id int64) (*service.User
 	}
 	user := service.User{ID: id, Email: "user@example.com", Status: service.StatusActive}
 	return &user, nil
+}
+
+func (s *stubAdminService) GetUserIncludeDeleted(ctx context.Context, id int64) (*service.User, error) {
+	return s.GetUser(ctx, id)
 }
 
 func (s *stubAdminService) CreateUser(ctx context.Context, input *service.CreateUserInput) (*service.User, error) {
@@ -188,6 +204,10 @@ func (s *stubAdminService) UpdateUserPoints(ctx context.Context, userID int64, p
 func (s *stubAdminService) UpdateUserLoadFactorCredits(ctx context.Context, userID int64, amount int, operation string, notes string, operatorUserID int64) (*service.User, error) {
 	user := service.User{ID: userID, LoadFactorCreditsBalance: amount, Status: service.StatusActive}
 	return &user, nil
+}
+
+func (s *stubAdminService) BatchUpdateLimits(ctx context.Context, userIDs []int64, concurrency, rpmLimit *int) (int, error) {
+	return len(userIDs), nil
 }
 
 func (s *stubAdminService) GetUserAPIKeys(ctx context.Context, userID int64, page, pageSize int, sortBy, sortOrder string) ([]service.APIKey, int64, error) {
@@ -272,6 +292,13 @@ func (s *stubAdminService) GetGroup(ctx context.Context, id int64) (*service.Gro
 	return &group, nil
 }
 
+func (s *stubAdminService) GetGroupModelsListCandidates(_ context.Context, _ int64, platform string) ([]string, error) {
+	if platform == service.PlatformGrok {
+		return []string{"grok-imagine-video", "grok-imagine-video-1.5"}, nil
+	}
+	return []string{"claude-sonnet-4-6"}, nil
+}
+
 func (s *stubAdminService) CreateGroup(ctx context.Context, input *service.CreateGroupInput) (*service.Group, error) {
 	s.createdGroups = append(s.createdGroups, input)
 	videoRateMultiplier := 0.0
@@ -289,6 +316,15 @@ func (s *stubAdminService) CreateGroup(ctx context.Context, input *service.Creat
 		VideoPrice1080P:      input.VideoPrice1080P,
 	}
 	return &group, nil
+}
+
+func (s *stubAdminService) DuplicateGroup(ctx context.Context, id int64, actorScope, operationKey string) (*service.Group, error) {
+	group := service.Group{ID: 201, Name: "group (Copy)", Status: "inactive"}
+	return &group, nil
+}
+
+func (s *stubAdminService) RecoverDuplicateGroup(ctx context.Context, id int64, actorScope, operationKey string) (*service.Group, error) {
+	return nil, nil
 }
 
 func (s *stubAdminService) UpdateGroup(ctx context.Context, id int64, input *service.UpdateGroupInput) (*service.Group, error) {
@@ -350,6 +386,41 @@ func (s *stubAdminService) ListAccounts(ctx context.Context, page, pageSize int,
 	return s.accounts, int64(len(s.accounts)), nil
 }
 
+func (s *stubAdminService) ListAccountsForSchedulerScoreFilter(_ context.Context, platform, accountType, status, search string, groupID int64, privacyMode string) ([]service.Account, error) {
+	s.schedulerScoreFilterCalls++
+	if s.accountSchedulerScoreFilterAccounts != nil {
+		return s.accountSchedulerScoreFilterAccounts, nil
+	}
+	return s.accounts, nil
+}
+
+func (s *stubAdminService) ListOpenAISchedulableAccountsForSchedulerScore(_ context.Context, groupID *int64) ([]service.Account, error) {
+	s.openAISchedulerScorePoolCalls++
+	accounts := s.openAISchedulerScorePoolAccounts
+	if accounts == nil {
+		accounts = s.accounts
+	}
+	out := make([]service.Account, 0, len(accounts))
+	for _, account := range accounts {
+		if account.Platform != service.PlatformOpenAI || !account.IsSchedulable() {
+			continue
+		}
+		if groupID == nil {
+			if len(account.AccountGroups) == 0 && len(account.GroupIDs) == 0 {
+				out = append(out, account)
+			}
+			continue
+		}
+		for _, accountGroup := range account.AccountGroups {
+			if accountGroup.GroupID == *groupID {
+				out = append(out, account)
+				break
+			}
+		}
+	}
+	return out, nil
+}
+
 func (s *stubAdminService) GetAccountQuotaDashboard(ctx context.Context) (*service.AccountQuotaDashboard, error) {
 	now := time.Now().UTC()
 	return &service.AccountQuotaDashboard{
@@ -370,6 +441,9 @@ func (s *stubAdminService) GetAccountQuotaDashboard(ctx context.Context) (*servi
 }
 
 func (s *stubAdminService) GetAccount(ctx context.Context, id int64) (*service.Account, error) {
+	if s.getAccountResult != nil {
+		return s.getAccountResult, nil
+	}
 	account := service.Account{ID: id, Name: "account", Status: service.StatusActive}
 	return &account, nil
 }
@@ -394,12 +468,27 @@ func (s *stubAdminService) CreateAccount(ctx context.Context, input *service.Cre
 	return &account, nil
 }
 
+func (s *stubAdminService) DuplicateAccount(ctx context.Context, id int64, actorScope, operationKey string) (*service.Account, error) {
+	account := service.Account{ID: 301, Name: "account (Copy)", Status: service.StatusActive, Schedulable: false}
+	return &account, nil
+}
+
+func (s *stubAdminService) RecoverDuplicateAccount(ctx context.Context, id int64, actorScope, operationKey string) (*service.Account, error) {
+	return nil, nil
+}
+
 func (s *stubAdminService) UpdateAccount(ctx context.Context, id int64, input *service.UpdateAccountInput) (*service.Account, error) {
+	s.updateAccountCalls++
 	if s.updateAccountErr != nil {
 		return nil, s.updateAccountErr
 	}
 	account := service.Account{ID: id, Name: input.Name, Status: service.StatusActive}
 	return &account, nil
+}
+
+func (s *stubAdminService) UpdateAccountExtra(ctx context.Context, id int64, updates map[string]any) error {
+	s.updateAccountExtraCalls++
+	return nil
 }
 
 func (s *stubAdminService) DeleteAccount(ctx context.Context, id int64) error {
@@ -686,6 +775,26 @@ func (s *stubAdminService) ForceAntigravityPrivacy(ctx context.Context, account 
 
 func (s *stubAdminService) ReplaceUserGroup(ctx context.Context, userID, oldGroupID, newGroupID int64) (*service.ReplaceUserGroupResult, error) {
 	return &service.ReplaceUserGroupResult{MigratedKeys: 0}, nil
+}
+
+func (s *stubAdminService) CreateShadow(_ context.Context, parentID int64, opts service.ShadowOptions) (*service.Account, error) {
+	if s.createSparkShadowErr != nil {
+		return nil, s.createSparkShadowErr
+	}
+	pid := parentID
+	return &service.Account{
+		ID:              9001,
+		Name:            opts.Name,
+		Platform:        service.PlatformOpenAI,
+		Type:            service.AccountTypeOAuth,
+		Priority:        opts.Priority,
+		Concurrency:     opts.Concurrency,
+		GroupIDs:        opts.GroupIDs,
+		ParentAccountID: &pid,
+		QuotaDimension:  service.QuotaDimensionSpark,
+		Credentials:     map[string]any{},
+		Extra:           map[string]any{},
+	}, nil
 }
 
 // Ensure stub implements interface.

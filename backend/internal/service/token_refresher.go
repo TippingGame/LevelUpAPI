@@ -89,7 +89,7 @@ func (r *OpenAITokenRefresher) CacheKey(account *Account) string {
 
 // CanRefresh 检查是否能处理此账号
 func (r *OpenAITokenRefresher) CanRefresh(account *Account) bool {
-	return account.Platform == PlatformOpenAI && account.Type == AccountTypeOAuth
+	return account.Platform == PlatformOpenAI && account.Type == AccountTypeOAuth && !account.IsCredentialShadow()
 }
 
 // NeedsRefresh 检查token是否需要刷新

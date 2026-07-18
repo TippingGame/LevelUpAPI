@@ -334,6 +334,49 @@ func (r *apiKeyRepository) Delete(ctx context.Context, id int64) error {
 	})
 }
 
+// DeleteWithAudit atomically records the plaintext key ownership before soft-deleting it.
+func (r *apiKeyRepository) DeleteWithAudit(ctx context.Context, id int64) error {
+	tombstoneKey := fmt.Sprintf("__deleted__%d__%d", id, time.Now().UnixNano())
+	return r.withTx(ctx, func(txCtx context.Context, client *dbent.Client) error {
+		return r.deleteWithAudit(txCtx, client, id, tombstoneKey)
+	})
+}
+
+func (r *apiKeyRepository) deleteWithAudit(ctx context.Context, client *dbent.Client, id int64, tombstoneKey string) error {
+	if _, err := client.ExecContext(ctx, `
+		INSERT INTO deleted_api_key_audits (key, api_key_id, user_id, key_name, deleted_at)
+		SELECT key, id, user_id, name, NOW()
+		FROM api_keys
+		WHERE id = $1 AND deleted_at IS NULL`, id); err != nil {
+		return err
+	}
+
+	res, err := client.ExecContext(ctx, `
+		UPDATE api_keys
+		SET key = $1, deleted_at = NOW(), updated_at = NOW()
+		WHERE id = $2 AND deleted_at IS NULL`, tombstoneKey, id)
+	if err != nil {
+		return err
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		exists, err := client.APIKey.Query().
+			Where(apikey.IDEQ(id)).
+			Exist(mixins.SkipSoftDelete(ctx))
+		if err != nil {
+			return err
+		}
+		if exists {
+			return nil
+		}
+		return service.ErrAPIKeyNotFound
+	}
+	return nil
+}
+
 func (r *apiKeyRepository) ListByUserID(ctx context.Context, userID int64, params pagination.PaginationParams, filters service.APIKeyListFilters) ([]service.APIKey, *pagination.PaginationResult, error) {
 	q := r.activeQuery().Where(apikey.UserIDEQ(userID))
 

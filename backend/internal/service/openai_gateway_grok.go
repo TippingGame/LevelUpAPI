@@ -17,7 +17,10 @@ import (
 	"github.com/tidwall/sjson"
 )
 
-const grokDefaultResponsesModel = "grok-4.5"
+const (
+	grokDefaultResponsesModel = "grok-4.5"
+	grokCLIVersion            = xai.CLIClientVersion
+)
 
 func (s *OpenAIGatewayService) forwardGrokResponses(
 	ctx context.Context,
@@ -36,19 +39,28 @@ func (s *OpenAIGatewayService) forwardGrokResponses(
 	if strings.TrimSpace(upstreamModel) == "" {
 		upstreamModel = grokDefaultResponsesModel
 	}
+	cacheIdentity := resolveGrokCacheIdentity(c, body, "", upstreamModel)
 	patchedBody, err := patchGrokResponsesBody(body, upstreamModel)
 	if err != nil {
 		return nil, err
 	}
+	patchedBody, err = applyGrokResponsesCacheIdentity(patchedBody, body, cacheIdentity, account.IsGrokOAuth())
+	if err != nil {
+		return nil, fmt.Errorf("apply grok prompt cache identity: %w", err)
+	}
+	patchedBody, err = applyGrokFreeMessagesFunctionToolCacheRoute(patchedBody, body, account, cacheIdentity)
+	if err != nil {
+		return nil, fmt.Errorf("apply grok Free function-tool cache route: %w", err)
+	}
 
-	token, _, err := s.GetAccessToken(ctx, account)
+	token, _, err := s.getRequestCredential(ctx, c, account)
 	if err != nil {
 		return nil, err
 	}
 
 	upstreamCtx, releaseUpstreamCtx := detachStreamUpstreamContext(ctx, reqStream)
 	defer releaseUpstreamCtx()
-	upstreamReq, err := buildGrokResponsesRequestWithPolicy(upstreamCtx, c, account, patchedBody, token, s.settingService, s.cfg)
+	upstreamReq, err := buildGrokResponsesRequestWithPolicy(upstreamCtx, c, account, patchedBody, token, s.settingService, s.cfg, cacheIdentity)
 	if err != nil {
 		return nil, err
 	}
@@ -87,13 +99,14 @@ func (s *OpenAIGatewayService) forwardGrokResponses(
 			return nil, &UpstreamFailoverError{
 				StatusCode:             resp.StatusCode,
 				ResponseBody:           respBody,
+				ResponseHeaders:        resp.Header.Clone(),
 				RetryableOnSameAccount: account.IsPoolMode() && account.IsPoolModeRetryableStatus(resp.StatusCode),
 			}
 		}
 		return s.handleErrorResponse(ctx, resp, c, account, patchedBody, upstreamModel)
 	}
 
-	s.updateGrokUsageSnapshot(ctx, account, xai.ParseQuotaHeaders(resp.Header, resp.StatusCode))
+	s.updateGrokUsageFromResponse(ctx, account, resp.Header, resp.StatusCode)
 
 	var usage *OpenAIUsage
 	var firstTokenMs *int
@@ -111,8 +124,8 @@ func (s *OpenAIGatewayService) forwardGrokResponses(
 		if err != nil {
 			return nil, err
 		}
-		usage = nonStreamResult
-		responseID = strings.TrimSpace(nonStreamResult.ResponseID)
+		usage = nonStreamResult.usage
+		responseID = strings.TrimSpace(nonStreamResult.responseID)
 	}
 
 	if usage == nil {
@@ -397,11 +410,11 @@ func shouldDropGrokToolChoice(toolChoice gjson.Result, tools []json.RawMessage) 
 	return true
 }
 
-func buildGrokResponsesRequest(ctx context.Context, c *gin.Context, account *Account, body []byte, token string) (*http.Request, error) {
-	return buildGrokResponsesRequestWithPolicy(ctx, c, account, body, token, nil, nil)
+func buildGrokResponsesRequest(ctx context.Context, c *gin.Context, account *Account, body []byte, token, cacheIdentity string, cfg *config.Config) (*http.Request, error) {
+	return buildGrokResponsesRequestWithPolicy(ctx, c, account, body, token, nil, cfg, cacheIdentity)
 }
 
-func buildGrokResponsesRequestWithPolicy(ctx context.Context, c *gin.Context, account *Account, body []byte, token string, settingService *SettingService, cfg *config.Config) (*http.Request, error) {
+func buildGrokResponsesRequestWithPolicy(ctx context.Context, c *gin.Context, account *Account, body []byte, token string, settingService *SettingService, cfg *config.Config, cacheIdentityOpt ...string) (*http.Request, error) {
 	targetURL, err := buildGrokResponsesURL(account, cfg, settingService)
 	if err != nil {
 		return nil, err
@@ -413,10 +426,14 @@ func buildGrokResponsesRequestWithPolicy(ctx context.Context, c *gin.Context, ac
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json, text/event-stream")
-	req.Header.Set("User-Agent", "sub2api-grok/1.0")
 	if account.IsGrokOAuth() {
 		applyGrokCLIHeaders(req.Header)
 	}
+	cacheIdentity := ""
+	if len(cacheIdentityOpt) > 0 {
+		cacheIdentity = cacheIdentityOpt[0]
+	}
+	applyGrokCacheHeaders(req.Header, cacheIdentity)
 	if c != nil {
 		if v := c.GetHeader("OpenAI-Beta"); strings.TrimSpace(v) != "" {
 			req.Header.Set("OpenAI-Beta", v)
@@ -471,10 +488,9 @@ func (s *OpenAIGatewayService) tempUnscheduleGrok(ctx context.Context, account *
 	if account.TempUnschedulableUntil != nil && account.TempUnschedulableUntil.After(until) {
 		until = *account.TempUnschedulableUntil
 	}
-	if s.rateLimitService != nil {
-		_ = s.rateLimitService.SetTempUnschedulable(ctx, account, until, reason)
-	} else if s.accountRepo != nil {
-		stateCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	s.BlockAccountScheduling(account, until, reason)
+	if s.accountRepo != nil {
+		stateCtx, cancel := openAIAccountStateContext(ctx)
 		defer cancel()
 		_ = s.accountRepo.SetTempUnschedulable(stateCtx, account.ID, until, reason)
 	}

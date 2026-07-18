@@ -58,12 +58,15 @@ func (u *grokBillingEligibilityUpstream) Do(req *http.Request, _ string, _ int64
 
 func newGrokBillingEligibilityService(accountID int64, weeklyStatus, monthlyStatus int) (*GrokQuotaService, *grokBillingEligibilityAccountRepo, *Account) {
 	account := &Account{
-		ID:       accountID,
-		Platform: PlatformGrok,
-		Type:     AccountTypeOAuth,
+		ID:          accountID,
+		Platform:    PlatformGrok,
+		Type:        AccountTypeOAuth,
+		Status:      StatusActive,
+		Schedulable: true,
 		Credentials: map[string]any{
-			"access_token": "access-token",
-			"expires_at":   time.Now().Add(time.Hour).UTC().Format(time.RFC3339),
+			"access_token":  "access-token",
+			"refresh_token": "refresh-token",
+			"expires_at":    time.Now().Add(2 * grokTokenRefreshSkew).UTC().Format(time.RFC3339),
 		},
 	}
 	repo := &grokBillingEligibilityAccountRepo{account: account}
@@ -115,7 +118,7 @@ func TestGrokQuotaPartialBilling403PersistsMediaEligibilitySignal(t *testing.T) 
 	require.Equal(t, "billing_forbidden", reason)
 }
 
-func TestPreferBillingObservationStatus(t *testing.T) {
+func TestPreferBillingObservationStatus_MediaEligibility(t *testing.T) {
 	tests := []struct {
 		name          string
 		weeklyStatus  int

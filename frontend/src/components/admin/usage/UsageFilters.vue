@@ -1,5 +1,5 @@
 <template>
-  <div class="card p-6">
+  <div :class="flat ? 'p-4 sm:p-6' : 'card p-6'">
     <!-- Toolbar: left filters (multi-line) + right actions -->
     <div class="flex flex-wrap items-end justify-between gap-4">
       <!-- Left: filters (allowed to wrap to multiple rows) -->
@@ -35,7 +35,7 @@
               @click="selectUser(u)"
               class="w-full px-4 py-2 text-left hover:bg-gray-100 dark:hover:bg-gray-700"
             >
-              <span>{{ u.email }}</span>
+              <span>{{ u.email }}<span v-if="u.deleted" class="ml-1 text-xs text-gray-400">（{{ t('admin.usage.userDeletedBadge') }}）</span></span>
               <span class="ml-2 text-xs text-gray-400">#{{ u.id }}</span>
             </button>
           </div>
@@ -121,22 +121,36 @@
           </div>
         </div>
 
-        <!-- Request Type Filter -->
-        <div class="w-full sm:w-auto sm:min-w-[180px]">
+        <!-- Request Type Filter (usage only) -->
+        <div v-if="mode !== 'errors'" class="w-full sm:w-auto sm:min-w-[180px]">
           <label class="input-label">{{ t('usage.type') }}</label>
           <Select v-model="filters.request_type" :options="requestTypeOptions" @change="emitChange" />
         </div>
 
-        <!-- Billing Type Filter -->
-        <div class="w-full sm:w-auto sm:min-w-[200px]">
+        <!-- Billing Type Filter (usage only) -->
+        <div v-if="mode !== 'errors'" class="w-full sm:w-auto sm:min-w-[200px]">
           <label class="input-label">{{ t('admin.usage.billingType') }}</label>
           <Select v-model="filters.billing_type" :options="billingTypeOptions" @change="emitChange" />
         </div>
 
-        <!-- Billing Mode Filter -->
-        <div class="w-full sm:w-auto sm:min-w-[200px]">
+        <!-- Billing Mode Filter (usage only; ranking API does not support it) -->
+        <div v-if="mode === 'usage'" class="w-full sm:w-auto sm:min-w-[200px]">
           <label class="input-label">{{ t('admin.usage.billingMode') }}</label>
           <Select v-model="filters.billing_mode" :options="billingModeOptions" @change="emitChange" />
+        </div>
+
+        <!-- Error filters -->
+        <div v-if="mode === 'errors'" class="w-full sm:w-auto sm:min-w-[180px]">
+          <label class="input-label">{{ t('admin.ops.errorLog.type') }}</label>
+          <Select v-model="filters.error_phase" :options="errorPhaseOptions" @change="emitChange" />
+        </div>
+        <div v-if="mode === 'errors'" class="w-full sm:w-auto sm:min-w-[180px]">
+          <label class="input-label">{{ t('usage.errors.category') }}</label>
+          <Select v-model="filters.error_category" :options="errorCategoryOptions" @change="emitChange" />
+        </div>
+        <div v-if="mode === 'errors'" class="w-full sm:w-auto sm:min-w-[180px]">
+          <label class="input-label">{{ t('admin.ops.errorLog.status') }}</label>
+          <Select v-model="filters.status_code" :options="statusCodeOptions" @change="emitChange" />
         </div>
 
         <!-- Group Filter -->
@@ -156,22 +170,25 @@
           {{ t('common.reset') }}
         </button>
         <slot name="after-reset" />
-        <button type="button" @click="$emit('cleanup')" class="btn btn-danger">
-          {{ t('admin.usage.cleanup.button') }}
-        </button>
-        <button type="button" @click="$emit('export')" :disabled="exporting" class="btn btn-primary">
-          {{ t('usage.exportExcel') }}
-        </button>
+        <template v-if="mode === 'usage'">
+          <button type="button" @click="$emit('cleanup')" class="btn btn-danger">
+            {{ t('admin.usage.cleanup.button') }}
+          </button>
+          <button type="button" @click="$emit('export')" :disabled="exporting" class="btn btn-primary">
+            {{ t('usage.exportExcel') }}
+          </button>
+        </template>
       </div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, toRef, watch } from 'vue'
+import { computed, ref, onMounted, onUnmounted, toRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { adminAPI } from '@/api/admin'
 import Select, { type SelectOption } from '@/components/common/Select.vue'
+import { COMMON_ERROR_STATUS_CODES } from '@/utils/errorBadges'
 import type { SimpleApiKey, SimpleUser } from '@/api/admin/usage'
 
 type ModelValue = Record<string, any>
@@ -182,12 +199,17 @@ interface Props {
   startDate: string
   endDate: string
   showActions?: boolean
+  modelOptions?: string[]
+  mode?: 'usage' | 'errors' | 'ranking'
+  flat?: boolean
   initialUserId?: number
   initialUserLabel?: string
 }
 
 const props = withDefaults(defineProps<Props>(), {
   showActions: true,
+  mode: 'usage',
+  flat: false,
   initialUserLabel: ''
 })
 const emit = defineEmits([
@@ -225,20 +247,44 @@ const accountResults = ref<SimpleAccount[]>([])
 const showAccountDropdown = ref(false)
 let accountSearchTimeout: ReturnType<typeof setTimeout> | null = null
 
-const modelOptions = ref<SelectOption[]>([{ value: null, label: t('admin.usage.allModels') }])
+const modelOptions = computed<SelectOption[]>(() => [
+  { value: null, label: t('admin.usage.allModels') },
+  ...(props.modelOptions ?? []).map((model) => ({ value: model, label: model }))
+])
 const groupOptions = ref<SelectOption[]>([{ value: null, label: t('admin.usage.allGroups') }])
 
 const requestTypeOptions = ref<SelectOption[]>([
   { value: null, label: t('admin.usage.allTypes') },
   { value: 'ws_v2', label: t('usage.ws') },
   { value: 'stream', label: t('usage.stream') },
-  { value: 'sync', label: t('usage.sync') }
+  { value: 'sync', label: t('usage.sync') },
+  { value: 'cyber', label: t('usage.cyber') }
 ])
 
 const billingTypeOptions = ref<SelectOption[]>([
   { value: null, label: t('admin.usage.allBillingTypes') },
   { value: 0, label: t('admin.usage.billingTypeBalance') },
   { value: 1, label: t('admin.usage.billingTypeSubscription') }
+])
+
+const errorPhaseOptions = computed<SelectOption[]>(() => [
+  { value: null, label: t('admin.usage.allTypes') },
+  { value: 'upstream', label: t('admin.ops.errorLog.typeUpstream') },
+  { value: 'account_auth', label: t('admin.ops.errorLog.typeAccountAuth') },
+  { value: 'request', label: t('admin.ops.errorLog.typeRequest') },
+  { value: 'auth', label: t('admin.ops.errorLog.typeAuth') },
+  { value: 'routing', label: t('admin.ops.errorLog.typeRouting') },
+  { value: 'internal', label: t('admin.ops.errorLog.typeInternal') }
+])
+
+const errorCategoryCodes = ['auth', 'rate_limit', 'quota', 'invalid_request', 'service_unavailable', 'upstream', 'internal', 'cyber']
+const errorCategoryOptions = computed<SelectOption[]>(() => [
+  { value: null, label: t('usage.errors.allCategories') },
+  ...errorCategoryCodes.map((category) => ({ value: category, label: t(`usage.errors.categories.${category}`) }))
+])
+const statusCodeOptions = computed<SelectOption[]>(() => [
+  { value: null, label: t('usage.errors.allStatuses') },
+  ...COMMON_ERROR_STATUS_CODES.map((code) => ({ value: code, label: String(code) }))
 ])
 
 const billingModeOptions = ref<SelectOption[]>([
@@ -259,7 +305,8 @@ const debounceUserSearch = () => {
       return
     }
     try {
-      userResults.value = await adminAPI.usage.searchUsers(userKeyword.value)
+      const results = await adminAPI.usage.searchUsers(userKeyword.value)
+      userResults.value = results.sort((a, b) => Number(a.deleted) - Number(b.deleted))
     } catch {
       userResults.value = []
     }
@@ -436,24 +483,8 @@ onMounted(async () => {
   document.addEventListener('click', onDocumentClick)
 
   try {
-    const [gs, ms] = await Promise.all([
-      adminAPI.groups.list(1, 1000),
-      adminAPI.dashboard.getModelStats({ start_date: props.startDate, end_date: props.endDate })
-    ])
-
+    const gs = await adminAPI.groups.list(1, 1000)
     groupOptions.value.push(...gs.items.map((g: any) => ({ value: g.id, label: g.name })))
-
-    const uniqueModels = new Set<string>()
-    ms.models?.forEach((s: any) => {
-      if (s.model) {
-        uniqueModels.add(s.model)
-      }
-    })
-    modelOptions.value.push(
-      ...Array.from(uniqueModels)
-        .sort()
-        .map((m) => ({ value: m, label: m }))
-    )
   } catch {
     // Ignore filter option loading errors (page still usable)
   }
@@ -462,4 +493,12 @@ onMounted(async () => {
 onUnmounted(() => {
   document.removeEventListener('click', onDocumentClick)
 })
+
+const setUserKeyword = (email: string) => {
+  userKeyword.value = email
+  userResults.value = []
+  showUserDropdown.value = false
+}
+
+defineExpose({ setUserKeyword })
 </script>

@@ -27,6 +27,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/timezone"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/xai"
+	"github.com/Wei-Shaw/sub2api/internal/securityaudit"
 	middleware2 "github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 
@@ -46,6 +47,7 @@ const maxAPIKeyGroupRouteBreakerStates = 4096
 // GatewayHandler handles API gateway requests
 type GatewayHandler struct {
 	gatewayService            *service.GatewayService
+	openAIGatewayService      *service.OpenAIGatewayService
 	geminiCompatService       *service.GeminiMessagesCompatService
 	antigravityGatewayService *service.AntigravityGatewayService
 	userService               *service.UserService
@@ -55,6 +57,7 @@ type GatewayHandler struct {
 	usageRecordWorkerPool     *service.UsageRecordWorkerPool
 	errorPassthroughService   *service.ErrorPassthroughService
 	contentModerationService  *service.ContentModerationService
+	securityAuditCoordinator  *securityaudit.Coordinator
 	concurrencyHelper         *ConcurrencyHelper
 	userMsgQueueHelper        *UserMsgQueueHelper
 	maxAccountSwitches        int
@@ -66,6 +69,7 @@ type GatewayHandler struct {
 // NewGatewayHandler creates a new GatewayHandler
 func NewGatewayHandler(
 	gatewayService *service.GatewayService,
+	openAIGatewayService *service.OpenAIGatewayService,
 	geminiCompatService *service.GeminiMessagesCompatService,
 	antigravityGatewayService *service.AntigravityGatewayService,
 	userService *service.UserService,
@@ -101,6 +105,7 @@ func NewGatewayHandler(
 
 	return &GatewayHandler{
 		gatewayService:            gatewayService,
+		openAIGatewayService:      openAIGatewayService,
 		geminiCompatService:       geminiCompatService,
 		antigravityGatewayService: antigravityGatewayService,
 		userService:               userService,
@@ -159,7 +164,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 		return
 	}
 
-	setOpsRequestContext(c, "", false, body)
+	setOpsRequestContext(c, "", false)
 
 	parsedReq, err := service.ParseGatewayRequest(body, domain.PlatformAnthropic)
 	if err != nil {
@@ -189,12 +194,16 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 	// 在请求上下文中记录 thinking 状态，供 Antigravity 最终模型 key 推导/模型维度限流使用
 	c.Request = c.Request.WithContext(service.WithThinkingEnabled(c.Request.Context(), parsedReq.ThinkingEnabled, h.metadataBridgeEnabled()))
 
-	setOpsRequestContext(c, reqModel, reqStream, body)
+	setOpsRequestContext(c, reqModel, reqStream)
 	setOpsEndpointContext(c, "", int16(service.RequestTypeFromLegacy(reqStream, false)))
 
 	// 验证 model 必填
 	if reqModel == "" {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "model is required")
+		return
+	}
+	if decision := h.checkSecurityAudit(c, reqLog, apiKey, subject, service.ContentModerationProtocolAnthropicMessages, reqModel, body); decision != nil && !decision.AllowNextStage {
+		h.anthropicSecurityAuditError(c, decision)
 		return
 	}
 
@@ -599,7 +608,6 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 				h.submitUsageRecordTask(c.Request.Context(), func(ctx context.Context) {
 					if err := h.gatewayService.RecordUsage(ctx, &service.RecordUsageInput{
 						Result:             result,
-						ParsedRequest:      parsedReq,
 						APIKey:             currentAPIKey,
 						User:               currentAPIKey.User,
 						Account:            account,
@@ -766,6 +774,7 @@ routeLoop:
 					c.Request = c.Request.WithContext(ctx)
 					continue
 				case FailoverCanceled:
+					failoverClientGone(c)
 					return
 				default: // FailoverExhausted
 					if fs.LastFailoverErr != nil {
@@ -1004,7 +1013,6 @@ routeLoop:
 				h.submitUsageRecordTask(c.Request.Context(), func(ctx context.Context) {
 					if err := h.gatewayService.RecordUsage(ctx, &service.RecordUsageInput{
 						Result:             result,
-						ParsedRequest:      parsedReq,
 						APIKey:             currentAPIKey,
 						User:               currentAPIKey.User,
 						Account:            account,
@@ -1130,6 +1138,7 @@ routeLoop:
 						h.handleFailoverExhausted(c, fs.LastFailoverErr, account.Platform, streamStarted)
 						return
 					case FailoverCanceled:
+						failoverClientGone(c)
 						return
 					}
 				}
@@ -1214,6 +1223,7 @@ func (h *GatewayHandler) Models(c *gin.Context) {
 
 	// Get available models from account configurations.
 	var availableModels []string
+	customModelsList := false
 	if apiKey != nil && len(apiKey.GroupRoutes) > 0 {
 		candidates, available := buildAPIKeyGroupRouteCandidates(apiKey)
 		if !available {
@@ -1224,12 +1234,29 @@ func (h *GatewayHandler) Models(c *gin.Context) {
 			return service.APIKeyGroupRouteLess(candidates[i].Route, candidates[j].Route)
 		})
 		platform = modelListPlatformForRouteCandidates(candidates, forcedPlatform)
-		availableModels = h.availableModelsForRouteCandidates(c.Request.Context(), candidates, forcedPlatform)
+		availableModels, customModelsList = h.availableModelsForRouteCandidates(c.Request.Context(), candidates, forcedPlatform)
 	} else {
 		availableModels = h.gatewayService.GetAvailableModels(c.Request.Context(), groupID, platform)
+		if apiKey != nil && apiKey.Group != nil && apiKey.Group.CustomModelsListEnabled() {
+			customModelsList = true
+			availableModels = filterModelsByCustomList(
+				availableModels,
+				defaultModelIDsForPlatform(platform),
+				apiKey.Group.ModelsListConfig.Models,
+			)
+		}
+	}
+
+	if customModelsList {
+		writeCustomModelsList(c, platform, availableModels)
+		return
 	}
 
 	if len(availableModels) > 0 {
+		if platform == service.PlatformGrok {
+			writeGrokModelsList(c, availableModels)
+			return
+		}
 		// Build model list from whitelist
 		models := make([]claude.Model, 0, len(availableModels))
 		for _, modelID := range availableModels {
@@ -1256,10 +1283,7 @@ func (h *GatewayHandler) Models(c *gin.Context) {
 		return
 	}
 	if platform == service.PlatformGrok {
-		c.JSON(http.StatusOK, gin.H{
-			"object": "list",
-			"data":   xai.DefaultModels(),
-		})
+		writeGrokModelsList(c, xai.DefaultModelIDs())
 		return
 	}
 	if platform == service.PlatformGemini {
@@ -1269,15 +1293,183 @@ func (h *GatewayHandler) Models(c *gin.Context) {
 		})
 		return
 	}
-
 	c.JSON(http.StatusOK, gin.H{
 		"object": "list",
 		"data":   claude.DefaultModels,
 	})
 }
 
-func (h *GatewayHandler) availableModelsForRouteCandidates(ctx context.Context, candidates []apiKeyGroupRouteCandidate, forcedPlatform string) []string {
+type grokReasoningEffortOption struct {
+	Value   string `json:"value"`
+	Label   string `json:"label"`
+	Default bool   `json:"default,omitempty"`
+}
+
+type grokModelListItem struct {
+	xai.Model
+	SupportsReasoningEffort bool                        `json:"supportsReasoningEffort,omitempty"`
+	ReasoningEffort         string                      `json:"reasoningEffort,omitempty"`
+	ReasoningEfforts        []grokReasoningEffortOption `json:"reasoningEfforts,omitempty"`
+}
+
+func writeGrokModelsList(c *gin.Context, modelIDs []string) {
+	defaults := xai.DefaultModels()
+	defaultsByID := make(map[string]xai.Model, len(defaults))
+	for _, model := range defaults {
+		defaultsByID[model.ID] = model
+	}
+
+	models := make([]grokModelListItem, 0, len(modelIDs))
+	for _, modelID := range modelIDs {
+		model, ok := defaultsByID[modelID]
+		if !ok {
+			model = xai.Model{ID: modelID, Object: "model", OwnedBy: "xai", DisplayName: modelID}
+		}
+		item := grokModelListItem{Model: model}
+		if grokModelSupportsConfigurableReasoning(modelID) {
+			item.SupportsReasoningEffort = true
+			item.ReasoningEffort = "high"
+			item.ReasoningEfforts = []grokReasoningEffortOption{
+				{Value: "low", Label: "Low"},
+				{Value: "medium", Label: "Medium"},
+				{Value: "high", Label: "High", Default: true},
+			}
+		}
+		models = append(models, item)
+	}
+	c.JSON(http.StatusOK, gin.H{"object": "list", "data": models})
+}
+
+func writeGenericModelsList(c *gin.Context, modelIDs []string) {
+	models := make([]claude.Model, 0, len(modelIDs))
+	for _, modelID := range modelIDs {
+		models = append(models, claude.Model{
+			ID:          modelID,
+			Type:        "model",
+			DisplayName: modelID,
+			CreatedAt:   "2024-01-01T00:00:00Z",
+		})
+	}
+	c.JSON(http.StatusOK, gin.H{"object": "list", "data": models})
+}
+
+func writeCustomModelsList(c *gin.Context, platform string, modelIDs []string) {
+	switch platform {
+	case service.PlatformOpenAI:
+		writeOpenAIModelsList(c, modelIDs)
+	case service.PlatformGrok:
+		writeGrokModelsList(c, modelIDs)
+	default:
+		writeGenericModelsList(c, modelIDs)
+	}
+}
+
+func writeOpenAIModelsList(c *gin.Context, modelIDs []string) {
+	defaultsByID := make(map[string]openai.Model, len(openai.DefaultModels))
+	for _, model := range openai.DefaultModels {
+		defaultsByID[model.ID] = model
+	}
+
+	models := make([]openai.Model, 0, len(modelIDs))
+	for _, modelID := range modelIDs {
+		if model, ok := defaultsByID[modelID]; ok {
+			models = append(models, model)
+			continue
+		}
+		models = append(models, openai.Model{
+			ID:          modelID,
+			Object:      "model",
+			Created:     1704067200,
+			OwnedBy:     "openai",
+			Type:        "model",
+			DisplayName: modelID,
+		})
+	}
+	c.JSON(http.StatusOK, gin.H{"object": "list", "data": models})
+}
+
+func filterModelsByCustomList(availableModels, fallbackModels, selectedModels []string) []string {
+	if len(selectedModels) == 0 {
+		return availableModels
+	}
+	source := availableModels
+	if len(source) == 0 {
+		source = fallbackModels
+	}
+
+	allowed := make([]string, 0, len(source))
+	for _, model := range source {
+		if model = strings.TrimSpace(model); model != "" {
+			allowed = append(allowed, model)
+		}
+	}
+
+	seen := make(map[string]struct{}, len(selectedModels))
+	filtered := make([]string, 0, len(selectedModels))
+	for _, model := range selectedModels {
+		model = strings.TrimSpace(model)
+		if model == "" || !customModelsListAllowsModel(allowed, model) {
+			continue
+		}
+		if _, ok := seen[model]; ok {
+			continue
+		}
+		seen[model] = struct{}{}
+		filtered = append(filtered, model)
+	}
+	return filtered
+}
+
+func customModelsListAllowsModel(availablePatterns []string, model string) bool {
+	for _, pattern := range availablePatterns {
+		if pattern == model || (strings.HasSuffix(pattern, "*") && strings.HasPrefix(model, strings.TrimSuffix(pattern, "*"))) {
+			return true
+		}
+	}
+	return false
+}
+
+func defaultModelIDsForPlatform(platform string) []string {
+	switch platform {
+	case service.PlatformOpenAI:
+		return openai.DefaultModelIDs()
+	case service.PlatformGemini:
+		ids := make([]string, 0, len(geminicli.DefaultModels))
+		for _, model := range geminicli.DefaultModels {
+			ids = append(ids, model.ID)
+		}
+		return ids
+	case service.PlatformAntigravity:
+		models := antigravity.DefaultModels()
+		ids := make([]string, 0, len(models))
+		for _, model := range models {
+			ids = append(ids, model.ID)
+		}
+		return ids
+	case service.PlatformGrok:
+		return xai.DefaultModelIDs()
+	default:
+		ids := make([]string, 0, len(claude.DefaultModels))
+		for _, model := range claude.DefaultModels {
+			ids = append(ids, model.ID)
+		}
+		return ids
+	}
+}
+
+func grokModelSupportsConfigurableReasoning(modelID string) bool {
+	switch strings.ToLower(strings.TrimSpace(modelID)) {
+	case "grok-4.5", "grok-4.5-latest", "grok", "grok-latest", "grok-build", "grok-build-latest", "grok-build-0.1":
+		return true
+	default:
+		return false
+	}
+}
+
+func (h *GatewayHandler) availableModelsForRouteCandidates(ctx context.Context, candidates []apiKeyGroupRouteCandidate, forcedPlatform string) ([]string, bool) {
 	modelSet := make(map[string]struct{})
+	models := make([]string, 0)
+	customModelsList := false
 	for _, candidate := range candidates {
 		if candidate.Route.GroupID <= 0 || candidate.Route.Group == nil {
 			continue
@@ -1287,22 +1479,33 @@ func (h *GatewayHandler) availableModelsForRouteCandidates(ctx context.Context, 
 		if platform == "" {
 			platform = candidate.Route.Group.Platform
 		}
-		for _, modelID := range h.gatewayService.GetAvailableModels(ctx, &groupID, platform) {
+		availableModels := h.gatewayService.GetAvailableModels(ctx, &groupID, platform)
+		if candidate.Route.Group.CustomModelsListEnabled() {
+			customModelsList = true
+			availableModels = filterModelsByCustomList(
+				availableModels,
+				defaultModelIDsForPlatform(platform),
+				candidate.Route.Group.ModelsListConfig.Models,
+			)
+		}
+		for _, modelID := range availableModels {
 			if strings.TrimSpace(modelID) == "" {
 				continue
 			}
+			if _, exists := modelSet[modelID]; exists {
+				continue
+			}
 			modelSet[modelID] = struct{}{}
+			models = append(models, modelID)
 		}
 	}
-	if len(modelSet) == 0 {
-		return nil
+	if len(models) == 0 {
+		return nil, customModelsList
 	}
-	models := make([]string, 0, len(modelSet))
-	for modelID := range modelSet {
-		models = append(models, modelID)
+	if !customModelsList {
+		sort.Strings(models)
 	}
-	sort.Strings(models)
-	return models
+	return models, customModelsList
 }
 
 func modelListPlatformForRouteCandidates(candidates []apiKeyGroupRouteCandidate, forcedPlatform string) string {
@@ -2314,7 +2517,7 @@ func (h *GatewayHandler) CountTokens(c *gin.Context) {
 		return
 	}
 
-	setOpsRequestContext(c, "", false, body)
+	setOpsRequestContext(c, "", false)
 
 	parsedReq, err := service.ParseGatewayRequest(body, domain.PlatformAnthropic)
 	if err != nil {
@@ -2333,7 +2536,7 @@ func (h *GatewayHandler) CountTokens(c *gin.Context) {
 		return
 	}
 
-	setOpsRequestContext(c, parsedReq.Model, parsedReq.Stream, body)
+	setOpsRequestContext(c, parsedReq.Model, parsedReq.Stream)
 	setOpsEndpointContext(c, "", int16(service.RequestTypeFromLegacy(parsedReq.Stream, false)))
 
 	// 获取订阅信息（可能为nil）

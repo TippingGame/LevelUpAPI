@@ -12,6 +12,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/accountgroup"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 	"github.com/Wei-Shaw/sub2api/internal/service"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 )
 
@@ -54,6 +55,7 @@ func (s *schedulerCacheRecorder) GetAccount(ctx context.Context, accountID int64
 }
 
 func (s *schedulerCacheRecorder) SetAccount(ctx context.Context, account *service.Account) error {
+	s.setCtxErr = ctx.Err()
 	s.setAccounts = append(s.setAccounts, account)
 	if s.accounts == nil {
 		s.accounts = make(map[int64]*service.Account)
@@ -62,6 +64,31 @@ func (s *schedulerCacheRecorder) SetAccount(ctx context.Context, account *servic
 		s.accounts[account.ID] = account
 	}
 	return nil
+}
+
+type failAtomicSchedulerOutboxSQLExecutor struct {
+	sqlExecutor
+}
+
+func (e *failAtomicSchedulerOutboxSQLExecutor) ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error) {
+	if strings.Contains(query, "WITH updated AS") && strings.Contains(query, "INSERT INTO scheduler_outbox") && len(args) > 0 {
+		args = append([]any(nil), args...)
+		args[len(args)-1] = nil // event_type is NOT NULL; the whole statement must roll back.
+	}
+	return e.sqlExecutor.ExecContext(ctx, query, args...)
+}
+
+type cancelAfterAtomicMutationSQLExecutor struct {
+	sqlExecutor
+	cancel context.CancelFunc
+}
+
+func (e *cancelAfterAtomicMutationSQLExecutor) ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error) {
+	result, err := e.sqlExecutor.ExecContext(ctx, query, args...)
+	if err == nil && strings.Contains(query, "WITH updated AS") && strings.Contains(query, "INSERT INTO scheduler_outbox") {
+		e.cancel()
+	}
+	return result, err
 }
 
 func (s *schedulerCacheRecorder) DeleteAccount(ctx context.Context, accountID int64) error {
@@ -283,6 +310,34 @@ func (s *AccountRepoSuite) TestUpdate_SyncSchedulerSnapshotOnCredentialsChange()
 	s.Require().Equal("gpt-5.2", mapping["gpt-5"])
 }
 
+func (s *AccountRepoSuite) TestUpdateCredentials_SyncsSnapshotAndDurableOutbox() {
+	account := mustCreateAccount(s.T(), s.client, &service.Account{
+		Name:        "sync-refresh-credentials",
+		Status:      service.StatusActive,
+		Schedulable: true,
+		Credentials: map[string]any{"access_token": "old-token"},
+	})
+	cacheRecorder := &schedulerCacheRecorder{}
+	s.repo.schedulerCache = cacheRecorder
+	_, err := s.repo.sql.ExecContext(s.ctx, "TRUNCATE scheduler_outbox")
+	s.Require().NoError(err)
+
+	s.Require().NoError(s.repo.UpdateCredentials(s.ctx, account.ID, map[string]any{"access_token": "new-token"}))
+
+	s.Require().Len(cacheRecorder.setAccounts, 1)
+	s.Require().Equal("new-token", cacheRecorder.setAccounts[0].GetCredential("access_token"))
+	var outboxCount int
+	err = scanSingleRow(
+		s.ctx,
+		s.repo.sql,
+		"SELECT COUNT(*) FROM scheduler_outbox WHERE event_type = $1 AND account_id = $2",
+		[]any{service.SchedulerOutboxEventAccountChanged, account.ID},
+		&outboxCount,
+	)
+	s.Require().NoError(err)
+	s.Require().Equal(1, outboxCount)
+}
+
 func (s *AccountRepoSuite) TestDelete() {
 	account := mustCreateAccount(s.T(), s.client, &service.Account{Name: "to-delete"})
 	cacheRecorder := &schedulerCacheRecorder{}
@@ -319,6 +374,88 @@ func (s *AccountRepoSuite) TestList() {
 	s.Require().NoError(err, "List")
 	s.Require().Len(accounts, 2)
 	s.Require().Equal(int64(2), page.Total)
+}
+
+func (s *AccountRepoSuite) TestListOAuthRefreshCandidatePage_GrokCursorAndExclusions() {
+	now := time.Now().UTC()
+	valid1 := mustCreateAccount(s.T(), s.client, &service.Account{
+		Name:     "grok-oauth-page-1",
+		Platform: service.PlatformGrok,
+		Type:     service.AccountTypeOAuth,
+		Status:   service.StatusActive,
+		Credentials: map[string]any{
+			"access_token":  "access-1",
+			"refresh_token": "refresh-1",
+			"expires_at":    now.Add(30 * time.Minute).Format(time.RFC3339),
+		},
+	})
+	mustCreateAccount(s.T(), s.client, &service.Account{
+		Name:     "grok-api-key-excluded",
+		Platform: service.PlatformGrok,
+		Type:     service.AccountTypeAPIKey,
+		Status:   service.StatusActive,
+		Credentials: map[string]any{
+			"api_key":       "api-key",
+			"refresh_token": "must-not-make-api-key-eligible",
+		},
+	})
+	valid2 := mustCreateAccount(s.T(), s.client, &service.Account{
+		Name:        "grok-oauth-page-2",
+		Platform:    service.PlatformGrok,
+		Type:        service.AccountTypeOAuth,
+		Status:      service.StatusActive,
+		Credentials: map[string]any{"refresh_token": "refresh-2"},
+	})
+	mustCreateAccount(s.T(), s.client, &service.Account{
+		Name:        "grok-oauth-blank-refresh-excluded",
+		Platform:    service.PlatformGrok,
+		Type:        service.AccountTypeOAuth,
+		Status:      service.StatusActive,
+		Credentials: map[string]any{"refresh_token": "   "},
+	})
+	valid3 := mustCreateAccount(s.T(), s.client, &service.Account{
+		Name:        "grok-oauth-page-3",
+		Platform:    service.PlatformGrok,
+		Type:        service.AccountTypeOAuth,
+		Status:      service.StatusActive,
+		Credentials: map[string]any{"refresh_token": "refresh-3"},
+	})
+	cooldown := mustCreateAccount(s.T(), s.client, &service.Account{
+		Name:        "grok-oauth-retry-cooldown-excluded",
+		Platform:    service.PlatformGrok,
+		Type:        service.AccountTypeOAuth,
+		Status:      service.StatusActive,
+		Credentials: map[string]any{"refresh_token": "refresh-cooldown"},
+	})
+	s.Require().NoError(s.repo.SetTempUnschedulable(s.ctx, cooldown.ID, now.Add(10*time.Minute), "token refresh retry exhausted: timeout"))
+	mustCreateAccount(s.T(), s.client, &service.Account{
+		Name:        "openai-oauth-excluded",
+		Platform:    service.PlatformOpenAI,
+		Type:        service.AccountTypeOAuth,
+		Status:      service.StatusActive,
+		Credentials: map[string]any{"refresh_token": "refresh-openai"},
+	})
+
+	options := service.OAuthRefreshPageOptions{
+		Platforms:            []string{service.PlatformGrok},
+		Limit:                2,
+		ActiveOnly:           true,
+		RequireRefreshToken:  true,
+		ExcludeRetryCooldown: true,
+	}
+	firstPage, err := s.repo.ListOAuthRefreshCandidatePage(s.ctx, options)
+	s.Require().NoError(err)
+	first := firstPage.Accounts
+	s.Require().Len(first, 2)
+	s.Require().Equal([]int64{valid1.ID, valid2.ID}, []int64{first[0].ID, first[1].ID})
+
+	options.AfterID = first[len(first)-1].ID
+	secondPage, err := s.repo.ListOAuthRefreshCandidatePage(s.ctx, options)
+	s.Require().NoError(err)
+	second := secondPage.Accounts
+	s.Require().Len(second, 1)
+	s.Require().Equal(valid3.ID, second[0].ID)
+	s.Require().NotContains([]int64{first[0].ID, first[1].ID}, second[0].ID)
 }
 
 func (s *AccountRepoSuite) TestListWithFilters() {
@@ -2475,6 +2612,56 @@ func (s *AccountRepoSuite) TestSetRateLimitedIfLaterDoesNotShortenReset() {
 	s.Require().Len(cacheRecorder.setAccounts, 2)
 	s.Require().NotNil(cacheRecorder.setAccounts[1].RateLimitResetAt)
 	s.Require().WithinDuration(later, *cacheRecorder.setAccounts[1].RateLimitResetAt, time.Second)
+}
+
+func (s *AccountRepoSuite) TestClearRateLimitIfObservedProtectsRearmed429Generation() {
+	account := mustCreateAccount(s.T(), s.client, &service.Account{
+		Name:     "acc-rl-conditional-clear",
+		Platform: service.PlatformGrok,
+		Type:     service.AccountTypeOAuth,
+	})
+	firstReset := time.Now().Add(30 * time.Minute).UTC().Truncate(time.Second)
+	rearmedReset := time.Now().Add(5 * time.Minute).UTC().Truncate(time.Second)
+
+	s.Require().NoError(s.repo.SetRateLimitedIfLater(s.ctx, account.ID, firstReset))
+	staleGeneration, err := s.repo.GetByID(s.ctx, account.ID)
+	s.Require().NoError(err)
+	s.Require().NotNil(staleGeneration.RateLimitedAt)
+	s.Require().NotNil(staleGeneration.RateLimitResetAt)
+	cleared, err := s.repo.ClearRateLimitIfObserved(s.ctx, account.ID, *staleGeneration.RateLimitedAt, *staleGeneration.RateLimitResetAt)
+	s.Require().NoError(err)
+	s.Require().True(cleared)
+
+	// A newer generation may legitimately re-arm a shorter boundary after the
+	// first generation was cleared. The stale success must not erase it.
+	s.Require().NoError(s.repo.SetRateLimitedIfLater(s.ctx, account.ID, rearmedReset))
+	cleared, err = s.repo.ClearRateLimitIfObserved(s.ctx, account.ID, *staleGeneration.RateLimitedAt, *staleGeneration.RateLimitResetAt)
+	s.Require().NoError(err)
+	s.Require().False(cleared)
+
+	got, err := s.repo.GetByID(s.ctx, account.ID)
+	s.Require().NoError(err)
+	s.Require().NotNil(got.RateLimitedAt)
+	s.Require().NotNil(got.RateLimitResetAt)
+	s.Require().WithinDuration(rearmedReset, *got.RateLimitResetAt, time.Second)
+
+	// An admin can retype the row while the successful OAuth request is still
+	// in flight. The stale OAuth recovery must not cross into API-key state even
+	// when both observed timestamps still match.
+	_, err = s.client.Account.UpdateOneID(account.ID).
+		SetType(service.AccountTypeAPIKey).
+		Save(s.ctx)
+	s.Require().NoError(err)
+	cleared, err = s.repo.ClearRateLimitIfObserved(s.ctx, account.ID, *got.RateLimitedAt, *got.RateLimitResetAt)
+	s.Require().NoError(err)
+	s.Require().False(cleared)
+
+	retyped, err := s.repo.GetByID(s.ctx, account.ID)
+	s.Require().NoError(err)
+	s.Require().Equal(service.AccountTypeAPIKey, retyped.Type)
+	s.Require().NotNil(retyped.RateLimitedAt)
+	s.Require().NotNil(retyped.RateLimitResetAt)
+	s.Require().WithinDuration(rearmedReset, *retyped.RateLimitResetAt, time.Second)
 }
 
 func (s *AccountRepoSuite) TestClearRateLimit() {

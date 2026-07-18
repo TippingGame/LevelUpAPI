@@ -476,6 +476,11 @@ func (s *OpsService) UpdateOpsAdvancedSettings(ctx context.Context, cfg *OpsAdva
 	if err := s.settingRepo.Set(ctx, SettingKeyOpsAdvancedSettings, string(raw)); err != nil {
 		return nil, err
 	}
+	if s.cleanupReloader != nil {
+		if err := s.cleanupReloader.Reload(ctx); err != nil {
+			return nil, err
+		}
+	}
 
 	updated := &OpsAdvancedSettings{}
 	_ = json.Unmarshal(raw, updated)

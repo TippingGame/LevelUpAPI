@@ -41,7 +41,9 @@ const (
 
 var (
 	oauthEndpointAllowedHosts = []string{"x.ai", "*.x.ai"}
-	baseURLAllowedHosts       = []string{"api.x.ai", "cli-chat-proxy.grok.com"}
+	// *.api.x.ai 覆盖 xAI 区域端点（us-east-1/us-west-2/eu-west-1 等），
+	// 运营方可在端点间手动切换以规避单点不可用。
+	baseURLAllowedHosts = []string{"api.x.ai", "*.api.x.ai", "cli-chat-proxy.grok.com"}
 )
 
 // OAuthSession stores one PKCE OAuth flow.
@@ -297,6 +299,12 @@ func ValidateTrustedBaseURL(raw string) (string, error) {
 	return normalizeKnownBaseURLPath(normalized)
 }
 
+// normalizeKnownBaseURLPath 规范化 base URL 的 path 部分：
+//   - 官方主机固定使用 /v1 前缀（空 path 自动补齐，其余 path 拒绝）；
+//   - 其他主机保留管理员配置的任意 path 前缀（第三方转发地址常见
+//     /xxx/v1 之类的路由前缀），空 path 仍按惯例补 /v1。
+//
+// 所有主机统一禁止 userinfo/query/fragment，并去除尾部斜杠。
 func normalizeKnownBaseURLPath(raw string) (string, error) {
 	parsed, err := url.Parse(raw)
 	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
@@ -331,11 +339,30 @@ func normalizeKnownBaseURLPath(raw string) (string, error) {
 func IsOfficialBaseURLHost(host string) bool {
 	host = strings.ToLower(strings.TrimSpace(host))
 	for _, allowed := range baseURLAllowedHosts {
+		if strings.HasPrefix(allowed, "*.") {
+			suffix := strings.TrimPrefix(allowed, "*.")
+			if host == suffix || strings.HasSuffix(host, "."+suffix) {
+				return true
+			}
+			continue
+		}
 		if host == allowed {
 			return true
 		}
 	}
 	return false
+}
+
+// IsParseableBaseURL reports whether raw can be parsed into an absolute host.
+// Callers use this to fall back safely when stored credentials contain a
+// malformed forwarding URL.
+func IsParseableBaseURL(raw string) bool {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return false
+	}
+	parsed, err := url.Parse(trimmed)
+	return err == nil && parsed.Host != ""
 }
 
 // IsOfficialBaseURL reports whether raw points at an official xAI host.

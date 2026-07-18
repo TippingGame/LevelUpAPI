@@ -83,6 +83,17 @@ type APIKeyRepository interface {
 	GetRateLimitData(ctx context.Context, id int64) (*APIKeyRateLimitData, error)
 }
 
+type apiKeyAuditDeleteRepository interface {
+	DeleteWithAudit(ctx context.Context, id int64) error
+}
+
+func deleteAPIKeyWithAudit(ctx context.Context, repo APIKeyRepository, id int64) error {
+	if auditRepo, ok := repo.(apiKeyAuditDeleteRepository); ok {
+		return auditRepo.DeleteWithAudit(ctx, id)
+	}
+	return repo.Delete(ctx, id)
+}
+
 // APIKeyRateLimitData holds rate limit usage and window state for an API key.
 type APIKeyRateLimitData struct {
 	Usage5h       float64
@@ -831,16 +842,16 @@ func (s *APIKeyService) Delete(ctx context.Context, id int64, userID int64) erro
 		return ErrInsufficientPerms
 	}
 
-	// 清除Redis缓存（使用 userID 而非 apiKey.UserID）
+	// 先驱逐认证缓存，避免数据库删除失败或提交状态不确定时继续接受旧 Key。
 	if s.cache != nil {
 		_ = s.cache.DeleteCreateAttemptCount(ctx, userID)
 	}
 	s.InvalidateAuthCacheByKey(ctx, key)
+	s.lastUsedTouchL1.Delete(id)
 
-	if err := s.apiKeyRepo.Delete(ctx, id); err != nil {
+	if err := deleteAPIKeyWithAudit(ctx, s.apiKeyRepo, id); err != nil {
 		return fmt.Errorf("delete api key: %w", err)
 	}
-	s.lastUsedTouchL1.Delete(id)
 
 	return nil
 }
