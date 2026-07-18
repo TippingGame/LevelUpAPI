@@ -56,6 +56,12 @@ func diffSettings(before *service.SystemSettings, after *service.SystemSettings,
 	if before.TotpEnabled != after.TotpEnabled {
 		changed = append(changed, "totp_enabled")
 	}
+	if before.SessionBindingEnabled != after.SessionBindingEnabled {
+		changed = append(changed, "session_binding_enabled")
+	}
+	if before.StepUpEnabled != after.StepUpEnabled {
+		changed = append(changed, "step_up_enabled")
+	}
 	if before.LoginAgreementEnabled != after.LoginAgreementEnabled {
 		changed = append(changed, "login_agreement_enabled")
 	}
@@ -413,6 +419,9 @@ func diffSettings(before *service.SystemSettings, after *service.SystemSettings,
 	if before.ClaudeOAuthSystemPromptBlocks != after.ClaudeOAuthSystemPromptBlocks {
 		changed = append(changed, "claude_oauth_system_prompt_blocks")
 	}
+	if before.OpenAICleanRelayEnabled != after.OpenAICleanRelayEnabled {
+		changed = append(changed, "openai_clean_relay_enabled")
+	}
 	if before.EnableAnthropicCacheTTL1hInjection != after.EnableAnthropicCacheTTL1hInjection {
 		changed = append(changed, "enable_anthropic_cache_ttl_1h_injection")
 	}
@@ -487,6 +496,12 @@ func diffSettings(before *service.SystemSettings, after *service.SystemSettings,
 	}
 	if before.OpenAIAdvancedSchedulerWeightSessionSticky != after.OpenAIAdvancedSchedulerWeightSessionSticky {
 		changed = append(changed, "openai_advanced_scheduler_weight_session_sticky")
+	}
+	if before.OpenAIFreeAccountRepairEnabled != after.OpenAIFreeAccountRepairEnabled {
+		changed = append(changed, "openai_free_account_repair_enabled")
+	}
+	if before.OpenAIFreeAccountRepairWeeklyThresholdUSD != after.OpenAIFreeAccountRepairWeeklyThresholdUSD {
+		changed = append(changed, "openai_free_account_repair_weekly_threshold_usd")
 	}
 	// 余额、订阅到期与账号限额通知
 	if before.BalanceLowNotifyEnabled != after.BalanceLowNotifyEnabled {

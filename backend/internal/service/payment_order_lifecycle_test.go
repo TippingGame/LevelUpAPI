@@ -10,6 +10,7 @@ import (
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/ent/enttest"
+	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/payment"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 	"github.com/stretchr/testify/require"
@@ -572,4 +573,103 @@ func newPaymentOrderLifecycleTestClient(t *testing.T) *dbent.Client {
 	client := enttest.NewClient(t, enttest.WithOptions(dbent.Driver(drv)))
 	t.Cleanup(func() { _ = client.Close() })
 	return client
+}
+
+func TestPaymentMarkCompletedSendsSystemNoticeAndNotificationEmail(t *testing.T) {
+	ctx := context.Background()
+	client := newPaymentOrderLifecycleTestClient(t)
+
+	user, err := client.User.Create().
+		SetEmail("paid@example.com").
+		SetPasswordHash("hash").
+		SetUsername("paid-user").
+		Save(ctx)
+	require.NoError(t, err)
+
+	order, err := client.PaymentOrder.Create().
+		SetUserID(user.ID).
+		SetUserEmail(user.Email).
+		SetUserName(user.Username).
+		SetAmount(88).
+		SetPayAmount(88).
+		SetFeeRate(0).
+		SetRechargeCode("NOTIFY-SUCCESS").
+		SetOutTradeNo("sub2_notify_success").
+		SetPaymentType(payment.TypeAlipay).
+		SetPaymentTradeNo("upstream-notify-success").
+		SetOrderType(payment.OrderTypeBalance).
+		SetStatus(OrderStatusRecharging).
+		SetExpiresAt(time.Now().Add(time.Hour)).
+		SetClientIP("127.0.0.1").
+		SetSrcHost("api.example.com").
+		Save(ctx)
+	require.NoError(t, err)
+
+	settingRepo := newNotificationEmailMemorySettingRepo()
+	smtpServer := startNotificationEmailTestSMTPServer(t)
+	require.NoError(t, settingRepo.SetMultiple(ctx, smtpServer.settings()))
+	emailService := NewEmailService(settingRepo, nil)
+	notificationEmailService := NewNotificationEmailService(settingRepo, emailService)
+	notificationEmailService.RememberRecipientLocale(ctx, user.ID, user.Email, "zh-CN")
+
+	systemNotice, notices := newNoticeRecorder(user.ID)
+	svc := &PaymentService{
+		entClient: client,
+		userRepo: &mockUserRepo{getByIDUser: &User{
+			ID:       user.ID,
+			Email:    user.Email,
+			Username: user.Username,
+			Balance:  88,
+			Status:   StatusActive,
+		}},
+		systemNotice:             systemNotice,
+		notificationEmailService: notificationEmailService,
+	}
+
+	require.NoError(t, svc.markCompleted(ctx, order, "RECHARGE_SUCCESS"))
+	require.Len(t, *notices, 1)
+	require.Equal(t, SystemNoticeSourcePaymentOrder, (*notices)[0].Source)
+	require.Eventually(t, func() bool {
+		return smtpServer.messageCount() == 1
+	}, 5*time.Second, 20*time.Millisecond)
+
+	auditCount, err := client.PaymentAuditLog.Query().Count(ctx)
+	require.NoError(t, err)
+	require.Equal(t, 1, auditCount)
+}
+
+func TestPrepareCreateOrderRemembersRequestedNotificationLocale(t *testing.T) {
+	ctx := context.Background()
+	settingRepo := newNotificationEmailMemorySettingRepo()
+	require.NoError(t, settingRepo.SetMultiple(ctx, map[string]string{
+		SettingPaymentEnabled:      "true",
+		SettingEnabledPaymentTypes: payment.TypeAlipay,
+		SettingBalanceRechargeMult: "1",
+	}))
+	client := newPaymentConfigServiceTestClient(t)
+	configService := NewPaymentConfigService(client, settingRepo, nil, &config.Config{})
+	notificationEmailService := NewNotificationEmailService(settingRepo, nil)
+	userID := int64(42)
+	email := "locale@example.com"
+	svc := &PaymentService{
+		configService: configService,
+		userRepo: &mockUserRepo{getByIDUser: &User{
+			ID:       userID,
+			Email:    email,
+			Username: "locale-user",
+			Status:   StatusActive,
+		}},
+		loadBalancer:             &captureLoadBalancer{},
+		notificationEmailService: notificationEmailService,
+	}
+
+	_, err := svc.prepareCreateOrder(ctx, CreateOrderRequest{
+		UserID:      userID,
+		Amount:      10,
+		PaymentType: payment.TypeAlipay,
+		OrderType:   payment.OrderTypeBalance,
+		Locale:      "zh-CN,zh;q=0.9,en;q=0.8",
+	})
+	require.NoError(t, err)
+	require.Equal(t, notificationEmailLocaleChinese, notificationEmailService.ResolveRecipientLocale(ctx, userID, email))
 }

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   appendAuthSourceDefaultsToUpdateRequest,
   buildAuthSourceDefaultsState,
+  normalizePlatformQuotasMap,
   type UpdateSettingsRequest,
 } from "@/api/admin/settings";
 
@@ -31,6 +32,7 @@ describe("admin settings auth source defaults helpers", () => {
       subscriptions: [{ group_id: 1, validity_days: 30 }],
       grant_on_signup: false,
       grant_on_first_bind: true,
+      platform_quotas: normalizePlatformQuotasMap(),
     });
     expect(state.linuxdo).toEqual({
       balance: 6,
@@ -38,6 +40,7 @@ describe("admin settings auth source defaults helpers", () => {
       subscriptions: [{ group_id: 2, validity_days: 60 }],
       grant_on_signup: true,
       grant_on_first_bind: false,
+      platform_quotas: normalizePlatformQuotasMap(),
     });
     expect(state.oidc).toEqual({
       balance: 0,
@@ -45,6 +48,7 @@ describe("admin settings auth source defaults helpers", () => {
       subscriptions: [],
       grant_on_signup: false,
       grant_on_first_bind: false,
+      platform_quotas: normalizePlatformQuotasMap(),
     });
     expect(state.wechat).toEqual({
       balance: 0,
@@ -52,6 +56,7 @@ describe("admin settings auth source defaults helpers", () => {
       subscriptions: [],
       grant_on_signup: false,
       grant_on_first_bind: false,
+      platform_quotas: normalizePlatformQuotasMap(),
     });
   });
 
@@ -68,9 +73,11 @@ describe("admin settings auth source defaults helpers", () => {
     const payload: UpdateSettingsRequest = {
       site_name: "Sub2API",
     };
+    const noPlatformQuotas = { platform_quotas: {} };
 
     appendAuthSourceDefaultsToUpdateRequest(payload, {
       email: {
+		...noPlatformQuotas,
         balance: 1.25,
         concurrency: 2,
         subscriptions: [{ group_id: 3, validity_days: 7 }],
@@ -78,6 +85,7 @@ describe("admin settings auth source defaults helpers", () => {
         grant_on_first_bind: false,
       },
       linuxdo: {
+		...noPlatformQuotas,
         balance: 0,
         concurrency: 6,
         subscriptions: [],
@@ -85,6 +93,7 @@ describe("admin settings auth source defaults helpers", () => {
         grant_on_first_bind: true,
       },
       oidc: {
+		...noPlatformQuotas,
         balance: 4,
         concurrency: 9,
         subscriptions: [{ group_id: 9, validity_days: 90 }],
@@ -92,6 +101,7 @@ describe("admin settings auth source defaults helpers", () => {
         grant_on_first_bind: true,
       },
       wechat: {
+		...noPlatformQuotas,
         balance: 2,
         concurrency: 5,
         subscriptions: [],
@@ -99,6 +109,7 @@ describe("admin settings auth source defaults helpers", () => {
         grant_on_first_bind: false,
       },
       github: {
+		...noPlatformQuotas,
         balance: 3,
         concurrency: 4,
         subscriptions: [{ group_id: 10, validity_days: 14 }],
@@ -106,12 +117,21 @@ describe("admin settings auth source defaults helpers", () => {
         grant_on_first_bind: false,
       },
       google: {
+		...noPlatformQuotas,
         balance: 0,
         concurrency: 5,
         subscriptions: [],
         grant_on_signup: false,
         grant_on_first_bind: true,
       },
+      dingtalk: {
+		...noPlatformQuotas,
+		balance: 0,
+		concurrency: 5,
+		subscriptions: [],
+		grant_on_signup: false,
+		grant_on_first_bind: false,
+	},
     });
 
     expect(payload).toMatchObject({
@@ -123,6 +143,7 @@ describe("admin settings auth source defaults helpers", () => {
       ],
       auth_source_default_email_grant_on_signup: true,
       auth_source_default_email_grant_on_first_bind: false,
+      auth_source_default_email_platform_quotas: normalizePlatformQuotasMap(),
       auth_source_default_linuxdo_balance: 0,
       auth_source_default_linuxdo_concurrency: 6,
       auth_source_default_linuxdo_subscriptions: [],

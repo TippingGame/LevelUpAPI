@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/handler/dto"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
@@ -583,4 +584,126 @@ func TestDiffSettings_IncludesAuthSourceDefaultsAndForceEmail(t *testing.T) {
 	require.Contains(t, changed, "auth_source_default_email_grant_on_signup")
 	require.Contains(t, changed, "auth_source_default_email_grant_on_first_bind")
 	require.Contains(t, changed, "force_email_on_third_party_signup")
+}
+
+func TestSettingHandler_GetSettings_ReturnsStoredDefaultPlatformQuotas(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	repo := &settingHandlerRepoStub{values: map[string]string{
+		service.SettingKeyDefaultPlatformQuotas: `{"openai":{"weekly":12.5}}`,
+	}}
+	svc := service.NewSettingService(repo, &config.Config{Default: config.DefaultConfig{UserConcurrency: 5}})
+	handler := NewSettingHandler(svc, nil, nil, nil, nil, nil)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodGet, "/api/v1/admin/settings", nil)
+	handler.GetSettings(c)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	var resp response.Response
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	data, ok := resp.Data.(map[string]any)
+	require.True(t, ok)
+	quotas, ok := data["default_platform_quotas"].(map[string]any)
+	require.True(t, ok)
+	openAI, ok := quotas["openai"].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, 12.5, openAI["weekly"])
+}
+
+func TestSettingHandler_UpdateSettings_RoundTripsLevelUpOpenAIAndPaymentFields(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	repo := &settingHandlerRepoStub{values: map[string]string{
+		service.SettingKeyOpenAIFreeAccountRepairWeeklyThresholdUSD: "60",
+	}}
+	cfg := &config.Config{Default: config.DefaultConfig{UserConcurrency: 5}}
+	settingSvc := service.NewSettingService(repo, cfg)
+	paymentCfgSvc := service.NewPaymentConfigService(nil, repo, []byte("0123456789abcdef0123456789abcdef"), cfg)
+	handler := NewSettingHandler(settingSvc, nil, nil, nil, paymentCfgSvc, nil)
+
+	body := map[string]any{
+		"openai_clean_relay_enabled":                      true,
+		"openai_free_account_repair_enabled":              true,
+		"openai_free_account_repair_weekly_threshold_usd": 75.5,
+		"payment_announcement_text":                       "Scheduled maintenance tonight",
+		"payment_recharge_center_items": []map[string]any{{
+			"name":        "Help center",
+			"description": "Recharge instructions",
+			"url":         "https://example.com/recharge",
+		}},
+		"payment_recharge_center_tab_enabled": true,
+		"payment_recharge_tab_enabled":        true,
+		"payment_subscription_tab_enabled":    false,
+		"payment_receipt_code_oss_enabled":    false,
+		"payment_receipt_code_oss_prefix":     "receipts/",
+	}
+	rawBody, err := json.Marshal(body)
+	require.NoError(t, err)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPut, "/api/v1/admin/settings", bytes.NewReader(rawBody))
+	c.Request.Header.Set("Content-Type", "application/json")
+	handler.UpdateSettings(c)
+
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.Equal(t, "true", repo.values[service.SettingKeyOpenAICleanRelayEnabled])
+	require.Equal(t, "true", repo.values[service.SettingKeyOpenAIFreeAccountRepairEnabled])
+	require.Equal(t, "75.5", repo.values[service.SettingKeyOpenAIFreeAccountRepairWeeklyThresholdUSD])
+	require.Equal(t, "Scheduled maintenance tonight", repo.values[service.SettingPaymentAnnouncement])
+
+	var resp response.Response
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	data, ok := resp.Data.(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, true, data["openai_clean_relay_enabled"])
+	require.Equal(t, true, data["openai_free_account_repair_enabled"])
+	require.Equal(t, 75.5, data["openai_free_account_repair_weekly_threshold_usd"])
+	require.Equal(t, "Scheduled maintenance tonight", data["payment_announcement_text"])
+	require.Equal(t, true, data["payment_recharge_center_tab_enabled"])
+	require.Equal(t, false, data["payment_subscription_tab_enabled"])
+	require.Equal(t, false, data["payment_receipt_code_oss_enabled"])
+	items, ok := data["payment_recharge_center_items"].([]any)
+	require.True(t, ok)
+	require.Len(t, items, 1)
+}
+
+func TestHasPaymentFields_IncludesLevelUpPaymentSettings(t *testing.T) {
+	announcement := "notice"
+	tabEnabled := true
+	ossPrefix := "receipts/"
+	items := []dto.PaymentRechargeCenterItem{{Name: "Docs", URL: "https://example.com"}}
+
+	tests := []struct {
+		name string
+		req  UpdateSettingsRequest
+	}{
+		{name: "announcement", req: UpdateSettingsRequest{PaymentAnnouncementText: &announcement}},
+		{name: "recharge center items", req: UpdateSettingsRequest{PaymentRechargeCenterItems: &items}},
+		{name: "recharge center tab", req: UpdateSettingsRequest{PaymentRechargeCenterTabEnabled: &tabEnabled}},
+		{name: "receipt code OSS", req: UpdateSettingsRequest{PaymentReceiptCodeOSSPrefix: &ossPrefix}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.True(t, hasPaymentFields(tt.req))
+		})
+	}
+}
+
+func TestDiffSettings_IncludesLevelUpOpenAISettings(t *testing.T) {
+	changed := diffSettings(
+		&service.SystemSettings{OpenAIFreeAccountRepairWeeklyThresholdUSD: 60},
+		&service.SystemSettings{
+			OpenAICleanRelayEnabled:                   true,
+			OpenAIFreeAccountRepairEnabled:            true,
+			OpenAIFreeAccountRepairWeeklyThresholdUSD: 75,
+		},
+		nil,
+		nil,
+		UpdateSettingsRequest{},
+	)
+
+	require.Contains(t, changed, "openai_clean_relay_enabled")
+	require.Contains(t, changed, "openai_free_account_repair_enabled")
+	require.Contains(t, changed, "openai_free_account_repair_weekly_threshold_usd")
 }

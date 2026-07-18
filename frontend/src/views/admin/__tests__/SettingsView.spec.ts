@@ -11,6 +11,8 @@ const {
   updateWebSearchEmulationConfig,
   getAdminApiKey,
   getOverloadCooldownSettings,
+  getRateLimit429CooldownSettings,
+  updateRateLimit429CooldownSettings,
   getStreamTimeoutSettings,
   getRectifierSettings,
   getBetaPolicySettings,
@@ -31,6 +33,8 @@ const {
   updateWebSearchEmulationConfig: vi.fn(),
   getAdminApiKey: vi.fn(),
   getOverloadCooldownSettings: vi.fn(),
+  getRateLimit429CooldownSettings: vi.fn(),
+  updateRateLimit429CooldownSettings: vi.fn(),
   getStreamTimeoutSettings: vi.fn(),
   getRectifierSettings: vi.fn(),
   getBetaPolicySettings: vi.fn(),
@@ -47,6 +51,7 @@ const {
 }));
 
 const localeRef = vi.hoisted(() => ({ value: "zh-CN" }));
+const listAffiliateUsers = vi.hoisted(() => vi.fn());
 
 vi.mock("@/api", () => ({
   adminAPI: {
@@ -57,6 +62,8 @@ vi.mock("@/api", () => ({
       updateWebSearchEmulationConfig,
       getAdminApiKey,
       getOverloadCooldownSettings,
+      getRateLimit429CooldownSettings,
+      updateRateLimit429CooldownSettings,
       getStreamTimeoutSettings,
       getRectifierSettings,
       getBetaPolicySettings,
@@ -85,6 +92,16 @@ vi.mock("@/stores", () => ({
     fetchPublicSettings,
   }),
 }));
+
+vi.mock("@/api/admin/affiliates", () => {
+  const affiliatesAPI = {
+    listUsers: listAffiliateUsers,
+  };
+  return {
+    affiliatesAPI,
+    default: affiliatesAPI,
+  };
+});
 
 vi.mock("@/stores/adminSettings", () => ({
   useAdminSettingsStore: () => ({
@@ -296,6 +313,33 @@ const ImageUploadStub = defineComponent({
   },
 });
 
+const OpenAIFastPolicyUserSelectorStub = defineComponent({
+  props: {
+    modelValue: {
+      type: Array,
+      default: () => [],
+    },
+  },
+  emits: ["update:modelValue"],
+  setup(props, { emit }) {
+    return () =>
+      h(
+        "button",
+        {
+          type: "button",
+          class: "openai-fast-policy-user-selector-stub",
+          "data-model-value": JSON.stringify(props.modelValue),
+          onClick: () =>
+            emit("update:modelValue", [
+              ...(props.modelValue as number[]),
+              99,
+            ]),
+        },
+        "select user",
+      );
+  },
+});
+
 const baseSettingsResponse = {
   registration_enabled: true,
   email_verify_enabled: false,
@@ -335,10 +379,27 @@ const baseSettingsResponse = {
   turnstile_enabled: false,
   turnstile_site_key: "",
   turnstile_secret_key_configured: false,
+  api_key_acl_trust_forwarded_ip: false,
   linuxdo_connect_enabled: false,
   linuxdo_connect_client_id: "",
   linuxdo_connect_client_secret_configured: false,
   linuxdo_connect_redirect_url: "",
+  dingtalk_connect_enabled: false,
+  dingtalk_connect_client_id: "",
+  dingtalk_connect_client_secret_configured: false,
+  dingtalk_connect_redirect_url: "",
+  dingtalk_connect_corp_restriction_policy: "none",
+  dingtalk_connect_internal_corp_id: "",
+  dingtalk_connect_bypass_registration: false,
+  dingtalk_connect_sync_corp_email: false,
+  dingtalk_connect_sync_display_name: false,
+  dingtalk_connect_sync_dept: false,
+  dingtalk_connect_sync_corp_email_attr_key: "dingtalk_email",
+  dingtalk_connect_sync_display_name_attr_key: "dingtalk_name",
+  dingtalk_connect_sync_dept_attr_key: "dingtalk_department",
+  dingtalk_connect_sync_corp_email_attr_name: "",
+  dingtalk_connect_sync_display_name_attr_name: "",
+  dingtalk_connect_sync_dept_attr_name: "",
   wechat_connect_enabled: true,
   wechat_connect_app_id: "wx-app-id-123",
   wechat_connect_app_secret_configured: true,
@@ -400,6 +461,7 @@ const baseSettingsResponse = {
   payment_enabled_types: [],
   payment_balance_disabled: false,
   payment_balance_recharge_multiplier: 1,
+  payment_subscription_usd_to_cny_rate: 0,
   payment_recharge_fee_rate: 0,
   payment_load_balance_strategy: "round-robin",
   payment_product_name_prefix: "",
@@ -416,6 +478,7 @@ const baseSettingsResponse = {
   payment_cancel_rate_limit_window: 1,
   payment_cancel_rate_limit_unit: "day",
   payment_cancel_rate_limit_window_mode: "rolling",
+  payment_alipay_force_qrcode: false,
   payment_visible_method_alipay_source: "alipay_direct",
   payment_visible_method_wxpay_source: "invalid-source",
   payment_visible_method_alipay_enabled: true,
@@ -450,8 +513,11 @@ const baseSettingsResponse = {
   balance_low_notify_enabled: false,
   balance_low_notify_threshold: 0,
   balance_low_notify_recharge_url: "",
+  subscription_expiry_notify_enabled: true,
   account_quota_notify_enabled: false,
   account_quota_notify_emails: [],
+  default_platform_quotas: {},
+  allow_user_view_error_requests: false,
 };
 
 function mountView() {
@@ -470,6 +536,9 @@ function mountView() {
         ProxySelector: true,
         ImageUpload: ImageUploadStub,
         BackupSettings: true,
+        EmailTemplateEditor: true,
+        OpenAIFastPolicyUserSelector: OpenAIFastPolicyUserSelectorStub,
+        RouterLink: true,
       },
     },
   });
@@ -513,6 +582,8 @@ describe("admin SettingsView payment visible method controls", () => {
     updateWebSearchEmulationConfig.mockReset();
     getAdminApiKey.mockReset();
     getOverloadCooldownSettings.mockReset();
+    getRateLimit429CooldownSettings.mockReset();
+    updateRateLimit429CooldownSettings.mockReset();
     getStreamTimeoutSettings.mockReset();
     getRectifierSettings.mockReset();
     getBetaPolicySettings.mockReset();
@@ -526,6 +597,7 @@ describe("admin SettingsView payment visible method controls", () => {
     adminSettingsFetch.mockReset();
     showError.mockReset();
     showSuccess.mockReset();
+    listAffiliateUsers.mockReset();
     localeRef.value = "zh-CN";
 
     getSettings.mockResolvedValue({ ...baseSettingsResponse });
@@ -548,6 +620,14 @@ describe("admin SettingsView payment visible method controls", () => {
     getOverloadCooldownSettings.mockResolvedValue({
       enabled: true,
       cooldown_minutes: 10,
+    });
+    getRateLimit429CooldownSettings.mockResolvedValue({
+      enabled: true,
+      cooldown_seconds: 60,
+    });
+    updateRateLimit429CooldownSettings.mockResolvedValue({
+      enabled: true,
+      cooldown_seconds: 60,
     });
     getStreamTimeoutSettings.mockResolvedValue({
       enabled: true,
@@ -575,6 +655,7 @@ describe("admin SettingsView payment visible method controls", () => {
     });
     fetchPublicSettings.mockResolvedValue(undefined);
     adminSettingsFetch.mockResolvedValue(undefined);
+    listAffiliateUsers.mockResolvedValue({ items: [], total: 0 });
   });
 
   it("does not render legacy visible payment method controls", async () => {
@@ -738,6 +819,9 @@ describe("admin SettingsView payment visible method controls", () => {
           ProxySelector: true,
           ImageUpload: ImageUploadStub,
           BackupSettings: true,
+          EmailTemplateEditor: true,
+          OpenAIFastPolicyUserSelector: OpenAIFastPolicyUserSelectorStub,
+          RouterLink: true,
         },
       },
     });
@@ -840,6 +924,123 @@ describe("admin SettingsView payment visible method controls", () => {
     expect(paymentHelpImageUpload?.attributes("data-upload-label")).toBe("上传图片");
     expect(paymentHelpImageUpload?.attributes("data-remove-label")).toBe("移除");
   });
+
+  it("builds OAuth callback suggestions from the configured API base URL", async () => {
+    getSettings.mockResolvedValueOnce({
+      ...baseSettingsResponse,
+      api_base_url: "https://api.example.com/gateway/api/v1/",
+      linuxdo_connect_enabled: true,
+      linuxdo_connect_client_id: "linuxdo-client",
+    });
+
+    const wrapper = mountView();
+    await flushPromises();
+    await openSecurityTab(wrapper);
+
+    expect(wrapper.text()).toContain(
+      "https://api.example.com/gateway/api/v1/auth/oauth/linuxdo/callback",
+    );
+    expect(wrapper.text()).toContain(
+      "https://api.example.com/gateway/api/v1/auth/oauth/wechat/callback",
+    );
+    expect(wrapper.text()).not.toContain(
+      "https://api.example.com/gateway/api/v1/api/v1/",
+    );
+  });
+
+  it("submits restored DingTalk, quota, payment, notification, and user-error settings", async () => {
+    getSettings.mockResolvedValueOnce({
+      ...baseSettingsResponse,
+      dingtalk_connect_enabled: true,
+      dingtalk_connect_client_id: "ding-client",
+      dingtalk_connect_client_secret_configured: true,
+      dingtalk_connect_redirect_url:
+        "https://api.example.com/api/v1/auth/oauth/dingtalk/callback",
+      dingtalk_connect_corp_restriction_policy: "internal_only",
+      dingtalk_connect_bypass_registration: true,
+      dingtalk_connect_sync_corp_email: true,
+      dingtalk_connect_sync_corp_email_attr_key: "corp_email",
+      default_platform_quotas: {
+        grok: { daily: 5, weekly: null, monthly: 50 },
+      },
+      auth_source_default_dingtalk_platform_quotas: {
+        openai: { daily: null, weekly: 20, monthly: null },
+      },
+      payment_subscription_usd_to_cny_rate: 7.25,
+      payment_alipay_force_qrcode: true,
+      subscription_expiry_notify_enabled: false,
+      allow_user_view_error_requests: true,
+    });
+
+    const wrapper = mountView();
+    await flushPromises();
+    await wrapper.find("form").trigger("submit.prevent");
+    await flushPromises();
+
+    expect(updateSettings).toHaveBeenCalledWith(
+      expect.objectContaining({
+        dingtalk_connect_enabled: true,
+        dingtalk_connect_client_id: "ding-client",
+        dingtalk_connect_corp_restriction_policy: "internal_only",
+        dingtalk_connect_bypass_registration: true,
+        dingtalk_connect_sync_corp_email: true,
+        dingtalk_connect_sync_corp_email_attr_key: "corp_email",
+        payment_subscription_usd_to_cny_rate: 7.25,
+        payment_alipay_force_qrcode: true,
+        subscription_expiry_notify_enabled: false,
+        allow_user_view_error_requests: true,
+      }),
+    );
+    const payload = updateSettings.mock.calls[0]?.[0];
+    expect(payload.default_platform_quotas.grok).toEqual({
+      daily: 5,
+      weekly: null,
+      monthly: 50,
+    });
+    expect(
+      payload.auth_source_default_dingtalk_platform_quotas.openai,
+    ).toEqual({ daily: null, weekly: 20, monthly: null });
+  });
+
+  it("round-trips OpenAI fast-policy user targeting and force-priority actions", async () => {
+    getSettings.mockResolvedValueOnce({
+      ...baseSettingsResponse,
+      openai_fast_policy_settings: {
+        rules: [
+          {
+            service_tier: "priority",
+            action: "force_priority",
+            scope: "all",
+            user_ids: [7],
+            model_whitelist: ["gpt-*"],
+            fallback_action: "force_priority",
+          },
+        ],
+      },
+    });
+
+    const wrapper = mountView();
+    await flushPromises();
+    const selector = wrapper.get(".openai-fast-policy-user-selector-stub");
+    expect(selector.attributes("data-model-value")).toBe("[7]");
+    await selector.trigger("click");
+    await wrapper.find("form").trigger("submit.prevent");
+    await flushPromises();
+
+    expect(updateSettings).toHaveBeenCalledWith(
+      expect.objectContaining({
+        openai_fast_policy_settings: {
+          rules: [
+            expect.objectContaining({
+              action: "force_priority",
+              user_ids: [7, 99],
+              fallback_action: "force_priority",
+            }),
+          ],
+        },
+      }),
+    );
+  });
 });
 
 describe("admin SettingsView wechat connect controls", () => {
@@ -850,6 +1051,8 @@ describe("admin SettingsView wechat connect controls", () => {
     updateWebSearchEmulationConfig.mockReset();
     getAdminApiKey.mockReset();
     getOverloadCooldownSettings.mockReset();
+    getRateLimit429CooldownSettings.mockReset();
+    updateRateLimit429CooldownSettings.mockReset();
     getStreamTimeoutSettings.mockReset();
     getRectifierSettings.mockReset();
     getBetaPolicySettings.mockReset();
@@ -863,6 +1066,7 @@ describe("admin SettingsView wechat connect controls", () => {
     adminSettingsFetch.mockReset();
     showError.mockReset();
     showSuccess.mockReset();
+    listAffiliateUsers.mockReset();
 
     getSettings.mockResolvedValue({
       ...baseSettingsResponse,
@@ -888,6 +1092,14 @@ describe("admin SettingsView wechat connect controls", () => {
     getOverloadCooldownSettings.mockResolvedValue({
       enabled: true,
       cooldown_minutes: 10,
+    });
+    getRateLimit429CooldownSettings.mockResolvedValue({
+      enabled: true,
+      cooldown_seconds: 60,
+    });
+    updateRateLimit429CooldownSettings.mockResolvedValue({
+      enabled: true,
+      cooldown_seconds: 60,
     });
     getStreamTimeoutSettings.mockResolvedValue({
       enabled: true,
@@ -915,6 +1127,7 @@ describe("admin SettingsView wechat connect controls", () => {
     });
     fetchPublicSettings.mockResolvedValue(undefined);
     adminSettingsFetch.mockResolvedValue(undefined);
+    listAffiliateUsers.mockResolvedValue({ items: [], total: 0 });
   });
 
   it("loads and echoes WeChat Connect fields from the backend payload", async () => {

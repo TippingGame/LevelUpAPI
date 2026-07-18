@@ -85,6 +85,7 @@ type CreateOrderRequest struct {
 	PlanID          int64
 	ShopOrderID     int64
 	Subject         string
+	Locale          string
 }
 
 type CreateOrderResponse struct {
@@ -243,20 +244,21 @@ type ShopPaymentDeliveryReader interface {
 // --- Service ---
 
 type PaymentService struct {
-	providerMu       sync.Mutex
-	providersLoaded  bool
-	entClient        *dbent.Client
-	registry         *payment.Registry
-	loadBalancer     payment.LoadBalancer
-	redeemService    *RedeemService
-	subscriptionSvc  *SubscriptionService
-	configService    *PaymentConfigService
-	userRepo         UserRepository
-	groupRepo        GroupRepository
-	resumeService    *PaymentResumeService
-	affiliateService *AffiliateService
-	shopFulfillment  ShopPaymentFulfillment
-	systemNotice     *SystemNoticeService
+	providerMu               sync.Mutex
+	providersLoaded          bool
+	entClient                *dbent.Client
+	registry                 *payment.Registry
+	loadBalancer             payment.LoadBalancer
+	redeemService            *RedeemService
+	subscriptionSvc          *SubscriptionService
+	configService            *PaymentConfigService
+	userRepo                 UserRepository
+	groupRepo                GroupRepository
+	resumeService            *PaymentResumeService
+	affiliateService         *AffiliateService
+	shopFulfillment          ShopPaymentFulfillment
+	systemNotice             *SystemNoticeService
+	notificationEmailService *NotificationEmailService
 }
 
 func NewPaymentService(entClient *dbent.Client, registry *payment.Registry, loadBalancer payment.LoadBalancer, redeemService *RedeemService, subscriptionSvc *SubscriptionService, configService *PaymentConfigService, userRepo UserRepository, groupRepo GroupRepository, affiliateService *AffiliateService) *PaymentService {
@@ -277,6 +279,13 @@ func (s *PaymentService) SetSystemNoticeService(noticeService *SystemNoticeServi
 		return
 	}
 	s.systemNotice = noticeService
+}
+
+func (s *PaymentService) SetNotificationEmailService(notificationEmailService *NotificationEmailService) {
+	if s == nil {
+		return
+	}
+	s.notificationEmailService = notificationEmailService
 }
 
 // --- Provider Registry ---

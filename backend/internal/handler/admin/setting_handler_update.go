@@ -12,6 +12,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/handler/dto"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
+	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 
 	"github.com/gin-gonic/gin"
@@ -29,7 +30,8 @@ type UpdateSettingsRequest struct {
 	FrontendURL                      string                       `json:"frontend_url"`
 	InvitationCodeEnabled            bool                         `json:"invitation_code_enabled"`
 	TotpEnabled                      bool                         `json:"totp_enabled"`             // TOTP 双因素认证
-	SessionBindingEnabled            bool                         `json:"session_binding_enabled"`  // 会话 IP/UA 绑定
+	SessionBindingEnabled            *bool                        `json:"session_binding_enabled"`  // 会话 IP/UA 绑定（省略=保持现值）
+	StepUpEnabled                    *bool                        `json:"step_up_enabled"`          // 敏感操作 step-up 2FA（省略=保持现值）
 	AuditLogRetentionDays            int                          `json:"audit_log_retention_days"` // 审计日志保留天数
 	LoginAgreementEnabled            *bool                        `json:"login_agreement_enabled"`
 	LoginAgreementMode               string                       `json:"login_agreement_mode"`
@@ -234,6 +236,7 @@ type UpdateSettingsRequest struct {
 	EnableClaudeOAuthSystemPromptInjection *bool   `json:"enable_claude_oauth_system_prompt_injection"`
 	ClaudeOAuthSystemPrompt                *string `json:"claude_oauth_system_prompt"`
 	ClaudeOAuthSystemPromptBlocks          *string `json:"claude_oauth_system_prompt_blocks"`
+	OpenAICleanRelayEnabled                *bool   `json:"openai_clean_relay_enabled"`
 	EnableAnthropicCacheTTL1hInjection     *bool   `json:"enable_anthropic_cache_ttl_1h_injection"`
 	RewriteMessageCacheControl             *bool   `json:"rewrite_message_cache_control"`
 	EnableClientDatelineNormalization      *bool   `json:"enable_client_dateline_normalization"`
@@ -271,6 +274,8 @@ type UpdateSettingsRequest struct {
 	OpenAIAdvancedSchedulerWeightUpstreamCost          *string  `json:"openai_advanced_scheduler_weight_upstream_cost"`
 	OpenAIAdvancedSchedulerWeightPreviousResponse      *string  `json:"openai_advanced_scheduler_weight_previous_response"`
 	OpenAIAdvancedSchedulerWeightSessionSticky         *string  `json:"openai_advanced_scheduler_weight_session_sticky"`
+	OpenAIFreeAccountRepairEnabled                     *bool    `json:"openai_free_account_repair_enabled"`
+	OpenAIFreeAccountRepairWeeklyThresholdUSD          *float64 `json:"openai_free_account_repair_weekly_threshold_usd"`
 
 	// 余额不足提醒
 	BalanceLowNotifyEnabled         *bool                   `json:"balance_low_notify_enabled"`
@@ -281,22 +286,38 @@ type UpdateSettingsRequest struct {
 	AccountQuotaNotifyEmails        *[]dto.NotifyEmailEntry `json:"account_quota_notify_emails"`
 
 	// Payment configuration (integrated into settings, full replace)
-	PaymentEnabled                   *bool    `json:"payment_enabled"`
-	PaymentMinAmount                 *float64 `json:"payment_min_amount"`
-	PaymentMaxAmount                 *float64 `json:"payment_max_amount"`
-	PaymentDailyLimit                *float64 `json:"payment_daily_limit"`
-	PaymentOrderTimeoutMin           *int     `json:"payment_order_timeout_minutes"`
-	PaymentMaxPendingOrders          *int     `json:"payment_max_pending_orders"`
-	PaymentEnabledTypes              []string `json:"payment_enabled_types"`
-	PaymentBalanceDisabled           *bool    `json:"payment_balance_disabled"`
-	PaymentBalanceRechargeMultiplier *float64 `json:"payment_balance_recharge_multiplier"`
-	PaymentSubscriptionUSDToCNYRate  *float64 `json:"payment_subscription_usd_to_cny_rate"`
-	PaymentRechargeFeeRate           *float64 `json:"payment_recharge_fee_rate"`
-	PaymentLoadBalanceStrat          *string  `json:"payment_load_balance_strategy"`
-	PaymentProductNamePrefix         *string  `json:"payment_product_name_prefix"`
-	PaymentProductNameSuffix         *string  `json:"payment_product_name_suffix"`
-	PaymentHelpImageURL              *string  `json:"payment_help_image_url"`
-	PaymentHelpText                  *string  `json:"payment_help_text"`
+	PaymentEnabled                            *bool                            `json:"payment_enabled"`
+	PaymentMinAmount                          *float64                         `json:"payment_min_amount"`
+	PaymentMaxAmount                          *float64                         `json:"payment_max_amount"`
+	PaymentDailyLimit                         *float64                         `json:"payment_daily_limit"`
+	PaymentOrderTimeoutMin                    *int                             `json:"payment_order_timeout_minutes"`
+	PaymentMaxPendingOrders                   *int                             `json:"payment_max_pending_orders"`
+	PaymentEnabledTypes                       []string                         `json:"payment_enabled_types"`
+	PaymentBalanceDisabled                    *bool                            `json:"payment_balance_disabled"`
+	PaymentBalanceRechargeMultiplier          *float64                         `json:"payment_balance_recharge_multiplier"`
+	PaymentSubscriptionUSDToCNYRate           *float64                         `json:"payment_subscription_usd_to_cny_rate"`
+	PaymentRechargeFeeRate                    *float64                         `json:"payment_recharge_fee_rate"`
+	PaymentLoadBalanceStrat                   *string                          `json:"payment_load_balance_strategy"`
+	PaymentProductNamePrefix                  *string                          `json:"payment_product_name_prefix"`
+	PaymentProductNameSuffix                  *string                          `json:"payment_product_name_suffix"`
+	PaymentAnnouncementText                   *string                          `json:"payment_announcement_text"`
+	PaymentRechargeCenterItems                *[]dto.PaymentRechargeCenterItem `json:"payment_recharge_center_items"`
+	PaymentRechargeCenterTabEnabled           *bool                            `json:"payment_recharge_center_tab_enabled"`
+	PaymentRechargeTabEnabled                 *bool                            `json:"payment_recharge_tab_enabled"`
+	PaymentSubscriptionTabEnabled             *bool                            `json:"payment_subscription_tab_enabled"`
+	PaymentHelpImageURL                       *string                          `json:"payment_help_image_url"`
+	PaymentHelpText                           *string                          `json:"payment_help_text"`
+	PaymentReceiptCodeOSSEnabled              *bool                            `json:"payment_receipt_code_oss_enabled"`
+	PaymentReceiptCodeOSSEndpoint             *string                          `json:"payment_receipt_code_oss_endpoint"`
+	PaymentReceiptCodeOSSRegion               *string                          `json:"payment_receipt_code_oss_region"`
+	PaymentReceiptCodeOSSBucket               *string                          `json:"payment_receipt_code_oss_bucket"`
+	PaymentReceiptCodeOSSAccessKeyID          *string                          `json:"payment_receipt_code_oss_access_key_id"`
+	PaymentReceiptCodeOSSSecretAccessKey      *string                          `json:"payment_receipt_code_oss_secret_access_key"`
+	PaymentReceiptCodeOSSPrefix               *string                          `json:"payment_receipt_code_oss_prefix"`
+	PaymentReceiptCodeOSSPublicBaseURL        *string                          `json:"payment_receipt_code_oss_public_base_url"`
+	PaymentReceiptCodeOSSForcePathStyle       *bool                            `json:"payment_receipt_code_oss_force_path_style"`
+	PaymentReceiptCodeOSSMaxSizeBytes         *int64                           `json:"payment_receipt_code_oss_max_size_bytes"`
+	PaymentReceiptCodeOSSPresignExpireSeconds *int                             `json:"payment_receipt_code_oss_presign_expire_seconds"`
 
 	// Cancel rate limit
 	PaymentCancelRateLimitEnabled *bool   `json:"payment_cancel_rate_limit_enabled"`
@@ -348,6 +369,41 @@ type UpdateSettingsRequest struct {
 
 // UpdateSettings 更新系统设置
 // PUT /api/v1/admin/settings
+// ensureActorTotpForStepUp 校验当前操作者具备开启 step-up 门控的条件：
+// 必须是真人管理员会话（admin API key 无法完成 TOTP step-up，拒绝）且本人已启用 TOTP。
+// 校验失败时写入错误响应并返回 false。
+func (h *SettingHandler) ensureActorTotpForStepUp(c *gin.Context) bool {
+	if c.GetString("auth_method") == service.AuditAuthMethodAdminAPIKey {
+		response.ErrorWithDetails(c, http.StatusForbidden,
+			"Admin API key cannot enable step-up verification; use an admin session with TOTP enabled",
+			"STEP_UP_ADMIN_API_KEY_FORBIDDEN", nil)
+		return false
+	}
+	subject, ok := middleware.GetAuthSubjectFromContext(c)
+	if !ok || subject.UserID <= 0 {
+		response.ErrorWithDetails(c, http.StatusForbidden,
+			"Enabling step-up verification requires an authenticated admin session",
+			"STEP_UP_ENABLE_REQUIRES_TOTP", nil)
+		return false
+	}
+	if h.userService == nil {
+		response.InternalError(c, "Step-up precondition check unavailable")
+		return false
+	}
+	user, err := h.userService.GetByID(c.Request.Context(), subject.UserID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return false
+	}
+	if !user.TotpEnabled {
+		response.ErrorWithDetails(c, http.StatusBadRequest,
+			"Enable two-factor authentication (TOTP) for your account before turning on step-up verification",
+			"STEP_UP_ENABLE_REQUIRES_TOTP", nil)
+		return false
+	}
+	return true
+}
+
 func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 	var req UpdateSettingsRequest
 	rawBody, err := io.ReadAll(c.Request.Body)
@@ -375,6 +431,34 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
+	}
+
+	// 两个安全开关的请求字段为指针：省略字段=保持现值，避免旧客户端/脚本
+	// 用不含新字段的全量 payload 保存设置时把安全开关静默重置。
+	sessionBindingEnabled := previousSettings.SessionBindingEnabled
+	if req.SessionBindingEnabled != nil {
+		sessionBindingEnabled = *req.SessionBindingEnabled
+	}
+	stepUpEnabled := previousSettings.StepUpEnabled
+	if req.StepUpEnabled != nil {
+		stepUpEnabled = *req.StepUpEnabled
+	}
+
+	// 开启敏感操作 step-up 门控属自锁风险操作：仅允许本人已启用 TOTP 的管理员会话开启，
+	// 否则开启后操作者立即被挡在所有敏感操作之外。仅在 false→true 的开启瞬间校验，
+	// 保持开启状态的常规设置保存不受影响。
+	if stepUpEnabled && !previousSettings.StepUpEnabled {
+		if !h.ensureActorTotpForStepUp(c) {
+			return
+		}
+	}
+	// 关闭 step-up 门控本身就是敏感操作：防止拿到管理员会话的攻击者先关闸再执行导出/备份。
+	// previousSettings 已证实开关处于开启状态，使用无条件门控变体，
+	// 避免门控内部二次读取开关时因存储故障 fail-open（前端捕获 STEP_UP_REQUIRED 弹码重试）。
+	if !stepUpEnabled && previousSettings.StepUpEnabled {
+		if !middleware.EnforceStepUpAlways(c, h.totpService, h.userService) {
+			return
+		}
 	}
 
 	// 验证参数
@@ -1220,7 +1304,8 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		FrontendURL:                      req.FrontendURL,
 		InvitationCodeEnabled:            req.InvitationCodeEnabled,
 		TotpEnabled:                      req.TotpEnabled,
-		SessionBindingEnabled:            req.SessionBindingEnabled,
+		SessionBindingEnabled:            sessionBindingEnabled,
+		StepUpEnabled:                    stepUpEnabled,
 		AuditLogRetentionDays:            req.AuditLogRetentionDays,
 		LoginAgreementEnabled: func() bool {
 			if req.LoginAgreementEnabled != nil {
@@ -1433,6 +1518,12 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 			}
 			return previousSettings.ClaudeOAuthSystemPromptBlocks
 		}(),
+		OpenAICleanRelayEnabled: func() bool {
+			if req.OpenAICleanRelayEnabled != nil {
+				return *req.OpenAICleanRelayEnabled
+			}
+			return previousSettings.OpenAICleanRelayEnabled
+		}(),
 		EnableAnthropicCacheTTL1hInjection: func() bool {
 			if req.EnableAnthropicCacheTTL1hInjection != nil {
 				return *req.EnableAnthropicCacheTTL1hInjection
@@ -1539,6 +1630,18 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		OpenAIAdvancedSchedulerWeightUpstreamCost:     stringSetting(req.OpenAIAdvancedSchedulerWeightUpstreamCost, previousSettings.OpenAIAdvancedSchedulerWeightUpstreamCost),
 		OpenAIAdvancedSchedulerWeightPreviousResponse: stringSetting(req.OpenAIAdvancedSchedulerWeightPreviousResponse, previousSettings.OpenAIAdvancedSchedulerWeightPreviousResponse),
 		OpenAIAdvancedSchedulerWeightSessionSticky:    stringSetting(req.OpenAIAdvancedSchedulerWeightSessionSticky, previousSettings.OpenAIAdvancedSchedulerWeightSessionSticky),
+		OpenAIFreeAccountRepairEnabled: func() bool {
+			if req.OpenAIFreeAccountRepairEnabled != nil {
+				return *req.OpenAIFreeAccountRepairEnabled
+			}
+			return previousSettings.OpenAIFreeAccountRepairEnabled
+		}(),
+		OpenAIFreeAccountRepairWeeklyThresholdUSD: func() float64 {
+			if req.OpenAIFreeAccountRepairWeeklyThresholdUSD != nil {
+				return *req.OpenAIFreeAccountRepairWeeklyThresholdUSD
+			}
+			return previousSettings.OpenAIFreeAccountRepairWeeklyThresholdUSD
+		}(),
 		BalanceLowNotifyEnabled: func() bool {
 			if req.BalanceLowNotifyEnabled != nil {
 				return *req.BalanceLowNotifyEnabled
@@ -1714,29 +1817,49 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 	// Update payment configuration (integrated into system settings).
 	// Skip if no payment fields were provided (prevents accidental wipe).
 	if h.paymentConfigService != nil && hasPaymentFields(req) {
+		var rechargeCenterItems []service.RechargeCenterItem
+		if req.PaymentRechargeCenterItems != nil {
+			rechargeCenterItems = rechargeCenterItemsFromDTO(*req.PaymentRechargeCenterItems)
+		}
 		paymentReq := service.UpdatePaymentConfigRequest{
-			Enabled:                   req.PaymentEnabled,
-			MinAmount:                 req.PaymentMinAmount,
-			MaxAmount:                 req.PaymentMaxAmount,
-			DailyLimit:                req.PaymentDailyLimit,
-			OrderTimeoutMin:           req.PaymentOrderTimeoutMin,
-			MaxPendingOrders:          req.PaymentMaxPendingOrders,
-			EnabledTypes:              req.PaymentEnabledTypes,
-			BalanceDisabled:           req.PaymentBalanceDisabled,
-			BalanceRechargeMultiplier: req.PaymentBalanceRechargeMultiplier,
-			SubscriptionUSDToCNYRate:  req.PaymentSubscriptionUSDToCNYRate,
-			RechargeFeeRate:           req.PaymentRechargeFeeRate,
-			LoadBalanceStrategy:       req.PaymentLoadBalanceStrat,
-			ProductNamePrefix:         req.PaymentProductNamePrefix,
-			ProductNameSuffix:         req.PaymentProductNameSuffix,
-			HelpImageURL:              req.PaymentHelpImageURL,
-			HelpText:                  req.PaymentHelpText,
-			CancelRateLimitEnabled:    req.PaymentCancelRateLimitEnabled,
-			CancelRateLimitMax:        req.PaymentCancelRateLimitMax,
-			CancelRateLimitWindow:     req.PaymentCancelRateLimitWindow,
-			CancelRateLimitUnit:       req.PaymentCancelRateLimitUnit,
-			CancelRateLimitMode:       req.PaymentCancelRateLimitMode,
-			AlipayForceQRCode:         req.PaymentAlipayForceQRCode,
+			Enabled:                            req.PaymentEnabled,
+			MinAmount:                          req.PaymentMinAmount,
+			MaxAmount:                          req.PaymentMaxAmount,
+			DailyLimit:                         req.PaymentDailyLimit,
+			OrderTimeoutMin:                    req.PaymentOrderTimeoutMin,
+			MaxPendingOrders:                   req.PaymentMaxPendingOrders,
+			EnabledTypes:                       req.PaymentEnabledTypes,
+			BalanceDisabled:                    req.PaymentBalanceDisabled,
+			BalanceRechargeMultiplier:          req.PaymentBalanceRechargeMultiplier,
+			SubscriptionUSDToCNYRate:           req.PaymentSubscriptionUSDToCNYRate,
+			RechargeFeeRate:                    req.PaymentRechargeFeeRate,
+			LoadBalanceStrategy:                req.PaymentLoadBalanceStrat,
+			ProductNamePrefix:                  req.PaymentProductNamePrefix,
+			ProductNameSuffix:                  req.PaymentProductNameSuffix,
+			AnnouncementText:                   req.PaymentAnnouncementText,
+			RechargeCenterItems:                rechargeCenterItems,
+			RechargeCenterTabEnabled:           req.PaymentRechargeCenterTabEnabled,
+			RechargeTabEnabled:                 req.PaymentRechargeTabEnabled,
+			SubscriptionTabEnabled:             req.PaymentSubscriptionTabEnabled,
+			HelpImageURL:                       req.PaymentHelpImageURL,
+			HelpText:                           req.PaymentHelpText,
+			ReceiptCodeOSSEnabled:              req.PaymentReceiptCodeOSSEnabled,
+			ReceiptCodeOSSEndpoint:             req.PaymentReceiptCodeOSSEndpoint,
+			ReceiptCodeOSSRegion:               req.PaymentReceiptCodeOSSRegion,
+			ReceiptCodeOSSBucket:               req.PaymentReceiptCodeOSSBucket,
+			ReceiptCodeOSSAccessKeyID:          req.PaymentReceiptCodeOSSAccessKeyID,
+			ReceiptCodeOSSSecretAccessKey:      req.PaymentReceiptCodeOSSSecretAccessKey,
+			ReceiptCodeOSSPrefix:               req.PaymentReceiptCodeOSSPrefix,
+			ReceiptCodeOSSPublicBaseURL:        req.PaymentReceiptCodeOSSPublicBaseURL,
+			ReceiptCodeOSSForcePathStyle:       req.PaymentReceiptCodeOSSForcePathStyle,
+			ReceiptCodeOSSMaxSizeBytes:         req.PaymentReceiptCodeOSSMaxSizeBytes,
+			ReceiptCodeOSSPresignExpireSeconds: req.PaymentReceiptCodeOSSPresignExpireSeconds,
+			CancelRateLimitEnabled:             req.PaymentCancelRateLimitEnabled,
+			CancelRateLimitMax:                 req.PaymentCancelRateLimitMax,
+			CancelRateLimitWindow:              req.PaymentCancelRateLimitWindow,
+			CancelRateLimitUnit:                req.PaymentCancelRateLimitUnit,
+			CancelRateLimitMode:                req.PaymentCancelRateLimitMode,
+			AlipayForceQRCode:                  req.PaymentAlipayForceQRCode,
 		}
 		if err := h.paymentConfigService.UpdatePaymentConfig(c.Request.Context(), paymentReq); err != nil {
 			response.ErrorFrom(c, err)
@@ -1791,6 +1914,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		TotpEnabled:                                            updatedSettings.TotpEnabled,
 		TotpEncryptionKeyConfigured:                            h.settingService.IsTotpEncryptionKeyConfigured(),
 		SessionBindingEnabled:                                  updatedSettings.SessionBindingEnabled,
+		StepUpEnabled:                                          updatedSettings.StepUpEnabled,
 		AuditLogRetentionDays:                                  updatedSettings.AuditLogRetentionDays,
 		LoginAgreementEnabled:                                  updatedSettings.LoginAgreementEnabled,
 		LoginAgreementMode:                                     updatedSettings.LoginAgreementMode,
@@ -1927,6 +2051,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		EnableClaudeOAuthSystemPromptInjection:                 updatedSettings.EnableClaudeOAuthSystemPromptInjection,
 		ClaudeOAuthSystemPrompt:                                updatedSettings.ClaudeOAuthSystemPrompt,
 		ClaudeOAuthSystemPromptBlocks:                          updatedSettings.ClaudeOAuthSystemPromptBlocks,
+		OpenAICleanRelayEnabled:                                updatedSettings.OpenAICleanRelayEnabled,
 		EnableAnthropicCacheTTL1hInjection:                     updatedSettings.EnableAnthropicCacheTTL1hInjection,
 		RewriteMessageCacheControl:                             updatedSettings.RewriteMessageCacheControl,
 		EnableClientDatelineNormalization:                      updatedSettings.EnableClientDatelineNormalization,
@@ -1938,6 +2063,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		CodexCLIOnlyWhitelist:                                  updatedSettings.CodexCLIOnlyWhitelist,
 		CodexCLIOnlyAllowAppServerClients:                      updatedSettings.CodexCLIOnlyAllowAppServerClients,
 		CodexCLIOnlyEngineFingerprintSignals:                   updatedSettings.CodexCLIOnlyEngineFingerprintSignals,
+		WebSearchEmulationEnabled:                              updatedSettings.WebSearchEmulationEnabled,
 		PaymentVisibleMethodAlipaySource:                       updatedSettings.PaymentVisibleMethodAlipaySource,
 		PaymentVisibleMethodWxpaySource:                        updatedSettings.PaymentVisibleMethodWxpaySource,
 		PaymentVisibleMethodAlipayEnabled:                      updatedSettings.PaymentVisibleMethodAlipayEnabled,
@@ -1969,6 +2095,8 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		OpenAIAdvancedSchedulerEffectiveWeightUpstreamCost:     updatedSettings.OpenAIAdvancedSchedulerEffectiveWeightUpstreamCost,
 		OpenAIAdvancedSchedulerEffectiveWeightPreviousResponse: updatedSettings.OpenAIAdvancedSchedulerEffectiveWeightPreviousResponse,
 		OpenAIAdvancedSchedulerEffectiveWeightSessionSticky:    updatedSettings.OpenAIAdvancedSchedulerEffectiveWeightSessionSticky,
+		OpenAIFreeAccountRepairEnabled:                         updatedSettings.OpenAIFreeAccountRepairEnabled,
+		OpenAIFreeAccountRepairWeeklyThresholdUSD:              updatedSettings.OpenAIFreeAccountRepairWeeklyThresholdUSD,
 		BalanceLowNotifyEnabled:                                updatedSettings.BalanceLowNotifyEnabled,
 		BalanceLowNotifyThreshold:                              updatedSettings.BalanceLowNotifyThreshold,
 		BalanceLowNotifyRechargeURL:                            updatedSettings.BalanceLowNotifyRechargeURL,
@@ -1989,8 +2117,24 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		PaymentLoadBalanceStrat:                                updatedPaymentCfg.LoadBalanceStrategy,
 		PaymentProductNamePrefix:                               updatedPaymentCfg.ProductNamePrefix,
 		PaymentProductNameSuffix:                               updatedPaymentCfg.ProductNameSuffix,
+		PaymentAnnouncementText:                                updatedPaymentCfg.AnnouncementText,
+		PaymentRechargeCenterItems:                             rechargeCenterItemsToDTO(updatedPaymentCfg.RechargeCenterItems),
+		PaymentRechargeCenterTabEnabled:                        updatedPaymentCfg.RechargeCenterTabEnabled,
+		PaymentRechargeTabEnabled:                              updatedPaymentCfg.RechargeTabEnabled,
+		PaymentSubscriptionTabEnabled:                          updatedPaymentCfg.SubscriptionTabEnabled,
 		PaymentHelpImageURL:                                    updatedPaymentCfg.HelpImageURL,
 		PaymentHelpText:                                        updatedPaymentCfg.HelpText,
+		PaymentReceiptCodeOSSEnabled:                           updatedPaymentCfg.ReceiptCodeOSS.Enabled,
+		PaymentReceiptCodeOSSEndpoint:                          updatedPaymentCfg.ReceiptCodeOSS.Endpoint,
+		PaymentReceiptCodeOSSRegion:                            updatedPaymentCfg.ReceiptCodeOSS.Region,
+		PaymentReceiptCodeOSSBucket:                            updatedPaymentCfg.ReceiptCodeOSS.Bucket,
+		PaymentReceiptCodeOSSAccessKeyID:                       updatedPaymentCfg.ReceiptCodeOSS.AccessKeyID,
+		PaymentReceiptCodeOSSSecretConfigured:                  updatedPaymentCfg.ReceiptCodeOSS.SecretAccessKeyConfigured,
+		PaymentReceiptCodeOSSPrefix:                            updatedPaymentCfg.ReceiptCodeOSS.Prefix,
+		PaymentReceiptCodeOSSPublicBaseURL:                     updatedPaymentCfg.ReceiptCodeOSS.PublicBaseURL,
+		PaymentReceiptCodeOSSForcePathStyle:                    updatedPaymentCfg.ReceiptCodeOSS.ForcePathStyle,
+		PaymentReceiptCodeOSSMaxSizeBytes:                      updatedPaymentCfg.ReceiptCodeOSS.MaxSizeBytes,
+		PaymentReceiptCodeOSSPresignExpireSeconds:              updatedPaymentCfg.ReceiptCodeOSS.PresignExpireSeconds,
 		PaymentCancelRateLimitEnabled:                          updatedPaymentCfg.CancelRateLimitEnabled,
 		PaymentCancelRateLimitMax:                              updatedPaymentCfg.CancelRateLimitMax,
 		PaymentCancelRateLimitWindow:                           updatedPaymentCfg.CancelRateLimitWindow,
@@ -2049,10 +2193,19 @@ func hasPaymentFields(req UpdateSettingsRequest) bool {
 		req.PaymentBalanceRechargeMultiplier != nil || req.PaymentSubscriptionUSDToCNYRate != nil ||
 		req.PaymentRechargeFeeRate != nil ||
 		req.PaymentLoadBalanceStrat != nil || req.PaymentProductNamePrefix != nil ||
-		req.PaymentProductNameSuffix != nil || req.PaymentHelpImageURL != nil ||
+		req.PaymentProductNameSuffix != nil || req.PaymentAnnouncementText != nil ||
+		req.PaymentRechargeCenterItems != nil || req.PaymentRechargeCenterTabEnabled != nil ||
+		req.PaymentRechargeTabEnabled != nil || req.PaymentSubscriptionTabEnabled != nil ||
+		req.PaymentHelpImageURL != nil ||
 		req.PaymentHelpText != nil || req.PaymentCancelRateLimitEnabled != nil ||
 		req.PaymentCancelRateLimitMax != nil || req.PaymentCancelRateLimitWindow != nil ||
 		req.PaymentCancelRateLimitUnit != nil || req.PaymentCancelRateLimitMode != nil ||
+		req.PaymentReceiptCodeOSSEnabled != nil || req.PaymentReceiptCodeOSSEndpoint != nil ||
+		req.PaymentReceiptCodeOSSRegion != nil || req.PaymentReceiptCodeOSSBucket != nil ||
+		req.PaymentReceiptCodeOSSAccessKeyID != nil || req.PaymentReceiptCodeOSSSecretAccessKey != nil ||
+		req.PaymentReceiptCodeOSSPrefix != nil || req.PaymentReceiptCodeOSSPublicBaseURL != nil ||
+		req.PaymentReceiptCodeOSSForcePathStyle != nil || req.PaymentReceiptCodeOSSMaxSizeBytes != nil ||
+		req.PaymentReceiptCodeOSSPresignExpireSeconds != nil ||
 		req.PaymentAlipayForceQRCode != nil
 }
 

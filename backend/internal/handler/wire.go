@@ -168,8 +168,11 @@ func ProvideAdminUserHandler(
 	userAttributeService *service.UserAttributeService,
 	userPlatformQuotaRepo service.UserPlatformQuotaRepository,
 	billingCache service.BillingCache,
+	totpService *service.TotpService,
+	userService *service.UserService,
+	settingService *service.SettingService,
 ) *admin.UserHandler {
-	return admin.NewUserHandler(adminService, concurrencyService, userAttributeService, userPlatformQuotaRepo, billingCache)
+	return admin.NewUserHandler(adminService, concurrencyService, userAttributeService, userPlatformQuotaRepo, billingCache, totpService, userService, settingService)
 }
 
 func ProvideAuthHandler(
@@ -206,9 +209,12 @@ func ProvideAdminSettingHandler(
 	paymentService *service.PaymentService,
 	userAttributeService *service.UserAttributeService,
 	notificationEmailService *service.NotificationEmailService,
+	totpService *service.TotpService,
+	userService *service.UserService,
 ) *admin.SettingHandler {
 	h := admin.NewSettingHandler(settingService, emailService, turnstileService, opsService, paymentConfigService, paymentService, userAttributeService)
 	h.SetNotificationEmailService(notificationEmailService)
+	h.SetStepUpDeps(totpService, userService)
 	return h
 }
 

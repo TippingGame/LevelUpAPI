@@ -28,6 +28,7 @@ type UserHandler struct {
 	billingCache          service.BillingCache
 	totpService           *service.TotpService
 	userService           *service.UserService
+	settingService        *service.SettingService // step-up 功能开关
 }
 
 // NewUserHandler creates a new admin user handler
@@ -48,6 +49,8 @@ func NewUserHandler(adminService service.AdminService, concurrencyService *servi
 			h.totpService = value
 		case *service.UserService:
 			h.userService = value
+		case *service.SettingService:
+			h.settingService = value
 		}
 	}
 	return h
@@ -307,7 +310,7 @@ func (h *UserHandler) Create(c *gin.Context) {
 
 	// 创建管理员账号属权限敏感操作：需最近完成 step-up 2FA 验证。
 	if req.Role == service.RoleAdmin {
-		if !middleware.EnforceStepUp(c, h.totpService, h.userService) {
+		if !middleware.EnforceStepUp(c, h.totpService, h.userService, h.settingService) {
 			return
 		}
 	}
@@ -361,8 +364,10 @@ func (h *UserHandler) Update(c *gin.Context) {
 			response.ErrorFrom(c, getErr)
 			return
 		}
-		if target.Role != service.RoleAdmin && !middleware.EnforceStepUp(c, h.totpService, h.userService) {
-			return
+		if target.Role != service.RoleAdmin {
+			if !middleware.EnforceStepUp(c, h.totpService, h.userService, h.settingService) {
+				return
+			}
 		}
 	}
 

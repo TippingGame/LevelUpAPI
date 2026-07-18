@@ -1007,9 +1007,11 @@ func ProvidePaymentService(
 	groupRepo GroupRepository,
 	affiliateService *AffiliateService,
 	systemNoticeService *SystemNoticeService,
+	notificationEmailService *NotificationEmailService,
 ) *PaymentService {
 	svc := NewPaymentService(entClient, registry, loadBalancer, redeemService, subscriptionSvc, configService, userRepo, groupRepo, affiliateService)
 	svc.SetSystemNoticeService(systemNoticeService)
+	svc.SetNotificationEmailService(notificationEmailService)
 	return svc
 }
 
