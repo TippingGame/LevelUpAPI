@@ -78,8 +78,12 @@ func claudeCodeBodyMapFromParsedRequest(parsedReq *service.ParsedRequest) map[st
 	bodyMap := map[string]any{
 		"model": parsedReq.Model,
 	}
-	if parsedReq.System != nil || parsedReq.HasSystem {
-		bodyMap["system"] = parsedReq.System
+	if parsedReq.HasSystem {
+		if system, ok := parsedReq.SystemValue(); ok {
+			bodyMap["system"] = system
+		} else {
+			bodyMap["system"] = nil
+		}
 	}
 	if parsedReq.MetadataUserID != "" {
 		bodyMap["metadata"] = map[string]any{"user_id": parsedReq.MetadataUserID}

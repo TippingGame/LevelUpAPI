@@ -2100,8 +2100,12 @@ func (a *Account) SupportsOpenAIEndpointCapability(capability OpenAIEndpointCapa
 		case OpenAIEndpointCapabilityChatCompletions:
 			return true
 		case OpenAIEndpointCapabilityGrokMediaGeneration:
-			eligible, _ := a.GrokMediaGenerationEligibility()
-			return eligible
+			eligible, reason := a.GrokMediaGenerationEligibility()
+			// Unobserved OAuth accounts remain scheduler candidates only so the
+			// request path can run the billing probe before forwarding. The
+			// forwarding gate itself fails closed if that probe is unavailable or
+			// cannot produce positive paid-entitlement evidence.
+			return eligible || reason == "billing_unobserved"
 		default:
 			return false
 		}
@@ -2145,8 +2149,10 @@ func (a *Account) SupportsOpenAIEndpointCapability(capability OpenAIEndpointCapa
 	return configured[string(capability)]
 }
 
-// GrokMediaGenerationEligibility 阻止已明确无媒体权益的 OAuth 账号接收新生成任务。
-// 未探测过的账号保持兼容并允许；视频状态查询不要求此能力。
+// GrokMediaGenerationEligibility reports whether a Grok account may receive
+// new image/video generation requests. OAuth media fails closed unless billing
+// observations provide positive paid-entitlement evidence. An explicit
+// operator override takes precedence over probe data.
 func (a *Account) GrokMediaGenerationEligibility() (bool, string) {
 	if a == nil || !a.IsGrok() {
 		return false, "not_grok"
@@ -2162,12 +2168,18 @@ func (a *Account) GrokMediaGenerationEligibility() (bool, string) {
 	}
 	billing, err := grokBillingSnapshotFromExtra(a.Extra)
 	if err != nil || billing == nil {
-		return true, "billing_unobserved"
+		return false, "billing_unobserved"
 	}
 	if billing.StatusCode == http.StatusForbidden ||
 		billing.WeeklyStatusCode == http.StatusForbidden ||
 		billing.MonthlyStatusCode == http.StatusForbidden {
 		return false, "billing_forbidden"
+	}
+	if isKnownGrokFreeAccount(a) {
+		return false, "billing_free_tier"
+	}
+	if !grokBillingHasAuthoritativeQuota(billing) {
+		return false, "billing_inconclusive"
 	}
 	return true, "eligible"
 }

@@ -334,23 +334,17 @@ func (r *apiKeyRepository) Delete(ctx context.Context, id int64) error {
 	})
 }
 
-// DeleteWithAudit atomically records the plaintext key ownership before soft-deleting it.
+// DeleteWithAudit keeps the legacy method name for rolling-upgrade compatibility.
+// It atomically tombstones and soft-deletes the key without retaining credential
+// material. Tombstoning releases the unique key value for safe reuse.
 func (r *apiKeyRepository) DeleteWithAudit(ctx context.Context, id int64) error {
 	tombstoneKey := fmt.Sprintf("__deleted__%d__%d", id, time.Now().UnixNano())
 	return r.withTx(ctx, func(txCtx context.Context, client *dbent.Client) error {
-		return r.deleteWithAudit(txCtx, client, id, tombstoneKey)
+		return r.deleteWithTombstone(txCtx, client, id, tombstoneKey)
 	})
 }
 
-func (r *apiKeyRepository) deleteWithAudit(ctx context.Context, client *dbent.Client, id int64, tombstoneKey string) error {
-	if _, err := client.ExecContext(ctx, `
-		INSERT INTO deleted_api_key_audits (key, api_key_id, user_id, key_name, deleted_at)
-		SELECT key, id, user_id, name, NOW()
-		FROM api_keys
-		WHERE id = $1 AND deleted_at IS NULL`, id); err != nil {
-		return err
-	}
-
+func (r *apiKeyRepository) deleteWithTombstone(ctx context.Context, client *dbent.Client, id int64, tombstoneKey string) error {
 	res, err := client.ExecContext(ctx, `
 		UPDATE api_keys
 		SET key = $1, deleted_at = NOW(), updated_at = NOW()
@@ -377,7 +371,7 @@ func (r *apiKeyRepository) deleteWithAudit(ctx context.Context, client *dbent.Cl
 	return nil
 }
 
-func (r *apiKeyRepository) ListByUserID(ctx context.Context, userID int64, params pagination.PaginationParams, filters service.APIKeyListFilters) ([]service.APIKey, *pagination.PaginationResult, error) {
+func (r *apiKeyRepository) apiKeyListByUserIDQuery(userID int64, filters service.APIKeyListFilters) *dbent.APIKeyQuery {
 	q := r.activeQuery().Where(apikey.UserIDEQ(userID))
 
 	// Apply filters
@@ -400,6 +394,12 @@ func (r *apiKeyRepository) ListByUserID(ctx context.Context, userID int64, param
 			))
 		}
 	}
+
+	return q
+}
+
+func (r *apiKeyRepository) ListByUserID(ctx context.Context, userID int64, params pagination.PaginationParams, filters service.APIKeyListFilters) ([]service.APIKey, *pagination.PaginationResult, error) {
+	q := r.apiKeyListByUserIDQuery(userID, filters)
 
 	total, err := q.Count(ctx)
 	if err != nil {
@@ -437,6 +437,32 @@ func (r *apiKeyRepository) ListByUserID(ctx context.Context, userID int64, param
 	}
 
 	return outKeys, paginationResultFromTotal(int64(total), params), nil
+}
+
+func (r *apiKeyRepository) ListAllByUserID(ctx context.Context, userID int64, filters service.APIKeyListFilters) ([]service.APIKey, error) {
+	keys, err := r.apiKeyListByUserIDQuery(userID, filters).
+		WithGroup().
+		WithGroupRoutes(apiKeyGroupRouteQueryOptions).
+		Order(dbent.Asc(apikey.FieldID)).
+		All(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	outKeys := make([]service.APIKey, 0, len(keys))
+	for i := range keys {
+		outKeys = append(outKeys, *apiKeyEntityToService(keys[i]))
+	}
+	if err := r.attachLastUsedIPs(ctx, outKeys); err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, ctxErr
+		}
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return nil, err
+		}
+		logger.LegacyPrintf("repository.api_key", "best-effort last-used IP enrichment failed: %v", err)
+	}
+	return outKeys, nil
 }
 
 func (r *apiKeyRepository) attachLastUsedIPs(ctx context.Context, keys []service.APIKey) error {

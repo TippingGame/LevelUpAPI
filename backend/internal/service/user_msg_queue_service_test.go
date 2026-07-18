@@ -12,9 +12,8 @@ import (
 )
 
 type cleanupWorkerUserMsgQueueCache struct {
-	scanCalls         atomic.Int64
-	forceReleaseCalls atomic.Int64
-	maxCount          atomic.Int64
+	reconcileCalls atomic.Int64
+	maxCount       atomic.Int64
 }
 
 var _ UserMsgQueueCache = (*cleanupWorkerUserMsgQueueCache)(nil)
@@ -35,18 +34,13 @@ func (c *cleanupWorkerUserMsgQueueCache) GetCurrentTimeMs(context.Context) (int6
 	return time.Now().UnixMilli(), nil
 }
 
-func (c *cleanupWorkerUserMsgQueueCache) ScanLockKeys(_ context.Context, maxCount int) ([]int64, error) {
-	c.scanCalls.Add(1)
+func (c *cleanupWorkerUserMsgQueueCache) ReconcileExpiredLockCandidates(_ context.Context, maxCount int) (int, error) {
+	c.reconcileCalls.Add(1)
 	c.maxCount.Store(int64(maxCount))
-	return []int64{42}, nil
+	return 1, nil
 }
 
-func (c *cleanupWorkerUserMsgQueueCache) ForceReleaseLock(context.Context, int64) error {
-	c.forceReleaseCalls.Add(1)
-	return nil
-}
-
-func TestStartCleanupWorker_ScansAndReleasesOrphanedLocks(t *testing.T) {
+func TestStartCleanupWorker_ReconcilesExpiredLockCandidates(t *testing.T) {
 	cache := &cleanupWorkerUserMsgQueueCache{}
 	svc := NewUserMessageQueueService(cache, nil, nil)
 	defer svc.Stop()
@@ -54,7 +48,7 @@ func TestStartCleanupWorker_ScansAndReleasesOrphanedLocks(t *testing.T) {
 	svc.StartCleanupWorker(time.Millisecond)
 
 	require.Eventually(t, func() bool {
-		return cache.scanCalls.Load() > 0 && cache.forceReleaseCalls.Load() > 0
+		return cache.reconcileCalls.Load() > 0
 	}, time.Second, 10*time.Millisecond)
 	require.EqualValues(t, 1000, cache.maxCount.Load())
 }

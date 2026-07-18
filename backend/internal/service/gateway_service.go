@@ -948,36 +948,13 @@ func (s *GatewayService) GenerateSessionHash(parsed *ParsedRequest) string {
 		_, _ = combined.WriteString(strconv.FormatInt(parsed.SessionContext.APIKeyID, 10))
 		_, _ = combined.WriteString("|")
 	}
-	if parsed.System != nil {
-		systemText := s.extractTextFromSystem(parsed.System)
-		if systemText != "" {
-			_, _ = combined.WriteString(systemText)
-		}
+	if systemText := extractTextFromSystemRaw(parsed.SystemRaw()); systemText != "" {
+		_, _ = combined.WriteString(systemText)
 	}
 	contentStart := combined.Len()
-	for _, msg := range parsed.Messages {
-		if m, ok := msg.(map[string]any); ok {
-			if content, exists := m["content"]; exists {
-				// Anthropic: messages[].content
-				if msgText := s.extractTextFromContent(content); msgText != "" {
-					_, _ = combined.WriteString(msgText)
-				}
-			} else if parts, ok := m["parts"].([]any); ok {
-				// Gemini: contents[].parts[].text
-				for _, part := range parts {
-					if partMap, ok := part.(map[string]any); ok {
-						if text, ok := partMap["text"].(string); ok {
-							_, _ = combined.WriteString(text)
-						}
-					}
-				}
-			}
-		}
-	}
+	appendMessageTextsFromRaw(&combined, parsed.MessagesRaw())
 	if combined.Len() == contentStart {
-		if inputText := s.extractResponsesSessionAnchor(parsed.Input); inputText != "" {
-			_, _ = combined.WriteString(inputText)
-		}
+		appendResponsesSessionAnchorFromRaw(&combined, parsed.InputRaw())
 	}
 	if combined.Len() > 0 {
 		hash := s.hashContent(combined.String())
@@ -1430,42 +1407,182 @@ func (s *GatewayService) extractCacheableContent(parsed *ParsedRequest) string {
 		return ""
 	}
 
-	var builder strings.Builder
-
-	// 检查 system 中的 cacheable 内容
-	if system, ok := parsed.System.([]any); ok {
-		for _, part := range system {
-			if partMap, ok := part.(map[string]any); ok {
-				if cc, ok := partMap["cache_control"].(map[string]any); ok {
-					if cc["type"] == "ephemeral" {
-						if text, ok := partMap["text"].(string); ok {
-							_, _ = builder.WriteString(text)
-						}
-					}
-				}
-			}
-		}
+	systemText := extractCacheableTextFromSystemRaw(parsed.SystemRaw())
+	if messageText := extractCacheableTextFromMessagesRaw(parsed.MessagesRaw()); messageText != "" {
+		return messageText
 	}
-	systemText := builder.String()
-
-	// 检查 messages 中的 cacheable 内容
-	for _, msg := range parsed.Messages {
-		if msgMap, ok := msg.(map[string]any); ok {
-			if msgContent, ok := msgMap["content"].([]any); ok {
-				for _, part := range msgContent {
-					if partMap, ok := part.(map[string]any); ok {
-						if cc, ok := partMap["cache_control"].(map[string]any); ok {
-							if cc["type"] == "ephemeral" {
-								return s.extractTextFromContent(msgMap["content"])
-							}
-						}
-					}
-				}
-			}
-		}
-	}
-
 	return systemText
+}
+
+func extractTextFromSystemRaw(raw []byte) string {
+	system := parseRawJSONView(raw)
+	switch system.Type {
+	case gjson.String:
+		return system.String()
+	case gjson.JSON:
+		if !system.IsArray() {
+			return ""
+		}
+		var builder strings.Builder
+		system.ForEach(func(_, part gjson.Result) bool {
+			if text := part.Get("text").String(); text != "" {
+				_, _ = builder.WriteString(text)
+			}
+			return true
+		})
+		return builder.String()
+	}
+	return ""
+}
+
+func extractTextFromContentRaw(content gjson.Result) string {
+	switch content.Type {
+	case gjson.String:
+		return content.String()
+	case gjson.JSON:
+		if !content.IsArray() {
+			return ""
+		}
+		var builder strings.Builder
+		content.ForEach(func(_, part gjson.Result) bool {
+			if part.Get("type").String() == "text" {
+				if text := part.Get("text").String(); text != "" {
+					_, _ = builder.WriteString(text)
+				}
+			}
+			return true
+		})
+		return builder.String()
+	}
+	return ""
+}
+
+func appendMessageTextsFromRaw(builder *strings.Builder, raw []byte) {
+	if builder == nil || len(raw) == 0 {
+		return
+	}
+	messages := parseRawJSONView(raw)
+	if !messages.IsArray() {
+		return
+	}
+	messages.ForEach(func(_, msg gjson.Result) bool {
+		if content := msg.Get("content"); content.Exists() {
+			_, _ = builder.WriteString(extractTextFromContentRaw(content))
+			return true
+		}
+		parts := msg.Get("parts")
+		if parts.IsArray() {
+			parts.ForEach(func(_, part gjson.Result) bool {
+				if text := part.Get("text").String(); text != "" {
+					_, _ = builder.WriteString(text)
+				}
+				return true
+			})
+		}
+		return true
+	})
+}
+
+func appendResponsesSessionAnchorFromRaw(builder *strings.Builder, raw []byte) {
+	if builder == nil || len(raw) == 0 {
+		return
+	}
+	input := parseRawJSONView(raw)
+	if input.Type == gjson.String {
+		_, _ = builder.WriteString(input.String())
+		return
+	}
+	if !input.IsArray() {
+		return
+	}
+	input.ForEach(func(_, item gjson.Result) bool {
+		if item.Type == gjson.String {
+			_, _ = builder.WriteString(item.String())
+			return false
+		}
+		switch item.Get("role").String() {
+		case "system", "developer":
+			appendResponsesContentText(builder, item.Get("content"))
+		case "user":
+			appendResponsesContentText(builder, item.Get("content"))
+			return false
+		default:
+			if item.Get("type").String() == "input_text" {
+				if text := item.Get("text").String(); text != "" {
+					_, _ = builder.WriteString(text)
+				}
+				return false
+			}
+		}
+		return true
+	})
+}
+
+func appendResponsesContentText(builder *strings.Builder, content gjson.Result) {
+	if builder == nil || !content.Exists() {
+		return
+	}
+	if content.Type == gjson.String {
+		_, _ = builder.WriteString(content.String())
+		return
+	}
+	if !content.IsArray() {
+		return
+	}
+	content.ForEach(func(_, part gjson.Result) bool {
+		switch part.Get("type").String() {
+		case "input_text", "text":
+			if text := part.Get("text").String(); text != "" {
+				_, _ = builder.WriteString(text)
+			}
+		}
+		return true
+	})
+}
+
+func extractCacheableTextFromSystemRaw(raw []byte) string {
+	system := parseRawJSONView(raw)
+	if !system.IsArray() {
+		return ""
+	}
+	var builder strings.Builder
+	system.ForEach(func(_, part gjson.Result) bool {
+		if part.Get("cache_control.type").String() == "ephemeral" {
+			if text := part.Get("text").String(); text != "" {
+				_, _ = builder.WriteString(text)
+			}
+		}
+		return true
+	})
+	return builder.String()
+}
+
+func extractCacheableTextFromMessagesRaw(raw []byte) string {
+	messages := parseRawJSONView(raw)
+	if !messages.IsArray() {
+		return ""
+	}
+	var text string
+	messages.ForEach(func(_, msg gjson.Result) bool {
+		content := msg.Get("content")
+		if !content.IsArray() {
+			return true
+		}
+		found := false
+		content.ForEach(func(_, part gjson.Result) bool {
+			if part.Get("cache_control.type").String() == "ephemeral" {
+				found = true
+				return false
+			}
+			return true
+		})
+		if found {
+			text = extractTextFromContentRaw(content)
+			return false
+		}
+		return true
+	})
+	return text
 }
 
 func (s *GatewayService) extractTextFromSystem(system any) string {

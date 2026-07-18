@@ -56,6 +56,16 @@ func TestAPIKeyGroupRouteCursor_SwitchLoopsThroughRoutesUntilAttemptLimit(t *tes
 	require.Equal(t, maxAPIKeyGroupRouteCyclesPerRequest*2, cursor.attempts)
 }
 
+func TestAPIKeyGroupRouteCursor_SingleRouteDoesNotReplaySameRoute(t *testing.T) {
+	resetAPIKeyGroupRouteBreakerForTest(t)
+	cursor := newAPIKeyGroupRouteCursorFromCandidates([]apiKeyGroupRouteCandidate{
+		testAPIKeyGroupRouteCandidate(1),
+	}, true)
+
+	require.False(t, cursor.switchToNext(10, "failure", nil))
+	require.Equal(t, 1, cursor.attempts)
+}
+
 func TestAPIKeyGroupRouteCursor_SwitchWithoutCooldownDoesNotTripBreaker(t *testing.T) {
 	resetAPIKeyGroupRouteBreakerForTest(t)
 	cursor := newAPIKeyGroupRouteCursorFromCandidates([]apiKeyGroupRouteCandidate{

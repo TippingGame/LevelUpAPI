@@ -23,10 +23,17 @@ func ClientRequestID() gin.HandlerFunc {
 			return
 		}
 
-		if v := c.Request.Context().Value(ctxkey.ClientRequestID); v != nil {
-			if id, ok := v.(string); ok {
-				c.Header(clientRequestIDHeader, strings.TrimSpace(id))
+		if v, _ := c.Request.Context().Value(ctxkey.ClientRequestID).(string); strings.TrimSpace(v) != "" {
+			var valid bool
+			v, valid = normalizeCorrelationID(v)
+			if !valid {
+				v = uuid.New().String()
 			}
+			c.Header(clientRequestIDHeader, v)
+			ctx := context.WithValue(c.Request.Context(), ctxkey.ClientRequestID, v)
+			requestLogger := logger.FromContext(ctx).With(zap.String("client_request_id", v))
+			ctx = logger.IntoContext(ctx, requestLogger)
+			c.Request = c.Request.WithContext(ctx)
 			c.Next()
 			return
 		}

@@ -166,11 +166,13 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 
 	setOpsRequestContext(c, "", false)
 
-	parsedReq, err := service.ParseGatewayRequest(body, domain.PlatformAnthropic)
+	bodyRef := service.NewRequestBodyRef(body)
+	parsedReq, err := service.ParseGatewayRequest(bodyRef, domain.PlatformAnthropic)
 	if err != nil {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to parse request body")
 		return
 	}
+	body = parsedReq.Body.Bytes()
 	reqModel := parsedReq.Model
 	reqStream := parsedReq.Stream
 	reqLog = reqLog.With(zap.String("model", reqModel), zap.Bool("stream", reqStream))
@@ -715,7 +717,7 @@ routeLoop:
 			h.handleStreamingAwareError(c, contentModerationStatus(decision), contentModerationErrorCode(decision), decision.Message, streamStarted)
 			return
 		}
-		parsedReqForRoute, parseErr := service.ParseGatewayRequest(routeBody, domain.PlatformAnthropic)
+		parsedReqForRoute, parseErr := service.ParseGatewayRequest(service.NewRequestBodyRef(routeBody), domain.PlatformAnthropic)
 		if parseErr != nil {
 			h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to parse request body")
 			return
@@ -958,8 +960,11 @@ routeLoop:
 			// 应用渠道模型映射到请求
 			if channelMapping.Mapped {
 				parsedReq.Model = channelMapping.MappedModel
-				parsedReq.Body = h.gatewayService.ReplaceModelInBody(parsedReq.Body, channelMapping.MappedModel)
 				routeBody = h.gatewayService.ReplaceModelInBody(routeBody, channelMapping.MappedModel)
+				if err := parsedReq.ReplaceBody(routeBody); err != nil {
+					h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to parse request body")
+					return
+				}
 			}
 
 			// 转发请求 - 根据账号平台分流
@@ -1666,7 +1671,10 @@ func newAPIKeyGroupRouteCursorFromCandidates(candidates []apiKeyGroupRouteCandid
 	maxAttempts := 0
 	if available && len(candidates) > 0 {
 		attempts = 1
-		maxAttempts = len(candidates) * maxAPIKeyGroupRouteCyclesPerRequest
+		maxAttempts = len(candidates)
+		if len(candidates) > 1 {
+			maxAttempts *= maxAPIKeyGroupRouteCyclesPerRequest
+		}
 	}
 	return &apiKeyGroupRouteCursor{
 		candidates:  candidates,
@@ -2519,11 +2527,13 @@ func (h *GatewayHandler) CountTokens(c *gin.Context) {
 
 	setOpsRequestContext(c, "", false)
 
-	parsedReq, err := service.ParseGatewayRequest(body, domain.PlatformAnthropic)
+	bodyRef := service.NewRequestBodyRef(body)
+	parsedReq, err := service.ParseGatewayRequest(bodyRef, domain.PlatformAnthropic)
 	if err != nil {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to parse request body")
 		return
 	}
+	body = parsedReq.Body.Bytes()
 	// count_tokens 走 messages 严格校验时，复用已解析请求，避免二次反序列化。
 	SetClaudeCodeClientContext(c, body, parsedReq)
 	reqLog = reqLog.With(zap.String("model", parsedReq.Model), zap.Bool("stream", parsedReq.Stream))

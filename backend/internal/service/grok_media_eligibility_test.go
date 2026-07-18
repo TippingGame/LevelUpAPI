@@ -15,12 +15,12 @@ func TestAccountGrokMediaGenerationEligibility(t *testing.T) {
 		wantReason string
 	}{
 		{
-			name: "unprobed OAuth account remains eligible",
+			name: "unprobed OAuth account is quarantined until billing is observed",
 			account: &Account{
 				Platform: PlatformGrok,
 				Type:     AccountTypeOAuth,
 			},
-			want:       true,
+			want:       false,
 			wantReason: "billing_unobserved",
 		},
 		{
@@ -90,7 +90,10 @@ func TestAccountGrokMediaGenerationEligibility(t *testing.T) {
 			got, reason := tt.account.GrokMediaGenerationEligibility()
 			require.Equal(t, tt.want, got)
 			require.Equal(t, tt.wantReason, reason)
-			require.Equal(t, tt.want, tt.account.SupportsOpenAIEndpointCapability(OpenAIEndpointCapabilityGrokMediaGeneration))
+			// Unobserved OAuth accounts stay in scheduler candidates so the
+			// request path can probe billing before its fail-closed forward gate.
+			wantCapability := tt.want || tt.wantReason == "billing_unobserved"
+			require.Equal(t, wantCapability, tt.account.SupportsOpenAIEndpointCapability(OpenAIEndpointCapabilityGrokMediaGeneration))
 		})
 	}
 }

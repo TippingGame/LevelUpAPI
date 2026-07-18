@@ -189,7 +189,7 @@ func TestOpenAIGatewayHandlerResponses_FailoverContinuesForConnectedClient(t *te
 
 	handler.Responses(c)
 
-	require.Equal(t, []int64{1, 2, 1, 2}, upstream.calls(), "在线客户端应正常切换账号; response: status=%d body=%s", rec.Code, rec.Body.String())
+	require.Equal(t, []int64{1, 2}, upstream.calls(), "在线客户端应正常切换账号，且单一路由耗尽后不重复整轮重放; response: status=%d body=%s", rec.Code, rec.Body.String())
 	require.Equal(t, http.StatusBadGateway, rec.Code)
 	require.Equal(t, "upstream_error", gjson.GetBytes(rec.Body.Bytes(), "error.type").String())
 }

@@ -981,6 +981,7 @@ export interface OpsErrorLog {
   requested_model?: string
   upstream_model?: string
   request_type?: number | null
+  user_agent?: string
 }
 
 export interface OpsErrorDetail extends OpsErrorLog {
@@ -1004,6 +1005,9 @@ export interface OpsErrorDetail extends OpsErrorLog {
   request_body_bytes?: number | null
 
   is_business_limited: boolean
+
+  // Bound (non-deleted) key prefix, snapshotted at error time
+  api_key_prefix?: string | null
 }
 
 export type OpsErrorLogsResponse = PaginatedResponse<OpsErrorLog>

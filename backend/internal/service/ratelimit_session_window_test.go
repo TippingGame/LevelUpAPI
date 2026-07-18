@@ -143,6 +143,9 @@ func (m *sessionWindowMockRepo) ListSchedulableUngroupedByPlatform(context.Conte
 func (m *sessionWindowMockRepo) ListSchedulableUngroupedByPlatforms(context.Context, []string) ([]Account, error) {
 	panic("unexpected")
 }
+func (m *sessionWindowMockRepo) ListModelAvailabilityCandidates(context.Context, *int64, []string, bool) ([]Account, error) {
+	panic("unexpected")
+}
 func (m *sessionWindowMockRepo) SetRateLimited(ctx context.Context, id int64, resetAt time.Time) error {
 	m.rateLimitCalls = append(m.rateLimitCalls, rlCall{ID: id, ResetAt: resetAt, ContextErr: ctx.Err()})
 	return nil

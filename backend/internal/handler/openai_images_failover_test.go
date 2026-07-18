@@ -174,7 +174,7 @@ func TestOpenAIGatewayHandlerImages_ServerErrorFailsOverAndReturnsClearErrorWhen
 
 	handler.Images(c)
 
-	require.Equal(t, []int64{1, 2, 1, 2}, upstream.calls(), "response: status=%d body=%s", rec.Code, rec.Body.String())
+	require.Equal(t, []int64{1, 2}, upstream.calls(), "single-route requests must not replay an exhausted account cycle; response: status=%d body=%s", rec.Code, rec.Body.String())
 	require.Equal(t, http.StatusBadGateway, rec.Code)
 	require.Equal(t, "upstream_error", gjson.GetBytes(rec.Body.Bytes(), "error.type").String())
 	require.Equal(t, "Upstream service temporarily unavailable", gjson.GetBytes(rec.Body.Bytes(), "error.message").String())
@@ -183,9 +183,7 @@ func TestOpenAIGatewayHandlerImages_ServerErrorFailsOverAndReturnsClearErrorWhen
 	require.True(t, ok)
 	events, ok := rawEvents.([]*service.OpsUpstreamErrorEvent)
 	require.True(t, ok)
-	require.Len(t, events, 4)
+	require.Len(t, events, 2)
 	require.Equal(t, "failover", events[0].Kind)
 	require.Equal(t, "failover", events[1].Kind)
-	require.Equal(t, "failover", events[2].Kind)
-	require.Equal(t, "failover", events[3].Kind)
 }

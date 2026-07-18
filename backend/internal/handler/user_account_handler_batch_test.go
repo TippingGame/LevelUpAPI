@@ -96,6 +96,9 @@ func (s *userAccountBatchRepoStub) ListActive(context.Context) ([]service.Accoun
 func (s *userAccountBatchRepoStub) ListByPlatform(context.Context, string) ([]service.Account, error) {
 	panic("unexpected ListByPlatform call")
 }
+func (s *userAccountBatchRepoStub) ListModelAvailabilityCandidates(context.Context, *int64, []string, bool) ([]service.Account, error) {
+	panic("unexpected ListModelAvailabilityCandidates call")
+}
 func (s *userAccountBatchRepoStub) UpdateLastUsed(context.Context, int64) error {
 	panic("unexpected UpdateLastUsed call")
 }

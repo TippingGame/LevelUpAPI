@@ -220,6 +220,7 @@ func TestGeminiErrorPolicyIntegration(t *testing.T) {
 		expectFailover       bool // expect UpstreamFailoverError
 		expectHandleError    bool // expect handleGeminiUpstreamError to be called
 		expectShouldFailover bool // for None path, whether shouldFailover triggers
+		expectModelScope     string
 	}{
 		{
 			name: "custom_codes_matched_429_failover",
@@ -273,7 +274,8 @@ func TestGeminiErrorPolicyIntegration(t *testing.T) {
 			statusCode:        503,
 			respBody:          []byte(`overloaded`),
 			expectFailover:    true,
-			expectHandleError: true,
+			expectHandleError: false,
+			expectModelScope:  "gemini-2.5-pro",
 		},
 		{
 			name: "no_policy_429_failover_via_shouldFailover",
@@ -327,15 +329,20 @@ func TestGeminiErrorPolicyIntegration(t *testing.T) {
 			headers := http.Header{}
 
 			if svc.rateLimitService != nil {
-				switch svc.rateLimitService.CheckErrorPolicy(ctx, account, statusCode, respBody) {
+				policy := svc.rateLimitService.CheckErrorPolicy(ctx, account, statusCode, respBody, "gemini-2.5-pro")
+				switch policy {
 				case ErrorPolicySkipped:
 					// Skipped → return error directly (no handleGeminiUpstreamError, no failover)
 					gotFailover = false
 					handleErrorCalled = false
 					goto verify
-				case ErrorPolicyMatched, ErrorPolicyTempUnscheduled:
+				case ErrorPolicyMatched:
 					svc.handleGeminiUpstreamError(ctx, account, statusCode, headers, respBody)
 					handleErrorCalled = true
+					gotFailover = true
+					goto verify
+				case ErrorPolicyTempUnscheduled:
+					handleErrorCalled = false
 					gotFailover = true
 					goto verify
 				}
@@ -351,6 +358,12 @@ func TestGeminiErrorPolicyIntegration(t *testing.T) {
 		verify:
 			require.Equal(t, tt.expectFailover, gotFailover, "failover mismatch")
 			require.Equal(t, tt.expectHandleError, handleErrorCalled, "handleGeminiUpstreamError call mismatch")
+			if tt.expectModelScope != "" {
+				require.Equal(t, 1, repo.setModelRateLimitedCalls)
+				require.Equal(t, tt.expectModelScope, repo.lastModelScope)
+				require.Zero(t, repo.setTempCalls)
+				require.Zero(t, repo.setRateLimitedCalls, "model temp rule must not be widened into an account rate limit")
+			}
 
 			if tt.expectShouldFailover {
 				require.True(t, svc.shouldFailoverGeminiUpstreamError(statusCode),
@@ -556,11 +569,13 @@ func TestHandleGeminiUpstreamError_PoolModeCustom429StillUsesLocalPolicy(t *test
 
 type geminiErrorPolicyRepo struct {
 	mockAccountRepoForGemini
-	setErrorCalls        int
-	setRateLimitedCalls  int
-	setTempCalls         int
-	lastRateLimitedID    int64
-	lastRateLimitedReset time.Time
+	setErrorCalls            int
+	setRateLimitedCalls      int
+	setTempCalls             int
+	setModelRateLimitedCalls int
+	lastModelScope           string
+	lastRateLimitedID        int64
+	lastRateLimitedReset     time.Time
 }
 
 func (r *geminiErrorPolicyRepo) SetError(_ context.Context, _ int64, _ string) error {
@@ -577,5 +592,11 @@ func (r *geminiErrorPolicyRepo) SetRateLimited(_ context.Context, id int64, rese
 
 func (r *geminiErrorPolicyRepo) SetTempUnschedulable(_ context.Context, _ int64, _ time.Time, _ string) error {
 	r.setTempCalls++
+	return nil
+}
+
+func (r *geminiErrorPolicyRepo) SetModelRateLimit(_ context.Context, _ int64, scope string, _ time.Time, _ ...string) error {
+	r.setModelRateLimitedCalls++
+	r.lastModelScope = scope
 	return nil
 }
