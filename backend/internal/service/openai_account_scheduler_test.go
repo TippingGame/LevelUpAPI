@@ -594,12 +594,14 @@ func TestSelectGrokAccountWithSessionPrefersBoundVideoRequestAccount(t *testing.
 		cfg:                &config.Config{RunMode: "simple"},
 	}
 	const requestID = "video-request-7461"
-	require.NoError(t, svc.BindGrokMediaVideoRequestAccount(context.Background(), nil, requestID, preferred.ID))
+	const userID int64 = 81
+	const apiKeyID int64 = 91
+	require.NoError(t, svc.BindGrokMediaVideoRequestAccount(context.Background(), nil, requestID, userID, apiKeyID, preferred.ID))
 
 	selection, decision, err := svc.selectGrokAccountWithSession(
 		context.Background(),
 		nil,
-		GrokMediaVideoRequestSessionHash(requestID),
+		GrokMediaVideoRequestSessionHash(requestID, userID, apiKeyID),
 		"",
 		nil,
 		"",

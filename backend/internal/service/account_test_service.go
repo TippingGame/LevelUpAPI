@@ -836,17 +836,21 @@ func (s *AccountTestService) testGrokAccountConnection(c *gin.Context, account *
 	if err != nil {
 		return s.sendErrorAndEnd(c, "Invalid Grok base URL: "+err.Error())
 	}
-	payload, err := json.Marshal(map[string]any{"model": testModelID, "input": "hi", "stream": true})
-	if err != nil {
-		return s.sendErrorAndEnd(c, "Failed to create Grok test payload")
-	}
 	c.Writer.Header().Set("Content-Type", "text/event-stream")
 	c.Writer.Header().Set("Cache-Control", "no-cache")
 	c.Writer.Header().Set("Connection", "keep-alive")
 	c.Writer.Header().Set("X-Accel-Buffering", "no")
 	c.Writer.Flush()
-	s.sendEvent(c, TestEvent{Type: "test_start", Model: testModelID})
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, apiURL, bytes.NewReader(payload))
+	payloadBytes, err := buildGrokQuotaProbeBody(testModelID)
+	if err != nil {
+		return s.sendErrorAndEnd(c, "Failed to create Grok test payload")
+	}
+
+	if !agentIdentityTaskRecoveryWasTried(ctx) {
+		s.sendEvent(c, TestEvent{Type: "test_start", Model: testModelID})
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, apiURL, bytes.NewReader(payloadBytes))
 	if err != nil {
 		return s.sendErrorAndEnd(c, "Failed to create Grok request")
 	}

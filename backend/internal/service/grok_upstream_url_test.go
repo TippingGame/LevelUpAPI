@@ -30,6 +30,57 @@ func TestGrokOAuthCustomBaseURLUsesOperatorPolicy(t *testing.T) {
 	require.EqualError(t, err, "invalid base url: base URL rejected by URL security policy")
 }
 
+func TestGrokAPIKeyURLPolicyFollowsGlobalSecurityConfig(t *testing.T) {
+	account := &Account{
+		Platform: PlatformGrok,
+		Type:     AccountTypeAPIKey,
+		Credentials: map[string]any{
+			"base_url": "http://grok.example.test/v1",
+		},
+	}
+
+	t.Run("insecure HTTP enabled with allowlist disabled", func(t *testing.T) {
+		cfg := &config.Config{}
+		cfg.Security.URLAllowlist.Enabled = false
+		cfg.Security.URLAllowlist.AllowInsecureHTTP = true
+
+		responsesURL, err := buildGrokResponsesURL(account, cfg)
+		require.NoError(t, err)
+		require.Equal(t, "http://grok.example.test/v1/responses", responsesURL)
+
+		chatURL, err := buildGrokChatCompletionsURL(account, cfg)
+		require.NoError(t, err)
+		require.Equal(t, "http://grok.example.test/v1/chat/completions", chatURL)
+
+		mediaURL, err := buildGrokMediaURL(account, cfg, GrokMediaEndpointImagesGenerations, "")
+		require.NoError(t, err)
+		require.Equal(t, "http://grok.example.test/v1/images/generations", mediaURL)
+
+		contentURL, err := buildGrokMediaURL(account, cfg, GrokMediaEndpointVideoContent, "request 123")
+		require.NoError(t, err)
+		require.Equal(t, "http://grok.example.test/v1/videos/request%20123/content", contentURL)
+	})
+
+	t.Run("insecure HTTP disabled", func(t *testing.T) {
+		cfg := &config.Config{}
+		cfg.Security.URLAllowlist.Enabled = false
+		cfg.Security.URLAllowlist.AllowInsecureHTTP = false
+
+		_, err := buildGrokResponsesURL(account, cfg)
+		require.EqualError(t, err, "invalid base url: base URL rejected by URL security policy")
+	})
+
+	t.Run("enabled allowlist remains HTTPS only", func(t *testing.T) {
+		cfg := &config.Config{}
+		cfg.Security.URLAllowlist.Enabled = true
+		cfg.Security.URLAllowlist.AllowInsecureHTTP = true
+		cfg.Security.URLAllowlist.UpstreamHosts = []string{"grok.example.test"}
+
+		_, err := buildGrokResponsesURL(account, cfg)
+		require.EqualError(t, err, "invalid base url: base URL rejected by URL security policy")
+	})
+}
+
 func TestGrokOAuthOfficialBaseURLBypassesOperatorAllowlist(t *testing.T) {
 	account := &Account{Platform: PlatformGrok, Type: AccountTypeOAuth}
 	cfg := &config.Config{}
