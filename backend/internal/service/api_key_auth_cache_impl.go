@@ -14,7 +14,7 @@ import (
 	"github.com/dgraph-io/ristretto"
 )
 
-const apiKeyAuthSnapshotVersion = 16 // v16: invalidate stale group media permissions
+const apiKeyAuthSnapshotVersion = 17 // v17: restore group media permissions in auth queries
 
 type apiKeyAuthCacheConfig struct {
 	l1Size        int
