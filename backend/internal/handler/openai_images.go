@@ -81,11 +81,17 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 		zap.Bool("multipart", parsed.Multipart),
 		zap.String("capability", string(parsed.RequiredCapability)),
 	)
-	if !service.GroupAllowsImageGeneration(apiKey.Group) {
+	routeCursor, routesAvailable := newImageGenerationAPIKeyGroupRouteCursor(apiKey)
+	if !routesAvailable {
+		h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "api_error", "No available API key group routes", streamStarted)
+		return
+	}
+	initialRoute, routeAllowed := routeCursor.current()
+	if !routeAllowed {
 		h.errorResponse(c, http.StatusForbidden, "permission_error", service.ImageGenerationPermissionMessage())
 		return
 	}
-	if decision := h.checkSecurityAudit(c, reqLog, apiKey, subject, service.ContentModerationProtocolOpenAIImages, requestModel, parsed.ModerationBody()); decision != nil && !decision.AllowNextStage {
+	if decision := h.checkSecurityAudit(c, reqLog, initialRoute.APIKey, subject, service.ContentModerationProtocolOpenAIImages, requestModel, parsed.ModerationBody()); decision != nil && !decision.AllowNextStage {
 		h.openAISecurityAuditError(c, decision)
 		return
 	}
@@ -128,12 +134,6 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 	var oauth429FailoverState service.OpenAIOAuth429FailoverState
 
 	maxAccountSwitches := h.maxAccountSwitches
-	routeCursor := newAPIKeyGroupRouteCursor(apiKey)
-	if _, ok := routeCursor.current(); !ok {
-		h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "api_error", "No available API key group routes", streamStarted)
-		return
-	}
-
 routeLoop:
 	for {
 		if failoverClientGone(c) {
@@ -145,6 +145,7 @@ routeLoop:
 			return
 		}
 		currentAPIKey := routeCandidate.APIKey
+		c.Set(string(middleware2.ContextKeyAPIKey), currentAPIKey)
 		currentSubscription, subErr := h.gatewayService.ResolveRouteSubscription(c.Request.Context(), currentAPIKey, subscription)
 		if subErr != nil {
 			if shouldSkipRouteOnSubscriptionResolveError(subErr) &&

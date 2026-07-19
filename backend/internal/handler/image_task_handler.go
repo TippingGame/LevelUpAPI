@@ -51,16 +51,24 @@ func (h *AsyncImageHandler) Submit(c *gin.Context) {
 		imageTaskError(c, service.ErrImageTaskForbidden)
 		return
 	}
+	routeCursor, routesAvailable := newImageGenerationAPIKeyGroupRouteCursor(apiKey)
+	if !routesAvailable {
+		imageTaskJSONError(c, http.StatusServiceUnavailable, "api_error", "No available API key group routes")
+		return
+	}
+	routeCandidate, routeAllowed := routeCursor.current()
+	if !routeAllowed {
+		imageTaskJSONError(c, http.StatusForbidden, "permission_error", service.ImageGenerationPermissionMessage())
+		return
+	}
+	apiKey = routeCandidate.APIKey
+	c.Set(string(middleware2.ContextKeyAPIKey), apiKey)
 	platform := ""
 	if apiKey.Group != nil {
 		platform = apiKey.Group.Platform
 	}
 	if platform != service.PlatformOpenAI && platform != service.PlatformGrok {
 		imageTaskJSONError(c, http.StatusNotFound, "not_found_error", "Images API is not supported for this platform")
-		return
-	}
-	if !service.GroupAllowsImageGeneration(apiKey.Group) {
-		imageTaskJSONError(c, http.StatusForbidden, "permission_error", service.ImageGenerationPermissionMessage())
 		return
 	}
 	if h == nil || h.tasks == nil || h.execute == nil {

@@ -53,10 +53,10 @@ func (e *handlerPromptEngine) snapshot() (evaluated, enqueued int, requests []se
 
 func securityAuditMediaTestMiddleware(c *gin.Context) {
 	groupID := int64(3)
-	user := &service.User{ID: 7, Username: "media-user", Email: "media@example.test"}
+	user := &service.User{ID: 7, Status: service.StatusActive, Username: "media-user", Email: "media@example.test"}
 	c.Set(string(middleware2.ContextKeyAPIKey), &service.APIKey{
 		ID: 9, UserID: 7, User: user, Name: "media-key", GroupID: &groupID,
-		Group: &service.Group{ID: groupID, Name: "media-group", Platform: service.PlatformOpenAI, AllowImageGeneration: true},
+		Group: &service.Group{ID: groupID, Name: "media-group", Status: service.StatusActive, Platform: service.PlatformOpenAI, AllowImageGeneration: true},
 	})
 	c.Set(string(middleware2.ContextKeyUser), middleware2.AuthSubject{UserID: 7, Concurrency: 2})
 	c.Next()

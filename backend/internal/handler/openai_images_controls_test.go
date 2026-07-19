@@ -28,9 +28,10 @@ func TestOpenAIGatewayHandlerImages_DisabledGroupRejectsBeforeScheduling(t *test
 		GroupID: &groupID,
 		Group: &service.Group{
 			ID:                   groupID,
+			Status:               service.StatusActive,
 			AllowImageGeneration: false,
 		},
-		User: &service.User{ID: 333},
+		User: &service.User{ID: 333, Status: service.StatusActive},
 	})
 	c.Set(string(middleware2.ContextKeyUser), middleware2.AuthSubject{UserID: 333, Concurrency: 1})
 

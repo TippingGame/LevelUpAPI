@@ -90,6 +90,7 @@ func runOpenAIResponsesImagePermissionGateTest(t *testing.T, platform string, bo
 		GroupID: &groupID,
 		Group: &service.Group{
 			ID:                   groupID,
+			Status:               service.StatusActive,
 			Platform:             platform,
 			AllowImageGeneration: false,
 		},

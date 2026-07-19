@@ -115,10 +115,18 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 	setOpsEndpointContext(c, "", int16(service.RequestTypeSync))
 
 	if endpoint.IsGenerationRequest() {
-		if !service.GroupAllowsImageGeneration(apiKey.Group) {
+		routeCursor, routesAvailable := newImageGenerationAPIKeyGroupRouteCursor(apiKey)
+		if !routesAvailable {
+			h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "No available API key group routes")
+			return
+		}
+		routeCandidate, routeAllowed := routeCursor.current()
+		if !routeAllowed {
 			h.errorResponse(c, http.StatusForbidden, "permission_error", service.ImageGenerationPermissionMessage())
 			return
 		}
+		apiKey = routeCandidate.APIKey
+		c.Set(string(middleware2.ContextKeyAPIKey), apiKey)
 		if moderationBody := requestInfo.ModerationBody(); len(moderationBody) > 0 {
 			decision := h.checkSecurityAudit(c, reqLog, apiKey, subject, service.ContentModerationProtocolOpenAIImages, requestModel, moderationBody)
 			if decision != nil && !decision.AllowNextStage {
@@ -142,6 +150,21 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 	if userReleaseFunc != nil {
 		defer userReleaseFunc()
 	}
+
+	currentSubscription, subErr := h.gatewayService.ResolveRouteSubscription(c.Request.Context(), apiKey, subscription)
+	if subErr != nil {
+		reqLog.Info("grok_media.route_subscription_resolve_failed",
+			zap.Error(subErr),
+			zap.Int64p("group_id", apiKey.GroupID),
+		)
+		status, code, message, retryAfter := billingErrorDetails(subErr)
+		if retryAfter > 0 {
+			c.Header("Retry-After", strconv.Itoa(retryAfter))
+		}
+		h.errorResponse(c, status, code, message)
+		return
+	}
+	subscription = currentSubscription
 
 	if err := h.billingCacheService.CheckBillingEligibility(c.Request.Context(), apiKey.User, apiKey, apiKey.Group, subscription); err != nil {
 		reqLog.Info("grok_media.billing_eligibility_check_failed", zap.Error(err))

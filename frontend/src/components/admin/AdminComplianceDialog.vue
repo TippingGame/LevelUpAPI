@@ -170,6 +170,9 @@ async function submit(): Promise<void> {
       appStore.showSuccess(t('adminCompliance.accepted'))
       typedPhrase.value = ''
       attemptedSubmit.value = false
+      // Initial admin requests were rejected by the compliance gate. Reload so
+      // every one-shot dashboard/settings request is issued again after unlock.
+      window.location.reload()
     }
   } catch (error) {
     const message = (error as { message?: string })?.message || t('adminCompliance.acceptFailed')

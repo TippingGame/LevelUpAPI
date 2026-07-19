@@ -319,9 +319,18 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		return
 	}
 	imageIntent := service.IsExplicitImageGenerationIntent("/v1/responses", reqModel, body)
-	if imageIntent && !service.GroupAllowsImageGeneration(apiKey.Group) {
-		h.errorResponse(c, http.StatusForbidden, "permission_error", service.ImageGenerationPermissionMessage())
-		return
+	routeCursor := newAPIKeyGroupRouteCursor(apiKey)
+	if imageIntent {
+		var routesAvailable bool
+		routeCursor, routesAvailable = newImageGenerationAPIKeyGroupRouteCursor(apiKey)
+		if !routesAvailable {
+			h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "api_error", "No available API key group routes", streamStarted)
+			return
+		}
+		if _, routeAllowed := routeCursor.current(); !routeAllowed {
+			h.errorResponse(c, http.StatusForbidden, "permission_error", service.ImageGenerationPermissionMessage())
+			return
+		}
 	}
 	var imageReleaseFunc func()
 	if imageIntent {
@@ -365,7 +374,6 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 	// Generate session hash (header first; fallback to prompt_cache_key)
 	sessionHash := h.gatewayService.GenerateSessionHash(c, sessionHashBody)
 	requireCompact := isOpenAIRemoteCompactPath(c)
-	routeCursor := newAPIKeyGroupRouteCursor(apiKey)
 	if _, ok := routeCursor.current(); !ok {
 		h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "api_error", "No available API key group routes", streamStarted)
 		return
@@ -389,6 +397,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 			return
 		}
 		currentAPIKey := routeCandidate.APIKey
+		c.Set(string(middleware2.ContextKeyAPIKey), currentAPIKey)
 		requestPlatform := openAICompatibleRequestPlatform(currentAPIKey)
 		requiredCapability := service.OpenAIEndpointCapabilityChatCompletions
 		if imageIntent && requestPlatform == service.PlatformOpenAI {
@@ -1552,10 +1561,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		closeOpenAIClientWS(wsConn, securityAuditWSCloseStatus(decision), securityAuditWSCloseReason(decision))
 		return
 	}
-	if service.IsExplicitImageGenerationIntent("/v1/responses", reqModel, firstMessage) && !service.GroupAllowsImageGeneration(apiKey.Group) {
-		closeOpenAIClientWS(wsConn, coderws.StatusPolicyViolation, service.ImageGenerationPermissionMessage())
-		return
-	}
+	imageIntent := service.IsExplicitImageGenerationIntent("/v1/responses", reqModel, firstMessage)
 
 	// 解析渠道级模型映射
 
@@ -1614,6 +1620,18 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 	baseFirstMessage := append([]byte(nil), firstMessage...)
 	subscription, _ := middleware2.GetSubscriptionFromContext(c)
 	routeCursor := newAPIKeyGroupRouteCursor(apiKey)
+	if imageIntent {
+		var routesAvailable bool
+		routeCursor, routesAvailable = newImageGenerationAPIKeyGroupRouteCursor(apiKey)
+		if !routesAvailable {
+			closeOpenAIClientWS(wsConn, coderws.StatusTryAgainLater, "no available API key group routes")
+			return
+		}
+		if _, routeAllowed := routeCursor.current(); !routeAllowed {
+			closeOpenAIClientWS(wsConn, coderws.StatusPolicyViolation, service.ImageGenerationPermissionMessage())
+			return
+		}
+	}
 	var currentAPIKey *service.APIKey
 	var currentSubscription *service.UserSubscription
 	var channelMappingWS service.ChannelMappingResult
@@ -1676,6 +1694,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				return
 			}
 			currentAPIKey = routeCandidate.APIKey
+			c.Set(string(middleware2.ContextKeyAPIKey), currentAPIKey)
 			routeFirstMessage, routePreviousResponseID, routePreviousResponseIDKind, routePreviousResponseRepaired := repairOpenAIWSInitialPayloadForRoute(
 				ctx,
 				currentAPIKey,

@@ -1666,6 +1666,16 @@ func newAPIKeyGroupRouteCursor(apiKey *service.APIKey) *apiKeyGroupRouteCursor {
 	return newAPIKeyGroupRouteCursorFromCandidates(candidates, available)
 }
 
+// newImageGenerationAPIKeyGroupRouteCursor keeps authorization tied to the
+// route that will actually serve the request. The bool reports whether the key
+// had any selectable routes before applying the image-generation permission.
+func newImageGenerationAPIKeyGroupRouteCursor(apiKey *service.APIKey) (*apiKeyGroupRouteCursor, bool) {
+	candidates, available, routesAvailable := buildAPIKeyGroupRouteCandidatesWhere(apiKey, func(candidate apiKeyGroupRouteCandidate) bool {
+		return candidate.APIKey != nil && service.GroupAllowsImageGeneration(candidate.APIKey.Group)
+	})
+	return newAPIKeyGroupRouteCursorFromCandidates(candidates, available), routesAvailable
+}
+
 func newAPIKeyGroupRouteCursorFromCandidates(candidates []apiKeyGroupRouteCandidate, available bool) *apiKeyGroupRouteCursor {
 	attempts := 0
 	maxAttempts := 0
@@ -1825,8 +1835,13 @@ func canSwitchAPIKeyGroupRouteAfterForward(c *gin.Context, cursor *apiKeyGroupRo
 }
 
 func buildAPIKeyGroupRouteCandidates(apiKey *service.APIKey) ([]apiKeyGroupRouteCandidate, bool) {
+	candidates, available, _ := buildAPIKeyGroupRouteCandidatesWhere(apiKey, nil)
+	return candidates, available
+}
+
+func buildAPIKeyGroupRouteCandidatesWhere(apiKey *service.APIKey, keep func(apiKeyGroupRouteCandidate) bool) ([]apiKeyGroupRouteCandidate, bool, bool) {
 	if apiKey == nil {
-		return nil, false
+		return nil, false, false
 	}
 	routes := apiKey.GroupRoutes
 	hasConfiguredRoutes := len(routes) > 0
@@ -1844,13 +1859,18 @@ func buildAPIKeyGroupRouteCandidates(apiKey *service.APIKey) ([]apiKeyGroupRoute
 	now := time.Now()
 	candidates := make([]apiKeyGroupRouteCandidate, 0, len(routes))
 	coolingDownCandidates := make([]apiKeyGroupRouteCandidate, 0, len(routes))
+	routesAvailable := false
 	for _, route := range routes {
 		if !service.IsAPIKeyGroupRouteSelectable(apiKey, route) {
 			continue
 		}
+		routesAvailable = true
 		candidate := apiKeyGroupRouteCandidate{
 			APIKey: cloneAPIKeyWithGroup(apiKey, route.Group),
 			Route:  route,
+		}
+		if keep != nil && !keep(candidate) {
+			continue
 		}
 		if !apiKeyGroupRouteBreaker.available(apiKey.ID, route.GroupID, now) {
 			coolingDownCandidates = append(coolingDownCandidates, candidate)
@@ -1863,7 +1883,7 @@ func buildAPIKeyGroupRouteCandidates(apiKey *service.APIKey) ([]apiKeyGroupRoute
 	}
 	if len(candidates) == 0 && apiKey.GroupID != nil && apiKey.Group != nil {
 		if hasConfiguredRoutes {
-			return nil, false
+			return nil, false, routesAvailable
 		}
 		route := service.APIKeyGroupRoute{
 			GroupID:         *apiKey.GroupID,
@@ -1874,14 +1894,19 @@ func buildAPIKeyGroupRouteCandidates(apiKey *service.APIKey) ([]apiKeyGroupRoute
 			Group:           apiKey.Group,
 		}
 		if service.IsAPIKeyGroupRouteSelectable(apiKey, route) {
-			candidates = append(candidates, apiKeyGroupRouteCandidate{
+			routesAvailable = true
+			candidate := apiKeyGroupRouteCandidate{
 				APIKey: cloneAPIKeyWithGroup(apiKey, apiKey.Group),
 				Route:  route,
-			})
+			}
+			if keep == nil || keep(candidate) {
+				candidates = append(candidates, candidate)
+			}
 		}
 	}
 	if len(candidates) == 0 && apiKey.GroupID == nil {
-		candidates = append(candidates, apiKeyGroupRouteCandidate{
+		routesAvailable = true
+		candidate := apiKeyGroupRouteCandidate{
 			APIKey: apiKey,
 			Route: service.APIKeyGroupRoute{
 				Priority:        100,
@@ -1889,10 +1914,13 @@ func buildAPIKeyGroupRouteCandidates(apiKey *service.APIKey) ([]apiKeyGroupRoute
 				Enabled:         true,
 				CooldownSeconds: 30,
 			},
-		})
+		}
+		if keep == nil || keep(candidate) {
+			candidates = append(candidates, candidate)
+		}
 	}
 	candidates = rotateAPIKeyGroupRouteCandidatesByWeightedStart(candidates)
-	return candidates, len(candidates) > 0
+	return candidates, len(candidates) > 0, routesAvailable
 }
 
 func rotateAPIKeyGroupRouteCandidatesByWeightedStart(candidates []apiKeyGroupRouteCandidate) []apiKeyGroupRouteCandidate {

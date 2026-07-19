@@ -107,6 +107,23 @@ describe('API Client', () => {
       const config = adapter.mock.calls[0][0]
       expect(config.withCredentials).toBe(true)
     })
+
+    it('标记管理员和用户界面请求', async () => {
+      const adapter = vi.fn().mockResolvedValue({
+        status: 200,
+        data: { code: 0, data: {} },
+        headers: {},
+        config: {},
+        statusText: 'OK',
+      })
+      apiClient.defaults.adapter = adapter
+
+      await apiClient.get('/admin/settings')
+      await apiClient.get('/usage')
+
+      expect(adapter.mock.calls[0][0].headers.get('X-Admin-UI-Request')).toBe('1')
+      expect(adapter.mock.calls[1][0].headers.get('X-User-UI-Request')).toBe('1')
+    })
   })
 
   // --- 响应拦截器 ---
@@ -142,6 +159,34 @@ describe('API Client', () => {
           message: '参数错误',
         })
       )
+    })
+
+    it('423 合规锁定时通知全局确认弹窗', async () => {
+      const listener = vi.fn()
+      window.addEventListener('admin-compliance-required', listener)
+      const adapter = vi.fn().mockRejectedValue({
+        response: {
+          status: 423,
+          data: {
+            code: 'ADMIN_COMPLIANCE_ACK_REQUIRED',
+            message: 'acknowledgement required',
+            metadata: { version: 'v-test' },
+          },
+        },
+        config: { url: '/admin/settings', headers: {} },
+        message: 'Request failed with status code 423',
+      })
+      apiClient.defaults.adapter = adapter
+
+      await expect(apiClient.get('/admin/settings')).rejects.toEqual(
+        expect.objectContaining({
+          status: 423,
+          code: 'ADMIN_COMPLIANCE_ACK_REQUIRED',
+        })
+      )
+      expect(listener).toHaveBeenCalledTimes(1)
+      expect((listener.mock.calls[0][0] as CustomEvent).detail).toEqual({ version: 'v-test' })
+      window.removeEventListener('admin-compliance-required', listener)
     })
   })
 

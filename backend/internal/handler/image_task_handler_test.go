@@ -62,7 +62,8 @@ func TestAsyncImageHandlerSubmitAndPoll(t *testing.T) {
 			ID:      9,
 			UserID:  7,
 			GroupID: &groupID,
-			Group:   &service.Group{ID: groupID, Platform: service.PlatformOpenAI, AllowImageGeneration: true},
+			Group:   &service.Group{ID: groupID, Status: service.StatusActive, Platform: service.PlatformOpenAI, AllowImageGeneration: true},
+			User:    &service.User{ID: 7, Status: service.StatusActive},
 		})
 		c.Next()
 	})
@@ -121,7 +122,8 @@ func TestAsyncImageHandlerDisabledReturns404(t *testing.T) {
 			ID:      9,
 			UserID:  7,
 			GroupID: &groupID,
-			Group:   &service.Group{ID: groupID, Platform: service.PlatformOpenAI, AllowImageGeneration: true},
+			Group:   &service.Group{ID: groupID, Status: service.StatusActive, Platform: service.PlatformOpenAI, AllowImageGeneration: true},
+			User:    &service.User{ID: 7, Status: service.StatusActive},
 		})
 		c.Next()
 	})

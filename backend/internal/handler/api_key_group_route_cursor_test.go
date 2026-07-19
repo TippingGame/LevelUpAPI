@@ -193,6 +193,100 @@ func TestBuildAPIKeyGroupRouteCandidates_SkipsUnavailableRoutes(t *testing.T) {
 	require.Equal(t, group2, candidates[0].APIKey.Group)
 }
 
+func TestImageGenerationRouteCursor_UsesAllowedFallbackRoute(t *testing.T) {
+	resetAPIKeyGroupRouteBreakerForTest(t)
+	disabled := &service.Group{ID: 1, Status: service.StatusActive, Platform: service.PlatformOpenAI, Hydrated: true}
+	allowed := &service.Group{ID: 2, Status: service.StatusActive, Platform: service.PlatformOpenAI, Hydrated: true, AllowImageGeneration: true}
+	apiKey := &service.APIKey{
+		ID:      10,
+		User:    &service.User{ID: 7, Status: service.StatusActive},
+		GroupID: &disabled.ID,
+		Group:   disabled,
+		GroupRoutes: []service.APIKeyGroupRoute{
+			{GroupID: disabled.ID, Priority: 1, Weight: 1, Enabled: true, Group: disabled},
+			{GroupID: allowed.ID, Priority: 2, Weight: 1, Enabled: true, Group: allowed},
+		},
+	}
+
+	cursor, routesAvailable := newImageGenerationAPIKeyGroupRouteCursor(apiKey)
+
+	require.True(t, routesAvailable)
+	current, ok := cursor.current()
+	require.True(t, ok)
+	require.Equal(t, allowed.ID, current.Route.GroupID)
+	require.Equal(t, allowed, current.APIKey.Group)
+}
+
+func TestImageGenerationRouteCursor_DoesNotFailOverIntoDisabledRoute(t *testing.T) {
+	resetAPIKeyGroupRouteBreakerForTest(t)
+	allowed := &service.Group{ID: 1, Status: service.StatusActive, Platform: service.PlatformOpenAI, Hydrated: true, AllowImageGeneration: true}
+	disabled := &service.Group{ID: 2, Status: service.StatusActive, Platform: service.PlatformOpenAI, Hydrated: true}
+	apiKey := &service.APIKey{
+		ID:      10,
+		User:    &service.User{ID: 7, Status: service.StatusActive},
+		GroupID: &allowed.ID,
+		Group:   allowed,
+		GroupRoutes: []service.APIKeyGroupRoute{
+			{GroupID: allowed.ID, Priority: 1, Weight: 1, Enabled: true, Group: allowed},
+			{GroupID: disabled.ID, Priority: 2, Weight: 1, Enabled: true, Group: disabled},
+		},
+	}
+
+	cursor, routesAvailable := newImageGenerationAPIKeyGroupRouteCursor(apiKey)
+
+	require.True(t, routesAvailable)
+	current, ok := cursor.current()
+	require.True(t, ok)
+	require.Equal(t, allowed.ID, current.Route.GroupID)
+	require.False(t, cursor.switchToNextWithoutCooldown(apiKey.ID, "test", nil))
+}
+
+func TestImageGenerationRouteCursor_RejectsOnlyWhenAllRoutesDisallowImages(t *testing.T) {
+	resetAPIKeyGroupRouteBreakerForTest(t)
+	group1 := &service.Group{ID: 1, Status: service.StatusActive, Platform: service.PlatformOpenAI, Hydrated: true}
+	group2 := &service.Group{ID: 2, Status: service.StatusActive, Platform: service.PlatformOpenAI, Hydrated: true}
+	apiKey := &service.APIKey{
+		ID:      10,
+		User:    &service.User{ID: 7, Status: service.StatusActive},
+		GroupID: &group1.ID,
+		Group:   group1,
+		GroupRoutes: []service.APIKeyGroupRoute{
+			{GroupID: group1.ID, Priority: 1, Weight: 1, Enabled: true, Group: group1},
+			{GroupID: group2.ID, Priority: 2, Weight: 1, Enabled: true, Group: group2},
+		},
+	}
+
+	cursor, routesAvailable := newImageGenerationAPIKeyGroupRouteCursor(apiKey)
+
+	require.True(t, routesAvailable)
+	_, ok := cursor.current()
+	require.False(t, ok)
+}
+
+func TestImageGenerationRouteCursor_FallsBackToCoolingAllowedRouteWhenWarmRouteIsDisallowed(t *testing.T) {
+	resetAPIKeyGroupRouteBreakerForTest(t)
+	disabled := &service.Group{ID: 1, Status: service.StatusActive, Platform: service.PlatformOpenAI, Hydrated: true}
+	allowed := &service.Group{ID: 2, Status: service.StatusActive, Platform: service.PlatformOpenAI, Hydrated: true, AllowImageGeneration: true}
+	apiKey := &service.APIKey{
+		ID:      10,
+		User:    &service.User{ID: 7, Status: service.StatusActive},
+		GroupID: &disabled.ID,
+		Group:   disabled,
+		GroupRoutes: []service.APIKeyGroupRoute{
+			{GroupID: disabled.ID, Priority: 1, Weight: 1, Enabled: true, CooldownSeconds: 30, Group: disabled},
+			{GroupID: allowed.ID, Priority: 2, Weight: 1, Enabled: true, CooldownSeconds: 30, Group: allowed},
+		},
+	}
+	apiKeyGroupRouteBreaker.recordFailure(apiKey.ID, allowed.ID, 30)
+
+	cursor, routesAvailable := newImageGenerationAPIKeyGroupRouteCursor(apiKey)
+
+	require.True(t, routesAvailable)
+	current, ok := cursor.current()
+	require.True(t, ok)
+	require.Equal(t, allowed.ID, current.Route.GroupID)
+}
+
 func TestWeightedAPIKeyGroupRouteStartIndexUsesBestPriorityBucket(t *testing.T) {
 	candidates := []apiKeyGroupRouteCandidate{
 		{Route: service.APIKeyGroupRoute{GroupID: 1, Priority: 100, Weight: 1}},

@@ -19,4 +19,10 @@ describe('App admin compliance wiring', () => {
     expect(appSource).toContain("window.addEventListener('admin-compliance-required', onAdminComplianceRequired)")
     expect(appSource).toContain("window.removeEventListener('admin-compliance-required', onAdminComplianceRequired)")
   })
+
+  it('reloads one-shot admin data after acknowledgement unlocks the API', () => {
+    const dialogPath = resolve(dirname(fileURLToPath(import.meta.url)), '../components/admin/AdminComplianceDialog.vue')
+    const dialogSource = readFileSync(dialogPath, 'utf8')
+    expect(dialogSource).toContain('window.location.reload()')
+  })
 })
