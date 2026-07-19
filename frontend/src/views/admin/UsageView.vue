@@ -1162,8 +1162,9 @@ const exportToExcel = async () => {
 
 // Column visibility
 const ALWAYS_VISIBLE = ['user', 'created_at']
-const DEFAULT_HIDDEN_COLUMNS = ['reasoning_effort', 'user_agent']
+const DEFAULT_HIDDEN_COLUMNS = ['user_agent']
 const HIDDEN_COLUMNS_KEY = 'usage-hidden-columns'
+const REASONING_EFFORT_VISIBLE_MIGRATION_KEY = 'usage-reasoning-effort-visible-v1'
 
 const allColumns = computed(() => [
   { key: 'user', label: t('admin.usage.user'), sortable: false },
@@ -1177,8 +1178,7 @@ const allColumns = computed(() => [
   { key: 'billing_mode', label: t('admin.usage.billingMode'), sortable: false },
   { key: 'tokens', label: t('usage.tokens'), sortable: false },
   { key: 'cost', label: t('usage.cost'), sortable: false },
-  { key: 'first_token', label: t('usage.firstToken'), sortable: false },
-  { key: 'duration', label: t('usage.duration'), sortable: false },
+  { key: 'latency', label: t('usage.latency'), sortable: false },
   { key: 'created_at', label: t('usage.time'), sortable: true },
   { key: 'user_agent', label: t('usage.userAgent'), sortable: false },
   { key: 'ip_address', label: t('admin.usage.ipAddress'), sortable: false }
@@ -1214,12 +1214,14 @@ const toggleColumn = (key: string) => {
 const loadSavedColumns = () => {
   try {
     const saved = localStorage.getItem(HIDDEN_COLUMNS_KEY)
-    if (saved) {
-      (JSON.parse(saved) as string[]).forEach((key) => {
-        hiddenColumns.add(key)
-      })
-    } else {
-      DEFAULT_HIDDEN_COLUMNS.forEach((key) => {
+    let values = saved ? JSON.parse(saved) as string[] : DEFAULT_HIDDEN_COLUMNS
+    if (localStorage.getItem(REASONING_EFFORT_VISIBLE_MIGRATION_KEY) !== '1') {
+      values = values.filter((key) => key !== 'reasoning_effort')
+      localStorage.setItem(HIDDEN_COLUMNS_KEY, JSON.stringify(values))
+      localStorage.setItem(REASONING_EFFORT_VISIBLE_MIGRATION_KEY, '1')
+    }
+    if (values.length > 0) {
+      values.forEach((key) => {
         hiddenColumns.add(key)
       })
     }

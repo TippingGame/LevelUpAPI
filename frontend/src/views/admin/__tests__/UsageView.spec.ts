@@ -110,6 +110,8 @@ const GroupDistributionChartStub = {
 describe('admin UsageView distribution metric toggles', () => {
   beforeEach(() => {
     vi.useFakeTimers()
+    vi.mocked(localStorage.getItem).mockReset().mockReturnValue(null)
+    vi.mocked(localStorage.setItem).mockReset()
     list.mockReset()
     getStats.mockReset()
     getSnapshotV2.mockReset()
@@ -198,5 +200,47 @@ describe('admin UsageView distribution metric toggles', () => {
     expect(modelChart.find('.metric').text()).toBe('actual_cost')
     expect(groupChart.find('.metric').text()).toBe('actual_cost')
     expect(getSnapshotV2).toHaveBeenCalledTimes(1)
+  })
+
+  it('shows reasoning effort and the combined latency column after migrating saved columns', async () => {
+    vi.mocked(localStorage.getItem).mockImplementation((key: string) => {
+      if (key === 'usage-hidden-columns') return JSON.stringify(['reasoning_effort', 'user_agent'])
+      return null
+    })
+
+    const wrapper = mount(UsageView, {
+      global: {
+        stubs: {
+          AppLayout: AppLayoutStub,
+          UsageStatsCards: true,
+          UsageFilters: UsageFiltersStub,
+          UsageTable: true,
+          UsageExportProgress: true,
+          UsageCleanupDialog: true,
+          UserBalanceHistoryModal: true,
+          Pagination: true,
+          Select: true,
+          DateRangePicker: true,
+          Icon: true,
+          TokenUsageTrend: true,
+          ModelDistributionChart: ModelDistributionChartStub,
+          GroupDistributionChart: GroupDistributionChartStub,
+        },
+      },
+    })
+
+    vi.advanceTimersByTime(120)
+    await flushPromises()
+
+    const setupState = (wrapper.vm as any).$?.setupState
+    const visibleColumnKeys = setupState.visibleColumns.map((column: { key: string }) => column.key)
+    expect(visibleColumnKeys).toContain('reasoning_effort')
+    expect(visibleColumnKeys).toContain('latency')
+    expect(visibleColumnKeys).not.toContain('first_token')
+    expect(visibleColumnKeys).not.toContain('duration')
+    expect(localStorage.setItem).toHaveBeenCalledWith(
+      'usage-hidden-columns',
+      JSON.stringify(['user_agent'])
+    )
   })
 })

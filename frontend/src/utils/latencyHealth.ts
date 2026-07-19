@@ -38,10 +38,24 @@ export const durationSeverity = (ms: number): LatencySeverity =>
   classify(ms, DURATION_THRESHOLDS_MS)
 
 export const LATENCY_TEXT_CLASSES: Record<LatencySeverity, string> = {
-  good: 'text-emerald-600 dark:text-emerald-400',
-  warn: 'text-amber-600 dark:text-amber-400',
-  slow: 'text-orange-600 dark:text-orange-400',
+  good: 'text-emerald-700 dark:text-emerald-400',
+  warn: 'text-amber-700 dark:text-amber-400',
+  slow: 'text-orange-700 dark:text-orange-400',
   critical: 'text-red-600 dark:text-red-400',
+}
+
+export const LATENCY_SEVERITY_LABEL_KEYS: Record<LatencySeverity, string> = {
+  good: 'monitorCommon.status.operational',
+  warn: 'common.warning',
+  slow: 'monitorCommon.status.degraded',
+  critical: 'common.critical',
+}
+
+export const LATENCY_SEVERITY_SYMBOLS: Record<LatencySeverity, string> = {
+  good: '✓',
+  warn: '!',
+  slow: '…',
+  critical: '×',
 }
 
 /** 无首字数据时的纯色色条（仅按总耗时档着色）。 */
@@ -66,4 +80,17 @@ export const LATENCY_BAR_TO_CLASSES: Record<LatencySeverity, string> = {
   warn: 'to-amber-400',
   slow: 'to-orange-500',
   critical: 'to-red-500',
+}
+
+export const formatUsageDuration = (milliseconds: number | null | undefined): string => {
+  if (milliseconds == null || !Number.isFinite(milliseconds) || milliseconds < 0) return '-'
+  if (milliseconds < 1_000) return `${Math.round(milliseconds)}ms`
+  if (milliseconds < 60_000) return `${(milliseconds / 1_000).toFixed(2)}s`
+
+  const totalSeconds = Math.floor(milliseconds / 1_000)
+  if (totalSeconds < 3_600) {
+    return `${Math.floor(totalSeconds / 60)}m ${totalSeconds % 60}s`
+  }
+
+  return `${Math.floor(totalSeconds / 3_600)}h ${Math.floor((totalSeconds % 3_600) / 60)}m`
 }

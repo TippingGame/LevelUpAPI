@@ -44,6 +44,9 @@ const messages: Record<string, string> = {
   'usage.cost': 'Cost',
   'usage.firstToken': 'First Token',
   'usage.duration': 'Duration',
+  'usage.latency': 'Latency Health',
+  'usage.latencyFirstToken': 'First Token',
+  'usage.latencyDuration': 'Total Duration',
   'usage.time': 'Time',
   'usage.userAgent': 'User Agent',
   'usage.balanceLedger.reasons.account_share_income': 'Shared account income',
@@ -107,6 +110,7 @@ describe('user UsageView tooltip', () => {
     showWarning.mockReset()
     showSuccess.mockReset()
     showInfo.mockReset()
+    localStorage.clear()
 
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({
       x: 0,
@@ -214,6 +218,50 @@ describe('user UsageView tooltip', () => {
     expect(text).toContain('0.092883 coins')
     expect(text).toContain('5.0000 coins / 1M tokens')
     expect(text).toContain('30.0000 coins / 1M tokens')
+  })
+
+  it('shows reasoning effort and the combined latency column after migrating saved columns', async () => {
+    localStorage.setItem('user-usage-hidden-columns', JSON.stringify([
+      'reasoning_effort',
+      'group_id',
+      'user_agent',
+    ]))
+    query.mockResolvedValue({ items: [], total: 0, pages: 0 })
+    getStatsByDateRange.mockResolvedValue({
+      total_requests: 0,
+      total_tokens: 0,
+      total_cost: 0,
+      avg_duration_ms: 0,
+    })
+    list.mockResolvedValue({ items: [] })
+
+    const wrapper = mount(UsageView, {
+      global: {
+        stubs: {
+          AppLayout: AppLayoutStub,
+          TablePageLayout: TablePageLayoutStub,
+          Pagination: true,
+          EmptyState: true,
+          Select: true,
+          DateRangePicker: true,
+          Icon: true,
+          Teleport: true,
+          ModelDistributionChart: true,
+          TokenUsageTrend: true,
+          UsageExportProgress: true,
+        },
+      },
+    })
+
+    await flushPromises()
+
+    const setupState = (wrapper.vm as any).$?.setupState
+    const visibleColumnKeys = setupState.visibleColumns.map((column: { key: string }) => column.key)
+    expect(visibleColumnKeys).toContain('reasoning_effort')
+    expect(visibleColumnKeys).toContain('latency')
+    expect(visibleColumnKeys).not.toContain('first_token')
+    expect(visibleColumnKeys).not.toContain('duration')
+    expect(JSON.parse(localStorage.getItem('user-usage-hidden-columns') || '[]')).not.toContain('reasoning_effort')
   })
 
   it('exports csv with input and output unit price columns', async () => {

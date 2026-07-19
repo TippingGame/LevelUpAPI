@@ -499,20 +499,11 @@
             </div>
           </template>
 
-          <template #cell-first_token="{ row }">
-            <span
-              v-if="row.first_token_ms != null"
-              class="text-sm text-gray-600 dark:text-gray-400"
-            >
-              {{ formatDuration(row.first_token_ms) }}
-            </span>
-            <span v-else class="text-sm text-gray-400 dark:text-gray-500">-</span>
-          </template>
-
-          <template #cell-duration="{ row }">
-            <span class="text-sm text-gray-600 dark:text-gray-400">{{
-              formatDuration(row.duration_ms)
-            }}</span>
+          <template #cell-latency="{ row }">
+            <UsageLatencyCell
+              :first-token-ms="row.first_token_ms"
+              :duration-ms="row.duration_ms"
+            />
           </template>
 
           <template #cell-created_at="{ value }">
@@ -776,6 +767,7 @@ import { usageAPI, keysAPI, userGroupsAPI } from '@/api'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import TablePageLayout from '@/components/layout/TablePageLayout.vue'
 import DataTable from '@/components/common/DataTable.vue'
+import UsageLatencyCell from '@/components/common/UsageLatencyCell.vue'
 import Pagination from '@/components/common/Pagination.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
 import Select from '@/components/common/Select.vue'
@@ -854,8 +846,9 @@ const modelDistributionMetric = ref<DistributionMetric>('tokens')
 const exportProgress = reactive({ show: false, progress: 0, current: 0, total: 0, estimatedTime: '' })
 
 const ALWAYS_VISIBLE_COLUMNS = ['api_key', 'created_at']
-const DEFAULT_HIDDEN_COLUMNS = ['reasoning_effort', 'group_id', 'user_agent']
+const DEFAULT_HIDDEN_COLUMNS = ['group_id', 'user_agent']
 const HIDDEN_COLUMNS_KEY = 'user-usage-hidden-columns'
+const REASONING_EFFORT_VISIBLE_MIGRATION_KEY = 'user-usage-reasoning-effort-visible-v1'
 
 const allColumns = computed<Column[]>(() => [
   { key: 'api_key', label: t('usage.apiKeyFilter'), sortable: false },
@@ -868,8 +861,7 @@ const allColumns = computed<Column[]>(() => [
   { key: 'payment_source', label: t('usage.paymentSource'), sortable: false },
   { key: 'tokens', label: t('usage.tokens'), sortable: false },
   { key: 'cost', label: t('usage.cost'), sortable: false },
-  { key: 'first_token', label: t('usage.firstToken'), sortable: false },
-  { key: 'duration', label: t('usage.duration'), sortable: false },
+  { key: 'latency', label: t('usage.latency'), sortable: false },
   { key: 'created_at', label: t('usage.time'), sortable: true },
   { key: 'user_agent', label: t('usage.userAgent'), sortable: false }
 ])
@@ -898,7 +890,12 @@ const toggleColumn = (key: string) => {
 const loadSavedColumns = () => {
   try {
     const saved = localStorage.getItem(HIDDEN_COLUMNS_KEY)
-    const values = saved ? JSON.parse(saved) as string[] : DEFAULT_HIDDEN_COLUMNS
+    let values = saved ? JSON.parse(saved) as string[] : DEFAULT_HIDDEN_COLUMNS
+    if (localStorage.getItem(REASONING_EFFORT_VISIBLE_MIGRATION_KEY) !== '1') {
+      values = values.filter((key) => key !== 'reasoning_effort')
+      localStorage.setItem(HIDDEN_COLUMNS_KEY, JSON.stringify(values))
+      localStorage.setItem(REASONING_EFFORT_VISIBLE_MIGRATION_KEY, '1')
+    }
     values.forEach((key) => hiddenColumns.add(key))
   } catch {
     DEFAULT_HIDDEN_COLUMNS.forEach((key) => hiddenColumns.add(key))
