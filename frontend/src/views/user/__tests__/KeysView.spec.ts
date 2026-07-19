@@ -296,11 +296,11 @@ describe('user KeysView column settings', () => {
       'usage',
       'expires_at',
       'status',
+      'last_used_at',
       'created_at',
       'actions',
     ])
     expect(visibleColumnKeys(wrapper)).not.toContain('rate_limit')
-    expect(visibleColumnKeys(wrapper)).not.toContain('last_used_at')
     expect(visibleColumnKeys(wrapper)).not.toContain('last_used_ip')
     expect(visibleColumnKeys(wrapper)).not.toContain('id')
   })
@@ -314,7 +314,7 @@ describe('user KeysView column settings', () => {
 
     expect(visibleColumnKeys(wrapper)).toContain('rate_limit')
     expect(localStorage.getItem('api-key-hidden-columns')).toBe(
-      JSON.stringify(['id', 'last_used_at', 'last_used_ip'])
+      JSON.stringify(['id', 'last_used_ip'])
     )
     expect(localStorage.getItem('api-key-column-settings-version')).toBe('3')
   })
