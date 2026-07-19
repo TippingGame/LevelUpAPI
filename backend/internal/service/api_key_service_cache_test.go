@@ -250,17 +250,28 @@ func TestAPIKeyService_SnapshotRoundTrip_PreservesMessagesDispatchModelConfig(t 
 			AllowedGroups: []int64{groupID},
 		},
 		Group: &Group{
-			ID:                    groupID,
-			Name:                  "openai",
-			Platform:              PlatformOpenAI,
-			Status:                StatusActive,
-			IsExclusive:           true,
-			OwnerUserID:           &ownerUserID,
-			Scope:                 GroupScopeUserPrivate,
-			SubscriptionType:      SubscriptionTypeStandard,
-			RateMultiplier:        1,
-			AllowMessagesDispatch: true,
-			DefaultMappedModel:    "gpt-5.4",
+			ID:                           groupID,
+			Name:                         "openai",
+			Platform:                     PlatformOpenAI,
+			Status:                       StatusActive,
+			IsExclusive:                  true,
+			OwnerUserID:                  &ownerUserID,
+			Scope:                        GroupScopeUserPrivate,
+			SubscriptionType:             SubscriptionTypeStandard,
+			RequiredAccountLevel:         AccountLevelPlus,
+			RateMultiplier:               1,
+			AllowImageGeneration:         true,
+			AllowBatchImageGeneration:    true,
+			BatchImageDiscountMultiplier: 0.55,
+			BatchImageHoldMultiplier:     0.65,
+			AllowMessagesDispatch:        true,
+			RequireOAuthOnly:             true,
+			RequirePrivacySet:            true,
+			DefaultMappedModel:           "gpt-5.4",
+			ModelsListConfig: GroupModelsListConfig{
+				Enabled: true,
+				Models:  []string{"gpt-5.4", "gpt-image-2"},
+			},
 			MessagesDispatchModelConfig: OpenAIMessagesDispatchModelConfig{
 				OpusMappedModel:   "gpt-5.4-nano",
 				SonnetMappedModel: "gpt-5.3-codex",
@@ -278,6 +289,14 @@ func TestAPIKeyService_SnapshotRoundTrip_PreservesMessagesDispatchModelConfig(t 
 	require.NotNil(t, roundTrip)
 	require.NotNil(t, roundTrip.Group)
 	require.Equal(t, apiKey.Group.MessagesDispatchModelConfig, roundTrip.Group.MessagesDispatchModelConfig)
+	require.True(t, roundTrip.Group.AllowImageGeneration)
+	require.True(t, roundTrip.Group.AllowBatchImageGeneration)
+	require.InDelta(t, apiKey.Group.BatchImageDiscountMultiplier, roundTrip.Group.BatchImageDiscountMultiplier, 1e-12)
+	require.InDelta(t, apiKey.Group.BatchImageHoldMultiplier, roundTrip.Group.BatchImageHoldMultiplier, 1e-12)
+	require.Equal(t, apiKey.Group.RequiredAccountLevel, roundTrip.Group.RequiredAccountLevel)
+	require.True(t, roundTrip.Group.RequireOAuthOnly)
+	require.True(t, roundTrip.Group.RequirePrivacySet)
+	require.Equal(t, apiKey.Group.ModelsListConfig, roundTrip.Group.ModelsListConfig)
 	require.Equal(t, apiKey.Group.Scope, roundTrip.Group.Scope)
 	require.True(t, roundTrip.Group.IsExclusive)
 	require.Equal(t, []int64{groupID}, roundTrip.User.AllowedGroups)

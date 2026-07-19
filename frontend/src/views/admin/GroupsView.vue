@@ -730,6 +730,41 @@
                 :placeholder="t('admin.groups.subscription.noLimit')"
               />
             </div>
+            <div class="border-t border-gray-200 pt-4 dark:border-dark-700">
+              <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+                <input
+                  v-model="createForm.peak_rate_enabled"
+                  type="checkbox"
+                  class="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                />
+                <span>{{ t("admin.groups.peakRate.enable") }}</span>
+              </label>
+              <div
+                v-if="createForm.peak_rate_enabled"
+                class="mt-3 grid grid-cols-1 gap-3 md:grid-cols-3"
+              >
+                <div>
+                  <label class="input-label">{{ t("admin.groups.peakRate.peakStart") }}</label>
+                  <input v-model="createForm.peak_start" type="time" class="input" />
+                </div>
+                <div>
+                  <label class="input-label">{{ t("admin.groups.peakRate.peakEnd") }}</label>
+                  <input v-model="createForm.peak_end" type="time" class="input" />
+                </div>
+                <div>
+                  <label class="input-label">{{ t("admin.groups.peakRate.peakMultiplier") }}</label>
+                  <input
+                    v-model.number="createForm.peak_rate_multiplier"
+                    type="number"
+                    step="0.001"
+                    min="0"
+                    class="input"
+                    placeholder="1"
+                    :title="t('admin.groups.peakRate.multiplierHint')"
+                  />
+                </div>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -882,6 +917,59 @@
               />
             </div>
           </div>
+          <div
+            v-if="createForm.platform === 'gemini' && createForm.allow_image_generation"
+            class="mt-4 border-t border-dashed border-gray-200 pt-4 dark:border-dark-700"
+          >
+            <label class="flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-300">
+              <input
+                v-model="createForm.allow_batch_image_generation"
+                type="checkbox"
+                class="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+              />
+              {{ t("admin.groups.imagePricing.allowBatchImageGeneration") }}
+            </label>
+            <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">
+              {{ t("admin.groups.imagePricing.batchSectionHint") }}
+            </p>
+            <div
+              v-if="createForm.allow_batch_image_generation"
+              class="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2"
+            >
+              <div>
+                <label class="input-label">{{
+                  t("admin.groups.imagePricing.batchDiscountMultiplier")
+                }}</label>
+                <input
+                  v-model.number="createForm.batch_image_discount_multiplier"
+                  type="number"
+                  step="0.0001"
+                  min="0"
+                  class="input"
+                  placeholder="0.5"
+                />
+              </div>
+              <div>
+                <label class="input-label">{{
+                  t("admin.groups.imagePricing.batchHoldMultiplier")
+                }}</label>
+                <input
+                  v-model.number="createForm.batch_image_hold_multiplier"
+                  type="number"
+                  step="0.0001"
+                  min="0"
+                  class="input"
+                  placeholder="0.6"
+                />
+              </div>
+            </div>
+          </div>
+          <p
+            v-else-if="createForm.platform !== 'gemini'"
+            class="mt-4 border-t border-dashed border-gray-200 pt-4 text-xs text-gray-500 dark:border-dark-700 dark:text-gray-400"
+          >
+            {{ t("admin.groups.imagePricing.batchGeminiOnlyHint") }}
+          </p>
         </div>
 
         <!-- Grok 视频生成按秒计费 -->
@@ -2049,6 +2137,41 @@
                 :placeholder="t('admin.groups.subscription.noLimit')"
               />
             </div>
+            <div class="border-t border-gray-200 pt-4 dark:border-dark-700">
+              <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+                <input
+                  v-model="editForm.peak_rate_enabled"
+                  type="checkbox"
+                  class="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                />
+                <span>{{ t("admin.groups.peakRate.enable") }}</span>
+              </label>
+              <div
+                v-if="editForm.peak_rate_enabled"
+                class="mt-3 grid grid-cols-1 gap-3 md:grid-cols-3"
+              >
+                <div>
+                  <label class="input-label">{{ t("admin.groups.peakRate.peakStart") }}</label>
+                  <input v-model="editForm.peak_start" type="time" class="input" />
+                </div>
+                <div>
+                  <label class="input-label">{{ t("admin.groups.peakRate.peakEnd") }}</label>
+                  <input v-model="editForm.peak_end" type="time" class="input" />
+                </div>
+                <div>
+                  <label class="input-label">{{ t("admin.groups.peakRate.peakMultiplier") }}</label>
+                  <input
+                    v-model.number="editForm.peak_rate_multiplier"
+                    type="number"
+                    step="0.001"
+                    min="0"
+                    class="input"
+                    placeholder="1"
+                    :title="t('admin.groups.peakRate.multiplierHint')"
+                  />
+                </div>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -2201,6 +2324,59 @@
               />
             </div>
           </div>
+          <div
+            v-if="editForm.platform === 'gemini' && editForm.allow_image_generation"
+            class="mt-4 border-t border-dashed border-gray-200 pt-4 dark:border-dark-700"
+          >
+            <label class="flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-300">
+              <input
+                v-model="editForm.allow_batch_image_generation"
+                type="checkbox"
+                class="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+              />
+              {{ t("admin.groups.imagePricing.allowBatchImageGeneration") }}
+            </label>
+            <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">
+              {{ t("admin.groups.imagePricing.batchSectionHint") }}
+            </p>
+            <div
+              v-if="editForm.allow_batch_image_generation"
+              class="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2"
+            >
+              <div>
+                <label class="input-label">{{
+                  t("admin.groups.imagePricing.batchDiscountMultiplier")
+                }}</label>
+                <input
+                  v-model.number="editForm.batch_image_discount_multiplier"
+                  type="number"
+                  step="0.0001"
+                  min="0"
+                  class="input"
+                  placeholder="0.5"
+                />
+              </div>
+              <div>
+                <label class="input-label">{{
+                  t("admin.groups.imagePricing.batchHoldMultiplier")
+                }}</label>
+                <input
+                  v-model.number="editForm.batch_image_hold_multiplier"
+                  type="number"
+                  step="0.0001"
+                  min="0"
+                  class="input"
+                  placeholder="0.6"
+                />
+              </div>
+            </div>
+          </div>
+          <p
+            v-else-if="editForm.platform !== 'gemini'"
+            class="mt-4 border-t border-dashed border-gray-200 pt-4 text-xs text-gray-500 dark:border-dark-700 dark:text-gray-400"
+          >
+            {{ t("admin.groups.imagePricing.batchGeminiOnlyHint") }}
+          </p>
         </div>
 
         <!-- Grok 视频生成按秒计费 -->
@@ -3642,8 +3818,11 @@ const createForm = reactive({
   monthly_limit_usd: null as number | null,
   // 图片/视频生成计费配置
   allow_image_generation: false,
+  allow_batch_image_generation: false,
   image_rate_independent: false,
   image_rate_multiplier: 1,
+  batch_image_discount_multiplier: 0.5,
+  batch_image_hold_multiplier: 0.6,
   image_price_1k: null as number | null,
   image_price_2k: null as number | null,
   image_price_4k: null as number | null,
@@ -3654,6 +3833,11 @@ const createForm = reactive({
   video_price_1080p: null as number | null,
   // Codex 网页搜索按次计费（仅 openai 平台使用）；null = 默认 $0.01/次
   web_search_price_per_call: null as number | null,
+  // 高峰时段倍率配置（仅订阅分组）
+  peak_rate_enabled: false,
+  peak_start: "",
+  peak_end: "",
+  peak_rate_multiplier: 1.0,
   // Claude Code 客户端限制（仅 anthropic 平台使用）
   claude_code_only: false,
   fallback_group_id: null as number | null,
@@ -3935,8 +4119,11 @@ const editForm = reactive({
   monthly_limit_usd: null as number | null,
   // 图片/视频生成计费配置
   allow_image_generation: false,
+  allow_batch_image_generation: false,
   image_rate_independent: false,
   image_rate_multiplier: 1,
+  batch_image_discount_multiplier: 0.5,
+  batch_image_hold_multiplier: 0.6,
   image_price_1k: null as number | null,
   image_price_2k: null as number | null,
   image_price_4k: null as number | null,
@@ -3947,6 +4134,11 @@ const editForm = reactive({
   video_price_1080p: null as number | null,
   // Codex 网页搜索按次计费（仅 openai 平台使用）；null = 默认 $0.01/次
   web_search_price_per_call: null as number | null,
+  // 高峰时段倍率配置（仅订阅分组）
+  peak_rate_enabled: false,
+  peak_start: "",
+  peak_end: "",
+  peak_rate_multiplier: 1.0,
   // Claude Code 客户端限制（仅 anthropic 平台使用）
   claude_code_only: false,
   fallback_group_id: null as number | null,
@@ -4005,6 +4197,26 @@ const createWebSearchFinalPricePreview = computed(() =>
 const editWebSearchFinalPricePreview = computed(() =>
   buildWebSearchFinalPricePreview(editForm),
 );
+
+type BatchImagePricingFormState = {
+  platform: GroupPlatform;
+  allow_image_generation: boolean;
+  allow_batch_image_generation: boolean;
+  batch_image_discount_multiplier: number;
+  batch_image_hold_multiplier: number;
+};
+
+const resetDisabledBatchImagePricing = (
+  form: BatchImagePricingFormState,
+) => {
+  if (form.platform !== "gemini" || !form.allow_image_generation) {
+    form.allow_batch_image_generation = false;
+  }
+  if (!form.allow_batch_image_generation) {
+    form.batch_image_discount_multiplier = 0.5;
+    form.batch_image_hold_multiplier = 0.6;
+  }
+};
 
 // 根据分组类型返回不同的删除确认消息
 const deleteConfirmMessage = computed(() => {
@@ -4176,8 +4388,11 @@ const closeCreateModal = () => {
   createForm.weekly_limit_usd = null;
   createForm.monthly_limit_usd = null;
   createForm.allow_image_generation = false;
+  createForm.allow_batch_image_generation = false;
   createForm.image_rate_independent = false;
   createForm.image_rate_multiplier = 1;
+  createForm.batch_image_discount_multiplier = 0.5;
+  createForm.batch_image_hold_multiplier = 0.6;
   createForm.image_price_1k = null;
   createForm.image_price_2k = null;
   createForm.image_price_4k = null;
@@ -4187,6 +4402,10 @@ const closeCreateModal = () => {
   createForm.video_price_720p = null;
   createForm.video_price_1080p = null;
   createForm.web_search_price_per_call = null;
+  createForm.peak_rate_enabled = false;
+  createForm.peak_start = "";
+  createForm.peak_end = "";
+  createForm.peak_rate_multiplier = 1.0;
   createForm.claude_code_only = false;
   createForm.fallback_group_id = null;
   createForm.fallback_group_id_on_invalid_request = null;
@@ -4269,6 +4488,13 @@ const handleCreateGroup = async () => {
     requestData.image_rate_multiplier = normalizeNonNegativeMultiplier(
       requestData.image_rate_multiplier,
     );
+    resetDisabledBatchImagePricing(requestData);
+    requestData.batch_image_discount_multiplier = normalizeNonNegativeMultiplier(
+      requestData.batch_image_discount_multiplier,
+    );
+    requestData.batch_image_hold_multiplier = normalizeNonNegativeMultiplier(
+      requestData.batch_image_hold_multiplier,
+    );
     requestData.video_rate_multiplier = normalizeNonNegativeMultiplier(
       requestData.video_rate_multiplier,
     );
@@ -4280,6 +4506,12 @@ const handleCreateGroup = async () => {
     requestData.video_price_1080p = emptyToNull(requestData.video_price_1080p);
     requestData.web_search_price_per_call = emptyToNull(
       requestData.web_search_price_per_call,
+    );
+    requestData.peak_rate_enabled = createForm.peak_rate_enabled;
+    requestData.peak_start = createForm.peak_start;
+    requestData.peak_end = createForm.peak_end;
+    requestData.peak_rate_multiplier = normalizeNonNegativeMultiplier(
+      createForm.peak_rate_multiplier,
     );
     await adminAPI.groups.create(requestData);
     appStore.showSuccess(t("admin.groups.groupCreated"));
@@ -4317,8 +4549,14 @@ const handleEdit = async (group: AdminGroup) => {
   editForm.weekly_limit_usd = group.weekly_limit_usd;
   editForm.monthly_limit_usd = group.monthly_limit_usd;
   editForm.allow_image_generation = group.allow_image_generation ?? false;
+  editForm.allow_batch_image_generation =
+    group.allow_batch_image_generation ?? false;
   editForm.image_rate_independent = group.image_rate_independent ?? false;
   editForm.image_rate_multiplier = group.image_rate_multiplier ?? 1;
+  editForm.batch_image_discount_multiplier =
+    group.batch_image_discount_multiplier ?? 0.5;
+  editForm.batch_image_hold_multiplier =
+    group.batch_image_hold_multiplier ?? 0.6;
   editForm.image_price_1k = group.image_price_1k;
   editForm.image_price_2k = group.image_price_2k;
   editForm.image_price_4k = group.image_price_4k;
@@ -4329,6 +4567,10 @@ const handleEdit = async (group: AdminGroup) => {
   editForm.video_price_1080p = group.video_price_1080p;
   editForm.web_search_price_per_call =
     group.web_search_price_per_call ?? null;
+  editForm.peak_rate_enabled = group.peak_rate_enabled ?? false;
+  editForm.peak_start = group.peak_start ?? "";
+  editForm.peak_end = group.peak_end ?? "";
+  editForm.peak_rate_multiplier = group.peak_rate_multiplier ?? 1.0;
   editForm.claude_code_only = group.claude_code_only || false;
   editForm.fallback_group_id = group.fallback_group_id;
   editForm.fallback_group_id_on_invalid_request =
@@ -4373,6 +4615,13 @@ const closeEditModal = () => {
   editingGroup.value = null;
   editModelRoutingRules.value = [];
   editForm.copy_accounts_from_group_ids = [];
+  editForm.allow_batch_image_generation = false;
+  editForm.batch_image_discount_multiplier = 0.5;
+  editForm.batch_image_hold_multiplier = 0.6;
+  editForm.peak_rate_enabled = false;
+  editForm.peak_start = "";
+  editForm.peak_end = "";
+  editForm.peak_rate_multiplier = 1.0;
   editForm.video_rate_independent = false;
   editForm.video_rate_multiplier = 1;
   editForm.video_price_480p = null;
@@ -4433,6 +4682,13 @@ const handleUpdateGroup = async () => {
     payload.image_rate_multiplier = normalizeNonNegativeMultiplier(
       payload.image_rate_multiplier,
     );
+    resetDisabledBatchImagePricing(payload);
+    payload.batch_image_discount_multiplier = normalizeNonNegativeMultiplier(
+      payload.batch_image_discount_multiplier,
+    );
+    payload.batch_image_hold_multiplier = normalizeNonNegativeMultiplier(
+      payload.batch_image_hold_multiplier,
+    );
     payload.video_rate_multiplier = normalizeNonNegativeMultiplier(
       payload.video_rate_multiplier,
     );
@@ -4446,6 +4702,12 @@ const handleUpdateGroup = async () => {
     payload.video_price_1080p = emptyPriceToClear(payload.video_price_1080p);
     payload.web_search_price_per_call = emptyPriceToClear(
       payload.web_search_price_per_call,
+    );
+    payload.peak_rate_enabled = editForm.peak_rate_enabled;
+    payload.peak_start = editForm.peak_start;
+    payload.peak_end = editForm.peak_end;
+    payload.peak_rate_multiplier = normalizeNonNegativeMultiplier(
+      editForm.peak_rate_multiplier,
     );
     await adminAPI.groups.update(editingGroup.value.id, payload);
     appStore.showSuccess(t("admin.groups.groupUpdated"));
@@ -4548,6 +4810,23 @@ watch(
     if (newVal === "subscription") {
       createForm.is_exclusive = true;
       createForm.fallback_group_id_on_invalid_request = null;
+    } else {
+      createForm.peak_rate_enabled = false;
+      createForm.peak_start = "";
+      createForm.peak_end = "";
+      createForm.peak_rate_multiplier = 1.0;
+    }
+  },
+);
+
+watch(
+  () => editForm.subscription_type,
+  (newVal) => {
+    if (newVal !== "subscription") {
+      editForm.peak_rate_enabled = false;
+      editForm.peak_start = "";
+      editForm.peak_end = "";
+      editForm.peak_rate_multiplier = 1.0;
     }
   },
 );
@@ -4569,10 +4848,25 @@ watch(
       createForm.require_oauth_only = false;
       createForm.require_privacy_set = false;
     }
+    resetDisabledBatchImagePricing(createForm);
     if (showCreateModal.value) {
       resetModelsListState(createModelsListState);
       loadModelsListCandidates("create", 0, newVal);
     }
+  },
+);
+
+watch(
+  () => createForm.allow_image_generation,
+  () => {
+    resetDisabledBatchImagePricing(createForm);
+  },
+);
+
+watch(
+  () => createForm.allow_batch_image_generation,
+  () => {
+    resetDisabledBatchImagePricing(createForm);
   },
 );
 
@@ -4590,6 +4884,7 @@ watch(
       editForm.require_oauth_only = false;
       editForm.require_privacy_set = false;
     }
+    resetDisabledBatchImagePricing(editForm);
     if (editingGroup.value) {
       resetModelsListState(
         editModelsListState,
@@ -4597,6 +4892,20 @@ watch(
       );
       loadModelsListCandidates("edit", editingGroup.value.id, newVal);
     }
+  },
+);
+
+watch(
+  () => editForm.allow_image_generation,
+  () => {
+    resetDisabledBatchImagePricing(editForm);
+  },
+);
+
+watch(
+  () => editForm.allow_batch_image_generation,
+  () => {
+    resetDisabledBatchImagePricing(editForm);
   },
 );
 

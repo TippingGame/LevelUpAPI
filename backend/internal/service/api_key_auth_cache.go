@@ -77,6 +77,7 @@ type APIKeyAuthGroupSnapshot struct {
 	OwnerUserID                     *int64   `json:"owner_user_id,omitempty"`
 	Scope                           string   `json:"scope,omitempty"`
 	SubscriptionType                string   `json:"subscription_type"`
+	RequiredAccountLevel            string   `json:"required_account_level,omitempty"`
 	RateMultiplier                  float64  `json:"rate_multiplier"`
 	PeakRateEnabled                 bool     `json:"peak_rate_enabled"`
 	PeakStart                       string   `json:"peak_start,omitempty"`
@@ -86,8 +87,11 @@ type APIKeyAuthGroupSnapshot struct {
 	WeeklyLimitUSD                  *float64 `json:"weekly_limit_usd,omitempty"`
 	MonthlyLimitUSD                 *float64 `json:"monthly_limit_usd,omitempty"`
 	AllowImageGeneration            bool     `json:"allow_image_generation"`
+	AllowBatchImageGeneration       bool     `json:"allow_batch_image_generation"`
 	ImageRateIndependent            bool     `json:"image_rate_independent"`
 	ImageRateMultiplier             float64  `json:"image_rate_multiplier"`
+	BatchImageDiscountMultiplier    float64  `json:"batch_image_discount_multiplier"`
+	BatchImageHoldMultiplier        float64  `json:"batch_image_hold_multiplier"`
 	ImagePrice1K                    *float64 `json:"image_price_1k,omitempty"`
 	ImagePrice2K                    *float64 `json:"image_price_2k,omitempty"`
 	ImagePrice4K                    *float64 `json:"image_price_4k,omitempty"`
@@ -112,8 +116,11 @@ type APIKeyAuthGroupSnapshot struct {
 
 	// OpenAI Messages 调度配置（仅 openai 平台使用）
 	AllowMessagesDispatch       bool                              `json:"allow_messages_dispatch"`
+	RequireOAuthOnly            bool                              `json:"require_oauth_only"`
+	RequirePrivacySet           bool                              `json:"require_privacy_set"`
 	DefaultMappedModel          string                            `json:"default_mapped_model,omitempty"`
 	MessagesDispatchModelConfig OpenAIMessagesDispatchModelConfig `json:"messages_dispatch_model_config,omitempty"`
+	ModelsListConfig            GroupModelsListConfig             `json:"models_list_config,omitempty"`
 
 	// RPMLimit 分组级每分钟请求数上限（0 = 不限制）；用于 billing_cache_service.checkRPM 级联判断。
 	RPMLimit int `json:"rpm_limit"`
