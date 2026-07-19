@@ -7,6 +7,7 @@ import (
 	"context"
 	"embed"
 	"encoding/json"
+	htmlpkg "html"
 	"io"
 	"io/fs"
 	"net/http"
