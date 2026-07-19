@@ -1,6 +1,8 @@
 import promptAuditLocale from './en/admin/promptAudit'
+import modularLocale from './en/index'
+import { mergeLocaleMessages } from './mergeLocaleMessages'
 
-export default {
+const legacyLocale = {
   // Home Page
   home: {
     viewOnGithub: 'View on GitHub',
@@ -8385,3 +8387,5 @@ export default {
   },
 
 }
+
+export default mergeLocaleMessages(legacyLocale, modularLocale)

@@ -1,6 +1,8 @@
 import promptAuditLocale from './zh/admin/promptAudit'
+import modularLocale from './zh/index'
+import { mergeLocaleMessages } from './mergeLocaleMessages'
 
-export default {
+const legacyLocale = {
   // Home Page
   home: {
     viewOnGithub: '在 GitHub 上查看',
@@ -8560,3 +8562,5 @@ export default {
   },
 
 }
+
+export default mergeLocaleMessages(legacyLocale, modularLocale)

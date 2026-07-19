@@ -3,9 +3,16 @@ import { RouterView, useRouter, useRoute } from 'vue-router'
 import { onMounted, onBeforeUnmount, watch } from 'vue'
 import Toast from '@/components/common/Toast.vue'
 import NavigationProgress from '@/components/common/NavigationProgress.vue'
+import AdminComplianceDialog from '@/components/admin/AdminComplianceDialog.vue'
 import { resolveDocumentTitle } from '@/router/title'
 import AnnouncementPopup from '@/components/common/AnnouncementPopup.vue'
-import { useAppStore, useAuthStore, useSubscriptionStore, useAnnouncementStore } from '@/stores'
+import {
+  useAdminComplianceStore,
+  useAnnouncementStore,
+  useAppStore,
+  useAuthStore,
+  useSubscriptionStore
+} from '@/stores'
 import { getSetupStatus } from '@/api/setup'
 import { updateFavicon } from '@/utils/branding'
 
@@ -15,6 +22,7 @@ const appStore = useAppStore()
 const authStore = useAuthStore()
 const subscriptionStore = useSubscriptionStore()
 const announcementStore = useAnnouncementStore()
+const adminComplianceStore = useAdminComplianceStore()
 
 // Watch for site settings changes and update favicon/title
 watch(
@@ -34,10 +42,21 @@ function onVisibilityChange() {
   }
 }
 
+function onAdminComplianceRequired(event: Event) {
+  const detail = (event as CustomEvent<Record<string, string>>).detail || {}
+  adminComplianceStore.requireAcknowledgement(detail)
+}
+
 watch(
   () => authStore.isAuthenticated,
   (isAuthenticated, oldValue) => {
     if (isAuthenticated) {
+      if (authStore.isAdmin) {
+        adminComplianceStore.fetchStatus().catch((error) => {
+          console.error('Failed to fetch admin compliance status:', error)
+        })
+      }
+
       // User logged in: preload subscriptions and start polling
       subscriptionStore.fetchActiveSubscriptions().catch((error) => {
         console.error('Failed to preload subscriptions:', error)
@@ -59,6 +78,7 @@ watch(
       // User logged out: clear data and stop polling
       subscriptionStore.clear()
       announcementStore.reset()
+      adminComplianceStore.reset()
       document.removeEventListener('visibilitychange', onVisibilityChange)
     }
   },
@@ -74,9 +94,12 @@ router.afterEach(() => {
 
 onBeforeUnmount(() => {
   document.removeEventListener('visibilitychange', onVisibilityChange)
+  window.removeEventListener('admin-compliance-required', onAdminComplianceRequired)
 })
 
 onMounted(async () => {
+  window.addEventListener('admin-compliance-required', onAdminComplianceRequired)
+
   // Check if setup is needed
   try {
     const status = await getSetupStatus()
@@ -101,4 +124,5 @@ onMounted(async () => {
   <RouterView />
   <Toast />
   <AnnouncementPopup />
+  <AdminComplianceDialog />
 </template>
