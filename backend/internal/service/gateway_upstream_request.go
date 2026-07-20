@@ -44,7 +44,7 @@ func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Contex
 		if err != nil {
 			return nil, nil, err
 		}
-		targetURL = s.buildCustomRelayURL(validatedURL, "/v1/messages", account)
+		targetURL = buildCustomRelayURL(validatedURL, "/v1/messages", account)
 	}
 
 	clientHeaders := http.Header{}
@@ -888,7 +888,7 @@ func truncateForLog(b []byte, maxBytes int) string {
 
 // buildCustomRelayURL 构建自定义中继转发 URL
 // 在 path 后附加 beta=true 和可选的 proxy 查询参数
-func (s *GatewayService) buildCustomRelayURL(baseURL, path string, account *Account) string {
+func buildCustomRelayURL(baseURL, path string, account *Account) string {
 	u := strings.TrimRight(baseURL, "/") + path + "?beta=true"
 	if account.ProxyID != nil && account.Proxy != nil {
 		proxyURL := account.Proxy.URL()
@@ -900,15 +900,22 @@ func (s *GatewayService) buildCustomRelayURL(baseURL, path string, account *Acco
 }
 
 func (s *GatewayService) validateUpstreamBaseURL(raw string) (string, error) {
-	if s.cfg != nil && !s.cfg.Security.URLAllowlist.Enabled {
+	if s == nil || s.cfg == nil {
+		return "", fmt.Errorf("invalid base_url: config is not available")
+	}
+	if !s.cfg.Security.URLAllowlist.Enabled {
 		normalized, err := urlvalidator.ValidateURLFormat(raw, s.cfg.Security.URLAllowlist.AllowInsecureHTTP)
 		if err != nil {
 			return "", fmt.Errorf("invalid base_url: %w", err)
 		}
 		return normalized, nil
 	}
-	normalized, err := urlvalidator.ValidateHTTPSURL(raw, urlvalidator.ValidationOptions{
-		AllowedHosts:     s.cfg.Security.URLAllowlist.UpstreamHosts,
+	allowedHosts, err := upstreamAllowlistHosts(context.Background(), s.cfg, s.settingService)
+	if err != nil {
+		return "", fmt.Errorf("invalid base_url: %w", err)
+	}
+	normalized, err := urlvalidator.ValidateHTTPURL(raw, s.cfg.Security.URLAllowlist.AllowInsecureHTTP, urlvalidator.ValidationOptions{
+		AllowedHosts:     allowedHosts,
 		RequireAllowlist: true,
 		AllowPrivate:     s.cfg.Security.URLAllowlist.AllowPrivateHosts,
 	})

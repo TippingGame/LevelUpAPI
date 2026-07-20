@@ -203,7 +203,7 @@ func (s *AccountTestService) validateUpstreamBaseURL(raw string) (string, error)
 	if err != nil {
 		return "", err
 	}
-	normalized, err := urlvalidator.ValidateHTTPSURL(raw, urlvalidator.ValidationOptions{
+	normalized, err := urlvalidator.ValidateHTTPURL(raw, s.cfg.Security.URLAllowlist.AllowInsecureHTTP, urlvalidator.ValidationOptions{
 		AllowedHosts:     allowedHosts,
 		RequireAllowlist: true,
 		AllowPrivate:     s.cfg.Security.URLAllowlist.AllowPrivateHosts,
@@ -362,6 +362,17 @@ func (s *AccountTestService) testClaudeAccountConnection(c *gin.Context, account
 		// OAuth or Setup Token - use Bearer token
 		useBearer = true
 		apiURL = testClaudeAPIURL
+		if account.IsCustomBaseURLEnabled() {
+			customURL := account.GetCustomBaseURL()
+			if customURL == "" {
+				return s.sendErrorAndEnd(c, "Custom base URL is enabled but not configured")
+			}
+			normalizedBaseURL, err := s.validateUpstreamBaseURL(customURL)
+			if err != nil {
+				return s.sendErrorAndEnd(c, fmt.Sprintf("Invalid custom base URL: %s", err.Error()))
+			}
+			apiURL = buildCustomRelayURL(normalizedBaseURL, "/v1/messages", account)
+		}
 		authToken = account.GetCredential("access_token")
 		if authToken == "" {
 			return s.sendErrorAndEnd(c, "No access token available")
@@ -431,7 +442,9 @@ func (s *AccountTestService) testClaudeAccountConnection(c *gin.Context, account
 	// Get proxy URL
 	proxyURL := ""
 	if account.ProxyID != nil && account.Proxy != nil {
-		proxyURL = account.Proxy.URL()
+		if !account.IsCustomBaseURLEnabled() || account.GetCustomBaseURL() == "" {
+			proxyURL = account.Proxy.URL()
+		}
 	}
 
 	resp, err := s.httpUpstream.DoWithTLS(req, proxyURL, account.ID, account.Concurrency, s.tlsFPProfileService.ResolveTLSProfile(account))

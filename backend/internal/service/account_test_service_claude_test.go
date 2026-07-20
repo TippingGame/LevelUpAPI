@@ -145,6 +145,49 @@ func TestAccountTestService_ClaudeOAuthConnectionUsesClaudeCodeMimicry(t *testin
 	require.Equal(t, claudeCodeSystemPrompt, system.Array()[1].Get("text").String())
 }
 
+func TestAccountTestService_ClaudeOAuthConnectionUsesConfiguredCustomRelay(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := newTestContext()
+	upstream := &httpUpstreamRecorder{resp: claudeTestSSEOKResponse()}
+	cfg := &config.Config{}
+	cfg.Security.URLAllowlist.Enabled = true
+	cfg.Security.URLAllowlist.UpstreamHosts = []string{"other.example.test"}
+	settings := NewSettingService(&settingValueRepoStub{values: map[string]string{
+		SettingKeyUpstreamURLAllowlistExtraHosts: `["relay.example.test"]`,
+	}}, cfg)
+	svc := &AccountTestService{
+		httpUpstream:   upstream,
+		cfg:            cfg,
+		settingService: settings,
+	}
+	proxyID := int64(7)
+	account := &Account{
+		ID:          44,
+		Platform:    PlatformAnthropic,
+		Type:        AccountTypeOAuth,
+		Concurrency: 1,
+		Credentials: map[string]any{"access_token": "oauth-token"},
+		Extra: map[string]any{
+			"custom_base_url_enabled": true,
+			"custom_base_url":         "https://relay.example.test",
+		},
+		ProxyID: &proxyID,
+		Proxy: &Proxy{
+			ID:       proxyID,
+			Protocol: "http",
+			Host:     "proxy.example.test",
+			Port:     8080,
+		},
+	}
+
+	require.NoError(t, svc.testClaudeAccountConnection(c, account, "claude-opus-4-8"))
+	require.NotNil(t, upstream.lastReq)
+	require.Equal(t, "https://relay.example.test/v1/messages", upstream.lastReq.URL.Scheme+"://"+upstream.lastReq.URL.Host+upstream.lastReq.URL.Path)
+	require.Equal(t, "true", upstream.lastReq.URL.Query().Get("beta"))
+	require.Equal(t, "http://proxy.example.test:8080", upstream.lastReq.URL.Query().Get("proxy"))
+	require.Empty(t, upstream.lastProxyURL, "custom relay must receive the proxy as a query parameter")
+}
+
 func claudeTestSSEOKResponse() *http.Response {
 	return &http.Response{
 		StatusCode: http.StatusOK,
