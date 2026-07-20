@@ -9,6 +9,7 @@ import (
 	"net"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
@@ -76,6 +77,12 @@ type SettingService struct {
 
 	openAIQuotaAutoPauseSettingsCache atomic.Value
 	openAIQuotaAutoPauseSettingsSF    singleflight.Group
+
+	securitySwitchesCache atomic.Value
+	securitySwitchesMu    sync.Mutex
+
+	adminComplianceCache sync.Map
+	adminComplianceSF    singleflight.Group
 }
 
 type DefaultPlatformQuotaSetting struct {

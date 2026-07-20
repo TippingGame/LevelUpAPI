@@ -23,7 +23,14 @@ const (
 	AdminComplianceAckPhraseEN    = "I have read, understood, and agree to the Sub2API Deployment and Operation Compliance Commitment"
 
 	settingKeyAdminComplianceAcknowledgement = "admin_compliance_acknowledgement"
+	adminComplianceCacheTTL                  = 5 * time.Minute
+	adminComplianceDBTimeout                 = 2 * time.Second
 )
+
+type cachedAdminComplianceAcknowledgement struct {
+	ack       AdminComplianceAcknowledgement
+	expiresAt int64
+}
 
 var (
 	ErrAdminComplianceAcknowledgementRequired = infraerrors.New(
@@ -90,7 +97,56 @@ func adminComplianceAcknowledgementKey(adminUserID int64) string {
 }
 
 func (s *SettingService) GetAdminComplianceStatus(ctx context.Context, adminUserID int64) (*AdminComplianceStatus, error) {
-	status := &AdminComplianceStatus{
+	status := newAdminComplianceStatus()
+	if s == nil || s.settingRepo == nil {
+		return status, nil
+	}
+	if ack := s.loadAdminComplianceAcknowledgement(adminUserID); ack != nil {
+		status.Required = false
+		status.Acknowledgement = ack
+		return status, nil
+	}
+
+	cacheKey := strconv.FormatInt(adminUserID, 10)
+	baseCtx := ctx
+	if baseCtx == nil {
+		baseCtx = context.Background()
+	}
+	result, err, _ := s.adminComplianceSF.Do(cacheKey, func() (any, error) {
+		if ack := s.loadAdminComplianceAcknowledgement(adminUserID); ack != nil {
+			return ack, nil
+		}
+		dbCtx, cancel := context.WithTimeout(context.WithoutCancel(baseCtx), adminComplianceDBTimeout)
+		defer cancel()
+		raw, err := s.settingRepo.GetValue(dbCtx, adminComplianceAcknowledgementKey(adminUserID))
+		if err != nil {
+			if errors.Is(err, ErrSettingNotFound) {
+				return (*AdminComplianceAcknowledgement)(nil), nil
+			}
+			return nil, fmt.Errorf("get admin compliance acknowledgement: %w", err)
+		}
+
+		var ack AdminComplianceAcknowledgement
+		if err := json.Unmarshal([]byte(raw), &ack); err != nil || ack.Version != AdminComplianceVersion {
+			return (*AdminComplianceAcknowledgement)(nil), nil
+		}
+		s.storeAdminComplianceAcknowledgement(adminUserID, ack)
+		return &ack, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	ack, _ := result.(*AdminComplianceAcknowledgement)
+	if ack != nil {
+		copy := *ack
+		status.Required = false
+		status.Acknowledgement = &copy
+	}
+	return status, nil
+}
+
+func newAdminComplianceStatus() *AdminComplianceStatus {
+	return &AdminComplianceStatus{
 		Required:       true,
 		Version:        AdminComplianceVersion,
 		DocumentPathZH: AdminComplianceDocumentPathZH,
@@ -100,27 +156,33 @@ func (s *SettingService) GetAdminComplianceStatus(ctx context.Context, adminUser
 		AckPhraseZH:    AdminComplianceAckPhraseZH,
 		AckPhraseEN:    AdminComplianceAckPhraseEN,
 	}
-	if s == nil || s.settingRepo == nil {
-		return status, nil
-	}
+}
 
-	raw, err := s.settingRepo.GetValue(ctx, adminComplianceAcknowledgementKey(adminUserID))
-	if err != nil {
-		if errors.Is(err, ErrSettingNotFound) {
-			return status, nil
-		}
-		return nil, fmt.Errorf("get admin compliance acknowledgement: %w", err)
+func (s *SettingService) loadAdminComplianceAcknowledgement(adminUserID int64) *AdminComplianceAcknowledgement {
+	if s == nil {
+		return nil
 	}
+	value, ok := s.adminComplianceCache.Load(adminUserID)
+	if !ok {
+		return nil
+	}
+	cached, _ := value.(*cachedAdminComplianceAcknowledgement)
+	if cached == nil || cached.ack.Version != AdminComplianceVersion || time.Now().UnixNano() >= cached.expiresAt {
+		s.adminComplianceCache.Delete(adminUserID)
+		return nil
+	}
+	copy := cached.ack
+	return &copy
+}
 
-	var ack AdminComplianceAcknowledgement
-	if err := json.Unmarshal([]byte(raw), &ack); err != nil {
-		return status, nil
+func (s *SettingService) storeAdminComplianceAcknowledgement(adminUserID int64, ack AdminComplianceAcknowledgement) {
+	if s == nil || ack.Version != AdminComplianceVersion {
+		return
 	}
-	if ack.Version == AdminComplianceVersion {
-		status.Required = false
-		status.Acknowledgement = &ack
-	}
-	return status, nil
+	s.adminComplianceCache.Store(adminUserID, &cachedAdminComplianceAcknowledgement{
+		ack:       ack,
+		expiresAt: time.Now().Add(adminComplianceCacheTTL).UnixNano(),
+	})
 }
 
 func (s *SettingService) IsAdminComplianceAcknowledged(ctx context.Context, adminUserID int64) (bool, error) {
@@ -156,6 +218,8 @@ func (s *SettingService) AcceptAdminCompliance(ctx context.Context, input AdminC
 	if err := s.settingRepo.Set(ctx, adminComplianceAcknowledgementKey(input.AdminUserID), string(payload)); err != nil {
 		return nil, fmt.Errorf("save admin compliance acknowledgement: %w", err)
 	}
+	s.adminComplianceSF.Forget(strconv.FormatInt(input.AdminUserID, 10))
+	s.storeAdminComplianceAcknowledgement(input.AdminUserID, ack)
 
 	return s.GetAdminComplianceStatus(ctx, input.AdminUserID)
 }

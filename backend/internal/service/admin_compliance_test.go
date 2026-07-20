@@ -4,14 +4,18 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/stretchr/testify/require"
 )
 
 type adminComplianceRepoStub struct {
-	values map[string]string
+	values        map[string]string
+	mu            sync.Mutex
+	getValueCalls int
 }
 
 func (r *adminComplianceRepoStub) Get(ctx context.Context, key string) (*Setting, error) {
@@ -22,19 +26,30 @@ func (r *adminComplianceRepoStub) Get(ctx context.Context, key string) (*Setting
 }
 
 func (r *adminComplianceRepoStub) GetValue(ctx context.Context, key string) (string, error) {
-	setting, err := r.Get(ctx, key)
-	if err != nil {
-		return "", err
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.getValueCalls++
+	value, ok := r.values[key]
+	if !ok {
+		return "", ErrSettingNotFound
 	}
-	return setting.Value, nil
+	return value, nil
 }
 
 func (r *adminComplianceRepoStub) Set(ctx context.Context, key, value string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	if r.values == nil {
 		r.values = map[string]string{}
 	}
 	r.values[key] = value
 	return nil
+}
+
+func (r *adminComplianceRepoStub) getValueCallCount() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.getValueCalls
 }
 
 func (r *adminComplianceRepoStub) GetMultiple(ctx context.Context, keys []string) (map[string]string, error) {
@@ -98,6 +113,48 @@ func TestAcceptAdminCompliancePersistsCurrentVersion(t *testing.T) {
 	require.NoError(t, json.Unmarshal([]byte(repo.values[adminComplianceAcknowledgementKey(42)]), &stored))
 	require.Equal(t, AdminComplianceVersion, stored.Version)
 	require.Equal(t, AdminComplianceDocumentPathZH, stored.DocumentZH)
+	require.Zero(t, repo.getValueCallCount(), "accepted acknowledgement should populate the hot-path cache")
+}
+
+func TestAdminComplianceCachesCurrentAcknowledgement(t *testing.T) {
+	repo := &adminComplianceRepoStub{values: map[string]string{}}
+	payload, err := json.Marshal(AdminComplianceAcknowledgement{
+		Version:     AdminComplianceVersion,
+		AdminUserID: 42,
+		AcceptedAt:  time.Now().UTC(),
+	})
+	require.NoError(t, err)
+	repo.values[adminComplianceAcknowledgementKey(42)] = string(payload)
+	svc := NewSettingService(repo, &config.Config{})
+
+	for range 3 {
+		acknowledged, err := svc.IsAdminComplianceAcknowledged(context.Background(), 42)
+		require.NoError(t, err)
+		require.True(t, acknowledged)
+	}
+	require.Equal(t, 1, repo.getValueCallCount())
+}
+
+func TestAdminComplianceDoesNotCacheMissingAcknowledgement(t *testing.T) {
+	repo := &adminComplianceRepoStub{values: map[string]string{}}
+	svc := NewSettingService(repo, &config.Config{})
+
+	acknowledged, err := svc.IsAdminComplianceAcknowledged(context.Background(), 42)
+	require.NoError(t, err)
+	require.False(t, acknowledged)
+
+	payload, err := json.Marshal(AdminComplianceAcknowledgement{
+		Version:     AdminComplianceVersion,
+		AdminUserID: 42,
+		AcceptedAt:  time.Now().UTC(),
+	})
+	require.NoError(t, err)
+	repo.values[adminComplianceAcknowledgementKey(42)] = string(payload)
+
+	acknowledged, err = svc.IsAdminComplianceAcknowledged(context.Background(), 42)
+	require.NoError(t, err)
+	require.True(t, acknowledged)
+	require.Equal(t, 2, repo.getValueCallCount())
 }
 
 func TestAdminComplianceStatusRequiresAckOnOldVersion(t *testing.T) {

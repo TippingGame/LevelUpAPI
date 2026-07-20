@@ -557,6 +557,7 @@ func (s *SettingService) refreshCachedSettings(settings *SystemSettings) {
 		value:     settings.BackendModeEnabled,
 		expiresAt: time.Now().Add(backendModeCacheTTL).UnixNano(),
 	})
+	s.refreshSecuritySwitchesCache(settings.SessionBindingEnabled, settings.StepUpEnabled)
 	gatewayForwardingSF.Forget("gateway_forwarding")
 	gatewayForwardingCache.Store(&cachedGatewayForwardingSettings{
 		fingerprintUnification:           settings.EnableFingerprintUnification,
