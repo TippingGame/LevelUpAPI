@@ -833,7 +833,9 @@ func (s *AccountTestService) testGrokAccountConnection(c *gin.Context, account *
 			return s.sendErrorAndEnd(c, "Grok token provider is not configured")
 		}
 		var err error
-		token, err = s.grokTokenProvider.GetAccessToken(ctx, account)
+		// An administrator-initiated connection test must be able to probe an
+		// account even when production scheduling has temporarily cooled it down.
+		token, err = s.grokTokenProvider.GetAccessTokenForManualTest(ctx, account)
 		if err != nil {
 			return s.sendErrorAndEnd(c, "Failed to get Grok access token: "+err.Error())
 		}
