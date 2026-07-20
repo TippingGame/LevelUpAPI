@@ -13,6 +13,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
+	"golang.org/x/sync/singleflight"
 )
 
 var (
@@ -24,6 +25,7 @@ var (
 
 const (
 	outboxEventTimeout                    = 2 * time.Minute
+	schedulerFallbackFlightTimeout        = 30 * time.Second
 	schedulerOutboxCleanupBatch           = 5000
 	schedulerGroupLifecycleTimeout        = 30 * time.Second
 	schedulerGroupLifecycleLeaseTTL       = 60 * time.Second
@@ -128,6 +130,7 @@ type SchedulerSnapshotService struct {
 	stopOnce                     sync.Once
 	wg                           sync.WaitGroup
 	fallbackLimit                *fallbackLimiter
+	dbFallbackFlight             singleflight.Group
 	lagMu                        sync.Mutex
 	lagFailures                  int
 	outboxRebuildLatched         bool
@@ -137,6 +140,8 @@ type SchedulerSnapshotService struct {
 	outboxRebuildRetryReason     string
 	outboxLagWarningActive       bool
 	outboxMaxIDErrorLastLoggedAt time.Time
+	emptyFallbackMu              sync.Mutex
+	emptyFallbackUntil           map[string]time.Time
 
 	fullRebuildRunMu     sync.Mutex
 	fullRebuildStateMu   sync.Mutex
@@ -144,6 +149,8 @@ type SchedulerSnapshotService struct {
 	fullRebuildCompleted uint64
 	fullRebuildLastErr   error
 }
+
+const schedulerEmptyFallbackTTL = time.Second
 
 func NewSchedulerSnapshotService(
 	cache SchedulerCache,
@@ -157,13 +164,14 @@ func NewSchedulerSnapshotService(
 		maxQPS = cfg.Gateway.Scheduling.DbFallbackMaxQPS
 	}
 	return &SchedulerSnapshotService{
-		cache:         cache,
-		outboxRepo:    outboxRepo,
-		accountRepo:   accountRepo,
-		groupRepo:     groupRepo,
-		cfg:           cfg,
-		stopCh:        make(chan struct{}),
-		fallbackLimit: newFallbackLimiter(maxQPS),
+		cache:              cache,
+		outboxRepo:         outboxRepo,
+		accountRepo:        accountRepo,
+		groupRepo:          groupRepo,
+		cfg:                cfg,
+		stopCh:             make(chan struct{}),
+		fallbackLimit:      newFallbackLimiter(maxQPS),
+		emptyFallbackUntil: make(map[string]time.Time),
 	}
 }
 
@@ -217,9 +225,6 @@ func (s *SchedulerSnapshotService) ListSchedulableAccounts(ctx context.Context, 
 			staleFiltered = append([]Account(nil), accounts...)
 		}
 	}
-	var writeToken SchedulerBucketWriteToken
-	canPublish := false
-
 	if s.cache != nil {
 		if candidateCache, ok := s.cache.(SchedulerCandidateCache); ok && !IsSchedulerCandidateIndexBypassed(ctx) {
 			cached, hit, err := candidateCache.GetCandidateSnapshot(ctx, bucket, s.candidateIndexLimit())
@@ -228,6 +233,7 @@ func (s *SchedulerSnapshotService) ListSchedulableAccounts(ctx context.Context, 
 			} else if hit {
 				filtered, stale := s.filterCachedSchedulableAccounts(ctx, bucket, cached, "candidate")
 				if !stale {
+					s.clearEmptyFallback(bucket)
 					return filtered, useMixed, nil
 				}
 				rememberStaleFiltered(filtered)
@@ -239,35 +245,20 @@ func (s *SchedulerSnapshotService) ListSchedulableAccounts(ctx context.Context, 
 		} else if hit {
 			filtered, stale := s.filterCachedSchedulableAccounts(ctx, bucket, cached, "snapshot")
 			if !stale {
+				s.clearEmptyFallback(bucket)
 				return filtered, useMixed, nil
 			}
 			rememberStaleFiltered(filtered)
 		}
-		token, err := s.captureBucketWriteToken(ctx, bucket)
-		if err != nil {
-			if errors.Is(err, ErrSchedulerBucketRetired) || errors.Is(err, ErrSchedulerBucketWriteFenced) {
-				slog.Debug("[Scheduler] cache publish fenced", "bucket", bucket.String())
-			} else {
-				logger.LegacyPrintf("service.scheduler_snapshot", "[Scheduler] cache publish token failed: bucket=%s err=%v", bucket.String(), err)
-			}
-		} else {
-			writeToken = token
-			canPublish = true
-		}
 	}
-
-	if err := s.guardFallback(ctx); err != nil {
+	if s.emptyFallbackHit(bucket) {
 		if len(staleFiltered) > 0 {
-			logger.LegacyPrintf("service.scheduler_snapshot", "[Scheduler] using partial cached accounts after fallback guard failed: bucket=%s err=%v", bucket.String(), err)
 			return staleFiltered, useMixed, nil
 		}
-		return nil, useMixed, err
+		return []Account{}, useMixed, nil
 	}
 
-	fallbackCtx, cancel := s.withFallbackTimeout(ctx)
-	defer cancel()
-
-	accounts, err := s.loadAccountsFromDB(fallbackCtx, bucket, useMixed)
+	accounts, err := s.loadAccountsWithFallback(ctx, bucket, useMixed)
 	if err != nil {
 		if len(staleFiltered) > 0 {
 			logger.LegacyPrintf("service.scheduler_snapshot", "[Scheduler] using partial cached accounts after fallback load failed: bucket=%s err=%v", bucket.String(), err)
@@ -276,17 +267,142 @@ func (s *SchedulerSnapshotService) ListSchedulableAccounts(ctx context.Context, 
 		return nil, useMixed, err
 	}
 
-	if s.cache != nil && canPublish {
-		if err := s.cache.SetSnapshot(fallbackCtx, bucket, writeToken, accounts); err != nil {
-			if errors.Is(err, ErrSchedulerBucketRetired) || errors.Is(err, ErrSchedulerBucketWriteFenced) {
-				slog.Debug("[Scheduler] cache publish fenced", "bucket", bucket.String())
+	return filterSchedulableAccounts(accounts), useMixed, nil
+}
+
+// loadAccountsWithFallback coalesces concurrent cache misses for the same
+// scheduler bucket. A Redis restart, a rebuilding snapshot, or a transient
+// metadata miss can otherwise make every request execute the relatively
+// expensive account-group query at the same time.
+func (s *SchedulerSnapshotService) loadAccountsWithFallback(ctx context.Context, bucket SchedulerBucket, useMixed bool) ([]Account, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	resultCh := s.dbFallbackFlight.DoChan(bucket.String(), func() (any, error) {
+		if err := s.guardFallback(ctx); err != nil {
+			return nil, err
+		}
+
+		// Keep the shared DB load independent of the first request's client
+		// cancellation. A disconnected caller must not abort the cache fill for
+		// all other waiters; each waiter still observes its own ctx below.
+		fallbackCtx, cancel := s.withSharedFallbackTimeout()
+		defer cancel()
+
+		var (
+			writeToken SchedulerBucketWriteToken
+			canPublish bool
+		)
+		if s.cache != nil {
+			token, err := s.captureBucketWriteToken(fallbackCtx, bucket)
+			if err != nil {
+				if errors.Is(err, ErrSchedulerBucketRetired) || errors.Is(err, ErrSchedulerBucketWriteFenced) {
+					slog.Debug("[Scheduler] cache publish fenced", "bucket", bucket.String())
+				} else {
+					logger.LegacyPrintf("service.scheduler_snapshot", "[Scheduler] cache publish token failed: bucket=%s err=%v", bucket.String(), err)
+				}
 			} else {
-				logger.LegacyPrintf("service.scheduler_snapshot", "[Scheduler] cache write failed: bucket=%s err=%v", bucket.String(), err)
+				writeToken = token
+				canPublish = true
 			}
 		}
-	}
 
-	return filterSchedulableAccounts(accounts), useMixed, nil
+		accounts, err := s.loadAccountsFromDB(fallbackCtx, bucket, useMixed)
+		if err != nil {
+			return nil, err
+		}
+		s.rememberEmptyFallback(bucket, len(accounts) == 0)
+
+		if s.cache != nil && canPublish {
+			if err := s.cache.SetSnapshot(fallbackCtx, bucket, writeToken, accounts); err != nil {
+				if errors.Is(err, ErrSchedulerBucketRetired) || errors.Is(err, ErrSchedulerBucketWriteFenced) {
+					slog.Debug("[Scheduler] cache publish fenced", "bucket", bucket.String())
+				} else {
+					logger.LegacyPrintf("service.scheduler_snapshot", "[Scheduler] cache write failed: bucket=%s err=%v", bucket.String(), err)
+				}
+			}
+		}
+
+		// The singleflight result is shared by all waiters. Return an owned
+		// slice so a caller cannot mutate another request's result.
+		return append([]Account(nil), accounts...), nil
+	})
+
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case result := <-resultCh:
+		if result.Err != nil {
+			return nil, result.Err
+		}
+		accounts, ok := result.Val.([]Account)
+		if !ok {
+			return nil, fmt.Errorf("scheduler fallback returned unexpected result type %T", result.Val)
+		}
+		return append([]Account(nil), accounts...), nil
+	}
+}
+
+func (s *SchedulerSnapshotService) withSharedFallbackTimeout() (context.Context, context.CancelFunc) {
+	timeout := schedulerFallbackFlightTimeout
+	if s != nil && s.cfg != nil && s.cfg.Gateway.Scheduling.DbFallbackTimeoutSeconds > 0 {
+		timeout = time.Duration(s.cfg.Gateway.Scheduling.DbFallbackTimeoutSeconds) * time.Second
+	}
+	return context.WithTimeout(context.Background(), timeout)
+}
+
+// emptyFallbackHit bounds repeated database probes for a bucket whose valid
+// scheduler snapshot contains no accounts. Empty snapshots intentionally
+// remain cache misses in Redis to protect the create-group/bind-account race;
+// this short local window prevents a busy empty pool from issuing one query
+// per request while the outbox worker catches up.
+func (s *SchedulerSnapshotService) emptyFallbackHit(bucket SchedulerBucket) bool {
+	if s == nil {
+		return false
+	}
+	now := time.Now()
+	s.emptyFallbackMu.Lock()
+	defer s.emptyFallbackMu.Unlock()
+	if len(s.emptyFallbackUntil) == 0 {
+		return false
+	}
+	key := bucket.String()
+	until, ok := s.emptyFallbackUntil[key]
+	if !ok {
+		return false
+	}
+	if !now.Before(until) {
+		delete(s.emptyFallbackUntil, key)
+		return false
+	}
+	return true
+}
+
+func (s *SchedulerSnapshotService) rememberEmptyFallback(bucket SchedulerBucket, empty bool) {
+	if s == nil {
+		return
+	}
+	s.emptyFallbackMu.Lock()
+	defer s.emptyFallbackMu.Unlock()
+	if s.emptyFallbackUntil == nil {
+		s.emptyFallbackUntil = make(map[string]time.Time)
+	}
+	now := time.Now()
+	for key, until := range s.emptyFallbackUntil {
+		if !now.Before(until) {
+			delete(s.emptyFallbackUntil, key)
+		}
+	}
+	key := bucket.String()
+	if empty {
+		s.emptyFallbackUntil[key] = now.Add(schedulerEmptyFallbackTTL)
+		return
+	}
+	delete(s.emptyFallbackUntil, key)
+}
+
+func (s *SchedulerSnapshotService) clearEmptyFallback(bucket SchedulerBucket) {
+	s.rememberEmptyFallback(bucket, false)
 }
 
 func (s *SchedulerSnapshotService) GetAccount(ctx context.Context, accountID int64) (*Account, error) {

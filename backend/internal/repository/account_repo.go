@@ -16,6 +16,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -4756,29 +4757,80 @@ func (r *accountRepository) queryAccountsByGroup(ctx context.Context, groupID in
 		q = q.Where(dbaccountgroup.HasAccountWith(preds...))
 	}
 
+	// Avoid the generated eager-load/order shape here. Ent implements
+	// HasAccountWith as an EXISTS predicate, while ByAccountField adds a second
+	// LEFT JOIN against accounts; eager loading then fetches the same accounts
+	// again. Load the ordered relation rows first, then fetch the selected
+	// accounts by primary key in one batch.
 	groups, err := q.
 		Order(
 			dbaccountgroup.ByPriority(),
-			dbaccountgroup.ByAccountField(dbaccount.FieldPriority),
+			dbaccountgroup.ByAccountID(),
 		).
-		WithAccount().
 		All(ctx)
 	if err != nil {
 		return nil, err
 	}
 
 	orderedIDs := make([]int64, 0, len(groups))
-	accountMap := make(map[int64]*dbent.Account, len(groups))
+	seenIDs := make(map[int64]struct{}, len(groups))
+	groupPriorityByID := make(map[int64]int, len(groups))
 	for _, ag := range groups {
-		if ag.Edges.Account == nil {
+		if ag == nil || ag.AccountID <= 0 {
 			continue
 		}
-		if _, exists := accountMap[ag.AccountID]; exists {
+		if _, exists := seenIDs[ag.AccountID]; exists {
 			continue
 		}
-		accountMap[ag.AccountID] = ag.Edges.Account
+		seenIDs[ag.AccountID] = struct{}{}
+		groupPriorityByID[ag.AccountID] = ag.Priority
 		orderedIDs = append(orderedIDs, ag.AccountID)
 	}
+	if len(orderedIDs) == 0 {
+		return []service.Account{}, nil
+	}
+
+	accountMap := make(map[int64]*dbent.Account, len(orderedIDs))
+	for start := 0; start < len(orderedIDs); start += postgresParameterBatchSize {
+		end := start + postgresParameterBatchSize
+		if end > len(orderedIDs) {
+			end = len(orderedIDs)
+		}
+		loaded, err := r.client.Account.Query().
+			Where(
+				dbaccount.IDIn(orderedIDs[start:end]...),
+				dbaccount.DeletedAtIsNil(),
+			).
+			All(ctx)
+		if err != nil {
+			return nil, err
+		}
+		for _, account := range loaded {
+			if account == nil {
+				continue
+			}
+			accountMap[account.ID] = account
+		}
+	}
+	// The relation query can be ordered by group priority without joining the
+	// accounts table. Apply the account-priority tie-breaker after the primary
+	// key fetch so the hot query does not need a second accounts join.
+	sort.SliceStable(orderedIDs, func(i, j int) bool {
+		leftGroupPriority := groupPriorityByID[orderedIDs[i]]
+		rightGroupPriority := groupPriorityByID[orderedIDs[j]]
+		if leftGroupPriority != rightGroupPriority {
+			return leftGroupPriority < rightGroupPriority
+		}
+		left, leftOK := accountMap[orderedIDs[i]]
+		right, rightOK := accountMap[orderedIDs[j]]
+		if !leftOK || !rightOK {
+			return leftOK && !rightOK
+		}
+		if left.Priority != right.Priority {
+			return left.Priority < right.Priority
+		}
+		return left.ID < right.ID
+	})
 
 	accounts := make([]*dbent.Account, 0, len(orderedIDs))
 	for _, id := range orderedIDs {
