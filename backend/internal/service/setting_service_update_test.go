@@ -5,7 +5,6 @@ package service
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"math"
 	"strconv"
 	"testing"

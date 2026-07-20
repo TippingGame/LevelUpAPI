@@ -88,7 +88,17 @@ func TestAsyncImageEnablesWithoutRestart(t *testing.T) {
 		groupID := int64(3)
 		c.Set(string(middleware2.ContextKeyAPIKey), &service.APIKey{
 			ID: 9, UserID: 7, GroupID: &groupID,
-			Group: &service.Group{ID: groupID, Platform: service.PlatformOpenAI, AllowImageGeneration: true},
+			User: &service.User{
+				ID:     7,
+				Status: service.StatusActive,
+			},
+			Group: &service.Group{
+				ID:                  groupID,
+				Status:              service.StatusActive,
+				Hydrated:            true,
+				Platform:            service.PlatformOpenAI,
+				AllowImageGeneration: true,
+			},
 		})
 		c.Next()
 	})

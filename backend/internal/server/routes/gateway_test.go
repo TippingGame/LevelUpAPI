@@ -61,7 +61,11 @@ func newGatewayRoutesTestRouter() *gin.Engine {
 func newGatewayRoutesTestRouterForPlatform(platform string) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
-	settingSvc := service.NewSettingService(&gatewayRouteSettingRepo{values: map[string]string{}}, &config.Config{})
+	cfg := &config.Config{Gateway: config.GatewayConfig{
+		MaxBodySize:     1 << 20,
+		TextMaxBodySize: 1 << 20,
+	}}
+	settingSvc := service.NewSettingService(&gatewayRouteSettingRepo{values: map[string]string{}}, cfg)
 
 	RegisterGatewayRoutes(
 		router,
@@ -82,7 +86,7 @@ func newGatewayRoutesTestRouterForPlatform(platform string) *gin.Engine {
 		nil,
 		nil,
 		settingSvc,
-		&config.Config{},
+		cfg,
 	)
 
 	return router
@@ -93,7 +97,6 @@ func TestGatewayRoutesGrokTextOnlyContract(t *testing.T) {
 
 	for _, path := range []string{
 		"/v1/embeddings",
-		"/v1/messages/count_tokens",
 	} {
 		req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(`{"model":"grok-4.5"}`))
 		req.Header.Set("Content-Type", "application/json")
@@ -101,6 +104,13 @@ func TestGatewayRoutesGrokTextOnlyContract(t *testing.T) {
 		router.ServeHTTP(w, req)
 		require.Equal(t, http.StatusNotFound, w.Code, "path=%s must stay unavailable for Grok", path)
 	}
+
+	countTokensReq := httptest.NewRequest(http.MethodPost, "/v1/messages/count_tokens", strings.NewReader(`{"model":"grok-4.5","messages":[{"role":"user","content":"hi"}]}`))
+	countTokensReq.Header.Set("Content-Type", "application/json")
+	countTokensResp := httptest.NewRecorder()
+	router.ServeHTTP(countTokensResp, countTokensReq)
+	require.Equal(t, http.StatusOK, countTokensResp.Code)
+	require.Contains(t, countTokensResp.Body.String(), `"input_tokens"`)
 
 	for _, path := range []string{"/v1/responses", "/v1/chat/completions", "/v1/messages"} {
 		req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(`{"model":"grok-4.5","input":"hi"}`))
