@@ -299,6 +299,16 @@ func TestSettingService_UpdateSettings_UpstreamAllowlistExtraHosts_Normalized(t 
 	require.Equal(t, `["naiccc.com","*.example.com","203.0.113.10:8080"]`, repo.updates[SettingKeyUpstreamURLAllowlistExtraHosts])
 }
 
+func TestSettingService_ParseSettings_UpstreamAllowlistExtraHosts(t *testing.T) {
+	svc := NewSettingService(&settingValueRepoStub{}, &config.Config{})
+
+	settings := svc.parseSettings(map[string]string{
+		SettingKeyUpstreamURLAllowlistExtraHosts: `[" Relay.Example.com ","*.Example.com","203.0.113.10:8080"]`,
+	})
+
+	require.Equal(t, []string{"relay.example.com", "*.example.com", "203.0.113.10:8080"}, settings.UpstreamURLAllowlistExtraHosts)
+}
+
 func TestSettingService_UpdateSettings_UpstreamAllowlistExtraHosts_Invalid(t *testing.T) {
 	repo := &settingUpdateRepoStub{}
 	svc := NewSettingService(repo, &config.Config{})
