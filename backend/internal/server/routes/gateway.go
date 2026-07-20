@@ -52,6 +52,13 @@ func RegisterGatewayRoutes(
 		}
 		h.Gateway.Models(c)
 	}
+	countTokensHandler := func(c *gin.Context) {
+		if isOpenAICompatible(c) {
+			h.OpenAIGateway.CountTokens(c)
+			return
+		}
+		h.Gateway.CountTokens(c)
+	}
 	imagesHandler := func(c *gin.Context) {
 		switch getGroupPlatform(c) {
 		case service.PlatformOpenAI:
@@ -248,6 +255,7 @@ func RegisterGatewayRoutes(
 		}
 	})
 	r.GET("/models", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic, modelsHandler)
+	r.POST("/messages/count_tokens", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic, countTokensHandler)
 	codexDirect := r.Group("/backend-api/codex")
 	codexDirect.Use(bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic)
 	{

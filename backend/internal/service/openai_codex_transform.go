@@ -1,6 +1,8 @@
 package service
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -77,10 +79,39 @@ type codexTransformResult struct {
 }
 
 type codexOAuthTransformOptions struct {
-	IsCodexCLI              bool
-	IsCompact               bool
-	SkipDefaultInstructions bool
-	PreserveToolCallIDs     bool
+	IsCodexCLI                          bool
+	IsCompact                           bool
+	SkipDefaultInstructions             bool
+	PreserveToolCallIDs                 bool
+	OmitPromotedSystemMessagesFromInput bool
+}
+
+const (
+	codexCallIDMaxLength = 64
+	codexCallIDPrefix    = "fc_"
+)
+
+func normalizeCodexCallID(id string) string {
+	candidate := id
+	switch {
+	case id == "":
+		return ""
+	case strings.HasPrefix(id, "fc"):
+	case strings.HasPrefix(id, "call_"):
+		candidate = codexCallIDPrefix + strings.TrimPrefix(id, "call_")
+	default:
+		candidate = codexCallIDPrefix + id
+	}
+	if len(candidate) <= codexCallIDMaxLength {
+		return candidate
+	}
+	return compactCodexCallID(candidate)
+}
+
+func compactCodexCallID(id string) string {
+	digest := sha256.Sum256([]byte("sub2api:codex-call-id:v1:" + id))
+	encoded := hex.EncodeToString(digest[:])
+	return codexCallIDPrefix + encoded[:codexCallIDMaxLength-len(codexCallIDPrefix)]
 }
 
 const codexImageGenerationFunctionToolName = "image_gen.imagegen"
@@ -215,7 +246,7 @@ func applyCodexOAuthTransformWithOptions(reqBody map[string]any, opts codexOAuth
 
 	// ChatGPT internal Codex endpoint does not accept role:"system".
 	// Keep the guidance as developer input and mirror it into instructions.
-	if extractSystemMessagesFromInput(reqBody) {
+	if extractSystemMessagesFromInput(reqBody, opts.OmitPromotedSystemMessagesFromInput) {
 		result.Modified = true
 	}
 
@@ -1079,33 +1110,52 @@ func extractTextFromContent(content any) string {
 	}
 }
 
-// extractSystemMessagesFromInput scans input for role=="system"/"developer".
-// System items are normalized to developer, and guidance text is mirrored into
-// reqBody["instructions"] so the Codex OAuth path keeps client instructions.
-func extractSystemMessagesFromInput(reqBody map[string]any) bool {
+// extractSystemMessagesFromInput scans input for system/developer guidance.
+// System items are normalized to developer, and their text is mirrored into
+// reqBody["instructions"]. Lossless text-only system items may be omitted after
+// promotion when the caller requests it. The variadic option preserves
+// compatibility with older internal callers.
+func extractSystemMessagesFromInput(reqBody map[string]any, omitOptions ...bool) bool {
 	input, ok := reqBody["input"].([]any)
 	if !ok || len(input) == 0 {
 		return false
 	}
 
+	omitPromoted := len(omitOptions) > 0 && omitOptions[0]
 	var systemTexts []string
+	filteredInput := make([]any, 0, len(input))
 	modified := false
 	for _, item := range input {
 		m, ok := item.(map[string]any)
 		if !ok {
+			filteredInput = append(filteredInput, item)
 			continue
 		}
 		role, _ := m["role"].(string)
 		if role != "system" && role != "developer" {
+			filteredInput = append(filteredInput, item)
 			continue
+		}
+		if role == "system" && omitPromoted {
+			if losslessText, lossless := extractLosslessTextFromContent(m["content"]); lossless {
+				if losslessText != "" {
+					systemTexts = append(systemTexts, losslessText)
+				}
+				modified = true
+				continue
+			}
+		}
+		if text := extractTextFromContent(m["content"]); text != "" {
+			systemTexts = append(systemTexts, text)
 		}
 		if role == "system" {
 			m["role"] = "developer"
 			modified = true
 		}
-		if text := extractTextFromContent(m["content"]); text != "" {
-			systemTexts = append(systemTexts, text)
-		}
+		filteredInput = append(filteredInput, item)
+	}
+	if omitPromoted && len(filteredInput) != len(input) {
+		reqBody["input"] = filteredInput
 	}
 
 	if len(systemTexts) == 0 {
@@ -1120,6 +1170,35 @@ func extractSystemMessagesFromInput(reqBody map[string]any) bool {
 		reqBody["instructions"] = extracted
 	}
 	return true
+}
+
+// extractLosslessTextFromContent returns text only when the entire content can
+// be represented by an instructions string without dropping non-text parts.
+func extractLosslessTextFromContent(content any) (string, bool) {
+	switch v := content.(type) {
+	case string:
+		return v, true
+	case []any:
+		var b strings.Builder
+		for _, part := range v {
+			m, ok := part.(map[string]any)
+			if !ok {
+				return "", false
+			}
+			typeName, ok := m["type"].(string)
+			if !ok || (typeName != "text" && typeName != "input_text" && typeName != "output_text") {
+				return "", false
+			}
+			text, ok := m["text"].(string)
+			if !ok {
+				return "", false
+			}
+			_, _ = b.WriteString(text)
+		}
+		return b.String(), true
+	default:
+		return "", false
+	}
 }
 
 func ensureCodexReasoningInclude(reqBody map[string]any) bool {
@@ -1269,13 +1348,7 @@ func filterCodexInputWithOptions(input []any, opts codexInputFilterOptions) []an
 			if opts.PreserveCallIDs {
 				return id
 			}
-			if id == "" || strings.HasPrefix(id, "fc") {
-				return id
-			}
-			if strings.HasPrefix(id, "call_") {
-				return "fc_" + strings.TrimPrefix(id, "call_")
-			}
-			return "fc_" + id
+			return normalizeCodexCallID(id)
 		}
 
 		if typ == "item_reference" {

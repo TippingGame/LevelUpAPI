@@ -704,6 +704,64 @@ describe("admin SettingsView payment visible method controls", () => {
     expect(wrapper.text()).not.toContain("支付来源");
   });
 
+  it("loads, edits, validates, and saves forwarded client-IP headers", async () => {
+    getSettings.mockResolvedValueOnce({
+      ...baseSettingsResponse,
+      api_key_acl_trust_forwarded_ip: false,
+      forwarded_client_ip_headers: ["cf-connecting-ip", "X-Real-IP"],
+    });
+    const wrapper = mountView();
+
+    await flushPromises();
+    await openSecurityTab(wrapper);
+
+    const card = wrapper
+      .findAll(".card")
+      .find((node) => node.text().includes("admin.settings.apiKeyAcl.title"));
+    expect(card).toBeDefined();
+    const toggle = card!.get('input[type="checkbox"]');
+    expect((toggle.element as HTMLInputElement).checked).toBe(false);
+    expect(card!.find('[data-testid="forwarded-client-ip-headers-input"]').exists()).toBe(false);
+
+    await toggle.setValue(true);
+    expect(card!.findAll('[data-testid="forwarded-client-ip-header-tag"]')).toHaveLength(2);
+    expect(card!.text()).toContain("Cf-Connecting-Ip");
+    expect(card!.text()).toContain("X-Real-Ip");
+    showError.mockClear();
+
+    const input = card!.get('[data-testid="forwarded-client-ip-headers-input"]');
+    await input.setValue("x-client-ip");
+    await input.trigger("keydown", { key: "Enter" });
+    await input.setValue("X-CLIENT-IP");
+    await input.trigger("keydown", { key: "Enter" });
+    await input.setValue("invalid header");
+    await input.trigger("keydown", { key: "Enter" });
+    expect(showError).toHaveBeenCalledTimes(1);
+    expect(card!.findAll('[data-testid="forwarded-client-ip-header-tag"]')).toHaveLength(3);
+
+    const realIpTag = card!
+      .findAll('[data-testid="forwarded-client-ip-header-tag"]')
+      .find((tag) => tag.text().includes("X-Real-Ip"));
+    expect(realIpTag).toBeDefined();
+    await realIpTag!.get("button").trigger("click");
+    expect(card!.text()).not.toContain("X-Real-Ip");
+
+    await toggle.setValue(false);
+    expect(card!.find('[data-testid="forwarded-client-ip-headers-input"]').exists()).toBe(false);
+    await toggle.setValue(true);
+    expect(card!.text()).toContain("X-Client-Ip");
+
+    await wrapper.find("form").trigger("submit.prevent");
+    await flushPromises();
+
+    expect(updateSettings).toHaveBeenCalledWith(
+      expect.objectContaining({
+        api_key_acl_trust_forwarded_ip: true,
+        forwarded_client_ip_headers: ["Cf-Connecting-Ip", "X-Client-Ip"],
+      }),
+    );
+  });
+
   it("links payment guidance to README sections instead of removed payment docs", async () => {
     const wrapper = mountView();
 

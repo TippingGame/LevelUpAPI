@@ -8,9 +8,11 @@ import (
 	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/payment"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/antigravity"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/google/wire"
 	"github.com/redis/go-redis/v9"
+	"go.uber.org/zap"
 )
 
 // BuildInfo contains build information
@@ -81,17 +83,34 @@ func ProvideRedeemService(
 	return NewRedeemService(redeemRepo, userRepo, subscriptionService, cache, billingCacheService, entClient, authCacheInvalidator, affiliateService)
 }
 
-// ProvideImageTaskService enables asynchronous image tasks only when object
-// storage is fully configured, keeping large base64 results out of Redis.
-func ProvideImageTaskService(store ImageTaskStore, storage ImageStorage, cfg *config.Config) *ImageTaskService {
-	if !cfg.ImageStorage.Active() {
-		if cfg.ImageStorage.Enabled {
-			logger.L().Warn("image_storage.enabled is true but object storage is not fully configured; async image tasks are disabled")
-		}
+// ProvideImageStorageSettingService constructs the runtime-editable image
+// storage settings service. Config-file values remain the fallback until an
+// administrator saves a database-backed setting.
+func ProvideImageStorageSettingService(
+	settingRepo SettingRepository,
+	encryptor SecretEncryptor,
+	backup *BackupService,
+	factory ImageStorageFactory,
+	cfg *config.Config,
+) *ImageStorageSettingService {
+	if cfg != nil && cfg.ImageStorage.Enabled && !cfg.ImageStorage.Active() {
+		logger.L().Warn("image_storage.enabled is true in config but object storage is not fully configured; configure it in the admin UI or complete the config file",
+			zap.Strings("missing_keys", cfg.ImageStorage.MissingCredentialKeys()))
+	}
+	var fallback config.ImageStorageConfig
+	if cfg != nil {
+		fallback = cfg.ImageStorage
+	}
+	return NewImageStorageSettingService(settingRepo, encryptor, backup, factory, fallback)
+}
+
+// ProvideImageTaskService resolves image storage settings at runtime, allowing
+// the admin toggle to take effect without restarting the server.
+func ProvideImageTaskService(store ImageTaskStore, settings *ImageStorageSettingService) *ImageTaskService {
+	if settings == nil {
 		return NewImageTaskService(store)
 	}
-	uploader := NewImageResultUploader(storage, cfg.ImageStorage.Prefix, cfg.ImageStorage.MaxDownloadByte, nil)
-	return NewImageTaskServiceWithUploader(store, uploader, defaultImageTaskTTL, defaultImageTaskExecutionTimeout)
+	return NewImageTaskServiceWithResolver(store, settings.Resolver(), defaultImageTaskTTL, defaultImageTaskExecutionTimeout)
 }
 
 // ProvideTokenRefreshService creates and starts TokenRefreshService
@@ -760,6 +779,16 @@ func ProvideSettingService(settingRepo SettingRepository, groupRepo GroupReposit
 	svc := NewSettingService(settingRepo, cfg)
 	svc.SetDefaultSubscriptionGroupReader(groupRepo)
 	svc.SetProxyRepository(proxyRepo)
+	if err := svc.LoadForwardedClientIPSettings(context.Background()); err != nil {
+		logger.LegacyPrintf("service.setting", "Warning: load forwarded client IP settings failed: %v", err)
+	}
+	if err := svc.MigrateOpenAIAllowClaudeCodeCodexPluginSetting(context.Background()); err != nil {
+		logger.LegacyPrintf("service.setting", "Warning: migrate openai allow Claude Code Codex plugin setting failed: %v", err)
+	}
+	if err := svc.MigrateCodexBodyFingerprintToSignals(context.Background()); err != nil {
+		logger.LegacyPrintf("service.setting", "Warning: migrate codex body fingerprint to signals failed: %v", err)
+	}
+	antigravity.SetUserAgentVersionResolver(svc.GetAntigravityUserAgentVersion)
 	return svc
 }
 
@@ -950,6 +979,7 @@ var ProviderSet = wire.NewSet(
 	ProvideAdminService,
 	ProvideGatewayService,
 	ProvideOpenAIGatewayService,
+	ProvideImageStorageSettingService,
 	ProvideImageTaskService,
 	ProvideBatchImageModelPricingResolver,
 	NewBatchImagePublicService,

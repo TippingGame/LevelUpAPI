@@ -134,6 +134,25 @@ export function formatDateOnly(date: string | Date | null | undefined): string {
   })
 }
 
+/** 格式化日期时间（精确到分钟） */
+export function formatDateTimeToMinute(
+  date: string | Date | null | undefined,
+  localeOverride?: string
+): string {
+  return formatDate(
+    date,
+    {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false
+    },
+    localeOverride
+  )
+}
+
 /**
  * 格式化日期时间（完整格式）
  * @param date 日期字符串或 Date 对象

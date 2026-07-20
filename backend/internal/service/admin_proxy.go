@@ -389,9 +389,16 @@ func runProxyQualityTarget(ctx context.Context, client *http.Client, target prox
 	}
 
 	if _, ok := target.AllowedStatuses[resp.StatusCode]; ok {
-		if resp.StatusCode >= http.StatusOK && resp.StatusCode < http.StatusMultipleChoices {
+		// Grok's unauthenticated model probe intentionally returns 401; unlike
+		// the legacy OpenAI/Anthropic probes, that endpoint is the connectivity
+		// contract for the Grok provider and should count as a pass.
+		if target.Target == "grok" || (resp.StatusCode >= http.StatusOK && resp.StatusCode < http.StatusMultipleChoices) {
 			item.Status = "pass"
-			item.Message = fmt.Sprintf("HTTP %d", resp.StatusCode)
+			if resp.StatusCode >= http.StatusOK && resp.StatusCode < http.StatusMultipleChoices {
+				item.Message = fmt.Sprintf("HTTP %d", resp.StatusCode)
+			} else {
+				item.Message = fmt.Sprintf("HTTP %d（目标可达）", resp.StatusCode)
+			}
 		} else {
 			item.Status = "warn"
 			item.Message = fmt.Sprintf("HTTP %d（目标可达）", resp.StatusCode)

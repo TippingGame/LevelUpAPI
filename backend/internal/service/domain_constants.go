@@ -503,6 +503,8 @@ const (
 	SettingKeyUpstreamURLAllowlistExtraHosts = "upstream_url_allowlist_extra_hosts" // JSON array
 
 	SettingKeyAPIKeyACLTrustForwardedIP = "api_key_acl_trust_forwarded_ip"
+	SettingKeyForwardedClientIPHeaders  = "forwarded_client_ip_headers"
+	settingKeyForwardedClientIPModeV2   = "forwarded_client_ip_mode_v2_migrated"
 
 	SettingKeyDingTalkConnectEnabled                 = "dingtalk_connect_enabled"
 	SettingKeyDingTalkConnectClientID                = "dingtalk_connect_client_id"
