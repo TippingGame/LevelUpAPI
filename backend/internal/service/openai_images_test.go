@@ -526,6 +526,10 @@ func TestOpenAIGatewayServiceForwardImages_OAuthUsesResponsesAPI(t *testing.T) {
 	require.Equal(t, "draw a cat", gjson.Get(rec.Body.String(), "data.0.revised_prompt").String())
 }
 
+func TestOpenAIGatewayServiceForwardImages_OAuthUpstreamHTTPErrorSurfacesRealError(t *testing.T) {
+	assertOpenAIImagesUpstreamHTTPErrorSurfacesRealError(t, AccountTypeOAuth)
+}
+
 func TestOpenAIGatewayServiceForwardImages_OAuthResponsesPersistentTransportErrorTempUnschedulesAndFailovers(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	body := []byte(`{"model":"gpt-image-2","prompt":"draw a cat"}`)
@@ -618,6 +622,70 @@ func TestOpenAIGatewayServiceForwardImages_APIKeyGenerationUsesConfiguredV1BaseU
 	require.Equal(t, "gpt-image-2", gjson.GetBytes(upstream.lastBody, "model").String())
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.Equal(t, "aGVsbG8=", gjson.Get(rec.Body.String(), "data.0.b64_json").String())
+}
+
+func TestOpenAIGatewayServiceForwardImages_APIKeyUpstreamHTTPErrorSurfacesRealError(t *testing.T) {
+	assertOpenAIImagesUpstreamHTTPErrorSurfacesRealError(t, AccountTypeAPIKey)
+}
+
+func assertOpenAIImagesUpstreamHTTPErrorSurfacesRealError(t *testing.T, accountType string) {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+	body := []byte(`{"model":"gpt-image-2","prompt":"draw a cat","response_format":"b64_json"}`)
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/images/generations", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = req
+	c.Set("api_key", &APIKey{ID: 42})
+
+	credentials := map[string]any{"access_token": "token-123"}
+	if accountType == AccountTypeAPIKey {
+		credentials = map[string]any{
+			"api_key":  "test-api-key",
+			"base_url": "https://image-upstream.example/v1",
+		}
+	}
+	svc := &OpenAIGatewayService{
+		cfg: &config.Config{},
+		httpUpstream: &httpUpstreamRecorder{
+			resp: &http.Response{
+				StatusCode: http.StatusBadRequest,
+				Header: http.Header{
+					"Content-Type": []string{"application/json"},
+					"X-Request-Id": []string{"req_img_badreq"},
+				},
+				Body: io.NopCloser(strings.NewReader(
+					`{"error":{"message":"Invalid value for 'size': expected a supported image size.","type":"invalid_request_error","param":"size","code":"invalid_value"}}`,
+				)),
+			},
+		},
+	}
+	parsed, err := svc.ParseOpenAIImagesRequest(c, body)
+	require.NoError(t, err)
+
+	account := &Account{
+		ID:          1,
+		Name:        "openai-image-upstream-error",
+		Platform:    PlatformOpenAI,
+		Type:        accountType,
+		Credentials: credentials,
+	}
+	result, err := svc.ForwardImages(context.Background(), c, account, body, parsed, "")
+	require.Nil(t, result)
+
+	var upstreamErr *OpenAIImagesUpstreamError
+	require.ErrorAs(t, err, &upstreamErr)
+	require.Equal(t, http.StatusBadRequest, upstreamErr.StatusCode)
+	require.Equal(t, "invalid_request_error", upstreamErr.ErrorType)
+	require.Equal(t, "invalid_value", upstreamErr.Code)
+	require.Equal(t, "size", upstreamErr.Param)
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	require.Equal(t, "invalid_request_error", gjson.Get(rec.Body.String(), "error.type").String())
+	require.Equal(t, "invalid_value", gjson.Get(rec.Body.String(), "error.code").String())
+	require.Equal(t, "size", gjson.Get(rec.Body.String(), "error.param").String())
+	require.Contains(t, gjson.Get(rec.Body.String(), "error.message").String(), "Invalid value for 'size'")
 }
 
 func TestOpenAIGatewayServiceForwardImages_APIKeyPersistentTransportErrorTempUnschedulesAndFailovers(t *testing.T) {
