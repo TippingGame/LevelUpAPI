@@ -19,6 +19,11 @@ import (
 	"github.com/tidwall/sjson"
 )
 
+const (
+	openAIImagesOAuthCapabilityCooldown = 5 * time.Minute
+	openAIImagesResponsesInstructions   = "Always use the image_generation tool to fulfill this image generation or editing request. Do not answer with text instead of calling the tool."
+)
+
 type openAIResponsesImageResult struct {
 	Result        string
 	RevisedPrompt string
@@ -93,7 +98,16 @@ func (e *OpenAIImagesUpstreamError) clientMessage() string {
 // retried on another account. Account-scoped rate limits are retryable even
 // though they are represented as a 4xx response.
 func IsOpenAIImagesRetryableUpstreamError(err *OpenAIImagesUpstreamError) bool {
-	return err != nil && (err.StatusCode == http.StatusTooManyRequests || err.StatusCode >= http.StatusInternalServerError)
+	return err != nil && (err.StatusCode == http.StatusTooManyRequests || err.StatusCode >= http.StatusInternalServerError || isOpenAIImagesToolChoiceCapabilityError(err))
+}
+
+func isOpenAIImagesToolChoiceCapabilityError(err *OpenAIImagesUpstreamError) bool {
+	if err == nil || err.StatusCode != http.StatusBadRequest || !strings.EqualFold(strings.TrimSpace(err.Param), "tool_choice") {
+		return false
+	}
+	message := strings.ToLower(strings.TrimSpace(err.Message))
+	return strings.Contains(message, "not found in 'tools' parameter") ||
+		strings.Contains(message, "must be specified with 'tools' parameter")
 }
 
 func openAIImagesSSEErrorStatus(errType, code string) int {
@@ -379,12 +393,12 @@ func buildOpenAIImagesResponsesRequest(parsed *OpenAIImagesRequest, toolModel st
 		return nil, fmt.Errorf("image input is required")
 	}
 
-	// ChatGPT's internal Responses endpoint does not consistently support
-	// selecting the hosted image tool with {"type":"image_generation"}.
-	// The Images API must still force generation rather than permit a text-only
-	// response, so require a tool call while advertising only image_generation.
-	req := []byte(`{"instructions":"","stream":true,"reasoning":{"effort":"medium","summary":"auto"},"parallel_tool_calls":true,"include":["reasoning.encrypted_content"],"model":"","store":false,"tool_choice":"required"}`)
+	// ChatGPT's internal Codex endpoint rejects forced hosted-tool choices even
+	// when image_generation is present. Auto passes validation; instructions
+	// retain the dedicated Images API contract that the tool must be used.
+	req := []byte(`{"instructions":"","stream":true,"reasoning":{"effort":"medium","summary":"auto"},"parallel_tool_calls":true,"include":["reasoning.encrypted_content"],"model":"","store":false,"tool_choice":"auto"}`)
 	req, _ = sjson.SetBytes(req, "model", openAIImagesResponsesMainModel)
+	req, _ = sjson.SetBytes(req, "instructions", openAIImagesResponsesInstructions)
 
 	input := []byte(`[{"type":"message","role":"user","content":[{"type":"input_text","text":""}]}]`)
 	input, _ = sjson.SetBytes(input, "0.content.0.text", prompt)
@@ -681,6 +695,70 @@ func extractOpenAIImagesModelRefusal(body []byte) string {
 		refusal = refusal[:maxRefusal]
 	}
 	return refusal
+}
+
+func isOpenAIImagesContentPolicyRefusal(text string) bool {
+	text = strings.ToLower(strings.TrimSpace(text))
+	if text == "" {
+		return false
+	}
+	for _, marker := range []string{
+		"content policy",
+		"policy violation",
+		"safety system",
+		"safety policy",
+		"moderation",
+		"unsafe to generate",
+		"安全系统",
+		"内容政策",
+		"内容策略",
+		"违反政策",
+		"涉及违规",
+		"违规内容",
+		"不适合生成",
+	} {
+		if strings.Contains(text, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func openAIImagesResponseMissingImageTool(body []byte) bool {
+	sawTools := false
+	hasImageTool := false
+	forEachOpenAISSEDataPayload(string(body), func(payload []byte) {
+		if !gjson.ValidBytes(payload) {
+			return
+		}
+		tools := gjson.GetBytes(payload, "response.tools")
+		if !tools.Exists() || !tools.IsArray() {
+			return
+		}
+		sawTools = true
+		tools.ForEach(func(_, tool gjson.Result) bool {
+			if strings.EqualFold(strings.TrimSpace(tool.Get("type").String()), "image_generation") {
+				hasImageTool = true
+			}
+			return true
+		})
+	})
+	return sawTools && !hasImageTool
+}
+
+func (s *OpenAIGatewayService) markOpenAIImagesToolUnavailable(account *Account, model string) {
+	if !isOpenAIOAuthAccount(account) {
+		return
+	}
+	canonicalModel := canonicalOpenAIAccountSchedulingModel(account, model)
+	decision := s.blockOpenAIAccountModelRuntime(account, canonicalModel, time.Now(), openAIImagesOAuthCapabilityCooldown)
+	logger.LegacyPrintf(
+		"service.openai_gateway",
+		"[OpenAI] OAuth image tool unavailable account_id=%d model=%s cooldown_ms=%d",
+		account.ID,
+		openAIAccountModelTransientModel(canonicalModel),
+		decision.Cooldown.Milliseconds(),
+	)
 }
 
 // summarizeOpenAIImagesNoOutputBody 从上游 SSE 响应体提取诊断摘要，用于软失败时
@@ -1331,6 +1409,9 @@ func (s *OpenAIGatewayService) handleOpenAIImagesOAuthNonStreamingResponse(
 	}
 	if upstreamErr := extractOpenAIImagesUpstreamError(body); upstreamErr != nil && upstreamErr.clientStatusCode() < http.StatusInternalServerError {
 		if IsOpenAIImagesRetryableUpstreamError(upstreamErr) {
+			if isOpenAIImagesToolChoiceCapabilityError(upstreamErr) {
+				s.markOpenAIImagesToolUnavailable(account, fallbackModel)
+			}
 			return OpenAIUsage{}, 0, upstreamErr
 		}
 		setOpsUpstreamError(c, upstreamErr.clientStatusCode(), upstreamErr.clientMessage(), "")
@@ -1363,22 +1444,27 @@ func (s *OpenAIGatewayService) handleOpenAIImagesOAuthNonStreamingResponse(
 		return OpenAIUsage{}, 0, err
 	}
 	if len(results) == 0 {
-		if refusal := extractOpenAIImagesModelRefusal(body); refusal != "" {
+		textOutput := extractOpenAIImagesModelRefusal(body)
+		if isOpenAIImagesContentPolicyRefusal(textOutput) {
 			refusalErr := &OpenAIImagesUpstreamError{
 				StatusCode: http.StatusBadRequest,
 				ErrorType:  "image_generation_user_error",
 				Code:       "content_policy_violation",
-				Message:    sanitizeUpstreamErrorMessage(refusal),
+				Message:    sanitizeUpstreamErrorMessage(textOutput),
 			}
 			setOpsUpstreamError(c, http.StatusBadRequest, refusalErr.clientMessage(), summarizeOpenAIImagesNoOutputBody(body))
 			writeOpenAIImagesUpstreamErrorResponse(c, refusalErr)
 			return OpenAIUsage{}, 0, refusalErr
 		}
+		toolUnavailable := openAIImagesResponseMissingImageTool(body) || textOutput != ""
+		if toolUnavailable {
+			s.markOpenAIImagesToolUnavailable(account, fallbackModel)
+		}
 		setOpsUpstreamError(c, http.StatusBadGateway, "upstream did not return image output", summarizeOpenAIImagesNoOutputBody(body))
 		return OpenAIUsage{}, 0, &UpstreamFailoverError{
 			StatusCode:             http.StatusBadGateway,
 			ResponseBody:           body,
-			RetryableOnSameAccount: true,
+			RetryableOnSameAccount: !toolUnavailable,
 		}
 	}
 	if strings.TrimSpace(firstMeta.Model) == "" {
@@ -1654,6 +1740,25 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesOAuth(
 				return nil, fmt.Errorf("agent identity task recovery failed: %w", err)
 			}
 			return s.forwardOpenAIImagesOAuth(markAgentIdentityTaskRecoveryTried(ctx), c, account, parsed, channelMappedModel)
+		}
+		if upstreamErr := openAIImagesUpstreamErrorFromHTTP(resp.StatusCode, resp.Header, respBody); isOpenAIImagesToolChoiceCapabilityError(upstreamErr) {
+			s.markOpenAIImagesToolUnavailable(account, requestModel)
+			setOpsUpstreamError(c, upstreamErr.StatusCode, upstreamErr.clientMessage(), "")
+			appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
+				Platform:           account.Platform,
+				AccountID:          account.ID,
+				AccountName:        account.Name,
+				UpstreamStatusCode: upstreamErr.StatusCode,
+				UpstreamRequestID:  upstreamErr.UpstreamRequestID,
+				UpstreamURL:        safeUpstreamURL(upstreamReq.URL.String()),
+				Kind:               "failover",
+				Message:            upstreamErr.clientMessage(),
+			})
+			return nil, &UpstreamFailoverError{
+				StatusCode:      upstreamErr.StatusCode,
+				ResponseBody:    respBody,
+				ResponseHeaders: resp.Header.Clone(),
+			}
 		}
 		resp.Body = io.NopCloser(bytes.NewReader(respBody))
 		upstreamMsg := strings.TrimSpace(extractUpstreamErrorMessage(respBody))

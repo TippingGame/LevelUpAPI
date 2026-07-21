@@ -37,6 +37,17 @@ func TestHandleOpenAITransientError_BlocksOnlyRequestedModel(t *testing.T) {
 	require.False(t, svc.isOpenAIAccountModelRuntimeBlocked(account, "gpt-5.6-terra"))
 }
 
+func TestOpenAIAccountModelTransient_ExplicitBlockOutlivesFailureWindow(t *testing.T) {
+	state := newOpenAIAccountModelTransientState(16)
+	now := time.Date(2026, 7, 21, 6, 0, 0, 0, time.UTC)
+
+	decision := state.blockFor(5108, "gpt-image-2", now, 5*time.Minute)
+
+	require.Equal(t, 5*time.Minute, decision.Cooldown)
+	require.True(t, state.isBlocked(5108, "gpt-image-2", now.Add(2*time.Minute)))
+	require.False(t, state.isBlocked(5108, "gpt-image-2", now.Add(6*time.Minute)))
+}
+
 func TestHandleOpenAITransientError_TransientStatusesUseModelScope(t *testing.T) {
 	for _, statusCode := range []int{http.StatusInternalServerError, http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout, 520, 521, 522, 523, 524} {
 		t.Run(http.StatusText(statusCode), func(t *testing.T) {

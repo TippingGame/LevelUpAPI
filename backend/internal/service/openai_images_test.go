@@ -518,13 +518,93 @@ func TestOpenAIGatewayServiceForwardImages_OAuthUsesResponsesAPI(t *testing.T) {
 	require.Equal(t, "1024x1024", gjson.GetBytes(upstream.lastBody, "tools.0.size").String())
 	require.Equal(t, "high", gjson.GetBytes(upstream.lastBody, "tools.0.quality").String())
 	require.Equal(t, int64(2), gjson.GetBytes(upstream.lastBody, "tools.0.n").Int())
-	require.Equal(t, "required", gjson.GetBytes(upstream.lastBody, "tool_choice").String())
+	require.Equal(t, "auto", gjson.GetBytes(upstream.lastBody, "tool_choice").String())
+	require.Equal(t, openAIImagesResponsesInstructions, gjson.GetBytes(upstream.lastBody, "instructions").String())
 	require.Equal(t, "draw a cat", gjson.GetBytes(upstream.lastBody, "input.0.content.0.text").String())
 
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.Equal(t, "gpt-image-2", gjson.Get(rec.Body.String(), "model").String())
 	require.Equal(t, "aGVsbG8=", gjson.Get(rec.Body.String(), "data.0.b64_json").String())
 	require.Equal(t, "draw a cat", gjson.Get(rec.Body.String(), "data.0.revised_prompt").String())
+}
+
+func TestOpenAIGatewayServiceForwardImages_OAuthToolChoiceCapabilityErrorFailovers(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	body := []byte(`{"model":"gpt-image-2","prompt":"draw a cat"}`)
+	req := httptest.NewRequest(http.MethodPost, "/v1/images/generations", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = req
+
+	svc := &OpenAIGatewayService{
+		cfg: &config.Config{},
+		httpUpstream: &httpUpstreamRecorder{resp: &http.Response{
+			StatusCode: http.StatusBadRequest,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body: io.NopCloser(strings.NewReader(
+				`{"error":{"message":"Tool choice 'image_generation' not found in 'tools' parameter.","type":"invalid_request_error","param":"tool_choice"}}`,
+			)),
+		}},
+	}
+	parsed, err := svc.ParseOpenAIImagesRequest(c, body)
+	require.NoError(t, err)
+	account := &Account{
+		ID:       51,
+		Name:     "openai-image-capability-missing",
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeOAuth,
+		Credentials: map[string]any{
+			"access_token": "token-123",
+		},
+	}
+
+	result, err := svc.ForwardImages(context.Background(), c, account, body, parsed, "")
+
+	require.Nil(t, result)
+	var failoverErr *UpstreamFailoverError
+	require.ErrorAs(t, err, &failoverErr)
+	require.Equal(t, http.StatusBadRequest, failoverErr.StatusCode)
+	require.Empty(t, rec.Body.String(), "capability errors must not be written before account failover")
+	require.True(t, svc.isOpenAIAccountModelRuntimeBlocked(account, "gpt-image-2"))
+}
+
+func TestOpenAIImagesToolChoiceCapabilityErrorSignatures(t *testing.T) {
+	for _, message := range []string{
+		"Tool choice 'image_generation' not found in 'tools' parameter.",
+		"Tool choice 'required' must be specified with 'tools' parameter.",
+	} {
+		err := &OpenAIImagesUpstreamError{
+			StatusCode: http.StatusBadRequest,
+			ErrorType:  "invalid_request_error",
+			Param:      "tool_choice",
+			Message:    message,
+		}
+		require.True(t, isOpenAIImagesToolChoiceCapabilityError(err), message)
+		require.True(t, IsOpenAIImagesRetryableUpstreamError(err), message)
+	}
+}
+
+func TestOpenAIImagesOAuthTextFallbackSwitchesAccount(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	upstreamSSE := "data: {\"type\":\"response.created\",\"response\":{\"id\":\"r\",\"status\":\"in_progress\",\"tools\":[]}}\n\n" +
+		"data: {\"type\":\"response.output_text.delta\",\"delta\":\"Here is a pixel cat\"}\n\n" +
+		"data: {\"type\":\"response.completed\",\"response\":{\"id\":\"r\",\"status\":\"completed\",\"tools\":[],\"output\":[{\"type\":\"message\",\"content\":[{\"type\":\"output_text\",\"text\":\"Here is a pixel cat\"}]}]}}\n\n"
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/edits", nil)
+	resp := &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(upstreamSSE))}
+	account := &Account{ID: 52, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+	svc := &OpenAIGatewayService{}
+
+	_, _, err := svc.handleOpenAIImagesOAuthNonStreamingResponse(context.Background(), account, resp, c, "b64_json", "gpt-image-2")
+
+	var failoverErr *UpstreamFailoverError
+	require.ErrorAs(t, err, &failoverErr)
+	require.False(t, failoverErr.RetryableOnSameAccount)
+	require.Empty(t, rec.Body.String(), "text fallback must not be exposed as an image response")
+	require.True(t, svc.isOpenAIAccountModelRuntimeBlocked(account, "gpt-image-2"))
+	require.False(t, isOpenAIImagesContentPolicyRefusal("Here is a pixel cat"))
 }
 
 func TestOpenAIGatewayServiceForwardImages_OAuthUpstreamHTTPErrorSurfacesRealError(t *testing.T) {
