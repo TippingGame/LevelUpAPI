@@ -8,3 +8,14 @@ services:
     build:
       context: ..
       dockerfile: Dockerfile
+      args:
+        # Conservative defaults keep cold builds from starving a small
+        # production host. Override these LOCAL_BUILD_* values in deploy/.env
+        # when the build runs on a larger dedicated machine.
+        BUILD_NICE_LEVEL: ${LOCAL_BUILD_NICE_LEVEL:-15}
+        FRONTEND_NODE_MAX_OLD_SPACE_SIZE_MB: ${LOCAL_BUILD_NODE_HEAP_MB:-1792}
+        FRONTEND_GOMAXPROCS: ${LOCAL_BUILD_CPU_THREADS:-1}
+        FRONTEND_UV_THREADPOOL_SIZE: ${LOCAL_BUILD_UV_THREADS:-2}
+        GO_BUILD_GOMAXPROCS: ${LOCAL_BUILD_CPU_THREADS:-1}
+        GO_BUILD_PARALLELISM: ${LOCAL_BUILD_CPU_THREADS:-1}
+        GO_BUILD_GOMEMLIMIT: ${LOCAL_BUILD_GO_MEMORY_LIMIT:-768MiB}

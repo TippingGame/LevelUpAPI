@@ -12,6 +12,13 @@ ARG ALPINE_IMAGE=alpine:3.21
 ARG POSTGRES_IMAGE=postgres:18-alpine
 ARG GOPROXY=https://goproxy.cn,direct
 ARG GOSUMDB=sum.golang.google.cn
+ARG BUILD_NICE_LEVEL=0
+ARG FRONTEND_NODE_MAX_OLD_SPACE_SIZE_MB=
+ARG FRONTEND_GOMAXPROCS=
+ARG FRONTEND_UV_THREADPOOL_SIZE=
+ARG GO_BUILD_GOMAXPROCS=
+ARG GO_BUILD_PARALLELISM=
+ARG GO_BUILD_GOMEMLIMIT=
 
 # -----------------------------------------------------------------------------
 # Stage 1: Frontend Builder
@@ -20,6 +27,10 @@ ARG GOSUMDB=sum.golang.google.cn
 # it on the native host arch instead of under QEMU emulation for the target.
 FROM --platform=${BUILDPLATFORM} ${NODE_IMAGE} AS frontend-builder
 ARG NPM_CONFIG_REGISTRY
+ARG BUILD_NICE_LEVEL
+ARG FRONTEND_NODE_MAX_OLD_SPACE_SIZE_MB
+ARG FRONTEND_GOMAXPROCS
+ARG FRONTEND_UV_THREADPOOL_SIZE
 
 WORKDIR /app/frontend
 
@@ -33,7 +44,12 @@ RUN pnpm install --frozen-lockfile
 # Copy frontend source and build
 COPY docs/legal/ /app/docs/legal/
 COPY frontend/ ./
-RUN pnpm run build
+RUN if [ -n "${FRONTEND_NODE_MAX_OLD_SPACE_SIZE_MB}" ]; then \
+        export NODE_OPTIONS="--max-old-space-size=${FRONTEND_NODE_MAX_OLD_SPACE_SIZE_MB} ${NODE_OPTIONS:-}"; \
+    fi && \
+    if [ -n "${FRONTEND_GOMAXPROCS}" ]; then export GOMAXPROCS="${FRONTEND_GOMAXPROCS}"; fi && \
+    if [ -n "${FRONTEND_UV_THREADPOOL_SIZE}" ]; then export UV_THREADPOOL_SIZE="${FRONTEND_UV_THREADPOOL_SIZE}"; fi && \
+    nice -n "${BUILD_NICE_LEVEL}" pnpm run build
 
 # -----------------------------------------------------------------------------
 # Stage 2: Backend Builder
@@ -53,6 +69,10 @@ ARG GOSUMDB
 # Populated by buildx from the --platform target (e.g. linux/amd64).
 ARG TARGETOS
 ARG TARGETARCH
+ARG BUILD_NICE_LEVEL
+ARG GO_BUILD_GOMAXPROCS
+ARG GO_BUILD_PARALLELISM
+ARG GO_BUILD_GOMEMLIMIT
 
 ENV GOPROXY=${GOPROXY}
 ENV GOSUMDB=${GOSUMDB}
@@ -82,7 +102,10 @@ RUN --mount=type=cache,id=sub2api-gomod,target=/go/pkg/mod \
     VERSION_VALUE="${VERSION}" && \
     if [ -z "${VERSION_VALUE}" ]; then VERSION_VALUE="$(sh ./scripts/resolve-version.sh)"; fi && \
     DATE_VALUE="${DATE:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}" && \
-    CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build \
+    if [ -n "${GO_BUILD_GOMAXPROCS}" ]; then export GOMAXPROCS="${GO_BUILD_GOMAXPROCS}"; fi && \
+    if [ -n "${GO_BUILD_GOMEMLIMIT}" ]; then export GOMEMLIMIT="${GO_BUILD_GOMEMLIMIT}"; fi && \
+    if [ -n "${GO_BUILD_PARALLELISM}" ]; then export GOFLAGS="${GOFLAGS:+${GOFLAGS} }-p=${GO_BUILD_PARALLELISM}"; fi && \
+    CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} nice -n "${BUILD_NICE_LEVEL}" go build \
     -tags embed \
     -ldflags="-s -w -X main.Version=${VERSION_VALUE} -X main.Commit=${COMMIT} -X main.Date=${DATE_VALUE} -X main.BuildType=release" \
     -trimpath \

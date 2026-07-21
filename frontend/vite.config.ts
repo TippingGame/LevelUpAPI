@@ -88,7 +88,10 @@ export default defineConfig(({ mode }) => {
       vue(),
       checker({
         typescript: true,
-        vueTsc: true
+        vueTsc: true,
+        // `pnpm run build` already runs `vue-tsc -b` before Vite. Avoid doing
+        // the same expensive type check again inside the production bundle.
+        enableBuild: false
       }),
       injectPublicSettings(backendUrl)
     ],
