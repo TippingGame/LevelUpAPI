@@ -379,11 +379,11 @@ func buildOpenAIImagesResponsesRequest(parsed *OpenAIImagesRequest, toolModel st
 		return nil, fmt.Errorf("image input is required")
 	}
 
-	// ChatGPT's internal Responses endpoint accepts the hosted image tool but
-	// does not consistently support selecting it with
-	// {"type":"image_generation"}. Match the Codex image bridge and let the
-	// upstream choose from the single advertised image tool.
-	req := []byte(`{"instructions":"","stream":true,"reasoning":{"effort":"medium","summary":"auto"},"parallel_tool_calls":true,"include":["reasoning.encrypted_content"],"model":"","store":false,"tool_choice":"auto"}`)
+	// ChatGPT's internal Responses endpoint does not consistently support
+	// selecting the hosted image tool with {"type":"image_generation"}.
+	// The Images API must still force generation rather than permit a text-only
+	// response, so require a tool call while advertising only image_generation.
+	req := []byte(`{"instructions":"","stream":true,"reasoning":{"effort":"medium","summary":"auto"},"parallel_tool_calls":true,"include":["reasoning.encrypted_content"],"model":"","store":false,"tool_choice":"required"}`)
 	req, _ = sjson.SetBytes(req, "model", openAIImagesResponsesMainModel)
 
 	input := []byte(`[{"type":"message","role":"user","content":[{"type":"input_text","text":""}]}]`)
